@@ -38,7 +38,7 @@ def _agent_def() -> AgentDef:
 
 def _inv(tmp_path: Path, log: InMemoryEventLog) -> AgentInvocation:
     return AgentInvocation(
-        agent_def=_agent_def(), provider_name="claude_code",
+        agent_def=_agent_def(), provider_name="claude",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(

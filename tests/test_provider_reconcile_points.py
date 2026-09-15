@@ -81,8 +81,8 @@ async def test_run_entry_repoints_every_tier_before_the_first_dispatch(
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"}, factory=_recording(seen))
-    _pre_resolved(quest, "claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording(seen))
+    _pre_resolved(quest, "claude")
     quest.set_provider("codex")
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
@@ -99,8 +99,8 @@ async def test_run_entry_discards_a_cross_vendor_step_override(
 ) -> None:
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_recording([]))
-    _pre_resolved(quest, "claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording([]))
+    _pre_resolved(quest, "claude")
     state = State.load(quest.state_dir)
     state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-5.6-sol")}
     state.save(quest.state_dir)
@@ -120,8 +120,8 @@ async def test_a_pin_written_by_another_process_is_read_at_entry(
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"}, factory=_recording(seen))
-    _pre_resolved(quest, "claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording(seen))
+    _pre_resolved(quest, "claude")
     meta_path = quest.quest_dir / "quest.json"             # the other process
     meta = json.loads(meta_path.read_text())
     meta["provider"] = "codex"
@@ -144,13 +144,13 @@ async def test_a_switch_armed_mid_run_lands_before_the_next_dispatch(
     _floor_config(tmp_path)
     (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(_TWO_STEPS)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_recording(seen, arm=quest))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
 
 
@@ -160,8 +160,8 @@ async def test_the_confirmation_reaches_the_scrollback_seam(
 ) -> None:
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_recording([]))
-    _pre_resolved(quest, "claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording([]))
+    _pre_resolved(quest, "claude")
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
@@ -180,16 +180,16 @@ async def test_a_run_with_nothing_pending_leaves_the_map_alone(
     _floor_config(tmp_path)
     (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(_TWO_STEPS)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"}, factory=_recording(seen))
-    _pre_resolved(quest, "claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording(seen))
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
-    low = BUILTIN_FLOOR["claude_code"].tier_defaults["low"]
+    low = BUILTIN_FLOOR["claude"].tier_defaults["low"]
     assert seen == [low, low]
     assert {pm.provider for pm in _reopen(quest).resolved_tiers.values()} == {
-        "claude_code"}
+        "claude"}
     assert not [e for e in events
                 if "provider switched" in str(e.get("payload", {}))]
 
@@ -203,13 +203,13 @@ async def test_pinning_the_vendor_already_resolved_is_a_no_op(
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"}, factory=_recording(seen))
-    _pre_resolved(quest, "claude_code")
-    quest.set_provider("claude_code")
+    floor_availability({"claude", "codex"}, factory=_recording(seen))
+    _pre_resolved(quest, "claude")
+    quest.set_provider("claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"]]
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"]]
     assert not [e for e in events
                 if "provider switched" in str(e.get("payload", {}))]

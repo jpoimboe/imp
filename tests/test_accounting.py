@@ -68,10 +68,10 @@ def test_metered_is_provider_aware() -> None:
     assert is_metered("openai", None) is True
     # codex and claude_code carry one; anything but apikey is notional.
     assert is_metered("codex", "apikey") is True
-    assert is_metered("claude_code", "apikey") is True
-    assert is_metered("claude_code", "subscription") is False
+    assert is_metered("claude", "apikey") is True
+    assert is_metered("claude", "subscription") is False
     assert is_metered("codex", "chatgpt") is False
-    assert is_metered("claude_code", None) is False
+    assert is_metered("claude", None) is False
 
 
 def _qr(agent_id: str, session_id: str | None, cost: float) -> dict:

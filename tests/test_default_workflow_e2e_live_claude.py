@@ -29,7 +29,7 @@ def _ensure_builtin_providers() -> None:
     register_builtin_providers()
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.anyio
 async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
@@ -56,11 +56,11 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
     )
     (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\n"
-        "providers: [claude_code]\n"
+        "providers: [claude]\n"
         "tiers:\n"
-        "  low:    {claude_code: claude-haiku-4-5-20251001}\n"
-        "  medium: {claude_code: claude-haiku-4-5-20251001}\n"
-        "  high:   {claude_code: claude-haiku-4-5-20251001}\n"
+        "  low:    {claude: claude-haiku-4-5-20251001}\n"
+        "  medium: {claude: claude-haiku-4-5-20251001}\n"
+        "  high:   {claude: claude-haiku-4-5-20251001}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")

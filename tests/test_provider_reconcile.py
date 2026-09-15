@@ -25,11 +25,11 @@ def _seed(tmp_path: Path) -> tuple[Quest, State, Any]:
     """A quest already resolved onto claude_code, as a stopped run left it."""
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     (project_state_dir(tmp_path) / "config.yaml").write_text(
-        "providers: [claude_code]\n")
+        "providers: [claude]\n")
     _refresh_workflow_snapshot(quest)
     workflow = load_workflow(quest.workflow_dir)
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
     state.resolved_steps = {}
     state.save(quest.state_dir)
     return quest, state, workflow
@@ -39,12 +39,12 @@ def test_an_unpinned_quest_reconciles_to_false_and_touches_nothing(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     events: list[dict[str, Any]] = []
 
     assert _reconcile_provider(
         quest, state, workflow, events.append) is False
-    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude_code"}
+    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude"}
     assert events == []
 
 
@@ -52,7 +52,7 @@ def test_a_pending_switch_repoints_every_tier_off_the_pinned_floor(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
@@ -73,7 +73,7 @@ def test_the_re_resolve_discards_a_cross_vendor_step_override(
     # An override names a model on the vendor being fled — exactly what the
     # switch exists to escape — so replacement is wholesale, never a merge.
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-5.6-sol")}
     quest.set_provider("codex")
 
@@ -86,7 +86,7 @@ def test_reconciling_twice_is_a_no_op_the_second_time(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     assert _reconcile_provider(quest, state, workflow, lambda _e: None) is True
     events: list[dict[str, Any]] = []
@@ -98,7 +98,7 @@ def test_the_confirmation_names_the_vendor_and_the_disposition(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
@@ -114,7 +114,7 @@ def test_step_ends_selects_the_next_step_confirmation(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
@@ -144,7 +144,7 @@ def test_a_raising_re_resolve_refuses_the_switch_and_keeps_the_run(
     tmp_path: Path, floor_availability, monkeypatch,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     _raise_load_error(monkeypatch)
     events: list[dict[str, Any]] = []
@@ -152,11 +152,11 @@ def test_a_raising_re_resolve_refuses_the_switch_and_keeps_the_run(
     assert _reconcile_provider(
         quest, state, workflow, events.append) is False
 
-    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude_code"}
+    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude"}
     assert events == [
         {"type": "provider_marker", "payload": {"provider": None}},
         {"type": "script_output", "payload": {"stdout": (
-            "couldn't switch to codex — staying on claude_code: "
+            "couldn't switch to codex — staying on claude: "
             "tier 'deep' has no model configured for provider 'codex'")}}]
 
 
@@ -164,7 +164,7 @@ def test_a_refused_switch_clears_the_pin_so_it_cannot_wedge_a_resume(
     tmp_path: Path, floor_availability, monkeypatch,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     _raise_load_error(monkeypatch)
 
@@ -183,14 +183,14 @@ def test_an_unavailable_pinned_vendor_is_refused_the_same_way(
     # The engine process's environment can differ from the client's that
     # validated availability; ProviderUnavailable must not kill the run either.
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code"})           # codex not available here
+    floor_availability({"claude"})           # codex not available here
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
     assert _reconcile_provider(
         quest, state, workflow, events.append) is False
-    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude_code"}
+    assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude"}
     assert quest.provider is None
     assert events[0] == {"type": "provider_marker", "payload": {"provider": None}}
     assert events[1]["payload"]["stdout"].startswith(
-        "couldn't switch to codex — staying on claude_code: ")
+        "couldn't switch to codex — staying on claude: ")

@@ -249,7 +249,7 @@ def test_rejects_falsy_non_dict_step_blobs_before_publication(
 def test_rejects_missing_rollout_or_foreign_owner_without_mutation(
     tmp_path: Path, case: str,
 ) -> None:
-    rec = _seed_v11(tmp_path, owner=b"claude_code" if case == "foreign-owner" else None)
+    rec = _seed_v11(tmp_path, owner=b"claude" if case == "foreign-owner" else None)
     if case == "missing-rollout":
         rec["step_blobs"].pop(f"{_PREFIX}/codex_rollout/{_RESTORE_PATH}")
         _write_record(tmp_path, rec)
@@ -350,7 +350,7 @@ def test_rejects_invalid_step_blobs_shape(
     assert _archive_snapshot(tmp_path) == before
 
 
-@pytest.mark.parametrize("owner", [None, b"claude_code"])
+@pytest.mark.parametrize("owner", [None, b"claude"])
 def test_rejects_current_codex_state_without_codex_owner(
     tmp_path: Path, owner: bytes | None,
 ) -> None:

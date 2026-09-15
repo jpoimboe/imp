@@ -288,7 +288,7 @@ async def test_claude_load_skill_parity(tmp_path: Path) -> None:
     runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
-    inv = _make_invocation(tmp_path, "claude_code", "claude-sonnet-4-5")
+    inv = _make_invocation(tmp_path, "claude", "claude-sonnet-4-5")
     out = await _drain(runner, inv)
     assert out == COMPLETE_STEP_ARGS
 
@@ -407,7 +407,7 @@ async def test_claude_load_skill_flush_orders_below_narration(
         # Stand in for _run's real _flush_llm_group: commit the turn's
         # accumulated narration prose as an agent_message event.
         ctx.event_log.append_agent_message(
-            agent_id="t", provider="claude_code", model="claude-sonnet-4-5",
+            agent_id="t", provider="claude", model="claude-sonnet-4-5",
             raw={"content": [{"type": "text",
                               "text": "loading the refactor skill"}]},
             usage={}, stop_reason=None,

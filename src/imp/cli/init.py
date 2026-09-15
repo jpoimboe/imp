@@ -216,7 +216,7 @@ def _commit_init_files(project_root: Path, *, extra_paths: tuple[str, ...] = ())
 # The order providers are presented in the picker. Bindings (tier→model) are
 # owned by the provider-code floor now, so init no longer carries a model table.
 _PROVIDER_DISPLAY_ORDER: tuple[str, ...] = (
-    "claude_code", "anthropic", "openai", "codex",
+    "claude", "anthropic", "openai", "codex",
 )
 
 
@@ -450,7 +450,7 @@ def _remote_hint() -> str:
 # claude_code (Anthropic) is the recommended single-provider default (review
 # architecture spec, M2). Pre-select it in the picker so the common path produces
 # a single-provider config; multi-select stays available for codex/openai.
-_RECOMMENDED_DEFAULT = "claude_code"
+_RECOMMENDED_DEFAULT = "claude"
 
 
 def _initial_selection(available: list[str]) -> set[int]:

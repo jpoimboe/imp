@@ -162,7 +162,7 @@ async def _run_claude_code_resume(
         model_name="claude-sonnet-4-5", client_factory=factory)
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -361,7 +361,7 @@ async def test_claude_interrupt_resume_appends_continuation_nudge(
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -439,7 +439,7 @@ async def test_claude_pending_human_tail_suppresses_nudge(
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -637,7 +637,7 @@ async def test_claude_provider_retry_resume_journals_the_retry_note(
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
     inv = AgentInvocation(
-        agent_def=_agent_def(), provider_name="claude_code",
+        agent_def=_agent_def(), provider_name="claude",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
@@ -699,7 +699,7 @@ async def test_claude_dependency_resume_journals_the_dependency_note(
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
     inv = AgentInvocation(
-        agent_def=_agent_def(), provider_name="claude_code",
+        agent_def=_agent_def(), provider_name="claude",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(

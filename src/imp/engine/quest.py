@@ -25,8 +25,14 @@ from imp.engine.event_migrations import (
     backfill_step_round,
     migrate_events,
     migrate_id_ns_event_to_block,
+    rename_claude_code_provider,
 )
 from imp.engine.reincarnation import write_session_owner
+from imp.engine.resume_state import (
+    RESUME_STATE_NAME,
+    NativeResumeState,
+    encode_native_resume_state,
+)
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
     JsonlEventLog,
@@ -39,7 +45,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 22  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 23  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -536,6 +542,41 @@ def _migrate_v21_to_v22(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v22_to_v23(quest_dir: Path) -> None:
+    """v22->v23: the `claude_code` provider id became `claude`, so every persisted
+    `provider` field naming it is stale — the per-quest pin, the resolved tier/step
+    maps, every historical event payload, the session owner sidecars and the native
+    resume-state manifests. The stamp lands last, so a partial failure leaves the home
+    at v22 and the hop re-runs; every half is idempotent."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        renamed = rename_claude_code_provider(data)
+        if renamed != data:
+            _rewrite_state_json(state_path, renamed)
+    events_path = quest_dir / "events.jsonl"
+    if events_path.exists():
+        events = parse_events_jsonl(events_path.read_bytes())
+        renamed_events = rename_claude_code_provider(events)
+        if renamed_events != events:
+            _rewrite_events_jsonl(events_path, renamed_events)
+    steps = quest_dir / "steps"
+    for sidecar in sorted(steps.glob("*/*/provider")):
+        if sidecar.read_text().strip() == "claude_code":
+            durable.durable_replace_bytes(sidecar, b"claude")
+    for manifest in sorted(steps.glob(f"*/*/{RESUME_STATE_NAME}")):
+        # Parsed raw: read_native_resume_state's registry gate rejects the stale id.
+        data = json.loads(manifest.read_bytes())
+        if data.get("provider") != "claude_code":
+            continue
+        durable.durable_replace_bytes(manifest, encode_native_resume_state(
+            NativeResumeState(provider="claude", state=data["state"])))
+    meta_path = quest_dir / "quest.json"
+    meta = rename_claude_code_provider(json.loads(meta_path.read_text()))
+    meta["layout_version"] = 23
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -558,6 +599,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (19, 20): _migrate_v19_to_v20,
     (20, 21): _migrate_v20_to_v21,
     (21, 22): _migrate_v21_to_v22,
+    (22, 23): _migrate_v22_to_v23,
 }
 
 

@@ -1811,7 +1811,7 @@ def test_context_bar_gauge_spans_empty_to_full() -> None:
     from imp.cli.live_driver import context_bar
 
     def bar(tokens: int) -> str | None:
-        return context_bar("claude_code", "claude-opus-5[1m]", tokens,
+        return context_bar("claude", "claude-opus-5[1m]", tokens,
                            color=False, over_bg=False)
 
     assert bar(0) == "░░░░░░░░░░ 0/200k"
@@ -1831,7 +1831,7 @@ def test_context_gauge_fill_and_tail_share_one_hue_over_a_gray_track() -> None:
     # 75% (amber) and 182k is 91% (red). The track is gray at every level and
     # disappears when the bar is full.
     def bar(tokens: int) -> str | None:
-        return context_bar("claude_code", "claude-opus-5[1m]", tokens,
+        return context_bar("claude", "claude-opus-5[1m]", tokens,
                            color=True, over_bg=False)
 
     try:
@@ -1853,7 +1853,7 @@ def test_context_bar_bands_are_relative_to_the_handoff_limit() -> None:
     from imp.cli.live_driver import context_bar
 
     def bar(tokens: int) -> str:
-        painted = context_bar("claude_code", "claude-opus-5[1m]", tokens,
+        painted = context_bar("claude", "claude-opus-5[1m]", tokens,
                               color=True, over_bg=False)
         assert painted is not None
         return painted
@@ -1869,13 +1869,13 @@ def test_the_gauge_means_the_same_thing_across_models() -> None:
     from imp.cli.live_driver import context_bar
     # The same 150k of occupancy: eight cells of a 200k limit wherever the
     # ceiling binds, nine of claude-opus-5's 80%-of-200k limit.
-    for provider, model in (("claude_code", "claude-opus-5[1m]"),
+    for provider, model in (("claude", "claude-opus-5[1m]"),
                             ("openai", "gpt-5"),
                             ("openai", "gpt-5.6-terra"),
                             ("codex", "gpt-6-astra")):
         assert context_bar(provider, model, 150_000, color=False,
                            over_bg=False) == "████████░░ 150k/200k", model
-    assert context_bar("claude_code", "claude-opus-5", 150_000, color=False,
+    assert context_bar("claude", "claude-opus-5", 150_000, color=False,
                        over_bg=False) == "█████████░ 150k/160k"
 
 
@@ -1884,7 +1884,7 @@ def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
     from imp.cli.live_driver import context_bar
     try:
         pal.set_theme("dark")
-        bar = context_bar("claude_code", "claude-opus-5[1m]", 150_000,
+        bar = context_bar("claude", "claude-opus-5[1m]", 150_000,
                           color=True, over_bg=False)
         assert bar is not None
         assert pal.sgr("wordmark", enabled=True) in bar   # \x1b[38;2;255;154;60m
@@ -2527,7 +2527,7 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     def row(kind: str | None) -> str:
         return compose_position_row(
             activity=_pos_activity(kind=kind, model="claude-opus-5",
-                                   provider="claude_code"),
+                                   provider="claude"),
             quest_id="z", title="t", context_tokens=120_000, color=False,
             width=120)
 
@@ -2542,7 +2542,7 @@ def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(
         activity=_pos_activity(kind="agent", lane_wait=True,
-                               model="claude-opus-5", provider="claude_code"),
+                               model="claude-opus-5", provider="claude"),
         quest_id="z", title="t", context_tokens=120_000, color=False, width=120)
     assert "█" not in row and "120k/160k" not in row
     assert "implementation phase" in row
@@ -2555,7 +2555,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
         row = compose_position_row(
             activity=_pos_activity(phase="planning phase", plan="plan 3/6",
                                    counter="task 2/3", model="claude-opus-5",
-                                   provider="claude_code", kind="agent"),
+                                   provider="claude", kind="agent"),
             quest_id="z9gixx", title="t", context_tokens=120_000, color=True,
             width=120)
     finally:
@@ -2704,16 +2704,16 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
     from imp.cli.live_driver import compose_position_row
     from imp.providers.quota import QuotaReading, QuotaWindow
     reading = QuotaReading(
-        provider="claude_code", plan=None, raw={},
+        provider="claude", plan=None, raw={},
         windows=(QuotaWindow("5h", 62.0, int(_ROW_NOW) + 9960),   # 2h46m -> (3h left)
                  QuotaWindow("7d", 7.0, None)))
     return compose_position_row(
         activity=nv.Activity(kind="agent", model="claude-opus-5",
-                             provider="claude_code", phase="implementation",
+                             provider="claude", phase="implementation",
                              plan="plan-1", counter="step 3/7"),
         quest_id="nota40", title=title, project="imp", context_tokens=70_400,
         color=color, width=width,
-        carrier=nv.Carrier(provider="claude_code", auth_mode="subscription",
+        carrier=nv.Carrier(provider="claude", auth_mode="subscription",
                            quota=reading),
         now_epoch=_ROW_NOW)
 
@@ -2722,10 +2722,10 @@ def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
     left = ("imp · nota40 · Context and quota gauges in the live footer · "
             "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 70k/160k")
     row = _wide_row(200)
-    # 133 + 20 + 45 = 198: both groups at their edges, spaces in between.
-    assert row == left + " " * 20 + "claude_code · session 62% (3h left) · week 7%"
+    # 133 + 25 + 40 = 198: both groups at their edges, spaces in between.
+    assert row == left + " " * 25 + "claude · session 62% (3h left) · week 7%"
     assert pal.display_width(row) == 198
-    assert " · claude_code" not in row      # reached across the gap, never ` · `-joined
+    assert " · claude · " not in row   # reached across the gap, never ` · `-joined
 
 
 def test_position_row_fit_ladder_drops_the_quota_then_the_gauge_then_clips() -> None:

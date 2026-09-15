@@ -234,7 +234,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     )
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -253,16 +253,16 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
-        providers: [claude_code]
+        providers: [claude]
         tiers:
-          low: {claude_code: claude-haiku-4-5-20251001}
-          medium: {claude_code: claude-sonnet-4-5}
-          high: {claude_code: claude-opus-4-5}
+          low: {claude: claude-haiku-4-5-20251001}
+          medium: {claude: claude-sonnet-4-5}
+          high: {claude: claude-opus-4-5}
     """))
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "-qm", "claude_code config"],
+         "commit", "-qm", "claude config"],
         cwd=tmp_path, check=True,
     )
     env = os.environ.copy()

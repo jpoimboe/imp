@@ -52,7 +52,7 @@ def _meta(quest_dir: Path) -> dict:
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23
     assert quest_mod._MIGRATIONS[(18, 19)] is _migrate_v18_to_v19
 
 

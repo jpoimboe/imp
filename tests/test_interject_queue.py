@@ -285,7 +285,7 @@ async def test_claude_delivers_interject_at_requery_boundary(
 
     inv = AgentInvocation(
         agent_def=_agent_def(tools=frozenset({"complete_step"})),
-        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        provider_name="claude", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=_CC(

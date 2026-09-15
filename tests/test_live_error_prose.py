@@ -26,7 +26,7 @@ def _ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> di
 
 def _msg(eid: str, body: str, *, tagged: bool) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "provider": "claude_code", "model": "m", "usage": {}, "stop_reason": None,
+        "provider": "claude", "model": "m", "usage": {}, "stop_reason": None,
         "raw": {"content": [{"type": "text", "text": body}]}}
     if tagged:
         payload["provider_error"] = True
@@ -36,7 +36,7 @@ def _msg(eid: str, body: str, *, tagged: bool) -> dict[str, Any]:
 def _step(*content: dict[str, Any]) -> list[dict[str, Any]]:
     return [_ev("q0", "quest_created", quest_id=1, title="x"),
             _ev("s1", "step_started", step="s", kind="agent", phase="p",
-                model="m", provider="claude_code"), *content]
+                model="m", provider="claude"), *content]
 
 
 def _live(events: list[dict[str, Any]]) -> list[str]:
@@ -119,7 +119,7 @@ def test_untagged_prose_under_a_backoff_error_renders_the_same_in_both_views() -
     events = _step(
         _msg("a1", ordinary, tagged=False),
         _ev("e1", "error", agent_id=AID, category="network", kind="terminated",
-            message="claude_code: terminated", detail={"last_agent_text": ordinary}),
+            message="claude: terminated", detail={"last_agent_text": ordinary}),
         _ev("r1", "agent_retry", category="network", attempt=1, backoff_seconds=1.0))
     body = _live(events)
     assert any(ordinary in ln for ln in body)

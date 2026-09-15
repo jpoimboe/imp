@@ -36,7 +36,7 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
 @pytest.mark.parametrize("module,provider", [
     ("imp.providers.anthropic", "anthropic"),
     ("imp.providers.openai", "openai"),
-    ("imp.providers.claude", "claude_code"),
+    ("imp.providers.claude", "claude"),
 ])
 def test_build_tools_threads_tiers(module, provider, tmp_path: Path) -> None:
     import importlib

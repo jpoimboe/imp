@@ -79,7 +79,7 @@ def _inv(
     log = event_log if event_log is not None else InMemoryEventLog()
     return AgentInvocation(
         agent_def=_agent_def(tools or frozenset({"complete_step"})),
-        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        provider_name="claude", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
@@ -918,11 +918,11 @@ def test_claude_provider_registered_and_resolves() -> None:
 
     src = SourceLoc(file=Path("w.yaml"), line=1)
     cfg = Config(
-        providers=("claude_code",),
+        providers=("claude",),
         tiers={
-            "low":    {"claude_code": "claude-haiku-4-5"},
-            "medium": {"claude_code": "claude-sonnet-4-5"},
-            "high":   {"claude_code": "claude-opus-4"},
+            "low":    {"claude": "claude-haiku-4-5"},
+            "medium": {"claude": "claude-sonnet-4-5"},
+            "high":   {"claude": "claude-opus-4"},
         },
     )
     agent = AgentDef(
@@ -949,7 +949,7 @@ def test_claude_provider_registered_and_resolves() -> None:
 
     resolved_tiers, _, _ = resolve.resolve_run(wf, cfg)
     pm = resolved_tiers["medium"]
-    assert pm.provider == "claude_code"
+    assert pm.provider == "claude"
     provider = resolve.provider_from_model(pm)
     assert isinstance(provider, ClaudeProvider)
 
@@ -2879,7 +2879,7 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
 
 def test_high_tier_floor_defaults_to_opus_1m() -> None:
     from imp.providers import BUILTIN_FLOOR
-    tiers = BUILTIN_FLOOR["claude_code"].tier_defaults
+    tiers = BUILTIN_FLOOR["claude"].tier_defaults
     assert tiers is not None
     assert tiers["high"] == "claude-opus-5[1m]"
 

@@ -163,7 +163,7 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
     from tests.test_provider_reconcile import _seed
 
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     trace: list[str] = []
 
     class _Driver:
@@ -189,7 +189,7 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
         trace.append("read")
 
     assert choices == [None, "codex"]        # the resolved vendor arms nothing
-    block = render_picker("claude_code", ["claude_code", "codex"])
+    block = render_picker("claude", ["claude", "codex"])
     assert trace == ["enter", "emit", *block, "read", "exit"]
 
 
@@ -258,7 +258,7 @@ def _quest(tmp_path: Path, floor_availability: Any,
     from tests.test_provider_reconcile import _seed
 
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"} if available is None
+    floor_availability({"claude", "codex"} if available is None
                        else available)
     return quest
 

@@ -33,7 +33,7 @@ def test_in_session_a_valid_name_returns_the_control_marker(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     out: list[str] = []
 
     result = handle_slash_line("/provider codex", quest=quest,
@@ -51,7 +51,7 @@ def test_pre_session_writes_the_pin_and_reprompts(
 ) -> None:
     # AC 21b(a): the same end state as `imp new --provider codex`.
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     out: list[str] = []
 
     result = handle_slash_line("/provider codex", quest=quest,
@@ -68,12 +68,12 @@ def test_bare_provider_prints_the_roster_and_switches_nothing(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     out: list[str] = []
 
     assert handle_slash_line("/provider", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert "Current: claude_code   (this quest)" in out
+    assert "Current: claude   (this quest)" in out
     assert "  codex" in out
     assert _pin_on_disk(quest) is None
 
@@ -83,25 +83,25 @@ def test_bare_provider_pre_session_needs_no_state(
 ) -> None:
     # AC 21b(b): print_model_roster asserts state.step is not None; this must not.
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     (quest.state_dir / "state.json").unlink()
     out: list[str] = []
 
     assert handle_slash_line("/provider", quest=quest, output_fn=out.append,
                              pre_session=True) is REPROMPT
-    assert "Current: claude_code   (this quest)" in out
+    assert "Current: claude   (this quest)" in out
 
 
 def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     out: list[str] = []
 
     assert handle_slash_line("/provider bogus", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == ("unknown provider 'bogus' (available here: claude_code, "
+    assert out[-1] == ("unknown provider 'bogus' (available here: claude, "
                        "codex; needs setup: anthropic, openai)")
 
 
@@ -109,7 +109,7 @@ def test_an_unavailable_name_is_refused_with_its_auth_hint(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code"})
+    floor_availability({"claude"})
     out: list[str] = []
 
     assert handle_slash_line("/provider codex", quest=quest,
@@ -122,12 +122,12 @@ def test_the_current_vendor_is_refused_as_redundant(
 ) -> None:
     # AC 8d: no pin written, and no marker to leave showing.
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     out: list[str] = []
 
-    assert handle_slash_line("/provider claude_code", quest=quest,
+    assert handle_slash_line("/provider claude", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == PROVIDER_ALREADY.format(name="claude_code")
+    assert out[-1] == PROVIDER_ALREADY.format(name="claude")
     assert _pin_on_disk(quest) is None
 
 
@@ -138,8 +138,8 @@ def test_the_guard_compares_the_tier_map_not_a_step_override(
     # switch and `claude_code` is the redundant one. A guard read off
     # resolve_current_model inverts both.
     quest, state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex", "openai"})
-    state.resolved_tiers = _tiers("claude_code")
+    floor_availability({"claude", "codex", "openai"})
+    state.resolved_tiers = _tiers("claude")
     state.resolved_steps = {"w": ProviderModel(provider="openai",
                                                model="gpt-5.6-terra")}
     state.step = "w"
@@ -148,16 +148,16 @@ def test_the_guard_compares_the_tier_map_not_a_step_override(
 
     assert handle_slash_line("/provider openai", quest=quest,
                              output_fn=out.append) == "/provider openai"
-    assert handle_slash_line("/provider claude_code", quest=quest,
+    assert handle_slash_line("/provider claude", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == PROVIDER_ALREADY.format(name="claude_code")
+    assert out[-1] == PROVIDER_ALREADY.format(name="claude")
 
 
 def test_pre_session_re_pinning_the_pinned_vendor_is_redundant(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, _state, _wf = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     out: list[str] = []
 
@@ -203,7 +203,7 @@ async def test_pre_session_provider_resolves_the_quest_onto_that_vendor(
 
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)                       # providers: [claude_code]
-    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    floor_availability({"claude", "codex"}, factory=_ok_factory)
 
     assert handle_slash_line("/provider codex", quest=quest,
                              output_fn=lambda _l: None,

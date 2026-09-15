@@ -78,4 +78,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     _migrate_v10_to_v11(qd)                   # second run must not corrupt or re-change
     assert _state(qd)["resume_target"] == "prompt-paused"
     assert not list((qd / "state").glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23

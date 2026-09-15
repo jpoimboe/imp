@@ -133,6 +133,8 @@ class ImpSessionStore:
         return sorted(out)
 
 
+# Hash input, not an identifier: re-seeding derives new ids and orphans every
+# existing session transcript.
 _SESSION_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session")
 
 
@@ -159,6 +161,7 @@ def session_store_for(transcript_dir: Path) -> ImpSessionStore:
     return ImpSessionStore(transcript_dir / "claude_session")
 
 
+# Hash input, not an identifier: re-seeding breaks append()'s record dedupe.
 _RECORD_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session-record")
 
 

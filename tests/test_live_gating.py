@@ -24,11 +24,11 @@ def test_parse_run_live_absent_returns_none():
 
 def test_parse_run_live_bare_returns_all_providers():
     assert parse_run_live(RUN_LIVE_ALL) == frozenset(KNOWN_PROVIDERS)
-    assert set(KNOWN_PROVIDERS) == {"anthropic", "openai", "claude_code", "codex"}
+    assert set(KNOWN_PROVIDERS) == {"anthropic", "openai", "claude", "codex"}
 
 
 def test_parse_run_live_subset_parses_named_providers():
-    assert parse_run_live("claude_code,openai") == frozenset({"claude_code", "openai"})
+    assert parse_run_live("claude,openai") == frozenset({"claude", "openai"})
 
 
 def test_parse_run_live_unknown_provider_raises_usage_error():
@@ -93,7 +93,7 @@ def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp
         "_find_cli",
         lambda _self: str(tmp_path / "never-created" / "claude"),
     )
-    assert live.provider_available("claude_code") is None
+    assert live.provider_available("claude") is None
 
 
 def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path):
@@ -102,7 +102,7 @@ def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path
     import tests._live as live
     _empty_path(monkeypatch, tmp_path)
     monkeypatch.setattr(SubprocessCLITransport, "_find_cli", _raise_cli_not_found)
-    assert live.provider_available("claude_code") == (
+    assert live.provider_available("claude") == (
         "claude CLI not found (neither the SDK's bundled binary nor PATH)"
     )
 
@@ -149,7 +149,7 @@ def test_live_skip_reason_selected_but_unavailable(monkeypatch):
     import tests._live as live
     monkeypatch.setattr(live, "provider_available", lambda _p: "claude CLI not on PATH")
     assert (
-        live.live_skip_reason(frozenset({"claude_code"}), "claude_code")
+        live.live_skip_reason(frozenset({"claude"}), "claude")
         == "claude CLI not on PATH"
     )
 
@@ -215,7 +215,7 @@ def test_hook_runs_selected_available_provider(monkeypatch):
     import tests._live as live
     from tests.conftest import pytest_collection_modifyitems
     monkeypatch.setattr(live, "provider_available", lambda _p: None)
-    item = _StubItem("tests/test_x_live.py", live_provider="claude_code")
+    item = _StubItem("tests/test_x_live.py", live_provider="claude")
     pytest_collection_modifyitems(_StubConfig(_ALL), [item])
     assert _skip_reasons(item) == []
 
@@ -239,7 +239,7 @@ def test_bare_pytest_skips_converted_live_file_despite_env():
     """AC-1 (accident scenario): with IMP_LIVE_PROVIDERS exported, a bare pytest
     run (no --run-live) skips every live test in a converted module, citing the
     run-live reason. The ambient env is powerless against the flag gate."""
-    env = {**os.environ, "IMP_LIVE_PROVIDERS": "anthropic,openai,claude_code,codex"}
+    env = {**os.environ, "IMP_LIVE_PROVIDERS": "anthropic,openai,claude,codex"}
     env["PYTHONPATH"] = (
         str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
     )

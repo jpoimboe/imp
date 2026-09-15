@@ -27,7 +27,7 @@ def test_preflight_names_the_fix_when_nothing_is_configured(
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     assert _preflight_imp_init(control_root=tmp_path) == (
-        "no providers configured — run 'imp config set providers claude_code'"
+        "no providers configured — run 'imp config set providers claude'"
     )
 
 
@@ -67,13 +67,13 @@ def test_preflight_lists_each_configured_provider_with_its_auth_hint(
 ) -> None:
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
-    (imp_home / "config.yaml").write_text("providers: [claude_code, anthropic]\n")
+    (imp_home / "config.yaml").write_text("providers: [claude, anthropic]\n")
     monkeypatch.setenv("IMP_HOME", str(imp_home))
-    _unauthenticated("claude_code", "anthropic")
+    _unauthenticated("claude", "anthropic")
 
     assert _preflight_imp_init(control_root=tmp_path) == (
-        "no authenticated provider — configured: claude_code, anthropic\n"
-        "  claude_code — run `claude login`\n"
+        "no authenticated provider — configured: claude, anthropic\n"
+        "  claude — run `claude login`\n"
         "  anthropic — set ANTHROPIC_API_KEY"
     )
 

@@ -35,11 +35,11 @@ def test_the_builder_holds_one_quota_reading_per_provider() -> None:
     assert b.quota_for("codex") is None                # nothing recorded yet
 
     codex = _reading("codex", QuotaWindow("5h", 12.0, 1788403732), plan="plus")
-    claude = _reading("claude_code", QuotaWindow("7d", 7.0, None))
+    claude = _reading("claude", QuotaWindow("7d", 7.0, None))
     b.add(ev("q1", "quota_reading", agent_id="step:p/s", **codex.to_payload()))
     b.add(ev("q2", "quota_reading", agent_id="step:p/s", **claude.to_payload()))
     assert b.quota_for("codex") == codex                # one carrier never masks
-    assert b.quota_for("claude_code") == claude         # the other
+    assert b.quota_for("claude") == claude         # the other
     assert b.quota_for(None) is None
 
     newer = _reading("codex", QuotaWindow("5h", 20.0, 1788403732), plan="plus")
@@ -65,13 +65,13 @@ def test_a_retired_subagents_reading_still_reaches_the_top_level_builder() -> No
 
 def test_the_builder_holds_one_auth_mode_per_provider() -> None:
     b = NarrativeBuilder()
-    assert b.auth_mode_for("claude_code") is None
+    assert b.auth_mode_for("claude") is None
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="claude-opus-5", provider="claude_code"))
-    b.add(_message("3", "step:p/s", "claude_code", auth_mode="subscription"))
+             model="claude-opus-5", provider="claude"))
+    b.add(_message("3", "step:p/s", "claude", auth_mode="subscription"))
     b.add(_message("4", "step:p/s", "anthropic"))
 
-    assert b.auth_mode_for("claude_code") == "subscription"
+    assert b.auth_mode_for("claude") == "subscription"
     assert b.auth_mode_for("anthropic") is None    # the API providers state none
     assert b.auth_mode_for(None) is None
 
@@ -111,19 +111,19 @@ def test_carrier_provider_names_only_step_level_agent_messages() -> None:
 def test_the_carrier_pairs_a_provider_with_its_own_mode_and_reading() -> None:
     b = NarrativeBuilder()
     assert b.carrier_for(None) is None            # no turn has named a carrier yet
-    reading = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    reading = _reading("claude", QuotaWindow("5h", 62.0, None))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="claude-opus-5", provider="claude_code"))
-    b.add(_message("3", "step:p/s", "claude_code", auth_mode="subscription"))
+             model="claude-opus-5", provider="claude"))
+    b.add(_message("3", "step:p/s", "claude", auth_mode="subscription"))
     b.add(ev("q1", "quota_reading", agent_id="step:p/s", **reading.to_payload()))
 
     # A provider-less step (chrome, or a drained stack) falls back to that turn.
-    assert b.carrier_for(None) == Carrier(provider="claude_code",
+    assert b.carrier_for(None) == Carrier(provider="claude",
                                           auth_mode="subscription",
                                           quota=reading)
     # A named provider still wins, and never borrows the other's mode.
     b.add(_message("4", "step:p/s", "codex", auth_mode="apikey"))
-    assert b.carrier_for("claude_code") == Carrier(provider="claude_code",
+    assert b.carrier_for("claude") == Carrier(provider="claude",
                                                    auth_mode="subscription",
                                                    quota=reading)
     assert b.carrier_for("anthropic") == Carrier(provider="anthropic",
@@ -146,27 +146,27 @@ def test_a_subagent_turn_does_not_set_the_last_known_provider() -> None:
 
 
 def test_the_carrier_scan_reads_a_parked_quests_log() -> None:
-    reading = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    reading = _reading("claude", QuotaWindow("5h", 62.0, None))
     assert carrier_from_events([]) is None          # nothing has named a carrier
     events = [
         ev("1", "quest_created", quest_id="c", title="C"),
         ev("q1", "quota_reading", agent_id="step:p/s", **reading.to_payload()),
-        _message("3", "step:p/s", "claude_code", auth_mode="subscription"),
+        _message("3", "step:p/s", "claude", auth_mode="subscription"),
         # A subagent can run another provider; the group has always meant the step's.
         _message("r1", "sub:t1", "codex", auth_mode="apikey"),
         # A torn final line reads as this, and must not break the parked prompt.
         {"_malformed": True, "raw": '{"type": "agent_mes'},
         # A later turn that states no mode must not erase the one the step reported.
-        _message("5", "step:p/s", "claude_code"),
+        _message("5", "step:p/s", "claude"),
     ]
     assert carrier_from_events(events) == Carrier(
-        provider="claude_code", auth_mode="subscription", quota=reading)
+        provider="claude", auth_mode="subscription", quota=reading)
 
 
 def test_the_scan_never_pairs_a_provider_with_another_ones_mode_or_reading() -> None:
-    claude = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    claude = _reading("claude", QuotaWindow("5h", 62.0, None))
     events = [
-        _message("3", "step:p/s", "claude_code", auth_mode="subscription"),
+        _message("3", "step:p/s", "claude", auth_mode="subscription"),
         ev("q1", "quota_reading", agent_id="step:p/s", **claude.to_payload()),
         # The last step-level turn wins the slot, and brings only its own figures:
         # codex stated apikey and has no reading of its own.

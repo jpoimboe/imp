@@ -31,7 +31,7 @@ WEB_TOOL_NAMES = frozenset({"web_search", "web_fetch"})
 # dropped with a one-time warning (see check_web_capability).
 _PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
     "anthropic": frozenset({"web_search", "web_fetch"}),
-    "claude_code": frozenset({"web_search", "web_fetch"}),
+    "claude": frozenset({"web_search", "web_fetch"}),
     "openai": frozenset({"web_search"}),
     # codex supports web_search via its model-hosted tool, switched on by
     # codex_config.py's top-level `web_search` key. It is enabled only when an

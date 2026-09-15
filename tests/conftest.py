@@ -85,8 +85,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help=(
             "Run tests needing a real provider. Bare --run-live runs every "
             "provider whose toolchain/credentials are present; "
-            "--run-live=claude_code,openai scopes to a subset "
-            "(valid: anthropic, openai, claude_code, codex)."
+            "--run-live=claude,openai scopes to a subset "
+            "(valid: anthropic, openai, claude, codex)."
         ),
     )
 

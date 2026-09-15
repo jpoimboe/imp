@@ -164,7 +164,7 @@ def test_cli_authenticated_provider_skips_key_check(
     fabricate a `CLAUDE_CODE_API_KEY not set` line (finding I1)."""
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
-    (imp_home / "config.yaml").write_text("providers: [claude_code]\n")
+    (imp_home / "config.yaml").write_text("providers: [claude]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()

@@ -24,8 +24,8 @@ _OPENAI = [True]
 def _providers():
     resolve.reset_providers_for_tests()
     resolve.register_provider(
-        "claude_code", env_check=lambda: True,
-        factory=lambda m: _FakeProvider("claude_code", m))
+        "claude", env_check=lambda: True,
+        factory=lambda m: _FakeProvider("claude", m))
     resolve.register_provider(
         "openai", env_check=lambda: _OPENAI[0],
         factory=lambda m: _FakeProvider("openai", m))
@@ -35,11 +35,11 @@ def _providers():
 
 def _config() -> Config:
     return Config(
-        providers=("claude_code", "openai"),
+        providers=("claude", "openai"),
         tiers={
-            "low":    {"claude_code": "haiku",  "openai": "gpt-5.4-mini"},
-            "medium": {"claude_code": "sonnet", "openai": "gpt-5.3-codex"},
-            "high":   {"claude_code": "opus",   "openai": "gpt-5.5"},
+            "low":    {"claude": "haiku",  "openai": "gpt-5.4-mini"},
+            "medium": {"claude": "sonnet", "openai": "gpt-5.3-codex"},
+            "high":   {"claude": "opus",   "openai": "gpt-5.5"},
         },
     )
 
@@ -51,9 +51,9 @@ def test_default_workflow_loads_and_resolves_review_steps() -> None:
     _OPENAI[0] = True
     wf = load_workflow(bundled_workflow_dir("default"))
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
-    assert resolved_tiers["medium"].provider == "claude_code"
+    assert resolved_tiers["medium"].provider == "claude"
     assert resolved_tiers["medium"].model == "sonnet"
-    assert resolved_tiers["high"].provider == "claude_code"
+    assert resolved_tiers["high"].provider == "claude"
     # No differ_from -> not diverged -> absent from resolved_steps (it holds only
     # steps that diverge from their tier via differ_from).
     assert "review" not in resolved_steps
@@ -65,6 +65,6 @@ def test_review_steps_resolve_same_vendor_single_provider() -> None:
     _OPENAI[0] = False
     wf = load_workflow(bundled_workflow_dir("default"))
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
-    assert resolved_tiers["medium"].provider == "claude_code"
+    assert resolved_tiers["medium"].provider == "claude"
     assert resolved_tiers["medium"].model == "sonnet"
     assert "review" not in resolved_steps

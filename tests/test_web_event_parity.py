@@ -68,7 +68,7 @@ async def _cc_shape(tmp_path: Path) -> dict:
         prompt_template_source="hi", source_path=Path("a.md"), source=loc)
     el = InMemoryEventLog()
     inv = AgentInvocation(
-        agent_def=agent, provider_name="claude_code", model_name="m",
+        agent_def=agent, provider_name="claude", model_name="m",
         system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,

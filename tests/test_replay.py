@@ -70,7 +70,7 @@ def test_parse_message_dispatches_each_provider_to_its_own_wire_format() -> None
             ThinkingBlock(thinking="hmm", signature="sig"),
             TextBlock(text="hi"),
         ), provider
-    for provider in ("claude_code", "codex"):
+    for provider in ("claude", "codex"):
         assert parse_message(provider, blocks_raw).content == (
             TextBlock(text="hi"),
         ), provider
@@ -112,7 +112,7 @@ def test_building_the_parse_table_imports_no_provider_module() -> None:
     assert reported.keys() == {"LEAKED", "PARSERS"}, (
         f"child did not report both lines; stdout was {proc.stdout!r}"
     )
-    assert reported["PARSERS"] == "anthropic,claude_code,codex,openai,scripted"
+    assert reported["PARSERS"] == "anthropic,claude,codex,openai,scripted"
     assert reported["LEAKED"] == "", (
         f"importing imp.engine.replay loaded: {reported['LEAKED']}"
     )

@@ -96,7 +96,7 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code", model_name=_MODEL,
+        provider_name="claude", model_name=_MODEL,
         # Carry imp's production completion instruction verbatim (every real
         # invocation appends completion_instruction(schema) — agent_run.py). The
         # hand-rolled "call complete_step" line alone left haiku free to end the
@@ -139,7 +139,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_send_to_llm_store_backed_native_resume(
@@ -213,7 +213,7 @@ async def test_send_to_llm_store_backed_native_resume(
                for b in streamed[0][0].content)
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -311,7 +311,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code", model_name=_MODEL,
+        provider_name="claude", model_name=_MODEL,
         system_prompt=(
             completion_instruction(agent_def.output_schema)
             + "\n\nYou are resuming a step you already finished. Your previous "
@@ -334,7 +334,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     )
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_complete_step_handback_native_resume(
@@ -403,7 +403,7 @@ async def test_complete_step_handback_native_resume(
         for b in projected["message"]["content"]), projected
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_step_completed_native_resume_redrives_with_feedback(
@@ -479,7 +479,7 @@ def _must_not_solicit(_prompt: str) -> str:
         "continue the agent, not park at a prompt")
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_midrun_interrupt_resume_continues_agent(

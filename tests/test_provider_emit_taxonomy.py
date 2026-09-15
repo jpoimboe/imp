@@ -178,7 +178,7 @@ def _cc_drive(
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        provider_name="claude", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(

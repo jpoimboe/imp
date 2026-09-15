@@ -57,8 +57,8 @@ def _cc_events(*tail: dict[str, Any],
     return [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
         ev("2", "step_started", step="coder", kind="agent",
-           phase="implement phase", model="claude-opus-5", provider="claude_code"),
-        ev("3", "agent_message", agent_id=_STEP, provider="claude_code",
+           phase="implement phase", model="claude-opus-5", provider="claude"),
+        ev("3", "agent_message", agent_id=_STEP, provider="claude",
            model="claude-opus-5", auth_mode=auth_mode, stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "done"}]},
            usage={"input_tokens": 120000, "output_tokens": 9000}),
@@ -162,7 +162,7 @@ def test_the_cost_field_reaches_the_row_from_the_streamed_events() -> None:
 
 # AC 15
 def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
-    reading = _reading("claude_code", QuotaWindow("5h", 34.0, None),
+    reading = _reading("claude", QuotaWindow("5h", 34.0, None),
                        QuotaWindow("7d", 7.0, None))
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000),
                         ev("q1", "quota_reading", agent_id=_STEP,
@@ -170,8 +170,8 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row == ("t · claude-opus-5 · ████████░░ 120k/160k" + " " * 123
-                   + "claude_code · session 34% · week 7%")
+    assert row == ("t · claude-opus-5 · ████████░░ 120k/160k" + " " * 128
+                   + "claude · session 34% · week 7%")
     assert "$" not in row
 
 
@@ -253,7 +253,7 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
         ev("3", "step_completed", step="a", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
         ev("4", "step_started", step="b", kind="agent", phase="p2",
-           model="claude-opus-5", provider="claude_code"),
+           model="claude-opus-5", provider="claude"),
     ]
     # codex's level says nothing about the claude account: no field, no
     # placeholder — the running step's carrier wins over the last-known one.
@@ -379,16 +379,16 @@ def _chrome_row(events: list[dict[str, Any]]) -> str:
 
 # AC 1
 def test_the_footer_keeps_the_group_through_a_chrome_step() -> None:
-    row = _chrome_row(_cc_events(_quota_event("claude_code"),
+    row = _chrome_row(_cc_events(_quota_event("claude"),
                                  auth_mode="subscription"))
-    assert row.endswith("claude_code · " + _WINDOWS)
+    assert row.endswith("claude · " + _WINDOWS)
     assert pal.display_width(row) == 198       # still anchored to the band's edge
     assert row.startswith("t ")                # the script step contributes no segment
 
 
 # AC 6
 def test_the_chrome_row_carries_no_context_gauge() -> None:
-    row = _chrome_row(_cc_events(_quota_event("claude_code"),
+    row = _chrome_row(_cc_events(_quota_event("claude"),
                                  auth_mode="subscription"))
     assert row.endswith(_WINDOWS)
     # The gauge stays gated on the activity's kind, not on the resolved carrier.
@@ -398,7 +398,7 @@ def test_the_chrome_row_carries_no_context_gauge() -> None:
 # AC 2
 def test_the_your_turn_prompt_keeps_the_group_after_the_turn_ends() -> None:
     drv = _drive(_cc_events(
-        _quota_event("claude_code"),
+        _quota_event("claude"),
         ev("4", "step_completed", step="coder", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
         auth_mode="subscription"))
@@ -406,7 +406,7 @@ def test_the_your_turn_prompt_keeps_the_group_after_the_turn_ends() -> None:
     assert rows is not None and "working" in rows[0]   # the step stack is drained
     toolbar = drv.compose_toolbar_static()
     assert toolbar is not None
-    assert toolbar.endswith("claude_code · " + _WINDOWS)
+    assert toolbar.endswith("claude · " + _WINDOWS)
 
 
 # AC 3(a)
@@ -430,16 +430,16 @@ def test_an_api_only_provider_keeps_its_dollars_through_a_chrome_step() -> None:
 # AC 3(b)
 def test_an_api_keyed_subscription_provider_keeps_its_dollars_too() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000),
-                        _quota_event("claude_code"), auth_mode="apikey")
+                        _quota_event("claude"), auth_mode="apikey")
     row = _chrome_row(events)
     assert row.endswith(" $4.21")
-    assert "session" not in row and "claude_code" not in row
+    assert "session" not in row and "claude" not in row
 
 
 # AC 5
 def test_a_subagent_provider_never_becomes_the_footers_fallback() -> None:
     events = _cc_events(
-        _quota_event("claude_code"),
+        _quota_event("claude"),
         ev("t1", "tool_call", agent_id=_STEP, id="blk-t1", name="sub_agent",
            input={"subagent_name": "coder"}),
         ev("c1", "step_context", agent_id="sub:t1", provider="codex",
@@ -449,7 +449,7 @@ def test_a_subagent_provider_never_becomes_the_footers_fallback() -> None:
            model="gpt-5.6-terra", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
         auth_mode="subscription")
-    assert _chrome_row(events).endswith("claude_code · " + _WINDOWS)
+    assert _chrome_row(events).endswith("claude · " + _WINDOWS)
 
 
 # AC 11
@@ -463,10 +463,10 @@ def test_a_chrome_step_with_no_reading_and_no_dollars_renders_no_group() -> None
 # AC 12
 def test_the_fallback_group_degrades_by_the_same_ladder(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    events = _cc_events(_quota_event("claude_code"), auth_mode="subscription")
+    events = _cc_events(_quota_event("claude"), auth_mode="subscription")
     monkeypatch.setenv("COLUMNS", "50")     # 48 columns carry the windows, not the name
     narrow = _chrome_row(events)
-    assert narrow.endswith(_WINDOWS) and "claude_code" not in narrow
+    assert narrow.endswith(_WINDOWS) and "claude" not in narrow
     monkeypatch.setenv("COLUMNS", "30")     # neither candidate fits
     assert _chrome_row(events) == "t"
 
@@ -475,10 +475,10 @@ def test_the_fallback_group_degrades_by_the_same_ladder(
 def test_the_opening_prompt_band_carries_no_group_before_the_first_step() -> None:
     drv = _drive([
         ev("1", "quest_created", id="pazo49", title="t"),
-        ev("3", "agent_message", agent_id=_STEP, provider="claude_code",
+        ev("3", "agent_message", agent_id=_STEP, provider="claude",
            model="claude-opus-5", auth_mode="subscription", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
-        _quota_event("claude_code"),
+        _quota_event("claude"),
     ])
     # No step_started, so current_activity() is None and the toolbar takes the
     # identity fallback — even though a carrier is sitting in the builder behind it.
@@ -492,7 +492,7 @@ def test_the_startup_band_stays_bare_when_the_replay_established_a_carrier() -> 
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=200, status=LiveStatus(out),
                      startup_verb="resuming")
-    for e in [*_cc_events(_quota_event("claude_code"), auth_mode="subscription"),
+    for e in [*_cc_events(_quota_event("claude"), auth_mode="subscription"),
               *_chrome_tail()]:
         drv.on_event(e)
     assert drv._builder.carrier_for(None) is not None

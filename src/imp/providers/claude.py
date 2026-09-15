@@ -241,14 +241,14 @@ def _termination_from_result(
         # colon-form "API Error: 400 …" — which _classify_agent_text labels a
         # terminal ApiError — is rerouted here too, not left to terminate.
         labeled = perr.NetworkError(
-            f"claude_code: tool use concurrency (api_error_status={status})")
+            f"claude: tool use concurrency (api_error_status={status})")
     if labeled is None and isinstance(status, int) and 500 <= status < 600:
-        labeled = perr.NetworkError(f"claude_code: api_error_status={status}")
+        labeled = perr.NetworkError(f"claude: api_error_status={status}")
     if labeled is None and status in (401, 403):
-        labeled = perr.AuthError(f"claude_code: api_error_status={status}")
+        labeled = perr.AuthError(f"claude: api_error_status={status}")
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if labeled is None and status == 429:
-        labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
+        labeled = perr.RateLimitError(f"claude: api_error_status={status}")
     if isinstance(labeled, (perr.AuthError, perr.AuthTerminalError)):
         detail.update(_read_token_expiry(config_dir, int(time.time() * 1000)))
     if isinstance(labeled, (perr.QuotaError, perr.AuthError, perr.AuthTerminalError,
@@ -256,7 +256,7 @@ def _termination_from_result(
         labeled.detail.update(detail)
         return labeled
     return perr.TerminatedError(
-        "claude_code agent terminated with an error (cause unknown)",
+        "claude agent terminated with an error (cause unknown)",
         detail=detail,
     )
 
@@ -787,7 +787,7 @@ def _wrap_one(
         if (state.runner_loop is not None
                 and asyncio.get_running_loop() is not state.runner_loop):
             raise RuntimeError(
-                "claude_code MCP tool dispatched off the runner loop "
+                "claude MCP tool dispatched off the runner loop "
                 "(same-loop topology pin)")
         inflight_key: str | None = None
         try:
@@ -1346,7 +1346,7 @@ def quota_from_rate_limit_info(info: Any) -> QuotaReading | None:
             resets_at=resets if isinstance(resets, int) else None))
     if not windows:
         return None
-    return QuotaReading(provider="claude_code", plan=None,
+    return QuotaReading(provider="claude", plan=None,
                         windows=tuple(windows), raw=block)
 
 
@@ -2497,7 +2497,7 @@ class ClaudeAgentRunner:
 
 
 class ClaudeProvider:
-    name = "claude_code"
+    name = "claude"
 
     def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
         self.model = model_name

@@ -180,7 +180,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
     from imp.cli.render_text import render_tree
     # `fake` has no parser so build_tree raises; provider_error driving suppression is in the rows.
     rendered = [
-        {**e, "payload": {**e["payload"], "provider": "claude_code"}}
+        {**e, "payload": {**e["payload"], "provider": "claude"}}
         if e["type"] == "agent_message" else e
         for e in events
     ]

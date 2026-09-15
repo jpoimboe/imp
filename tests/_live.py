@@ -33,7 +33,7 @@ import pytest
 from imp.paths import project_state_dir
 from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
-KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
+KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude", "codex")
 
 # Sentinel stored as the --run-live option's `const` (bare flag => all providers).
 RUN_LIVE_ALL = object()
@@ -88,7 +88,7 @@ def provider_available(provider: str) -> str | None:
     """None if the provider's toolchain + credentials are present on this
     machine, else a human-readable reason naming what is missing. claude_code
     resolves the binary the SDK will spawn, without spawning it."""
-    if provider == "claude_code":
+    if provider == "claude":
         from claude_agent_sdk import ClaudeAgentOptions, CLINotFoundError
         from claude_agent_sdk._internal.transport.subprocess_cli import (
             SubprocessCLITransport,

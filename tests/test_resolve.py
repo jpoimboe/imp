@@ -41,8 +41,8 @@ class _FakeProvider:
 def _providers():
     resolve.reset_providers_for_tests()
     resolve.register_provider(
-        "claude_code", env_check=lambda: True,
-        factory=lambda m: _FakeProvider("claude_code", m))
+        "claude", env_check=lambda: True,
+        factory=lambda m: _FakeProvider("claude", m))
     resolve.register_provider(
         "openai", env_check=lambda: _OPENAI_PRESENT[0],
         factory=lambda m: _FakeProvider("openai", m))
@@ -78,13 +78,13 @@ def _wf(steps, agents) -> Workflow:
         agents=agents, workflow_dir=Path("."), source=_SRC)
 
 
-def _cfg(providers=("claude_code", "openai")) -> Config:
+def _cfg(providers=("claude", "openai")) -> Config:
     return Config(
         providers=tuple(providers),
         tiers={
-            "low":    {"claude_code": "haiku",  "openai": "gpt-5.4-mini"},
-            "medium": {"claude_code": "sonnet", "openai": "gpt-5.3-codex"},
-            "high":   {"claude_code": "opus",   "openai": "gpt-5.5"},
+            "low":    {"claude": "haiku",  "openai": "gpt-5.4-mini"},
+            "medium": {"claude": "sonnet", "openai": "gpt-5.3-codex"},
+            "high":   {"claude": "opus",   "openai": "gpt-5.5"},
         },
     )
 
@@ -119,16 +119,16 @@ def test_tier_map_first_available_wins_with_both_envs() -> None:
     _OPENAI_PRESENT[0] = True
     wf = _wf([_step("s1", "medium", "writer")], {"writer": _agent("writer")})
     tiers, steps, details = resolve_run(wf, _cfg())
-    assert tiers["medium"] == ProviderModel("claude_code", "sonnet")
+    assert tiers["medium"] == ProviderModel("claude", "sonnet")
     assert steps == {}
-    assert details["tiers"]["medium"]["provider"] == "claude_code"
+    assert details["tiers"]["medium"]["provider"] == "claude"
 
 
 def test_tier_map_falls_back_when_first_unavailable() -> None:
     _OPENAI_PRESENT[0] = True
     wf = _wf([_step("s1", "medium", "writer")], {"writer": _agent("writer")})
     # Reverse preference: openai first.
-    tiers, _steps, _details = resolve_run(wf, _cfg(providers=("openai", "claude_code")))
+    tiers, _steps, _details = resolve_run(wf, _cfg(providers=("openai", "claude")))
     assert tiers["medium"] == ProviderModel("openai", "gpt-5.3-codex")
 
 
@@ -142,7 +142,7 @@ def test_differ_from_flips_vendor_when_both_available() -> None:
         {"a": _agent("a"), "b": _agent("b")},
     )
     tiers, steps, details = resolve_run(wf, _cfg())
-    assert tiers["high"] == ProviderModel("claude_code", "opus")
+    assert tiers["high"] == ProviderModel("claude", "opus")
     assert steps["s2"] == ProviderModel("openai", "gpt-5.5")
     assert details["steps"]["s2"]["differ_tier"] == 1
     assert details["steps"]["s2"]["differ_from"] == "s1"
@@ -159,7 +159,7 @@ def test_differ_from_single_provider_falls_back_same_vendor_model() -> None:
     )
     _tiers, steps, details = resolve_run(wf, _cfg())
     # s2 falls back to claude_code/opus (same vendor, same model -> tier 3).
-    assert steps["s2"].provider == "claude_code"
+    assert steps["s2"].provider == "claude"
     assert details["steps"]["s2"]["differ_tier"] == 3
 
 
@@ -201,11 +201,11 @@ def test_no_provider_available_raises() -> None:
     # only claude_code in config and we force its env_check off via re-register.
     resolve.reset_providers_for_tests()
     resolve.register_provider(
-        "claude_code", env_check=lambda: False,
-        factory=lambda m: _FakeProvider("claude_code", m))
+        "claude", env_check=lambda: False,
+        factory=lambda m: _FakeProvider("claude", m))
     wf = _wf([_step("s1", "medium", "a")], {"a": _agent("a")})
     with pytest.raises(ProviderUnavailable):
-        resolve_run(wf, _cfg(providers=("claude_code",)))
+        resolve_run(wf, _cfg(providers=("claude",)))
 
 
 def test_differ_from_cascaded_chain() -> None:
@@ -228,7 +228,7 @@ def test_differ_from_cascaded_chain() -> None:
     
     # s1 has no differ_from, so it comes from resolved_tiers["medium"]
     s1_resolved = tiers["medium"]
-    assert s1_resolved.provider == "claude_code"
+    assert s1_resolved.provider == "claude"
     
     # s2 differs from s1, so it's in resolved_steps and uses the other provider
     assert "s2" in steps
@@ -238,7 +238,7 @@ def test_differ_from_cascaded_chain() -> None:
     # s3 differs from s2's *resolved* provider. The key test: s3 looks up s2 from
     # resolved_steps (not resolved_tiers), so it correctly differs from openai.
     assert "s3" in steps
-    assert steps["s3"].provider == "claude_code"
+    assert steps["s3"].provider == "claude"
     assert details["steps"]["s3"]["differ_from"] == "s2"
     # s3 differs from s2's resolved provider (openai)
     assert steps["s3"].provider != steps["s2"].provider

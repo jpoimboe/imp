@@ -98,4 +98,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     _migrate_v9_to_v10(qd)                   # second run must not corrupt or re-change
     assert _state(qd)["status"] == "merged"
     assert not list(qd.glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23

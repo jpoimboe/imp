@@ -311,7 +311,7 @@ def _cc(agent_id: str, ts: str, *, auth_mode=None) -> dict:
     """A claude_code agent_message: ignored by the accounting path entirely —
     its usage is the unreliable start-of-message snapshot."""
     return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"provider": "claude_code", "model": "claude-sonnet-4-6",
+            "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
                         "usage": {"input_tokens": 9999, "output_tokens": 8888},
                         **({"auth_mode": auth_mode} if auth_mode else {})}}
 
@@ -1626,7 +1626,7 @@ def test_an_unpriced_step_floors_the_total_and_adds_the_third_legend_line():
 
 def _quota_reading(ts: str = "2026-01-01T00:00:30+00:00") -> dict:
     return {"type": "quota_reading", "timestamp": ts,
-            "payload": {"provider": "claude_code", "plan": None,
+            "payload": {"provider": "claude", "plan": None,
                         "windows": [{"label": "5h", "used_pct": 44.0,
                                      "resets_at": 100},
                                     {"label": "7d", "used_pct": 7.0,

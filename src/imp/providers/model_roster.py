@@ -35,7 +35,7 @@ def discover_roster(
             model = vendor_map.get(provider)
             if model is not None:
                 names.append(model)
-        if provider == "claude_code":
+        if provider == "claude":
             names.extend(opt.value for opt in claude_options)
         order: list[str] = []
         for name in names:

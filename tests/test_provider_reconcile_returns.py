@@ -87,14 +87,14 @@ async def test_a_completed_step_confirms_the_switch_takes_the_next_step(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
     assert {"type": "script_output", "payload": {"stdout": _NEXT_STEP}} in events
     assert not [e for e in events if e["type"] == "reincarnating"]
@@ -136,9 +136,9 @@ async def test_every_returning_disposition_reconciles_before_it_returns(
     if extra == "budget":
         monkeypatch.setattr(executor_mod, "budget_for", lambda _c: 0.5)
     seen: list[str] = []
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=arm_on, script=script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     if extra == "cap":
         # run_quest only reads context.max_reincarnations on a FRESH resolve
         # (executor.py:537), and these quests are already resolved.
@@ -167,15 +167,15 @@ async def test_a_pause_after_the_backoff_sleep_applies_the_switch_on_its_way_out
     _floor_config(tmp_path)
     seen: list[str] = []
     floor_availability(
-        {"claude_code", "codex"},
+        {"claude", "codex"},
         factory=_factory(seen, quest, arm_on=1,
                          script=lambda _n, _i: _error("rate_limit", "RateLimitError")))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.PAUSED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"]]
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"]]
     assert {pm.provider
             for pm in State.load(quest.state_dir).resolved_tiers.values()} == {"codex"}
     assert {"type": "script_output", "payload": {"stdout": _PICKS_UP}} in events
@@ -210,14 +210,14 @@ async def test_a_tier_a_reincarnation_re_enters_on_the_new_vendor(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
     assert [e["payload"]["reason"]
             for e in events if e["type"] == "reincarnating"] == [
@@ -242,14 +242,14 @@ async def test_a_tier_b_reincarnation_re_enters_on_the_new_vendor(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
     assert [e["payload"]["reason"]
             for e in events if e["type"] == "reincarnating"] == [
@@ -278,9 +278,9 @@ async def test_the_guards_seed_beats_a_seed_inherited_by_the_errored_retry(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=2, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
@@ -334,15 +334,15 @@ async def test_a_backoff_sleep_wakes_on_the_switch_and_re_enters_fresh(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
     assert polled == [True]
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
     assert snaps[1]["stashes"] == ["w.attempt-1"]
     assert snaps[1]["live"] == ""
@@ -372,9 +372,9 @@ async def test_a_sleep_with_nothing_pending_falls_through_exactly_as_today(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=0, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
@@ -407,9 +407,9 @@ async def test_a_retry_now_press_wins_the_reason_over_a_coincident_switch(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
@@ -438,9 +438,9 @@ async def test_an_applied_switch_leaves_a_later_sleep_full_length(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
@@ -459,12 +459,12 @@ async def test_a_resumed_entry_reaches_the_same_end_state_through_limb_one(
                         _capturing_sleep(polled))
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     tdir = quest.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
-    write_session_owner(tdir, "claude_code")
+    write_session_owner(tdir, "claude")
     quest.event_log().append(
         agent_id="step:only/w", type="engine_message",
         payload={"role": "system", "subtype": "system_prompt",
@@ -482,7 +482,7 @@ async def test_a_resumed_entry_reaches_the_same_end_state_through_limb_one(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=1, script=_script))
     events: list[dict[str, Any]] = []
 
@@ -490,7 +490,7 @@ async def test_a_resumed_entry_reaches_the_same_end_state_through_limb_one(
 
     assert polled == [True]
     assert snaps[0]["live"].strip() != ""
-    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+    assert seen == [BUILTIN_FLOOR["claude"].tier_defaults["low"],
                     BUILTIN_FLOOR["codex"].tier_defaults["low"]]
     assert snaps[1]["stashes"] == ["w.attempt-1"]
     assert snaps[1]["live"] == ""
@@ -527,9 +527,9 @@ async def test_a_switch_applied_at_the_step_boundary_also_stops_being_pending(
         return [{"type": "agent_result",
                  "payload": {"outcome": "ok", "status": "Success"}}]
 
-    floor_availability({"claude_code", "codex"},
+    floor_availability({"claude", "codex"},
                        factory=_factory(seen, quest, arm_on=0, script=_script))
-    _pre_resolved(quest, "claude_code")
+    _pre_resolved(quest, "claude")
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED

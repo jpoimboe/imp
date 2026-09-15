@@ -26,7 +26,7 @@ def _run(project: Path, monkeypatch, lines: list[str]) -> None:
         project,
         input_fn=lambda _p: "",
         output_fn=lines.append,
-        picker_fn=lambda _a: ["claude_code"],
+        picker_fn=lambda _a: ["claude"],
         detect_theme_fn=lambda: "ansi",
     )
 

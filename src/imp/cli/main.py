@@ -704,7 +704,7 @@ def _preflight_imp_init(*, control_root: Path) -> str | None:
         return None
     names = list(config.providers)
     if not names:
-        return "no providers configured — run 'imp config set providers claude_code'"
+        return "no providers configured — run 'imp config set providers claude'"
     return "\n".join([
         f"no authenticated provider — configured: {', '.join(names)}",
         *auth_hint_lines(names),

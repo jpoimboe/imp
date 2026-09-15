@@ -12,9 +12,9 @@ import pytest
 from imp.providers import BUILTIN_FLOOR, register_builtin_providers, resolve
 from imp.providers.config import ProviderModel
 
-_MODEL_BEARING = ["anthropic", "openai", "claude_code", "codex"]
+_MODEL_BEARING = ["anthropic", "openai", "claude", "codex"]
 _REQUIRED = {"low", "medium", "high"}
-_BUILTINS = ["anthropic", "claude_code", "codex", "openai", "scripted"]
+_BUILTINS = ["anthropic", "claude", "codex", "openai", "scripted"]
 
 
 class _Cfg:
@@ -39,7 +39,7 @@ def test_env_var_present_for_http_providers() -> None:
 
 
 def test_env_var_none_for_cli_providers() -> None:
-    assert BUILTIN_FLOOR["claude_code"].env_var is None
+    assert BUILTIN_FLOOR["claude"].env_var is None
     assert BUILTIN_FLOOR["codex"].env_var is None
 
 
@@ -151,7 +151,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         {"low": "gpt-5.6-luna", "medium": "gpt-5.6-terra", "high": "gpt-5.6-sol"},
         "OPENAI_API_KEY",
     ),
-    "claude_code": (
+    "claude": (
         {
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
@@ -257,7 +257,7 @@ def test_scripted_keeps_its_runtime_env_var_but_no_floor_table() -> None:
 # Exact literals: the hint is user-facing copy, so a plausible-but-wrong string
 # must not pass. Table order mirrors the spec's §6 table.
 _EXPECTED_AUTH_HINTS = {
-    "claude_code": "run `claude login`",
+    "claude": "run `claude login`",
     "codex": "run `codex login`",
     "anthropic": "set ANTHROPIC_API_KEY",
     "openai": "set OPENAI_API_KEY",
@@ -272,8 +272,8 @@ def test_every_builtin_carries_its_auth_hint() -> None:
 def test_auth_hint_lines_renders_one_indented_line_per_known_provider() -> None:
     from imp.providers import auth_hint_lines
 
-    assert auth_hint_lines(["claude_code", "anthropic"]) == [
-        "  claude_code — run `claude login`",
+    assert auth_hint_lines(["claude", "anthropic"]) == [
+        "  claude — run `claude login`",
         "  anthropic — set ANTHROPIC_API_KEY",
     ]
 

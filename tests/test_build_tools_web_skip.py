@@ -33,7 +33,7 @@ events_path=Path("/events.jsonl"))
 
 @pytest.mark.parametrize("build,provider", [
     (anthropic_build, "anthropic"),
-    (cc_build, "claude_code"),
+    (cc_build, "claude"),
     (openai_build, "openai"),
 ])
 def test_web_search_is_skipped_not_registry_looked_up(build, provider) -> None:

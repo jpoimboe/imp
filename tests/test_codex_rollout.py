@@ -243,7 +243,7 @@ _INVALID_STATES: list[tuple[str, NativeResumeState]] = [
         "rollout_slot": "rollout.jsonl"})),
     ("non-string slot", _resume_state(state={
         "thread_id": _THREAD_ID, "restore_path": _RESTORE_PATH, "rollout_slot": 1})),
-    ("wrong provider", _resume_state(provider="claude_code")),
+    ("wrong provider", _resume_state(provider="claude")),
 ]
 
 

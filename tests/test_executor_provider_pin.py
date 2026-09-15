@@ -27,7 +27,7 @@ def _floor_config(root: Path) -> None:
     """Configure claude_code as the whole provider order and name no tiers, so
     every tier model comes from the built-in floor — the shape a pin has to reach
     past, since codex is not in the configured list at all."""
-    (project_state_dir(root) / "config.yaml").write_text("providers: [claude_code]\n")
+    (project_state_dir(root) / "config.yaml").write_text("providers: [claude]\n")
 
 
 def _reopen(quest: Quest) -> State:
@@ -49,12 +49,12 @@ async def test_an_unpinned_run_resolves_the_configured_vendor(
     # configured claude_code, which is what the pinned run below must change.
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    floor_availability({"claude", "codex"}, factory=_ok_factory)
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
 
     tiers = _reopen(quest).resolved_tiers
-    assert {pm.provider for pm in tiers.values()} == {"claude_code"}
+    assert {pm.provider for pm in tiers.values()} == {"claude"}
 
 
 @pytest.mark.anyio
@@ -63,7 +63,7 @@ async def test_a_pinned_run_resolves_every_tier_off_the_pinned_vendors_floor(
 ) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    floor_availability({"claude", "codex"}, factory=_ok_factory)
     quest.set_provider("codex")
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
@@ -82,7 +82,7 @@ async def test_a_workflow_refresh_resolves_new_steps_on_the_pinned_vendor(
     # reintroduce the un-pinned vendor for every step it adds.
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    floor_availability({"claude", "codex"}, factory=_ok_factory)
     await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude_code
     _reopen(quest)
     quest.set_provider("codex")
@@ -118,11 +118,11 @@ async def test_an_unresolvable_pin_is_refused_before_a_workflow_refresh_merge(
     # resume instead of being refused and cleared.
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
-    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    floor_availability({"claude", "codex"}, factory=_ok_factory)
     await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude_code
     _reopen(quest)
     quest.set_provider("codex")
-    floor_availability({"claude_code"}, factory=_ok_factory)
+    floor_availability({"claude"}, factory=_ok_factory)
 
     (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -140,10 +140,10 @@ async def test_an_unresolvable_pin_is_refused_before_a_workflow_refresh_merge(
 
     assert quest.provider is None
     state = _reopen(quest)
-    assert state.resolved_steps["w2"].provider == "claude_code"
+    assert state.resolved_steps["w2"].provider == "claude"
     assert json.loads((quest.quest_dir / "quest.json").read_text())["provider"] is None
     assert any(
         e["type"] == "script_output"
         and e["payload"]["stdout"].startswith(
-            "couldn't switch to codex — staying on claude_code")
+            "couldn't switch to codex — staying on claude")
         for e in events)

@@ -39,8 +39,8 @@ class _FakeProvider:
 def _providers() -> Iterator[None]:
     resolve.reset_providers_for_tests()
     resolve.register_provider(
-        "claude_code", env_check=lambda: True,
-        factory=lambda m: _FakeProvider("claude_code", m))
+        "claude", env_check=lambda: True,
+        factory=lambda m: _FakeProvider("claude", m))
     resolve.register_provider(
         "codex", env_check=lambda: True,
         factory=lambda m: _FakeProvider("codex", m))
@@ -77,13 +77,13 @@ def _wf(steps: list[Step], agents: dict[str, AgentDef]) -> Workflow:
 def _cfg(providers: tuple[str, ...]) -> Config:
     return Config(
         providers=tuple(providers),
-        tiers={"high": {"claude_code": "opus", "codex": "gpt-5.5"}},
+        tiers={"high": {"claude": "opus", "codex": "gpt-5.5"}},
     )
 
 
 def test_codex_tier_detail_carries_no_warning_key() -> None:
     wf = _wf([_step("s1", "high")], {"s1": _agent("s1")})
-    _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude_code")))
+    _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude")))
     assert details["tiers"]["high"] == {
         "provider": "codex", "model": "gpt-5.5",
         "differ_from": None, "differ_tier": None}

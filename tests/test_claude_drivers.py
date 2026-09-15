@@ -35,7 +35,7 @@ def _agent(drivers: frozenset[str]) -> AgentDef:
 
 def _inv(tmp_path: Path, drivers: frozenset[str]) -> AgentInvocation:
     return AgentInvocation(
-        agent_def=_agent(drivers), provider_name="claude_code",
+        agent_def=_agent(drivers), provider_name="claude",
         model_name="claude-sonnet-4-6", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,

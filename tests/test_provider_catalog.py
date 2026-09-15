@@ -110,7 +110,7 @@ def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
 def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
     from imp.providers.catalog import context_threshold_crossed
     # 200k of the 1M window: the 0.8 fraction would put this at 800k.
-    for provider in ("anthropic", "claude_code"):
+    for provider in ("anthropic", "claude"):
         assert context_threshold_crossed(
             {"input_tokens": 200_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
@@ -194,7 +194,7 @@ def test_model_info_defaults_to_vision_capable() -> None:
 
 def test_known_models_are_vision_capable() -> None:
     assert model_supports_vision("anthropic", "opus") is True
-    assert model_supports_vision("claude_code", "sonnet") is True
+    assert model_supports_vision("claude", "sonnet") is True
     assert model_supports_vision("openai", "gpt-5") is True
     assert model_supports_vision("codex", "gpt-5.3-codex") is True
 
@@ -267,7 +267,7 @@ def test_anthropic_catalog_has_opus_5_entries() -> None:
 def test_limits_for_covers_fable() -> None:
     # The bracketed 1M form and the plain alias are both exact catalog keys.
     one_m = limits_for("anthropic", "claude-fable-5[1m]")
-    plain = limits_for("claude_code", "claude-fable-5")
+    plain = limits_for("claude", "claude-fable-5")
     assert one_m is not None and plain is not None
     assert (one_m.window, plain.window) == (1_000_000, 200_000)
 
@@ -284,7 +284,7 @@ def test_catalog_aliases_lists_provider_table_keys() -> None:
     anthropic = catalog_aliases("anthropic")
     assert "claude-fable-5[1m]" in anthropic
     assert "claude-fable-5" in anthropic
-    assert "sonnet" in catalog_aliases("claude_code")
+    assert "sonnet" in catalog_aliases("claude")
     # codex shares the OPENAI table
     assert catalog_aliases("codex") == catalog_aliases("openai")
     assert "gpt-5" in catalog_aliases("openai")
@@ -342,10 +342,10 @@ def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
     assert anthropic_1m is not None
     assert anthropic_1m.window == 1_000_000
-    claude_code_1m = limits_for("claude_code", "claude-opus-5[1m]")
+    claude_code_1m = limits_for("claude", "claude-opus-5[1m]")
     assert claude_code_1m is not None
     assert claude_code_1m.window == 1_000_000
-    claude_code_opus = limits_for("claude_code", "opus")
+    claude_code_opus = limits_for("claude", "opus")
     assert claude_code_opus is not None
     assert claude_code_opus.window == 200_000
 
@@ -355,7 +355,7 @@ def test_limits_for_longest_prefix_covers_dated_ids() -> None:
     anthropic_dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert anthropic_dated is not None
     assert anthropic_dated.window == 200_000
-    claude_code_dated = limits_for("claude_code", "claude-opus-5-20260315")
+    claude_code_dated = limits_for("claude", "claude-opus-5-20260315")
     assert claude_code_dated is not None
     assert claude_code_dated.window == 200_000
 

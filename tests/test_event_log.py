@@ -230,7 +230,7 @@ def test_append_query_result_includes_present_optional_fields(tmp_path: Path) ->
 def test_append_agent_message_stamps_optional_fields_when_provided(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     a = log.append_agent_message(
-        agent_id="A", provider="claude_code", model="served-x",
+        agent_id="A", provider="claude", model="served-x",
         raw={"content": []}, usage={}, stop_reason="end_turn",
         message_id="msg_1", request_id="req_9", duration_ms=1234)
     assert a["payload"]["message_id"] == "msg_1"
@@ -411,11 +411,11 @@ def test_quota_readings_dedupe_per_provider(tmp_path: Path) -> None:
     path = tmp_path / "e.jsonl"
     log = JsonlEventLog(path)
     log.append_quota_reading(agent_id="A", reading=_quota(provider="codex"))
-    log.append_quota_reading(agent_id="A", reading=_quota(provider="claude_code"))
+    log.append_quota_reading(agent_id="A", reading=_quota(provider="claude"))
     log.append_quota_reading(agent_id="A", reading=_quota(provider="codex"))
     providers = [e["payload"]["provider"] for e in _read(path)
                  if e["type"] == "quota_reading"]
-    assert providers == ["codex", "claude_code"]
+    assert providers == ["codex", "claude"]
 
 
 def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:

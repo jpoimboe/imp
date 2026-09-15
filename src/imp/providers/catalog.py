@@ -129,7 +129,7 @@ def model_info(catalog: dict[str, ModelInfo], alias: str) -> ModelInfo:
 # `codex` runs OpenAI models, so it shares OPENAI.
 _CATALOGS: dict[str, dict[str, ModelInfo]] = {
     "anthropic": ANTHROPIC,
-    "claude_code": CLAUDE,
+    "claude": CLAUDE,
     "openai": OPENAI,
     "codex": OPENAI,
 }

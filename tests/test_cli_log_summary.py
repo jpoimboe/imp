@@ -202,7 +202,7 @@ def _append_quota(control: Path, slug: str) -> None:
             fh.write(json.dumps({
                 "type": "quota_reading",
                 "timestamp": "2026-01-01T00:02:00+00:00",
-                "payload": {"provider": "claude_code", "plan": None,
+                "payload": {"provider": "claude", "plan": None,
                             "windows": [{"label": "5h", "used_pct": pct,
                                          "resets_at": 100}],
                             "raw": {}}}) + "\n")
@@ -224,4 +224,4 @@ def test_summary_export_carries_no_quota_block(flag, tmp_path, monkeypatch, caps
     assert main(["log", "-s", slug, flag]) == 0
     out = capsys.readouterr().out
     assert "quota" not in out
-    assert "claude_code" not in out
+    assert "claude" not in out

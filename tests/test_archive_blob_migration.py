@@ -681,7 +681,7 @@ _PRE_SESSION_ID = [
      "payload": {"total_cost_usd": 12.50, "usage": {}, "model_usage": {}}},
     {"id": "s1", "parent_id": None, "agent_id": None,
      "timestamp": "2026-06-02T03:02:00+00:00", "type": "step_started",
-     "payload": {"phase": "build", "step": "coder", "provider": "claude_code",
+     "payload": {"phase": "build", "step": "coder", "provider": "claude",
                  "model": "claude-sonnet-4-6"}},
     {"id": "q3", "parent_id": None, "agent_id": "step:build/coder",
      "timestamp": "2026-06-02T03:03:00+00:00", "type": "query_result",

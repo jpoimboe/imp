@@ -46,7 +46,7 @@ def test_the_engine_clears_the_marker_before_it_confirms(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     events: list[dict[str, Any]] = []
 
@@ -61,7 +61,7 @@ def test_a_refused_switch_also_clears_the_marker(
 ) -> None:
     # AC 11b(c): the run stays on its vendor, so nothing later would clear it.
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     quest.set_provider("codex")
     _raise_load_error(monkeypatch)
     events: list[dict[str, Any]] = []
@@ -74,7 +74,7 @@ def test_an_unswitched_run_broadcasts_no_marker_traffic(
     tmp_path: Path, floor_availability,
 ) -> None:
     quest, state, workflow = _seed(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     events: list[dict[str, Any]] = []
 
     assert _reconcile_provider(quest, state, workflow, events.append) is False

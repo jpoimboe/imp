@@ -37,7 +37,7 @@ def anyio_backend() -> str:
 
 
 def _reading(*windows: tuple[str, float, int | None],
-             provider: Literal["codex", "claude_code"] = "claude_code") -> QuotaReading:
+             provider: Literal["codex", "claude"] = "claude") -> QuotaReading:
     return QuotaReading(
         provider=provider, plan=None,
         windows=tuple(QuotaWindow(label=lb, used_pct=pct, resets_at=r)

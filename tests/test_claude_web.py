@@ -31,7 +31,7 @@ def _agent(tools: frozenset[str]) -> AgentDef:
 
 def _inv(tmp_path: Path, tools: frozenset[str]) -> AgentInvocation:
     return AgentInvocation(
-        agent_def=_agent(tools), provider_name="claude_code",
+        agent_def=_agent(tools), provider_name="claude",
         model_name="claude-sonnet-4-6", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,
@@ -118,7 +118,7 @@ def _web_agent() -> AgentDef:
 def _web_inv(tmp_path: Path, elog: InMemoryEventLog,
              *, max_tool_calls: int | None = None) -> AgentInvocation:
     return AgentInvocation(
-        agent_def=_web_agent(), provider_name="claude_code",
+        agent_def=_web_agent(), provider_name="claude",
         model_name="claude-sonnet-4-6", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,

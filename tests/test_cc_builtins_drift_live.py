@@ -12,7 +12,7 @@ import pytest
 from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_probe import invocation, probe_advertised_tools, resolve_cli
 
-pytestmark = pytest.mark.live("claude_code")
+pytestmark = pytest.mark.live("claude")
 
 
 def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
@@ -24,7 +24,7 @@ def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
     escapees = advertised - {"ToolSearch"}
     assert not escapees, (
         f"Built-ins reachable under imp's deny posture: {sorted(escapees)}. "
-        "The agent can call these from every claude_code step. Add them to "
+        "The agent can call these from every claude step. Add them to "
         "ALL_CLAUDE_BUILTIN_TOOLS in _cc_builtins.py."
     )
 

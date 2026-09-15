@@ -45,7 +45,7 @@ def _invocation(project_root: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be a coder",
         initial_messages=(),

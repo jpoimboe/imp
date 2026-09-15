@@ -36,7 +36,7 @@ _RAW = {
 def test_unified_windows_normalize_to_percentages_ordered_by_duration() -> None:
     reading = quota_from_rate_limit_info(FakeRateLimitInfo(raw=_RAW))
     assert reading is not None
-    assert reading.provider == "claude_code"
+    assert reading.provider == "claude"
     # No carrier states a plan name on this side.
     assert reading.plan is None
     assert reading.windows == (
@@ -109,7 +109,7 @@ async def test_a_streamed_rate_limit_event_records_the_reading(
     assert len(readings) == 1
     assert readings[0]["agent_id"] == "step:p/s"
     assert readings[0]["payload"] == {
-        "provider": "claude_code", "plan": None,
+        "provider": "claude", "plan": None,
         "windows": [
             {"label": "5h", "used_pct": 44.0, "resets_at": 1788565200},
             {"label": "7d", "used_pct": 7.0, "resets_at": 1788559200},

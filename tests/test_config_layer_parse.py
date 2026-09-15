@@ -187,7 +187,7 @@ def test_layer_numeric_forms_read_as_yaml_1_2(tmp_path: Path) -> None:
 
 def test_malformed_layer_raises_load_error_naming_the_file(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
-    p.write_text("providers: [claude_code\n")
+    p.write_text("providers: [claude\n")
     with pytest.raises(LoadError) as exc:
         parse_config_layer(p)
     assert "invalid YAML in config.yaml" in str(exc.value)
@@ -402,5 +402,5 @@ def test_empty_providers_error_carries_the_setter_hint(tmp_path: Path) -> None:
     assert str(exc.value) == (
         f"{p}:1\n"
         "  config.yaml 'providers:' must be a non-empty list of provider names\n"
-        "  hint: run 'imp config set providers claude_code' to fix"
+        "  hint: run 'imp config set providers claude' to fix"
     )

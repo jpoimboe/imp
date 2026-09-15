@@ -15,16 +15,16 @@ _NOW = 1_788_000_000.0        # fixed, so every countdown is deterministic
 
 def _act(**kw: Any) -> nv.Activity:
     base: dict[str, Any] = dict(kind="agent", model="claude-opus-5",
-                                provider="claude_code", phase="implement phase")
+                                provider="claude", phase="implement phase")
     base.update(kw)
     return nv.Activity(**base)
 
 
 def _reading(*windows: QuotaWindow) -> QuotaReading:
-    return QuotaReading(provider="claude_code", plan=None, windows=windows, raw={})
+    return QuotaReading(provider="claude", plan=None, windows=windows, raw={})
 
 
-def _carrier(quota: QuotaReading | None = None, *, provider: str = "claude_code",
+def _carrier(quota: QuotaReading | None = None, *, provider: str = "claude",
              auth_mode: str | None = None) -> nv.Carrier:
     return nv.Carrier(provider=provider, auth_mode=auth_mode, quota=quota)
 
@@ -42,14 +42,14 @@ def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     left = "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     row = _row(carrier=_carrier(calm, auth_mode="subscription"))
-    # 53 + 110 + 35 = 198 = width - 2: the field is reached across the gap.
-    assert row == left + " " * 110 + "claude_code · session 34% · week 7%"
+    # 53 + 115 + 30 = 198 = width - 2: the field is reached across the gap.
+    assert row == left + " " * 115 + "claude · session 34% · week 7%"
     assert pal.display_width(row) == 198
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(carrier=_carrier(one_up, auth_mode="subscription")).endswith(
-        "claude_code · session 62% (40m left) · week 7% (7d left)")
+        "claude · session 62% (40m left) · week 7% (7d left)")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
@@ -108,7 +108,7 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     # AC 5: a recorded reading never stamps a provider segment onto the metered field.
     metered = _row(carrier=_carrier(_reading(QuotaWindow("5h", 34.0, None)),
                                     auth_mode="apikey"), cost=priced)
-    assert metered.endswith(" $4.21") and "claude_code" not in metered
+    assert metered.endswith(" $4.21") and "claude · " not in metered
 
 
 # AC 10
@@ -152,13 +152,13 @@ def test_a_calm_window_with_a_known_reset_still_shows_its_countdown() -> None:
     full, windows = quota_field(calm_future, now_epoch=_NOW, color=False,
                                 over_bg=False)
     assert windows == "session 34% (3h left) · week 7% (5d left)"
-    assert full == "claude_code · " + windows
+    assert full == "claude · " + windows
     # The provider name, the separator after it, and the labels carry no SGR
     # sequence of their own, not even a reset.
     colored = quota_field(calm_future, now_epoch=_NOW, color=True,
                           over_bg=False)[0]
     assert colored == (
-        "claude_code · session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
+        "claude · session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
         " · week \x1b[32m7%\x1b[0m \x1b[90m(5d left)\x1b[0m")
 
 
@@ -172,7 +172,7 @@ def test_the_field_names_the_readings_own_provider() -> None:
     assert windows == "session 62% (3h left) · week 91% (5d left)"
     # The name is the reading's, never the activity's: a claude_code step whose
     # recorded reading came from codex still says codex.
-    row = _row(activity=_act(provider="claude_code"),
+    row = _row(activity=_act(provider="claude"),
                carrier=_carrier(codex, auth_mode="subscription"))
     assert row.endswith("codex · session 62% (3h left) · week 91% (5d left)")
 
@@ -188,14 +188,14 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
             color=False, width=width, now_epoch=_NOW,
             carrier=_carrier(reading, auth_mode="subscription"))
 
-    # (a) target 198: left group 53 + full right group 56, gap to spare.
+    # (a) target 198: left group 53 + full right group 51, gap to spare.
     assert at(200).endswith(
-        "claude_code · session 34% (40m left) · week 7% (6d left)")
+        "claude · session 34% (40m left) · week 7% (6d left)")
     # (b) target 98 fits the windows (42) but not the provider segment — and the
     # countdowns come with them, there being no third candidate to shed.
     windows_only = at(100)
     assert windows_only.endswith("session 34% (40m left) · week 7% (6d left)")
-    assert "claude_code" not in windows_only
+    assert "claude · " not in windows_only
     assert pal.display_width(windows_only) == 98
     # (c) target 78 fits neither candidate: the quota goes whole, the gauge stays.
     bare = at(80)
@@ -221,7 +221,7 @@ def test_a_provider_less_activity_still_renders_the_carriers_group() -> None:
                        QuotaWindow("7d", 7.0, int(_NOW) + 430000))
     row = _row(activity=chrome,
                carrier=_carrier(windows, auth_mode="subscription"))
-    assert row.endswith("claude_code · session 62% (3h left) · week 7% (5d left)")
+    assert row.endswith("claude · session 62% (3h left) · week 7% (5d left)")
     assert "█" not in row and "░" not in row      # kind-gated: no gauge on a chrome row
     # The metered choice reads the carrier too, not the provider-less activity.
     metered = _row(activity=chrome, carrier=_carrier(provider="anthropic"),

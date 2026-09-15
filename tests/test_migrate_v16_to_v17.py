@@ -14,7 +14,7 @@ _A = "step:build/coder"
 _V16_EVENTS = [
     {"id": "m1", "parent_id": None, "agent_id": _A, "timestamp": "T1",
      "type": "agent_message",
-     "payload": {"provider": "claude_code", "model": "claude-sonnet-4-6",
+     "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
                  "usage": {"input_tokens": 10}, "stop_reason": "end_turn"}},
     {"id": "q1", "parent_id": None, "agent_id": _A, "timestamp": "T2",
      "type": "query_result",
@@ -24,7 +24,7 @@ _V16_EVENTS = [
      "payload": {"total_cost_usd": 12.50, "usage": {}, "model_usage": {}}},
     {"id": "s1", "parent_id": None, "agent_id": None, "timestamp": "T4",
      "type": "step_started",
-     "payload": {"phase": "build", "step": "coder", "provider": "claude_code",
+     "payload": {"phase": "build", "step": "coder", "provider": "claude",
                  "model": "claude-sonnet-4-6"}},
     {"id": "q3", "parent_id": None, "agent_id": _A, "timestamp": "T5",
      "type": "query_result",
@@ -94,7 +94,7 @@ def test_the_migration_adds_session_ids_only(tmp_path: Path) -> None:
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23
     assert quest_mod._MIGRATIONS[(16, 17)] is _migrate_v16_to_v17
 
 
