@@ -31,7 +31,7 @@ def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> N
 
 @pytest.mark.parametrize(
     ("tier", "model"),
-    [("medium", "gpt-5.6-terra"), ("high", "gpt-6-astra")],
+    [("medium", "gpt-5.6-terra"), ("high", "gpt-5.6-sol")],
 )
 def test_thinking_tiers_pin_high_reasoning_effort(tier: str, model: str) -> None:
     opts = CodexAgentRunner(model_name=model)._build_thread_options(tier)
