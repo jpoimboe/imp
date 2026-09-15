@@ -6,6 +6,7 @@ ASSETS = Path("src/imp/assets")
 PARTIAL = ASSETS / "partials" / "commit-style.md"
 DEFAULT_AGENTS = ASSETS / "workflows" / "default" / "agents"
 MINIMAL_AGENTS = ASSETS / "workflows" / "minimal" / "agents"
+MEMORY_AGENTS = ASSETS / "workflows" / "memory" / "agents"
 INCLUDE = '{% include "partials/commit-style.md" %}'
 
 
@@ -87,3 +88,14 @@ def test_minimal_commit_authors_include_the_partial_and_name_a_message_file() ->
         assert INCLUDE in text
         assert "git add` + `git commit -F`" in text
         assert "git commit -m" not in text
+
+
+def test_memory_editor_keeps_its_own_rule_without_the_partial() -> None:
+    text = (MEMORY_AGENTS / "memory-editor.md").read_text()
+    flat = " ".join(text.split())
+    # Fixed component, one file: the derivation rules would be dead weight here.
+    assert INCLUDE not in text
+    assert 'git add imp/memory/<path>… && git commit -F "$TMPDIR/msg"' in text
+    assert "git commit -m" not in text
+    assert "`memory: <imperative summary, no trailing period>`" in flat
+    assert "one paragraph saying which standing instruction changed and why" in flat
