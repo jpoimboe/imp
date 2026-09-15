@@ -6,14 +6,18 @@ from pathlib import Path
 import pytest
 
 from imp.engine import quest as quest_mod
+from imp.engine.executor import _retire_foreign_session
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v22_to_v23
 from imp.engine.reincarnation import read_session_owner
 from imp.engine.resume_state import (
     RESUME_STATE_NAME,
+    InvalidResumeState,
     NativeResumeState,
     encode_native_resume_state,
     read_native_resume_state,
 )
+from imp.engine.state import State
+from imp.engine.types import Pause, SourceLoc, Step
 from tests.conftest import _seed_control
 
 _EVENTS = [
@@ -183,3 +187,37 @@ def test_load_migrates_a_live_home_through_the_chain(tmp_path: Path) -> None:
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
     assert LAYOUT_VERSION == 23
     assert quest_mod._MIGRATIONS[(22, 23)] is _migrate_v22_to_v23
+
+
+def _step() -> Step:
+    return Step(name="s", phase="p", kind="agent", rules=(), on_max_retries=Pause(),
+                max_loops=1, source=SourceLoc(file=Path("workflow.yaml"), line=1),
+                file=Path("agents/stub.md"))
+
+
+def test_a_step_paused_under_the_old_id_keeps_its_session(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    qd = _seed_v22(tmp_path, "mv23g")
+    session = qd / "steps" / "p" / "s"
+    state_path = qd / "state" / "state.json"
+    raw = json.loads(state_path.read_text())
+    raw["current_step"] = {"transcript_dir": str(session)}
+    state_path.write_text(json.dumps(raw, sort_keys=True))
+    with pytest.raises(InvalidResumeState):
+        read_native_resume_state(session)   # un-migrated, dispatch would raise outright
+
+    quest = Quest.load(tmp_path, "mv23g")   # triggers the migration chain
+
+    native = read_native_resume_state(session)
+    assert native == NativeResumeState(provider="claude", state={"session_id": "abc"})
+    state = State.load(quest.state_dir)
+    log = quest.event_log()
+    assert _retire_foreign_session(
+        session, _step(), quest, state, log, is_resume=True, resolved="claude",
+        native_resume_state=native, resumable=True) is None
+    # The sidecar half stands alone: a session with no manifest is owned by the file.
+    assert _retire_foreign_session(
+        session, _step(), quest, state, log, is_resume=True, resolved="claude",
+        native_resume_state=None, resumable=True) is None
+    assert list((qd / "steps" / "p").glob("s.attempt-*")) == []
+    assert session.is_dir()
