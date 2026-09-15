@@ -260,4 +260,3 @@ def apply_set(text: str, path: tuple[str, ...], value: Any) -> SetResult:
     if reclaimed is not None:
         return SetResult(reclaimed, SetOutcome.UNCOMMENTED)
     return SetResult(_insert(text, path, value), SetOutcome.NEW)
-
