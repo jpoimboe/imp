@@ -496,7 +496,7 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     assert _make_worktree_and_check(tmp_path)
 
 
-def test_merge_body_carries_decisions(tmp_path: Path) -> None:
+def test_merge_body_is_passed_through_verbatim(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     wt.create_worktree(tmp_path, "feat", "main")
     _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")

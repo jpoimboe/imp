@@ -1338,20 +1338,22 @@ async def _route_script(
     return action, feedback, muts
 
 
-def _decisions_body(spec_path: Path) -> str | None:
-    if not spec_path.is_file():
+def _summary_body(summary_path: Path) -> str | None:
+    """The summary's leading paragraph, used as the merge commit body. Blank and
+    heading lines are skipped in any order until the first content line, so a
+    summary written under an older prompt — one that still leads with a title —
+    yields its paragraph rather than the heading."""
+    if not summary_path.is_file():
         return None
-    lines = spec_path.read_text(encoding="utf-8", errors="replace").splitlines()
     out: list[str] = []
-    capturing = False
-    for line in lines:
-        if line.startswith("## "):
-            if capturing:
+    for line in summary_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            if out:
                 break
-            capturing = "decision" in line.lower()
             continue
-        if capturing:
-            out.append(line)
+        if not out and line.startswith("#"):
+            continue
+        out.append(line)
     text = "\n".join(out).strip()
     return text or None
 
@@ -1534,8 +1536,8 @@ async def _route_merge_and_exit_worktree(
         state.vars.update(match.var_mutations)
         return _finish(log, step, quest, match, state)
 
-    spec_path = quest.quest_dir / "artifacts" / "spec" / f"{quest.id}.md"
-    body = _decisions_body(spec_path)
+    summary_path = quest.quest_dir / "artifacts" / "summary" / f"{quest.id}.md"
+    body = _summary_body(summary_path)
     result = await anyio.to_thread.run_sync(
         functools.partial(
             worktree.merge_to_base,

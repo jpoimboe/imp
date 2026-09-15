@@ -283,30 +283,77 @@ def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
     assert rec["final_state"]["status"] == "merged"
 
 
-def test_decisions_body_extracts_summary_section(tmp_path: Path) -> None:
+PARA = ("Give the four stack-dependent settings one uniform three-state shape, so\n"
+        "a greenfield repo records \"no import root\" as an answer rather than as\n"
+        "an absence.")
+
+
+def _message(root: Path, commit: str) -> str:
+    return _git(root, "log", "-1", "--format=%B", commit).stdout.strip()
+
+
+def test_summary_body_takes_the_leading_paragraph(tmp_path: Path) -> None:
     from imp.engine import executor
-    spec = tmp_path / "spec.md"
-    spec.write_text(
-        "# Title\n\n## Goal\n\nDo the thing.\n\n"
-        "## Decisions summary\n\n- D1 — picked A over B.\n- D2 — kept C.\n\n"
-        "## Acceptance criteria\n\n- works\n")
-    out = executor._decisions_body(spec)
-    assert "D1 — picked A over B." in out
-    assert "D2 — kept C." in out
-    assert "Acceptance criteria" not in out   # stops at the next ## header
-    assert "Do the thing." not in out         # only the Decisions section
+    summary = tmp_path / "summary.md"
+    summary.write_text(f"{PARA}\n\n## Tasks\n\n- reshaped the settings\n")
+    assert executor._summary_body(summary) == PARA
 
 
-def test_decisions_body_missing_section_returns_none(tmp_path: Path) -> None:
+def test_summary_body_skips_a_leading_heading(tmp_path: Path) -> None:
+    # An in-flight quest holds the older summarizer prompt, which allows a title.
     from imp.engine import executor
-    spec = tmp_path / "spec.md"
-    spec.write_text("# Title\n\n## Goal\n\nDo the thing.\n")
-    assert executor._decisions_body(spec) is None
+    summary = tmp_path / "summary.md"
+    summary.write_text(f"# Uniform shape\n\n{PARA}\n\n## Tasks\n\n- one\n")
+    assert executor._summary_body(summary) == PARA
 
 
-def test_decisions_body_file_not_found_returns_none(tmp_path: Path) -> None:
+def test_summary_body_file_not_found_returns_none(tmp_path: Path) -> None:
     from imp.engine import executor
-    assert executor._decisions_body(tmp_path / "nonexistent.md") is None
+    assert executor._summary_body(tmp_path / "nonexistent.md") is None
+
+
+def test_summary_body_contentless_file_returns_none(tmp_path: Path) -> None:
+    from imp.engine import executor
+    summary = tmp_path / "summary.md"
+    summary.write_text("")
+    assert executor._summary_body(summary) is None
+    summary.write_text("\n   \n\n")
+    assert executor._summary_body(summary) is None
+
+
+def test_merge_body_is_the_summary_leading_paragraph(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Uniform shape", quest_id="feat", base_branch="main")
+    (ch.project_root / "feature.txt").write_text("hi")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "feat")
+    summary = ch.quest_dir / "artifacts" / "summary" / "feat.md"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text(f"{PARA}\n\n## Tasks\n\n- reshaped the settings\n")
+    state, log = _ctx(ch)
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert not isinstance(action, Pause)
+    assert _message(tmp_path, state.merge_commit) == (
+        f"Merge Uniform shape\n\n{PARA}\n\n(imp/feat)")
+
+
+def test_merge_body_without_a_summary_stays_minimal(tmp_path: Path) -> None:
+    # The spec's Decisions summary is no longer a source: with no summary
+    # artifact the merge body is empty even when the spec has one.
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Uniform shape", quest_id="feat", base_branch="main")
+    (ch.project_root / "feature.txt").write_text("hi")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "feat")
+    spec = ch.quest_dir / "artifacts" / "spec" / "feat.md"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# Uniform shape\n\n## Decisions summary\n\n- D1 — picked A over B.\n")
+    state, log = _ctx(ch)
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert not isinstance(action, Pause)
+    assert _message(tmp_path, state.merge_commit) == "Merge Uniform shape\n\n(imp/feat)"
 
 
 def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> None:
