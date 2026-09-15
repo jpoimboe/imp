@@ -34,7 +34,7 @@ cd "$WT" && imp config >/dev/null         # claims this clone's state dir under 
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 test -f "$STATE/repo"                     # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'
-providers: [claude_code]       # local provider; no API key → no shell wrapper needed (CLI). See §2.
+providers: [claude]       # local provider; no API key → no shell wrapper needed (CLI). See §2.
 theme: dark                    # primary pass; you will also sweep light + ansi (below)
 YAML
 cd "$WT" && imp config                    # confirm provider/theme resolved; label must read `[$STATE/config.yaml]`
@@ -49,7 +49,7 @@ cd "$WT" && imp config                    # confirm provider/theme resolved; lab
 > truecolor *and* 16-color faithfully, so `snapshot()` is trustworthy for each. Note where a
 > theme reads worse — low contrast, lost emphasis, glyphs that don't survive the downgrade.
 
-`claude_code` uses the local `claude` session (no API key). If it's unavailable, swap to a
+`claude` uses the local `claude` session (no API key). If it's unavailable, swap to a
 provider you have credentials for — the UX surface is the same.
 
 ---

@@ -14,7 +14,7 @@
 > repeating them, and restates only its own driving primitives inline.
 >
 > **Cost & cadence.** A full live multi-agent run is ~25 min and **billable** (or a local
-> `claude_code` session). Run it on demand. If a run looks stuck/looping for minutes with no
+> `claude` session). Run it on demand. If a run looks stuck/looping for minutes with no
 > progress, `stop` it and re-run — an environmental stall is not a product defect (§2).
 
 ---
@@ -35,7 +35,7 @@ ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```
 
 Force a single provider via the **local** layer — this clone's own state directory under
-`~/.imp/projects/`, outside the checkout (default `claude_code`; substitute another only if the
+`~/.imp/projects/`, outside the checkout (default `claude`; substitute another only if the
 operator names one):
 
 ```bash
@@ -43,7 +43,7 @@ cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; p
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'
-providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
+providers: [claude]   # exactly one of: claude | anthropic | openai | codex
 theme: ansi
 YAML
 cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading
