@@ -378,7 +378,7 @@ The columns list the **principal** writers and readers, not an exhaustive census
 |---|---|---|
 | `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |
 | `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer |
-| `artifacts/summary/{id}.md` | summarizer | finalize, `imp show` |
+| `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` step (merge commit body), `imp show` |
 | `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
 | `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |

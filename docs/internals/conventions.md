@@ -28,6 +28,24 @@ WHY is non-obvious, and never write multi-paragraph docstrings or multi-line
 comment blocks — one short line max. To change the rule, edit the partial; this
 section only says where it lives.
 
+## Commit messages
+
+Commit message style is coding stance too, so the operative rule lives in the
+shared partial `src/imp/assets/partials/commit-style.md` (overlaid into every
+quest as `workflow/partials/commit-style.md`) and the committing agents already
+carry it. The short form: a `component: imperative summary` subject under 100
+characters naming the part of the codebase that changed, and a required body
+wrapped at 75 columns in three movements — context, consequence, the fix —
+written to a file and committed with `git commit -F`, never `-m`. To change the
+rule, edit the partial; this section only says where it lives.
+
+The merge commit is the exception: no agent writes it. The engine assembles it
+in `_merge_subject()` (`src/imp/engine/worktree.py`): the subject is literally
+`Merge <title>`, followed by the leading paragraph of the summarizer's
+`artifacts/summary/<id>.md` (extracted by `_summary_body()` in
+`src/imp/engine/executor.py`) and the `(imp/<id>)` trailer. A quest whose
+summary artifact is missing merges with the subject and trailer alone.
+
 ## Seeing imp's own UI
 
 When the project under change is imp itself, `scripts/capture_imp_ui.py` renders

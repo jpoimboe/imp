@@ -89,6 +89,23 @@ def test_comment_rule_summary_matches_the_authoritative_partial() -> None:
         assert clause in flat_partial, f"coding-stance.md no longer says: {clause}"
 
 
+def test_commit_rule_summary_matches_the_authoritative_partial() -> None:
+    """Same split as the comment rule: the doc summarizes and points at the partial.
+    The merge commit is the one part no partial covers — it is engine-built — so the
+    doc is where its shape is recorded."""
+    doc = Path("docs/internals/conventions.md").read_text()
+    partial = Path("src/imp/assets/partials/commit-style.md").read_text()
+    assert "## Commit messages" in doc
+    assert "src/imp/assets/partials/commit-style.md" in doc
+    flat_doc = " ".join(doc.split())
+    flat_partial = " ".join(partial.split())
+    for clause in ("component: imperative summary", "wrapped at 75 columns", "never `-m`"):
+        assert clause in flat_doc, f"conventions.md dropped: {clause}"
+        assert clause in flat_partial, f"commit-style.md no longer says: {clause}"
+    for ref in ("_merge_subject()", "src/imp/engine/worktree.py", "(imp/<id>)"):
+        assert ref in flat_doc, f"conventions.md no longer records: {ref}"
+
+
 def test_index_scopes_internals_to_imp_on_imp() -> None:
     """The hub ships in every project, so its index must not present imp's own
     engine internals as relevant to a quest in someone else's repo. `guide/`
