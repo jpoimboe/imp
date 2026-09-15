@@ -2512,6 +2512,23 @@ def test_prepare_spawn_policy_recreates_the_scratch_dir_0o700(tmp_path):
     assert scratch.parent.stat().st_mode & 0o777 == 0o700
 
 
+def test_prepare_spawn_policy_creates_the_var_tmp_bind_source_0o700(tmp_path):
+    # build_sandbox_spawn substitutes quest_var_tmp_dir as the --bind (not --bind-try)
+    # source for the namespace /var/tmp, and nothing else mints a per-agent slot leaf:
+    # spawn is the one hook ahead of every keeper open, so it must self-heal this too.
+    scratch = tmp_path / "t" / f"imp-{os.getuid()}" / "abc" / "explorer-1"
+    var_tmp = tmp_path / "vt" / f"imp-{os.getuid()}" / "abc" / "explorer-1"
+    pol = _policy(quest_tmp_dir=str(scratch), quest_var_tmp_dir=str(var_tmp))
+    old_umask = os.umask(0)          # a permissive umask would leave a level 0o777
+    try:
+        prepare_spawn_policy(pol)
+    finally:
+        os.umask(old_umask)
+    assert var_tmp.is_dir()
+    assert var_tmp.stat().st_mode & 0o777 == 0o700
+    assert var_tmp.parent.stat().st_mode & 0o777 == 0o700
+
+
 def test_var_tmp_source_has_no_same_path_fallback():
     # An empty quest_var_tmp_dir must NEVER degrade to --bind /var/tmp /var/tmp
     # (which would expose the host's real /var/tmp read-write).
