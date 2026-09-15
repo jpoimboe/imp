@@ -7,7 +7,8 @@ import json
 import os
 from pathlib import Path
 
-from imp.engine.archive import ensure_current, index, index_path
+from imp.engine.archive import check_data_floor, ensure_current, index, index_path
+from imp.engine.errors import ArchiveMismatch
 from imp.engine.sandbox import _force_rmtree
 from imp.engine.state import lock_is_live
 from imp.paths import project_state_dir
@@ -17,6 +18,11 @@ def reap_archived_homes(control_root: Path) -> int:
     """Reap quest homes already terminal and durable in the archive; return the count."""
     from imp.cli.store import _INFLIGHT, _list_quest_homes, _quest_home
 
+    # stale index must not authorize deleting the only readable copy of a quest
+    try:
+        check_data_floor(control_root)
+    except ArchiveMismatch:
+        return 0
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
