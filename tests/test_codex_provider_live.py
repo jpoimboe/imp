@@ -85,17 +85,14 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 
 
 # How many independent round-trip attempts before the test gives up. The codex
-# "tool is not exposed in this session" refusal was root-caused to codex DEFERRING
-# all MCP tools behind its `tool_search` discovery tool (imp's `mcp__imp__*` tools
-# aren't in the model's initial list); `_build_prompt` now tells the model to load
-# them via `tool_search` first, which drove first-turn complete_step success from
-# 4/10 to ~30/30 on gpt-5.4-mini (measured pre-5.6; the pin moved to
-# gpt-5.6-luna when 5.4-mini retired from Codex, reliability not re-measured).
-# So the round-trip is reliable in production now
-# via that prompt guidance plus the nudge backstop (continuation_fn) and the
-# engine's RetryNow policy for `agent_output_missing`. The multi-attempt loop
-# stays as cheap belt-and-suspenders against residual LLM nondeterminism — it
-# almost always passes on the first attempt now.
+# "tool is not exposed in this session" refusal was root-caused to codex hiding
+# imp's MCP tools behind a discovery indirection the model had to walk first;
+# imp now sets `[features.code_mode] direct_only_tool_namespaces` so they are
+# declared directly, and `_build_prompt` says so. The round-trip is reliable in
+# production via that, the nudge backstop (continuation_fn), and the engine's
+# RetryNow policy for `agent_output_missing`. The multi-attempt loop stays as
+# cheap belt-and-suspenders against residual LLM nondeterminism — it almost
+# always passes on the first attempt now.
 _ROUND_TRIP_ATTEMPTS = 5
 
 
@@ -265,10 +262,10 @@ is NOT a failure — do not skip a step because you expect it to fail.
 2. Use your NATIVE shell/exec tool (`exec_command` on codex 0.153.2) to run
    this shell command in the working directory: printf 'x' > exec_written.txt
    Copy the exact error text it returns.
-3. Use the `mcp__imp__write_file` tool to write the file `mcp_written.txt`
+3. Use the `write_file` tool to write the file `mcp_written.txt`
    with exactly the content `MCP-OK`.
 
-Then call `mcp__imp__complete_step` with `patch_error` set to step 1's verbatim
+Then call `complete_step` with `patch_error` set to step 1's verbatim
 error text and `exec_error` set to step 2's verbatim error text.
 Report it VERBATIM — do not summarise or paraphrase it.
 If a step somehow succeeded, set that field to the literal text
@@ -318,10 +315,9 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC 5: both native write vectors — `apply_patch` and a shell write — are
-    refused, while an `mcp__imp__` write lands. Measured on 0.153.2 /
-    gpt-5.6-luna: every tool runs inside one native `exec` JS isolate, where
-    `tools.apply_patch` is refused by the read-only sandbox and
-    `tools.exec_command` is not bound at all (`[features] shell_tool = false`).
+    refused, while an imp MCP write lands. Measured on 0.153.2 / gpt-5.6-luna:
+    `apply_patch` is refused by the read-only sandbox and `exec_command` is not
+    bound at all (`[features] shell_tool = false`).
     """
     last_events: list[Any] = []
     notes: list[str] = []
