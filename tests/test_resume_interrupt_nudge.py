@@ -136,7 +136,7 @@ async def _run_claude_code_resume(
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
-    from imp.providers.claude_code_session_store import session_key, session_store_for
+    from imp.providers.claude_session_store import session_key, session_store_for
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use

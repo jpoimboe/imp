@@ -18,7 +18,7 @@ from imp.providers.claude_code import (
     _project_for_cli,
     _stream_history,
 )
-from imp.providers.claude_code_session_store import message_to_session_records
+from imp.providers.claude_session_store import message_to_session_records
 
 
 async def _drain(async_iter: Any) -> list[dict[str, Any]]:

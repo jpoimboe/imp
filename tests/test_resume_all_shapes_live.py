@@ -31,7 +31,7 @@ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers import claude_code
 from imp.providers.claude_code import ClaudeCodeAgentRunner
-from imp.providers.claude_code_session_store import (
+from imp.providers.claude_session_store import (
     message_to_session_records,
     session_key,
     session_store_for,

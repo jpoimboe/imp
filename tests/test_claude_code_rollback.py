@@ -14,7 +14,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude_code import ClaudeCodeAgentRunner, _roll_back_error_turn
-from imp.providers.claude_code_session_store import (
+from imp.providers.claude_session_store import (
     resume_session_id,
     session_key,
     session_store_for,

@@ -19,7 +19,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude_code import ClaudeCodeAgentRunner
-from imp.providers.claude_code_session_store import (
+from imp.providers.claude_session_store import (
     ImpSessionStore,
     resume_session_id,
     session_store_for,
@@ -1642,7 +1642,7 @@ async def test_fresh_run_mirrors_session_into_store(tmp_path: Path) -> None:
 async def test_resume_without_stored_session_passes_native_session_state(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1701,7 +1701,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
     """Mixed tail folds the completed pair; only the trailing text streams as the delta."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1747,7 +1747,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
 async def test_native_resume_holds_back_plain_text_tail(tmp_path: Path) -> None:
     """A trailing plain-text user turn is still held back and streamed as the delta."""
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1788,7 +1788,7 @@ async def test_native_resume_folds_is_error_tool_result_tail(tmp_path: Path) -> 
     """A trailing is_error tool_result folds the same way, exposing the real error content."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1976,7 +1976,7 @@ async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: 
     """A rework resume leaves the complete_step DANGLING in the loaded session
     (no success fold); the is_error feedback result streams as the delta and pairs
     it. So the stored record's trailing entry is the unpaired complete_step turn."""
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
     skey = session_key(inv.quest_context.project_root, "step:p/s")
@@ -2184,7 +2184,7 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     prefix is reconstructed into the native session."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -2254,7 +2254,7 @@ def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
 async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -2313,7 +2313,7 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
 async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -2371,7 +2371,7 @@ async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path)
 async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -2434,7 +2434,7 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -2487,7 +2487,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -2547,7 +2547,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
 async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -2616,7 +2616,7 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
 async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -2670,7 +2670,7 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
 async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -2747,7 +2747,7 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
 async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -3360,7 +3360,7 @@ async def test_second_interrupt_during_steer_skips_requery(
 @pytest.mark.anyio
 async def test_native_resume_rebuild_drops_a_stale_error_record(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -3403,7 +3403,7 @@ async def test_native_resume_rebuild_drops_a_stale_error_record(tmp_path: Path) 
 async def test_native_resume_rebuilds_a_partial_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -3488,7 +3488,7 @@ async def test_no_store_native_sets_standard_tool_mode(tmp_path: Path) -> None:
 async def test_native_resume_sets_standard_tool_mode(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -3540,7 +3540,7 @@ async def test_complete_step_tail_native_resumes_with_store_body(
     so claude-p resumes its own session by id rather than re-streaming a replay."""
     from imp.agents.runner import ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -3588,7 +3588,7 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
     partial post-kill turn imp never recorded) is replaced by the transcript
     projection and NATIVE-resumes — it no longer falls back to stream-json
     replay."""
-    from imp.providers.claude_code_session_store import session_key, session_store_for
+    from imp.providers.claude_session_store import session_key, session_store_for
 
     log = InMemoryEventLog()
     inv = _seed_complete_step_resume(
@@ -3637,7 +3637,7 @@ async def test_balance_on_resume_send_to_llm_tail_native_resumes(
     override) or carries retry_feedback — neither holds here."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -3689,7 +3689,7 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
     the trailing tool_result, so it is never lost."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -3739,7 +3739,7 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
     no redo-defusing manifest are produced."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -4514,7 +4514,7 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code import CAPTURED_TOOL_RESULTS_FILENAME
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -5103,7 +5103,7 @@ async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> No
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code import _project_for_cli
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -5163,7 +5163,7 @@ async def test_coincidental_count_deficit_drops_the_error_turn(tmp_path: Path) -
     resumes from the error turn, so the real closing turn never lands."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -5223,7 +5223,7 @@ async def test_vipu54_drifted_store_keeps_the_complete_step_trio(
     closing complete_step / result / summary trio is deleted instead."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )
@@ -5291,7 +5291,7 @@ async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
     assistant turn that preceded the reply must be in the rebuilt body — its
     absence is what made the agent regenerate its answer."""
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
     )

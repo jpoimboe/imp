@@ -8,7 +8,7 @@ from pathlib import Path
 import anyio
 from claude_agent_sdk.testing import run_session_store_conformance
 
-from imp.providers.claude_code_session_store import (
+from imp.providers.claude_session_store import (
     ImpSessionStore,
     resume_session_id,
     session_key,
@@ -247,7 +247,7 @@ def test_message_to_session_records_chains_and_shapes() -> None:
         ToolResultBlock,
         ToolUseBlock,
     )
-    from imp.providers.claude_code_session_store import message_to_session_records
+    from imp.providers.claude_session_store import message_to_session_records
 
     messages = [
         Message(role="assistant", content=(
@@ -282,7 +282,7 @@ def test_message_to_session_records_chains_and_shapes() -> None:
 
 def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
     from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import (
+    from imp.providers.claude_session_store import (
         _record_uuid,
         message_to_session_records,
     )

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from imp.agents.runner import ContentBlock, Message, TextBlock, ToolResultBlock
 from imp.agents.transcript import Transcript
-from imp.providers.claude_code_session_store import session_store_for
+from imp.providers.claude_session_store import session_store_for
 
 RESULT_PLACEHOLDER = "[tool result omitted by compaction]"
 

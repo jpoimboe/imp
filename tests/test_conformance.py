@@ -330,7 +330,7 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
-    from imp.providers.claude_code_session_store import resume_session_id
+    from imp.providers.claude_session_store import resume_session_id
     from tests.conformance_adapters import build, drive
 
     (tmp_path / "art").mkdir(exist_ok=True)
