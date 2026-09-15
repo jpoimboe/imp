@@ -25,7 +25,7 @@ def test_live_line_prepends_phase_label_no_auto_thinking() -> None:
     assert activity is not None
     row = ld.compose_position_row(
         activity=activity, quest_id=b.tree.root.id, title=b.tree.root.title,
-        prompt_tokens=None, color=False, width=80)
+        context_tokens=None, color=False, width=80)
     assert "implementation phase · plan 1/3 · finalizing" in row
     assert "thinking" not in row
 
@@ -38,6 +38,6 @@ def test_live_line_does_not_double_pushed_thinking() -> None:
     assert activity is not None
     row = ld.compose_position_row(
         activity=activity, quest_id=b.tree.root.id, title=b.tree.root.title,
-        prompt_tokens=None, color=False, width=80)
+        context_tokens=None, color=False, width=80)
     assert "task 1/5 · thinking" in row
     assert "thinking · thinking" not in row  # pushed label is not doubled

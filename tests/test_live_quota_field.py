@@ -33,7 +33,7 @@ def _row(**kw: Any) -> str:
     activity = kw.pop("activity", _act())
     color = kw.pop("color", False)
     return compose_position_row(
-        activity=activity, quest_id=None, title="", prompt_tokens=None,
+        activity=activity, quest_id=None, title="", context_tokens=None,
         color=color, width=200, context_pct=44.0, now_epoch=_NOW, **kw)
 
 
@@ -184,7 +184,7 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
 
     def at(width: int) -> str:
         return compose_position_row(
-            activity=_act(), quest_id=None, title="", prompt_tokens=None,
+            activity=_act(), quest_id=None, title="", context_tokens=None,
             color=False, width=width, context_pct=44.0, now_epoch=_NOW,
             carrier=_carrier(reading, auth_mode="subscription"))
 

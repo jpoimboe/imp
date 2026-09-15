@@ -65,7 +65,7 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
 
 
 def context_bar(provider: str | None, model: str | None,
-                prompt_tokens: int | None, *,
+                context_tokens: int | None, *,
                 context_pct: float | None = None,
                 context_window: int | None = None,
                 color: bool, over_bg: bool) -> str | None:
@@ -82,9 +82,9 @@ def context_bar(provider: str | None, model: str | None,
     if context_pct is not None:
         frac = context_pct / 100
     else:
-        if window is None or prompt_tokens is None:
+        if window is None or context_tokens is None:
             return None
-        frac = prompt_tokens / window
+        frac = context_tokens / window
     # Red begins exactly at the handoff cutoff, so the bar always marks the real
     # point; the live context_pct path has no window to cap against.
     warn = checkpoint_cutoff(info, window)
@@ -236,7 +236,7 @@ def _split_pad(left: str, gauged: str, rights: Sequence[str], *,
 
 
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
-                         title: str, prompt_tokens: int | None, color: bool,
+                         title: str, context_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          context_window: int | None = None,
                          carrier: nv.Carrier | None = None,
@@ -267,7 +267,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                  if activity.model else None)
     bar = None
     if activity.kind == "agent" and not activity.lane_wait:
-        bar = context_bar(activity.provider, activity.model, prompt_tokens,
+        bar = context_bar(activity.provider, activity.model, context_tokens,
                           context_pct=context_pct, context_window=context_window,
                           color=color, over_bg=over)
     rights: list[str]
@@ -299,7 +299,7 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
         return None
     return compose_position_row(
         activity=nv.Activity(kind=None, lane_wait=False), quest_id=quest_id,
-        title=title, project=project, prompt_tokens=None, color=color,
+        title=title, project=project, context_tokens=None, color=color,
         width=width, unsandboxed=unsandboxed)
 
 
@@ -317,7 +317,7 @@ def compose_prelaunch_position_row(
         kind=None, lane_wait=False)
     return compose_position_row(
         activity=activity, quest_id=quest_id, title=title, project=project,
-        prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed,
+        context_tokens=None, color=color, width=width, unsandboxed=unsandboxed,
         carrier=carrier, cost=cost)
 
 
@@ -564,7 +564,7 @@ class LiveDriver:
         p_row = compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             project=self._project,
-            prompt_tokens=self._builder.latest_prompt_tokens,
+            context_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
@@ -612,7 +612,7 @@ class LiveDriver:
         return compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             project=self._project,
-            prompt_tokens=self._builder.latest_prompt_tokens,
+            context_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,

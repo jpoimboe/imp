@@ -1970,7 +1970,7 @@ def test_position_row_separates_model_from_the_gauge_with_a_middle_dot() -> None
     act = nv.Activity(kind="agent", model="sonnet", provider="anthropic",
                       phase="review")
     line = compose_position_row(activity=act, quest_id="z9gixx", title="t",
-                                prompt_tokens=26000, color=False, width=200)
+                                context_tokens=26000, color=False, width=200)
     bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
     assert bar is not None
     assert f"sonnet · {bar}" in line          # model and gauge are two fields now
@@ -2263,10 +2263,10 @@ def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     banded = compose_position_row(
         activity=nv.Activity(kind="agent", model="gpt-5.6-sol", provider="openai",
                              phase="implementation phase"),
-        quest_id="abc", title="t", prompt_tokens=315_000, color=True, width=200)
+        quest_id="abc", title="t", context_tokens=315_000, color=True, width=200)
     unresolved = compose_position_row(
         activity=nv.Activity(kind="agent", model="gpt-5.6-sol", phase="implementation phase"),
-        quest_id="abc", title="t", prompt_tokens=315_000, color=True, width=200)
+        quest_id="abc", title="t", context_tokens=315_000, color=True, width=200)
     assert "\x1b[31m" in banded and "30%" in banded
     assert "%" not in unresolved
 
@@ -2527,7 +2527,7 @@ def _pos_activity(**kw):
 def test_compose_position_row_is_flat_and_identity_first() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
-                               title="streaming footer", prompt_tokens=None,
+                               title="streaming footer", context_tokens=None,
                                color=False, width=80)
     # One flat left-aligned line, identity first, no right-flush gap.
     assert row == ("z9gixx · streaming footer · implementation phase · "
@@ -2537,7 +2537,7 @@ def test_compose_position_row_is_flat_and_identity_first() -> None:
 def test_compose_position_row_omits_title_segment_when_untitled() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
-                               title="", prompt_tokens=None, color=False, width=80)
+                               title="", context_tokens=None, color=False, width=80)
     # No title -> no segment and no stray separator between id and phase.
     assert row == ("z9gixx · implementation phase · plan 1/1 · task 1/3 · m")
 
@@ -2545,13 +2545,13 @@ def test_compose_position_row_omits_title_segment_when_untitled() -> None:
 def test_compose_position_row_starts_with_title_when_quest_id_is_none() -> None:
     from imp.cli.live_driver import compose_position_row
     titled = compose_position_row(activity=_pos_activity(), quest_id=None,
-                                  title="streaming footer", prompt_tokens=None,
+                                  title="streaming footer", context_tokens=None,
                                   color=False, width=80)
     # No id -> row starts with the title, no leading separator.
     assert titled == ("streaming footer · implementation phase · plan 1/1 · "
                       "task 1/3 · m")
     untitled = compose_position_row(activity=_pos_activity(), quest_id=None,
-                                    title="", prompt_tokens=None, color=False,
+                                    title="", context_tokens=None, color=False,
                                     width=80)
     # No id and no title -> row starts with the phase.
     assert untitled == "implementation phase · plan 1/1 · task 1/3 · m"
@@ -2560,13 +2560,13 @@ def test_compose_position_row_starts_with_title_when_quest_id_is_none() -> None:
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     from imp.cli.live_driver import compose_position_row
     agent = compose_position_row(activity=_pos_activity(kind="agent"), quest_id="z",
-                                 title="t", prompt_tokens=None, color=False, width=80,
+                                 title="t", context_tokens=None, color=False, width=80,
                                  context_pct=42.0)
     script = compose_position_row(activity=_pos_activity(kind="script"), quest_id="z",
-                                  title="t", prompt_tokens=None, color=False, width=80,
+                                  title="t", context_tokens=None, color=False, width=80,
                                   context_pct=42.0)
     none_kind = compose_position_row(activity=_pos_activity(kind=None), quest_id="z",
-                                     title="t", prompt_tokens=None, color=False, width=80,
+                                     title="t", context_tokens=None, color=False, width=80,
                                      context_pct=42.0)
     assert "42%" in agent
     assert "%" not in script
@@ -2577,7 +2577,7 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
 def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(kind="agent", lane_wait=True),
-                               quest_id="z", title="t", prompt_tokens=None,
+                               quest_id="z", title="t", context_tokens=None,
                                color=False, width=80, context_pct=42.0)
     assert "%" not in row
     assert "implementation phase" in row
@@ -2590,7 +2590,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
         row = compose_position_row(
             activity=_pos_activity(phase="planning phase", plan="plan 3/6",
                                    counter="task 2/3", model="m", kind="agent"),
-            quest_id="z9gixx", title="t", prompt_tokens=None, color=True,
+            quest_id="z9gixx", title="t", context_tokens=None, color=True,
             width=120, context_pct=42.0)
     finally:
         pal.set_theme("ansi")
@@ -2607,7 +2607,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
 def test_compose_position_row_leads_with_the_project_segment() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), project="imp",
-                               quest_id="vope45", title="t", prompt_tokens=None,
+                               quest_id="vope45", title="t", context_tokens=None,
                                color=False, width=80)
     # project first; every existing segment keeps its current relative order.
     assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
@@ -2617,10 +2617,10 @@ def test_compose_position_row_leads_with_the_project_segment() -> None:
 def test_compose_position_row_without_project_is_byte_for_byte_unchanged() -> None:
     from imp.cli.live_driver import compose_position_row
     omitted = compose_position_row(activity=_pos_activity(), quest_id="vope45",
-                                   title="t", prompt_tokens=None, color=False,
+                                   title="t", context_tokens=None, color=False,
                                    width=80)
     empty = compose_position_row(activity=_pos_activity(), project="",
-                                 quest_id="vope45", title="t", prompt_tokens=None,
+                                 quest_id="vope45", title="t", context_tokens=None,
                                  color=False, width=80)
     assert omitted == empty == ("vope45 · t · implementation phase · plan 1/1 · "
                                 "task 1/3 · m")
@@ -2632,7 +2632,7 @@ def test_compose_position_row_project_is_gray_like_the_model_segment() -> None:
     try:
         pal.set_theme("ansi")
         row = compose_position_row(activity=_pos_activity(), project="imp",
-                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   quest_id="z9gixx", title="t", context_tokens=None,
                                    color=True, width=120)
     finally:
         pal.set_theme("ansi")
@@ -2649,7 +2649,7 @@ def test_compose_position_row_bands_and_pads_with_project_under_dark_theme() -> 
     try:
         pal.set_theme("dark")
         row = compose_position_row(activity=_pos_activity(), project="imp",
-                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   quest_id="z9gixx", title="t", context_tokens=None,
                                    color=True, width=120)
         gray = pal.sgr("gray", enabled=True)
         user_bg = pal.user_bg_open(enabled=True)
@@ -2745,7 +2745,7 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
         activity=nv.Activity(kind="agent", model="claude-opus-5",
                              provider="claude_code", phase="implementation",
                              plan="plan-1", counter="step 3/7"),
-        quest_id="nota40", title=title, project="imp", prompt_tokens=None,
+        quest_id="nota40", title=title, project="imp", context_tokens=None,
         color=color, width=width, context_pct=44.0,
         carrier=nv.Carrier(provider="claude_code", auth_mode="subscription",
                            quota=reading),
@@ -2996,7 +2996,7 @@ def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
     act = b.current_activity()
     # No countdown tag on the position row either.
     pos = compose_position_row(activity=act, quest_id="gizo14", title="t",
-                               prompt_tokens=None, color=False, width=120)
+                               context_tokens=None, color=False, width=120)
     assert "left" not in pos
     # The wait surfaces on the activity line instead.
     line = compose_activity_line(activity=act, frame=0, color=False, width=120,
@@ -3399,7 +3399,7 @@ def test_compose_startup_spinner_only_when_id_absent() -> None:
 def test_compose_position_row_shows_unsandboxed_after_title() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
-                               title="streaming footer", prompt_tokens=None,
+                               title="streaming footer", context_tokens=None,
                                color=False, width=120, unsandboxed=True)
     assert row == ("z9gixx · streaming footer · unsandboxed · implementation "
                    "phase · plan 1/1 · task 1/3 · m")
@@ -3408,7 +3408,7 @@ def test_compose_position_row_shows_unsandboxed_after_title() -> None:
 def test_compose_position_row_unsandboxed_after_id_when_no_title() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
-                               title="", prompt_tokens=None,
+                               title="", context_tokens=None,
                                color=False, width=80, unsandboxed=True)
     assert row == ("z9gixx · unsandboxed · implementation "
                    "phase · plan 1/1 · task 1/3 · m")
@@ -3467,7 +3467,7 @@ def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
     try:
         pal.set_theme("ansi")
         row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
-                                   title="t", prompt_tokens=None, color=True,
+                                   title="t", context_tokens=None, color=True,
                                    width=120, unsandboxed=True)
     finally:
         pal.set_theme("ansi")
