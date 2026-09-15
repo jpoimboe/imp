@@ -238,6 +238,31 @@ def _inv_with_task(
     )
 
 
+# The policy text codex agents must receive verbatim: under direct exposure the
+# model sees imp's tools by their bare names, so a `mcp__imp__`-prefixed
+# instruction would point at nothing.
+_POLICY_HEAD = (
+    "IMPORTANT — Tool policy:\n"
+    "- Your imp tools are already loaded and callable directly by name\n"
+    "  (`read_file`, `bash`, `complete_step`, …). Do not search for them,\n"
+    "  do not route them through `exec`, and do not claim they are\n"
+    "  unavailable.\n"
+    "- Use ONLY your imp tools. Never call a native built-in such as\n"
+    "  `apply_patch`.\n"
+)
+
+_POLICY_COMPLETION_BULLET = (
+    "- Finish the task by calling `complete_step` with the structured\n"
+    "  answer.\n"
+)
+
+_POLICY_DELIVERABLE_BULLET = (
+    "- Your final message is your entire deliverable to the agent\n"
+    "  that dispatched you; state your full conclusion in your last\n"
+    "  message.\n"
+)
+
+
 def test_build_prompt_folds_first_user_message_on_fresh_entry(
     tmp_path: Path,
 ) -> None:
@@ -250,11 +275,12 @@ def test_build_prompt_folds_first_user_message_on_fresh_entry(
     inv = _inv_with_task(tmp_path, task_text=task)
     built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert built.startswith("ROLE_HEADER_SENTINEL")   # role header first
-    assert "tool_search" in built                     # tool policy retained
+    assert "callable directly by name" in built       # tool policy retained
     assert "RENDER_BODY_SENTINEL_9f3a" in built       # rendered body folded in
     assert "complete_step" in built                   # completion contract folded in
     # Fold is appended after the policy, not before it.
-    assert built.index("tool_search") < built.index("RENDER_BODY_SENTINEL_9f3a")
+    assert (built.index("callable directly by name")
+            < built.index("RENDER_BODY_SENTINEL_9f3a"))
 
 
 def test_build_prompt_omits_first_user_message_on_resume(
@@ -265,7 +291,7 @@ def test_build_prompt_omits_first_user_message_on_resume(
     inv = _inv_with_task(tmp_path, task_text=task, balance_on_resume=True)
     built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert built.startswith("ROLE_HEADER_SENTINEL")   # role header + policy still built
-    assert "tool_search" in built
+    assert "callable directly by name" in built
     assert "RENDER_BODY_SENTINEL_9f3a" not in built    # task NOT re-folded on resume
 
 
@@ -278,7 +304,23 @@ def test_build_prompt_folds_subagent_task_with_deliverable_policy(
     built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert "SUBAGENT_BODY_SENTINEL" in built           # subagent task folded in
     assert "your entire deliverable" in built          # deliverable-note branch
-    assert "complete_step" not in built                # completion line absent for subagents
+    assert "Finish the task by calling" not in built   # completion line absent for subagents
+
+
+def test_build_prompt_emits_the_direct_exposure_policy_verbatim(tmp_path: Path) -> None:
+    top = CodexAgentRunner._build_prompt(
+        None, _inv_with_task(tmp_path, task_text="BODY"),
+        InMemoryEventLog(), "step:t")
+    sub = CodexAgentRunner._build_prompt(
+        None, _inv_with_task(tmp_path, task_text="BODY", subagent_depth=1),
+        InMemoryEventLog(), "step:t")
+    assert _POLICY_HEAD + _POLICY_COMPLETION_BULLET in top
+    assert _POLICY_DELIVERABLE_BULLET not in top
+    assert _POLICY_HEAD + _POLICY_DELIVERABLE_BULLET in sub
+    assert _POLICY_COMPLETION_BULLET not in sub
+    # Nothing tells a codex model to call a prefixed tool name any more.
+    assert "mcp__imp__" not in top
+    assert "mcp__imp__" not in sub
 
 
 
