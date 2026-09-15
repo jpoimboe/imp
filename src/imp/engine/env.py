@@ -171,9 +171,17 @@ def quest_var_tmp_root() -> Path:
 
 
 def ensure_quest_tmp_dir(tmp_dir: Path) -> None:
-    """Idempotently create the per-quest tmp dir 0o700 on both imp-<uid> parent and <id> leaf."""
+    """Idempotently create a scratch leaf — a quest's /tmp or /var/tmp dir, or a slot
+    beneath one — plus its parent and every level this call had to create, all at 0o700
+    (mkdir(mode=) sets only the final component, so an intermediate would land at the
+    umask default). 0o700 because /var/tmp is a world-writable sticky dir; the chmods
+    also correct a pre-existing wrong mode. The parent chmod is unconditional and rests
+    on a caller-side invariant: a scratch leaf's parent is imp's own dir — imp-<uid> or
+    a directory beneath it — never a system directory. Ancestors above the parent that
+    already existed are left alone."""
+    created = [p for p in (tmp_dir, *tmp_dir.parents) if not p.exists()]
     tmp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for d in (tmp_dir.parent, tmp_dir):
+    for d in (*created, tmp_dir, tmp_dir.parent):
         d.chmod(0o700)
 
 

@@ -239,3 +239,41 @@ def test_wipe_step_scratch_creates_the_dir_when_it_is_missing(tmp_path: Path) ->
 
     assert ch.tmp_dir.is_dir()
     assert ch.tmp_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_ensure_quest_tmp_dir_locks_down_every_level_it_creates(tmp_path: Path) -> None:
+    # A slot leaf sits BELOW the quest dir, so mkdir(parents=True, mode=) creates an
+    # intermediate the leaf+parent chmod never reaches — left at the umask default.
+    root = tmp_path / f"imp-{os.getuid()}"
+    root.mkdir()
+    leaf = root / "qid" / "explorer-1" / "spiker-2"
+
+    old_umask = os.umask(0)          # a permissive umask would leave a level 0o777
+    try:
+        ensure_quest_tmp_dir(leaf)
+    finally:
+        os.umask(old_umask)
+
+    for d in (root / "qid", leaf.parent, leaf):
+        assert d.is_dir(), d
+        assert d.stat().st_mode & 0o777 == 0o700, d
+
+
+def test_ensure_quest_tmp_dir_leaves_pre_existing_ancestors_above_the_parent_alone(
+    tmp_path: Path,
+) -> None:
+    # imp's to relock: the leaf, its parent, and levels this call created. An ancestor
+    # that was already there is not, so its mode must survive untouched.
+    root = tmp_path / f"imp-{os.getuid()}"
+    root.mkdir()
+    root.chmod(0o755)
+    quest_dir = root / "qid"
+    quest_dir.mkdir()
+    quest_dir.chmod(0o700)
+    leaf = quest_dir / "explorer-1"
+
+    ensure_quest_tmp_dir(leaf)
+
+    assert root.stat().st_mode & 0o777 == 0o755
+    assert quest_dir.stat().st_mode & 0o777 == 0o700
+    assert leaf.stat().st_mode & 0o777 == 0o700
