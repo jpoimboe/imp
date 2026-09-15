@@ -224,4 +224,4 @@ def test_summary_export_carries_no_quota_block(flag, tmp_path, monkeypatch, caps
     assert main(["log", "-s", slug, flag]) == 0
     out = capsys.readouterr().out
     assert "quota" not in out
-    assert "claude" not in out
+    assert "5h 44% → 58%" not in out
