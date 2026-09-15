@@ -465,3 +465,64 @@ def test_base_and_checkout_branch_default_empty(tmp_path: Path) -> None:
         "{% if quest.checkout_branch and quest.checkout_branch != quest.base_branch %}"
         "DIVERGED{% else %}SAME{% endif %}", ctx) == "[][]SAME"
 
+
+@pytest.mark.parametrize(
+    ("workflow_name", "agent_name", "fast_path"),
+    [
+        pytest.param("default", "coder", False, id="default-writer"),
+        pytest.param("default", "code-reviewer", False, id="default-task-reviewer"),
+        pytest.param(
+            "default", "batch-code-reviewer", False, id="default-quest-reviewer"
+        ),
+        pytest.param("minimal", "implementer", False, id="minimal-writer"),
+        pytest.param("minimal", "reviewer", False, id="minimal-reviewer"),
+        pytest.param("default", "coder", True, id="lighter-writer"),
+        pytest.param("default", "code-reviewer", True, id="lighter-task-reviewer"),
+        pytest.param(
+            "default", "batch-code-reviewer", True, id="lighter-quest-reviewer"
+        ),
+    ],
+)
+def test_portable_coding_guidance_reaches_writers_and_reviewers(
+    tmp_path: Path,
+    workflow_name: str,
+    agent_name: str,
+    fast_path: bool,
+) -> None:
+    from imp.engine.loader import load_workflow
+
+    workflow_dir = bundled_workflow_dir(workflow_name)
+    agent = load_workflow(workflow_dir).agents[agent_name]
+    context = build_context(
+        quest_title="t",
+        quest_id="abc",
+        quest_home=".imp/quests/abc",
+        event_log=_log(tmp_path / "events.jsonl", []),
+        vars={"fast_path": fast_path} if workflow_name == "default" else {},
+    )
+    rendered = render_prompt(
+        agent.prompt_template_source, context, workflow_dir=workflow_dir
+    )
+    normalized = " ".join(rendered.split())
+    rules = (
+        "Write timing-sensitive tests to tolerate load: wait for observable "
+        "signals instead of fixed sleeps, give inner waits generous budgets, "
+        "and use one outer timeout to catch hangs.",
+        "When changing an API, CLI, or tool interface, update affected "
+        "documentation, examples, and agent instructions in the same change.",
+        "Preserve existing data when changing persisted formats. Implement "
+        "the migration or compatibility needed for the project\u2019s supported "
+        "upgrade paths, preserving required behavior during in-flight operations.",
+        "Don\u2019t add feature flags or backwards-compatibility shims without "
+        "a concrete requirement.",
+    )
+    for rule in rules:
+        assert rule in normalized
+    assert (
+        "Don't add feature flags or backwards-compatibility shims "
+        "when you can just change the code."
+    ) not in normalized
+    assert "{% include" not in rendered
+    if fast_path:
+        assert "No production code without a failing test first" not in rendered
+

@@ -72,7 +72,8 @@ def _agent_def() -> AgentDef:
 
 def _build_invocation(
     tmp_path: Path, *, event_log: object, balance_on_resume: bool,
-    resume_cause: str = "human", transcript_dir: Path | None = None,
+    resume_cause: str = "human", retry_feedback: str | None = None,
+    transcript_dir: Path | None = None,
 ) -> AgentInvocation:
     transcript_dir = transcript_dir or tmp_path / "tx"
     return AgentInvocation(
@@ -84,6 +85,7 @@ def _build_invocation(
         transcript_dir=transcript_dir,
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=event_log, balance_on_resume=balance_on_resume,
+        retry_feedback=retry_feedback,
         native_resume_state=(
             read_native_resume_state(transcript_dir)
             if balance_on_resume else None),
@@ -685,3 +687,46 @@ async def test_resume_missing_complete_step_under_retry_uses_the_retry_note(
     driven = str(fake.thread.run_calls[0][0])
     assert RESUME_RETRY_NUDGE in driven
     assert RESUME_CONTINUE_NUDGE not in driven
+
+
+@pytest.mark.anyio
+async def test_resume_delivers_retry_feedback_to_first_native_prompt(
+    tmp_path: Path,
+) -> None:
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    thread_id = "thr-feedback-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
+    feedback = "verification failed: RUF001 at src/example.py:12"
+
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"name": "complete_step"}},
+    ])
+
+    elog = InMemoryEventLog()
+    fake = FakeCodex(scripted_turns=[[
+        thread_started(thread_id),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"}, result="ok",
+                 item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]])
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(
+        tmp_path, event_log=elog, balance_on_resume=True, retry_feedback=feedback)
+    async for _ev in runner.run(inv):
+        pass
+
+    driven = str(fake.thread.run_calls[0][0])
+    assert driven.count(feedback) == 1
+    assert [
+        event["payload"]["content"][0]["text"]
+        for event in elog.read()
+        if event["type"] == "engine_message"
+        and event.get("payload", {}).get("subtype") == "continuation"
+    ] == [feedback]

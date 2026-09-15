@@ -502,6 +502,10 @@ class CodexSession(ObserveSession):
                 nudge_msg = Message(role="user", content=(TextBlock(text=nudge),))
                 elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
                 next_prompt = nudge
+        if invocation.balance_on_resume and invocation.retry_feedback:
+            feedback = deliver_continuation_reply(
+                None, None, elog, aid, invocation.retry_feedback, human=False)
+            next_prompt = f"{feedback}\n\n{next_prompt}"
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
         # folded the reply above, so skip it here. Only runs on resume
