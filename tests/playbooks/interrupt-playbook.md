@@ -286,7 +286,7 @@ cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; p
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'
-providers: [claude]   # exactly one of: claude | anthropic | openai | codex
+providers: [claude]        # exactly one of: claude | anthropic | openai | codex
 theme: ansi                # fixed theme so snapshots render predictably
 remote:
   driver: null             # keep inherited channels off so streaming output stays clean

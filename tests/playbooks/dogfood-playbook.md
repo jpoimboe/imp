@@ -43,7 +43,7 @@ cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; p
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'
-providers: [claude]   # exactly one of: claude | anthropic | openai | codex
+providers: [claude]        # exactly one of: claude | anthropic | openai | codex
 theme: ansi
 YAML
 cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading

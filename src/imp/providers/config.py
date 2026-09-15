@@ -3,7 +3,7 @@
 """Parse a single config layer: the project, global, or local config file.
 Schema (post 2026-06-04-roles-to-tiers):
 
-    providers: [claude, openai]      # ordered preference list
+    providers: [claude, openai]           # ordered preference list
     tiers:
       low:    {claude: haiku,  openai: gpt-5.6-luna}
       medium: {claude: sonnet, openai: gpt-5.6-terra}
