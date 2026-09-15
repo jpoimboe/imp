@@ -110,3 +110,12 @@ def test_go_live_worktree_partial_shared_and_included_by_threshold() -> None:
         workflow_dir=bundled_workflow_dir("default"))
     assert "forks the branch and worktree from the base branch's current tip" in out
     assert "{% include" not in out
+
+
+def test_commit_style_partial_overlays_into_quest_snapshot(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    assert _refresh_workflow_snapshot(quest) is False        # initial copy
+    snap = quest.quest_dir / "workflow" / "partials" / "commit-style.md"
+    assert snap.is_file()
+    assert snap.read_text() == (
+        bundled_partials_dir() / "commit-style.md").read_text()
