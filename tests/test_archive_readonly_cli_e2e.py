@@ -19,7 +19,7 @@ from imp.engine.sandbox import sandbox_available
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
-pytestmark = pytest.mark.skipif(not sandbox_available(), reason="bwrap unavailable")
+_needs_bwrap = pytest.mark.skipif(not sandbox_available(), reason="bwrap unavailable")
 
 # src/ on the child's PYTHONPATH so in-sandbox `python -m imp` resolves the
 # working-tree package (mirrors conftest's subprocess PYTHONPATH pin).
@@ -156,6 +156,23 @@ def _run_readonly(
     return subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120)
 
 
+def _run_writable(repo: Path, home: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """`imp <args>` in `repo` with no sandbox — the writable counterpart of
+    `_run_readonly`, which no longer diverges now that nothing heals the marker."""
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(home),
+        "PYTHONPATH": _SRC,
+        "IMP_HOME": str(home),
+        "IMP_SESSION_SOCKET": "",
+        "NO_COLOR": "1",
+        "COLUMNS": "100",
+    }
+    return subprocess.run(
+        [sys.executable, "-m", "imp", *args], cwd=repo, env=env,
+        capture_output=True, text=True, timeout=120)
+
+
 def _snapshot(root: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
@@ -178,6 +195,7 @@ def _assert_every_read_command_is_clean(
     assert _snapshot(state) == before
 
 
+@_needs_bwrap
 def test_read_commands_work_against_a_healthy_read_only_state_dir(
     tmp_path: Path, project: tuple[Path, Path, Path],
 ) -> None:
@@ -186,6 +204,7 @@ def test_read_commands_work_against_a_healthy_read_only_state_dir(
     _assert_every_read_command_is_clean(tmp_path, repo, home, state)
 
 
+@_needs_bwrap
 def test_read_commands_work_when_the_index_schema_stamp_is_stale(
     tmp_path: Path, project: tuple[Path, Path, Path],
 ) -> None:
@@ -221,6 +240,7 @@ def _assert_below_floor_split(
         assert "Traceback" not in proc.stderr, f"{label} traceback\n{proc.stderr}"
 
 
+@_needs_bwrap
 def test_below_floor_reads_split_on_a_read_only_archive(
     tmp_path: Path, project: tuple[Path, Path, Path],
 ) -> None:
@@ -232,3 +252,16 @@ def test_below_floor_reads_split_on_a_read_only_archive(
 
     # Harness guard: the ro bind makes writes impossible; this fails only if that bind is dropped.
     assert _snapshot(state) == before
+
+
+def test_below_floor_reads_split_on_a_writable_archive(
+    tmp_path: Path, project: tuple[Path, Path, Path],
+) -> None:
+    """Nothing heals the marker any more, so a writable archive refuses exactly
+    what a read-only one does."""
+    repo, home, _state = project
+    archive.data_version_path(repo).unlink()
+
+    _assert_below_floor_split(lambda *args: _run_writable(repo, home, *args))
+
+    assert not archive.data_version_path(repo).exists()
