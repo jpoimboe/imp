@@ -143,31 +143,6 @@ def test_stranded_shelved_home_resumes_after_reap(tmp_path: Path) -> None:
     assert (loaded.quest_dir / "steps" / "plan" / "1.md").read_text() == "draft plan"
 
 
-def _seed_v11_terminal(control: Path, cid: str) -> Quest:
-    q = Quest.create(control, title="T", quest_id=cid, base_branch="main")
-    (q.state_dir / "state.json").write_text(json.dumps({
-        "id": cid, "step": "code", "step_attempt": 0, "status": "merged",
-        "resume_pending": None, "resume_mode": None,
-        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
-    }, indent=2, sort_keys=True))
-    meta_path = q.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    meta["layout_version"] = 11
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
-    return q
-
-
-def test_stale_layout_home_migrates_then_archives(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    _seed_v11_terminal(tmp_path, "stale")
-    digest = next(h for h in make_store(tmp_path).scan_homes() if h.quest_id == "stale")
-    assert digest.meta["layout_version"] == LAYOUT_VERSION
-    assert archive_read.is_archived(tmp_path, "stale")
-    assert json.loads(
-        archive_read.read_quest_json(tmp_path, "stale") or b"{}"
-    )["layout_version"] == LAYOUT_VERSION
-
-
 def test_failed_archiving_does_not_abort_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

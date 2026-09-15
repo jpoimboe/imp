@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LayoutMismatch, LoadError
-from imp.engine.quest import LAYOUT_VERSION, Quest, migrate
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
@@ -16,14 +16,6 @@ def _set_stored_version(quest_dir: Path, version: int) -> None:
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = version
     meta_path.write_text(json.dumps(meta))
-
-
-def test_migrate_always_raises_while_registry_empty(tmp_path: Path) -> None:
-    (tmp_path / "quest.json").write_text(json.dumps({"imp_commit": "deadbeef"}))
-    with pytest.raises(LayoutMismatch):
-        migrate(0, LAYOUT_VERSION, tmp_path)
-    with pytest.raises(LayoutMismatch):
-        migrate(LAYOUT_VERSION + 7, LAYOUT_VERSION, tmp_path)
 
 
 def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:

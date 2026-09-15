@@ -5,13 +5,12 @@ import os
 import subprocess
 from pathlib import Path
 
-from imp.cli import narrative as nv
 from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.engine import archive, worktree
-from imp.engine.quest import LAYOUT_VERSION, Quest
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control, held_lock
+from tests.conftest import _seed_control
 
 
 def _append_event(quest: Quest, event: dict) -> None:
@@ -165,111 +164,13 @@ def test_search_active_zone(tmp_path: Path) -> None:
     assert store.search("no-such-text", zones) == []
 
 
-def test_scan_homes_migrates_v5_home(tmp_path: Path) -> None:
-    from imp.engine.quest import LAYOUT_VERSION
-
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="", quest_id="v5q", base_branch="main")
-
-    # Downgrade to v5 so the migration fires on next scan_homes.
-    quest_json_path = ch.quest_dir / "quest.json"
-    meta = json.loads(quest_json_path.read_text())
-    meta["layout_version"] = 5
-    quest_json_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
-
-    # Write v5 (pre-triad) events.  step_context sets prompt_pending for
-    # agent1, so the following human:false user_message is reclassified to
-    # engine_message/agent_prompt on migration.
-    agent_id = "agent1"
-    v5_events = [
-        {
-            "id": "ev0", "agent_id": None,
-            "timestamp": "2026-06-01T00:00:00+00:00",
-            "type": "opening_intent", "payload": {"text": ""},
-        },
-        {
-            "id": "ev1", "agent_id": agent_id,
-            "timestamp": "2026-06-01T00:00:01+00:00",
-            "type": "step_context",
-            "payload": {"system_prompt": "You are a helpful assistant.", "step": "s"},
-        },
-        {
-            "id": "ev2", "agent_id": agent_id,
-            "timestamp": "2026-06-01T00:00:02+00:00",
-            "type": "user_message",
-            "payload": {
-                "role": "user", "human": False,
-                "content": [{"type": "text", "text": "Framework prompt here"}],
-            },
-        },
-        {
-            "id": "ev3", "agent_id": agent_id,
-            "timestamp": "2026-06-01T00:00:03+00:00",
-            "type": "llm_response",
-            "payload": {"role": "assistant",
-                        "content": [{"type": "text", "text": "agent response"}]},
-        },
-        {
-            "id": "ev4", "agent_id": agent_id,
-            "timestamp": "2026-06-01T00:00:04+00:00",
-            "type": "user_message",
-            "payload": {
-                "role": "user", "human": True,
-                "content": [{"type": "text", "text": "genuine reply here"}],
-            },
-        },
-    ]
-    ch.events_path.write_text(
-        "".join(json.dumps(ev) + "\n" for ev in v5_events)
-    )
-
-    digs = {d.quest_id: d for d in make_store(tmp_path).scan_homes()}
-    assert "v5q" in digs
-    d = digs["v5q"]
-
-    # The genuine human reply is the title, NOT the engine-injected prompt.
-    assert d.intent_title == "genuine reply here"
-
-    # quest.json must be stamped to the current layout version.
-    updated_meta = json.loads(quest_json_path.read_bytes())
-    assert updated_meta["layout_version"] == LAYOUT_VERSION
-
-    # events.jsonl must be rewritten in the triad schema.
-    migrated = [
-        json.loads(line)
-        for line in ch.events_path.read_text().strip().splitlines()
-    ]
-    # Framework prompt became engine_message/agent_prompt.
-    agent_prompts = [
-        e for e in migrated
-        if e.get("type") == "engine_message"
-        and e.get("payload", {}).get("subtype") == "agent_prompt"
-    ]
-    assert len(agent_prompts) == 1
-    # No user_message payload carries the legacy 'human' key.
-    assert not any(
-        "human" in e.get("payload", {})
-        for e in migrated if e.get("type") == "user_message"
-    )
-    # The genuine reply is now subtype=reply.
-    reply_events = [
-        e for e in migrated
-        if e.get("type") == "user_message"
-        and e.get("payload", {}).get("subtype") == "reply"
-    ]
-    assert reply_events[0]["payload"]["content"][0]["text"] == "genuine reply here"
-
-    # Second scan is idempotent — events.jsonl bytes must not change.
-    events_bytes_after_first_scan = ch.events_path.read_bytes()
-    make_store(tmp_path).scan_homes()
-    assert ch.events_path.read_bytes() == events_bytes_after_first_scan
-
 
 def test_scan_homes_tolerates_future_layout_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Future", quest_id="futq", base_branch="main")
 
-    # Stamp a future (unknowable) layout_version — migration must fail gracefully.
+    # Stamp a future (unknowable) layout_version — an unknowable version is
+    # skipped, leaving the raw quest.json bytes.
     quest_json_path = project_state_dir(tmp_path) / "quests" / "futq" / "quest.json"
     meta = json.loads(quest_json_path.read_text())
     meta["layout_version"] = 99
@@ -302,71 +203,3 @@ def test_scan_homes_reports_lock_live(tmp_path: Path) -> None:
     homes = {h.quest_id: h for h in LocalStore(tmp_path).scan_homes()}
     assert homes["liveq"].lock_live is True
     assert homes["deadq"].lock_live is False
-
-
-def _seed_v11_store(control: Path, cid: str) -> Quest:
-    q = Quest.create(control, title="T", quest_id=cid, base_branch="main")
-    (q.state_dir / "state.json").write_text(json.dumps({
-        "id": cid, "step": "code", "step_attempt": 0, "status": "paused",
-        "resume_pending": "code", "resume_mode": "continue",
-        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
-    }, indent=2, sort_keys=True))
-    meta_path = q.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    meta["layout_version"] = 11
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
-    return q
-
-
-def _digest_version(control: Path, cid: str) -> int:
-    return int(json.loads((_quest_dir(control, cid) / "quest.json").read_text())["layout_version"])
-
-
-def _quest_dir(control: Path, cid: str) -> Path:
-    return project_state_dir(control) / "quests" / cid
-
-
-def test_scan_homes_migrates_idle_stale_home(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    _seed_v11_store(tmp_path, "idles")
-    homes = make_store(tmp_path).scan_homes()
-    digest = next(h for h in homes if h.quest_id == "idles")
-    assert digest.meta["layout_version"] == LAYOUT_VERSION
-    assert _digest_version(tmp_path, "idles") == LAYOUT_VERSION
-
-
-def test_scan_homes_skips_migration_under_held_lock(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    q = _seed_v11_store(tmp_path, "lives")
-    with held_lock(q.quest_dir / "lock"):
-        homes = make_store(tmp_path).scan_homes()
-        digest = next(h for h in homes if h.quest_id == "lives")
-        assert digest.meta["layout_version"] == 11
-        assert digest.lock_live is True
-        assert _digest_version(tmp_path, "lives") == 11
-
-
-def test_get_events_under_a_held_lock_falls_back_to_the_unmigrated_log(
-    tmp_path: Path,
-) -> None:
-    # store.py catches MigrationLockHeld and reads the raw events.jsonl, which by
-    # definition skipped the round backfill — the builder's default is the only
-    # thing standing between those rows and the renderer.
-    _seed_control(tmp_path)
-    q = _seed_v11_store(tmp_path, "rawlk")
-    _append_event(q, {
-        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
-        "type": "step_started",
-        "payload": {"step": "plan-reviewer", "kind": "agent", "phase": "planning",
-                    "label": "reviewing plan"}})
-
-    with held_lock(q.quest_dir / "lock"):
-        events = make_store(tmp_path).get_events("rawlk")
-
-    assert events is not None
-    started = [e for e in events if e.get("type") == "step_started"]
-    assert started and all("round" not in e["payload"] for e in started)
-    steps = [c for phase in nv.build_tree(events).root.children
-             if isinstance(phase, nv.PhaseNode)
-             for c in phase.children if isinstance(c, nv.StepNode)]
-    assert [s.round for s in steps] == [1]

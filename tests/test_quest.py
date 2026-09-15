@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.quest import LAYOUT_VERSION, Quest
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
 from tests.conftest import _branch_with_commit, _git, _init_repo, _seed_control
@@ -393,52 +393,6 @@ def test_load_exposes_orig_and_cur_base_head(tmp_path: Path) -> None:
     assert loaded.orig_base_head == ch.orig_base_head
     assert loaded.cur_base_head == ch.cur_base_head
     assert loaded.cur_base_head != ""
-
-
-def test_migrate_v1_to_v2(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="X", quest_id="mig1", base_branch="main")
-    meta_path = ch.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    # Reconstruct a v1 quest.json: old `base_head` key, no orig/cur, version 1.
-    old_tip = meta.pop("cur_base_head")
-    meta["base_head"] = old_tip
-    meta["layout_version"] = 1
-    meta_path.write_text(json.dumps(meta))
-    loaded = Quest.load(tmp_path, "mig1")
-    migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == LAYOUT_VERSION
-    assert "base_head" not in migrated
-    assert migrated["orig_base_head"] == old_tip
-    assert migrated["cur_base_head"] == old_tip      # backfill = merge-base(main, branch HEAD)
-    assert loaded.orig_base_head == old_tip
-    assert loaded.cur_base_head == old_tip
-
-
-def test_migrate_v2_to_v3(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="X", quest_id="mig2", base_branch="main")
-    meta_path = ch.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    # Reconstruct a v2 quest.json (before the reincarnations field bump).
-    meta["layout_version"] = 2
-    meta_path.write_text(json.dumps(meta))
-    Quest.load(tmp_path, "mig2")
-    migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == LAYOUT_VERSION
-
-
-def test_migrate_v3_to_v4(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="X", quest_id="mig3", base_branch="main")
-    meta_path = ch.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    # Reconstruct a v3 quest.json (before the max_reincarnations field bump).
-    meta["layout_version"] = 3
-    meta_path.write_text(json.dumps(meta))
-    Quest.load(tmp_path, "mig3")
-    migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == LAYOUT_VERSION
 
 
 def test_create_draft_persists_and_resolves_workflow_override(tmp_path: Path) -> None:
