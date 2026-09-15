@@ -270,6 +270,7 @@ async def dispatch_task(
     invocation_id, target_dir = _allocate_subagent_dir(ctx, subagent_name)
 
     from imp.assets import resolve_workflow_dir
+    from imp.engine.sandbox import with_scratch_slot
     from imp.providers.effective import resolve_default_workflow  # lazy: breaks import cycle
 
     isolated = subagent_def.isolated_worktree
@@ -292,9 +293,11 @@ async def dispatch_task(
             from imp.engine.quest import link_quest_home
             assert spike_worktree is not None
             link_quest_home(spike_worktree, ctx.quest.quest_dir)
-            dispatch_policy = _build_isolated_policy(
-                ctx.quest, spike_worktree, ctx.test_gates,
-                parent_policy=ctx.sandbox_policy)
+            dispatch_policy = with_scratch_slot(
+                _build_isolated_policy(
+                    ctx.quest, spike_worktree, ctx.test_gates,
+                    parent_policy=ctx.sandbox_policy),
+                target_dir.name)
             dispatch_policy, home_cleanup = _attach_isolated_home(
                 dispatch_policy, spike_worktree, ctx.quest.quest_dir)
             if not dispatch_policy.active and ctx.event_log is not None:
@@ -302,7 +305,12 @@ async def dispatch_task(
                     agent_id=ctx.agent_id, type="sandbox_inactive",
                     payload={"reason": dispatch_policy.note})
         else:
+            # target_dir.name is this dispatch's <subagent>-<invocation_id>, so the
+            # scratch slot and the transcript dir cannot drift apart.
             dispatch_policy = ctx.sandbox_policy
+            if dispatch_policy is not None:      # no policy at all → nothing to slot
+                dispatch_policy = with_scratch_slot(
+                    dispatch_policy, target_dir.name)
 
         cc = ctx.quest_context or QuestContext(
             id="", title="", project_root=ctx.project_root,
