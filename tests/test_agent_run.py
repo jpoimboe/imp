@@ -2250,8 +2250,9 @@ def test_scratch_note_injected_when_the_policy_carries_a_quest_tmp_dir(
     assert "## Scratch files go in your scratch dir" in inv.system_prompt
     assert ("`/tmp` is read-only inside the sandbox — a literal write to "
             "`/tmp/<anything>` is refused." in inv.system_prompt)
-    assert (f"scripts under `{_SCRATCH_DIR}`, which is also your `$TMPDIR`; it "
-            "is wiped when your step ends" in inv.system_prompt)
+    assert (f"scripts under `{_SCRATCH_DIR}`, which is also your `$TMPDIR`; no "
+            "agent dispatched alongside you can see or write it, and it is "
+            "wiped when the step ends" in inv.system_prompt)
     assert ("The file tools don't expand `$TMPDIR` — give them the literal path."
             in inv.system_prompt)
     assert "{tmpdir}" not in inv.system_prompt   # the placeholder was formatted
