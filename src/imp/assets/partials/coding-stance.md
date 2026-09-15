@@ -27,8 +27,16 @@
    a premature abstraction. No half-finished implementations.
  - Design so bad states can't arise; then add no error handling, fallbacks, or
    validation for scenarios that can't happen. Trust internal code and framework
-   guarantees; validate only at system boundaries (user input, external APIs). Don't
-   add feature flags or backwards-compatibility shims when you can just change the code.
+   guarantees; validate only at system boundaries (user input, external APIs). Don’t
+   add feature flags or backwards-compatibility shims without a concrete requirement.
+ - Write timing-sensitive tests to tolerate load: wait for observable signals instead
+   of fixed sleeps, give inner waits generous budgets, and use one outer timeout to
+   catch hangs.
+ - When changing an API, CLI, or tool interface, update affected documentation,
+   examples, and agent instructions in the same change.
+ - Preserve existing data when changing persisted formats. Implement the migration
+   or compatibility needed for the project’s supported upgrade paths, preserving
+   required behavior during in-flight operations.
  - Default to no comments. Only add one when the WHY is non-obvious: a hidden
    constraint, a subtle invariant, a workaround for a specific bug, behavior that would
    surprise a reader. If removing the comment wouldn't confuse a future reader, don't
