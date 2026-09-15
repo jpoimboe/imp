@@ -10,10 +10,27 @@ MINIMAL_AGENTS = ASSETS / "workflows" / "minimal" / "agents"
 MEMORY_AGENTS = ASSETS / "workflows" / "memory" / "agents"
 INCLUDE = '{% include "partials/commit-style.md" %}'
 
-# A literal invocation must name a message file or be a fixup; the prose
-# prohibition "`git add`/`git commit`" is the one non-invocation spelling.
+# A bare `git commit` span is exempt only when a negation sits within a few words.
 ALLOWED_TAILS = (" -F", " --fixup=", " --allow-empty -F")
-PROHIBITION_PREFIX = "`git add`/`"
+PROHIBITION = re.compile(r"\b(?:never|not|don't)\b", re.IGNORECASE)
+PROHIBITION_REACH = 30
+
+
+def _bare_commit_lines(text: str) -> list[int]:
+    offending: list[int] = []
+    for match in re.finditer(r"git commit(?![-\w])", text):
+        tail = text[match.end():]
+        if tail.startswith(ALLOWED_TAILS):
+            continue
+        start = match.start()
+        end = match.end()
+        if (start > 0 and text[start - 1] == "`" and
+                end < len(text) and text[end] == "`"):
+            window = text[max(0, start - PROHIBITION_REACH):start].replace("\n", " ")
+            if PROHIBITION.search(window):
+                continue
+        offending.append(text[:start].count("\n") + 1)
+    return offending
 
 
 def test_commit_style_partial_states_the_canonical_rule() -> None:
@@ -135,11 +152,29 @@ def test_no_asset_writes_to_an_unguarded_tmpdir_path() -> None:
 def test_every_asset_git_commit_invocation_names_a_message_file_or_fixup() -> None:
     offenders: list[str] = []
     for path, text in _asset_texts():
-        for match in re.finditer(r"git commit(?![-\w])", text):
-            head = text[:match.start()]
-            if head.endswith(PROHIBITION_PREFIX):
-                continue
-            if not text[match.end():].startswith(ALLOWED_TAILS):
-                line = head.count("\n") + 1
-                offenders.append(f"{path}:{line}")
+        for line in _bare_commit_lines(text):
+            offenders.append(f"{path}:{line}")
     assert offenders == [], f"bare `git commit` at: {offenders}"
+
+
+def test_bare_commit_lines_discrimination() -> None:
+    cases: list[tuple[str, bool]] = [
+        # flagged — teaching forms
+        ("(`git add` + `git commit`)", True),
+        ("commit with `git commit` now", True),
+        # exempt — ALLOWED_TAILS
+        ('git commit -F "${TMPDIR:-/tmp}/msg"', False),
+        ("git commit --fixup=HEAD", False),
+        ('git commit --allow-empty -F "${TMPDIR:-/tmp}/msg"', False),
+        # exempt — prohibition with negation within reach
+        ("Do not `git add`/`git commit`.", False),
+        ("never runs `git add`/`git commit` on project", False),
+        ("never run `git commit` yourself", False),
+        ("you must never\nrun `git commit` yourself", False),
+    ]
+    for snippet, should_flag in cases:
+        lines = _bare_commit_lines(snippet)
+        flagged = len(lines) > 0
+        assert flagged == should_flag, (
+            f"snippet {snippet!r}: expected flagged={should_flag}, got {lines}"
+        )
