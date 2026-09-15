@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from imp.providers.claude_code_session import (
+from imp.providers.claude_session import (
     _SessionIsolatingAnyio,
     install_claude_session_isolation,
 )

@@ -1488,7 +1488,7 @@ def test_build_client_installs_session_isolation_on_real_arm(
     """_build_client installs isolation on the real arm but not the factory arm."""
     import claude_agent_sdk as sdk
 
-    import imp.providers.claude_code_session as sessmod
+    import imp.providers.claude_session as sessmod
 
     installed: list[bool] = []
     monkeypatch.setattr(
