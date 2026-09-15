@@ -401,7 +401,9 @@ def test_ensure_imp_ignored_on_base_commits_the_rule(tmp_path: Path) -> None:
 
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() != main_before
     assert _git(tmp_path, "log", "-1", "--format=%s",
-                "main").stdout.strip() == "chore: gitignore .imp/"
+                "main").stdout.strip() == "gitignore: exclude imp's internal state directory"
+    body = _git(tmp_path, "log", "-1", "--format=%b", "main").stdout.strip()
+    assert body and ".imp/" in body
     assert ".imp/" in _git(tmp_path, "show", "main:.gitignore").stdout
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
     assert ".imp/" not in (exclude.read_text() if exclude.exists() else "")
