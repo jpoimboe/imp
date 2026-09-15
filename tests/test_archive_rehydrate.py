@@ -94,13 +94,12 @@ def test_rehydrate_non_resumable_restores_no_steps(tmp_path: Path) -> None:
     assert not (quest_dir / "steps").exists()
 
 
-def test_rehydrate_read_only_stale_archive_fails_before_reads(
+def test_rehydrate_stale_archive_fails_before_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
     archive._write_data_version(tmp_path, 11)
     quest_dir = project_state_dir(tmp_path) / "quests" / "legacy"
-    monkeypatch.setattr(archive.os, "access", lambda _path, _mode: False)
     calls: list[str] = []
 
     def unexpected(*_args, **_kwargs):
