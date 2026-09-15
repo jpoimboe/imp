@@ -24,8 +24,7 @@ def test_create_draft_persists_the_pin_it_was_given(tmp_path: Path) -> None:
 
 
 def test_create_draft_without_a_pin_records_an_explicit_null(tmp_path: Path) -> None:
-    # The key is PRESENT and null, not absent: every v19 home has the same shape,
-    # whether it was created fresh or migrated.
+    # The key is PRESENT and null, not absent: every v19 home has the same shape.
     _seed_control(tmp_path)
 
     quest = Quest.create_draft(

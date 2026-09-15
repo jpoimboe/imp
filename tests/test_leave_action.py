@@ -119,7 +119,7 @@ def test_had_exchange_false_for_only_system_events() -> None:
 
 
 def test_had_exchange_true_for_answered_awaiting_user_input() -> None:
-    # Migrated shape: awaiting_user_input + user_message (no wfu tool_call/tool_result).
+    # awaiting_user_input + user_message (no wfu tool_call/tool_result).
     log = _Log([
         {"type": "awaiting_user_input", "payload": {"prompt": ""}},
         {"type": "user_message",
