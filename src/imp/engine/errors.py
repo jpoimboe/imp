@@ -77,20 +77,29 @@ class LayoutMismatch(LoadError):
 
 
 class ArchiveMismatch(LoadError):
-    """Raised on an archive read when a floor on disk is newer than this install's."""
+    """Raised on an archive read when a floor on disk is not this install's."""
 
     def __init__(self, *, floor: Literal["data", "index"], stored: int,
                  known: int) -> None:
         self.floor = floor
         self.stored = stored
         self.known = known
-        super().__init__(
-            f"archive {floor} is at v{stored}, newer than this imp "
-            f"(knows v{known}). A running imp keeps the code it started with, "
-            "so this is usually a stale process, not a stale checkout. "
-            "Fix: Ctrl-D and `imp resume` to restart this quest on the current "
-            "install; if it persists, update imp. Agents: suggest this to the user."
-        )
+        if stored > known:
+            detail = (
+                f"newer than this imp (knows v{known}). A running imp keeps the "
+                "code it started with, so this is usually a stale process, not a "
+                "stale checkout. Fix: Ctrl-D and `imp resume` to restart this "
+                "quest on the current install; if it persists, update imp. "
+                "Agents: suggest this to the user."
+            )
+        else:
+            detail = (
+                f"older than this imp (knows v{known}). An older imp wrote this "
+                "archive and no migration in this install can upgrade it. Fix: "
+                "update every imp that writes here; records the older install "
+                "already wrote stay unreadable. Agents: suggest this to the user."
+            )
+        super().__init__(f"archive {floor} is at v{stored}, {detail}")
 
 
 class StateDecodeError(LoadError):
