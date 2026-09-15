@@ -5,6 +5,7 @@ from pathlib import Path
 ASSETS = Path("src/imp/assets")
 PARTIAL = ASSETS / "partials" / "commit-style.md"
 DEFAULT_AGENTS = ASSETS / "workflows" / "default" / "agents"
+MINIMAL_AGENTS = ASSETS / "workflows" / "minimal" / "agents"
 INCLUDE = '{% include "partials/commit-style.md" %}'
 
 
@@ -77,3 +78,12 @@ def test_reconciler_includes_the_partial_and_names_a_message_file() -> None:
     text = (DEFAULT_AGENTS / "reconciler.md").read_text()
     assert INCLUDE in text
     assert "(`git add` + `git commit -F`)" in text
+
+
+def test_minimal_commit_authors_include_the_partial_and_name_a_message_file() -> None:
+    implementer = (MINIMAL_AGENTS / "implementer.md").read_text()
+    finalize = (MINIMAL_AGENTS / "finalize.md").read_text()
+    for text in (implementer, finalize):
+        assert INCLUDE in text
+        assert "git add` + `git commit -F`" in text
+        assert "git commit -m" not in text

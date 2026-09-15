@@ -13,6 +13,8 @@ make the change, and commit it on the quest branch (a normal worktree commit).
 
 {% include "partials/action-care.md" %}
 
+{% include "partials/commit-style.md" %}
+
 ## What to build
 
 - **Spec:** `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — the complete
@@ -28,7 +30,8 @@ make the change, and commit it on the quest branch (a normal worktree commit).
 3. If the change warrants a test, write one that pins the spec's required behavior — not
    a tautology that echoes your own implementation — and run the repo's focused-test
    command to confirm it passes.
-4. **Commit** in the worktree with `git add` + `git commit` and a clear message.
+4. **Commit** in the worktree with `git add` + `git commit -F` and a message in the
+   house style.
    Commit only the code change; the spec and quest files under the quest home are
    journaled separately and are not part of the code commit.
 
