@@ -218,12 +218,16 @@ def test_wipe_step_scratch_empties_in_place_without_changing_the_inode(
     (ch.tmp_dir / "nest" / "deeper" / "g.txt").write_text("y")
     (ch.tmp_dir / "dangling").symlink_to(ch.tmp_dir / "gone")
     (ch.tmp_dir / "symdir").symlink_to(real_dir)
+    slot = ch.tmp_dir / "explorer-1"          # a per-agent scratch slot
+    ensure_quest_tmp_dir(slot)
+    (slot / "probe.txt").write_text("z")
     ch.tmp_dir.chmod(0o755)
 
     _wipe_step_scratch(ch)
 
     assert ch.tmp_dir.stat().st_ino == before_ino
     assert list(ch.tmp_dir.iterdir()) == []
+    assert not slot.exists()                  # the slot went with everything else
     assert ch.tmp_dir.stat().st_mode & 0o777 == 0o700
     assert (real_dir / "sentinel.txt").exists()  # the dir symlink was not followed
 
