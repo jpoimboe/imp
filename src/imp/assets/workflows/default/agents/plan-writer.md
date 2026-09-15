@@ -333,7 +333,7 @@ Expected: PASS
 
 ```bash
 git add tests/path/test_file.py src/path/file.py
-git commit -F "$TMPDIR/msg"
+git commit -F "${TMPDIR:-/tmp}/msg"
 ```
 ````
 

@@ -69,7 +69,7 @@ Commit with **raw `git`** in `bash` (working dir is the project root; use relati
 
 ```
 git add <changed files>
-git commit -F "$TMPDIR/msg"
+git commit -F "${TMPDIR:-/tmp}/msg"
 ```
 
 **WITHIN-LOOP review fix** (same task): edit the tree to the desired **final** state, then record a fixup — never `--amend`, never history surgery:
@@ -93,7 +93,7 @@ approach, a consequence that no longer holds), record the corrected message as a
 `amend!` commit. Write the full replacement to a file whose first line is `amend! `
 plus the target commit's subject, then a blank line, then the new subject and body:
 
-    git commit --allow-empty -F "$TMPDIR/msg"
+    git commit --allow-empty -F "${TMPDIR:-/tmp}/msg"
 
 Every `fixup!` and `amend!` commit is transient — `autosquash` folds it into its target before review, so the final branch is one clean commit per task. You never rebase, reset, or amend yourself.
 

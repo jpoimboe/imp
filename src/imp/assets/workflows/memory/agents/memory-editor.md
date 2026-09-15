@@ -69,7 +69,7 @@ is one paragraph saying which standing instruction changed and why it was asked
 for:
 
 ```
-git add imp/memory/<path>… && git commit -F "$TMPDIR/msg"
+git add imp/memory/<path>… && git commit -F "${TMPDIR:-/tmp}/msg"
 ```
 
 Committing is required — an uncommitted worktree bounces this step. Never use a

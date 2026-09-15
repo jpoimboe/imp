@@ -21,7 +21,7 @@ def test_commit_style_partial_states_the_canonical_rule() -> None:
     flat = " ".join(text.split())
     assert text.startswith("## Commit messages\n")
     # The message-file mandate, not an example of one.
-    assert '`git commit -F "$TMPDIR/msg"` — never `-m`' in flat
+    assert '`git commit -F "${TMPDIR:-/tmp}/msg"` — never `-m`' in flat
     assert "**Subject:** `component: imperative summary` — no trailing period" in flat
     assert "under 100 characters" in flat
     # The corollary that kills the feat:/chore: reflex.
@@ -42,7 +42,7 @@ def test_commit_style_partial_states_the_canonical_rule() -> None:
 def test_coder_includes_the_commit_style_partial() -> None:
     text = (DEFAULT_AGENTS / "coder.md").read_text()
     assert INCLUDE in text
-    assert 'git commit -F "$TMPDIR/msg"' in text
+    assert 'git commit -F "${TMPDIR:-/tmp}/msg"' in text
     assert "git commit -m" not in text
 
 
@@ -51,7 +51,7 @@ def test_coder_documents_the_amend_reword_mode() -> None:
     assert "**REWORDING**" in flat
     # The message file's first line is the reword directive git's autosquash reads.
     assert "first line is `amend! ` plus the target commit's subject" in flat
-    assert 'git commit --allow-empty -F "$TMPDIR/msg"' in flat
+    assert 'git commit --allow-empty -F "${TMPDIR:-/tmp}/msg"' in flat
     assert "Every `fixup!` and `amend!` commit is transient" in flat
 
 
@@ -66,7 +66,7 @@ def test_sweep_and_plan_skeleton_commit_with_a_message_file() -> None:
     assert sweep.count("git commit -F") >= 2        # the item commit and the sweep fix
     assert "git commit -m" not in sweep
     # The skeleton stops modelling the old shape in every plan written from it.
-    assert 'git commit -F "$TMPDIR/msg"' in plan_writer
+    assert 'git commit -F "${TMPDIR:-/tmp}/msg"' in plan_writer
     assert "git commit -m" not in plan_writer
 
 
@@ -101,7 +101,7 @@ def test_memory_editor_keeps_its_own_rule_without_the_partial() -> None:
     flat = " ".join(text.split())
     # Fixed component, one file: the derivation rules would be dead weight here.
     assert INCLUDE not in text
-    assert 'git add imp/memory/<path>… && git commit -F "$TMPDIR/msg"' in text
+    assert 'git add imp/memory/<path>… && git commit -F "${TMPDIR:-/tmp}/msg"' in text
     assert "git commit -m" not in text
     assert "`memory: <imperative summary, no trailing period>`" in flat
     assert "one paragraph saying which standing instruction changed and why" in flat
@@ -124,6 +124,12 @@ def _asset_texts() -> list[tuple[Path, str]]:
 def test_no_asset_teaches_a_dash_m_commit() -> None:
     offenders = [str(p) for p, text in _asset_texts() if "git commit -m" in text]
     assert offenders == [], f"-m commit survives in: {offenders}"
+
+
+def test_no_asset_writes_to_an_unguarded_tmpdir_path() -> None:
+    """TMPDIR is unset on a sandbox-off run, so a bare-variable path resolves to /<name>."""
+    offenders = [str(p) for p, text in _asset_texts() if "$TMPDIR/" in text]
+    assert offenders == [], f"unguarded $TMPDIR path in: {offenders}"
 
 
 def test_every_asset_git_commit_invocation_names_a_message_file_or_fixup() -> None:

@@ -1,7 +1,7 @@
 ## Commit messages
 
-Write the message to a file and `git commit -F "$TMPDIR/msg"` — never `-m`. A body
-has blank lines and punctuation no shell quoting survives.
+Write the message to a file and `git commit -F "${TMPDIR:-/tmp}/msg"` — never
+`-m`. A body has blank lines and punctuation no shell quoting survives.
 
 **Subject:** `component: imperative summary` — no trailing period, under 100
 characters. The component names the **part of the codebase that changed**, not the
