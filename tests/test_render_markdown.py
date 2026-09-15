@@ -666,7 +666,7 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
 
 
 def _cc_fallback_events() -> list[dict]:
-    """A claude_code step whose query_result carries token counts but no
+    """A claude step whose query_result carries token counts but no
     `total_cost_usd` — the shape the price-table fallback prices."""
     return [
         {"type": "step_started", "timestamp": "2024-01-01T00:00:00Z",
@@ -687,7 +687,7 @@ def _cc_fallback_events() -> list[dict]:
     ]
 
 
-def test_summary_markdown_prices_a_vendor_less_claude_code_row():
+def test_summary_markdown_prices_a_vendor_less_claude_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
     rows = build_summary(_cc_fallback_events())

@@ -925,7 +925,7 @@ async def test_resume_preserves_tool_result_and_omits_manifest(tmp_path: Path) -
     sent = json.dumps(fake.messages.calls[0]["messages"])
     # Original tool_result content survives the replay untouched…
     assert "GROUNDED" in sent
-    # …and the claude_code-only manifest framing never reaches anthropic.
+    # …and the claude-only manifest framing never reaches anthropic.
     assert "replay artifact" not in sent
 
 

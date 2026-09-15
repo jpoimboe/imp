@@ -300,7 +300,7 @@ async def test_claude_load_skill_parity(tmp_path: Path) -> None:
     _assert_load_skill_in_schema(events)          # assertion 3
 
 
-# ── Claude in-process wrapper (assertion 2 for claude_code) ──────────────
+# ── Claude in-process wrapper (assertion 2 for claude) ──────────────
 
 
 def _passthrough_decorator(name: str, description: str, schema, annotations=None):  # type: ignore[no-untyped-def]
@@ -360,7 +360,7 @@ async def test_claude_load_skill_via_wrap_one(tmp_path: Path) -> None:
     )
     assert "isError" not in out
 
-    # Assertion B (== parity assertion 2 for claude_code): exactly ONE
+    # Assertion B (== parity assertion 2 for claude): exactly ONE
     # skill_load event with correct payload and agent_id=None.
     events = _read_events(events_path)
     _assert_skill_load_event(events)

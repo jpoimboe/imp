@@ -447,7 +447,7 @@ def _remote_hint() -> str:
     return "\n".join(lines) + "\n"
 
 
-# claude_code (Anthropic) is the recommended single-provider default (review
+# claude (Anthropic) is the recommended single-provider default (review
 # architecture spec, M2). Pre-select it in the picker so the common path produces
 # a single-provider config; multi-select stays available for codex/openai.
 _RECOMMENDED_DEFAULT = "claude"
@@ -485,7 +485,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     Renders in place (not a full-screen dialog):
         Which providers do you want to enable?
 
-        > [ ] claude_code
+        > [ ] claude
           [ ] anthropic
           [ ] openai
 

@@ -1,4 +1,4 @@
-"""Tests for the claude_code session-isolation subprocess patch.
+"""Tests for the claude session-isolation subprocess patch.
 
 Covers:
 - _SessionIsolatingAnyio proxy: injects start_new_session, respects explicit value, forwards attrs.

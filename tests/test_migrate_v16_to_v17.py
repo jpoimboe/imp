@@ -34,7 +34,7 @@ _V16_EVENTS = [
 
 def _seed_v16(control: Path, cid: str) -> Path:
     """A live home whose query_result rows predate the session_id field, stamped
-    back to v16 — exactly what claude_code wrote before this quest."""
+    back to v16 — exactly what claude wrote before this quest."""
     ch = Quest.create(control, title="", quest_id=cid, base_branch="main")
     ch.events_path.write_text(
         "".join(json.dumps(e) + "\n" for e in _V16_EVENTS), encoding="utf-8")
@@ -130,7 +130,7 @@ def test_second_run_is_a_no_op_and_leaves_no_temp_file(tmp_path: Path) -> None:
 
 
 def test_home_with_no_query_result_is_left_byte_identical(tmp_path: Path) -> None:
-    # The overwhelmingly common case: no claude_code rows at all. The hop must not
+    # The overwhelmingly common case: no claude rows at all. The hop must not
     # re-serialize the log — without the `if migrated != events` guard the malformed
     # line below would be replaced by its parsed {"_malformed": ...} stand-in,
     # changing the file bytes. Removing the guard must make this test fail.

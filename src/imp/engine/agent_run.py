@@ -93,7 +93,7 @@ _SANDBOX_SCRATCH_NOTE = engine_prompt("sandbox-scratch.md")
 # one identical date anchor — without it a model defaults to its training-cutoff
 # date and mis-handles relative->absolute dates, recency, and "latest version"
 # reasoning. claude-p natively injects its own currentDate too; no lever silences
-# that, so on claude_code this line is a harmless duplicate of the same value.
+# that, so on claude this line is a harmless duplicate of the same value.
 # Frozen on resume: the replay branch reuses the stored prompt and never re-appends.
 _CURRENT_DATE_NOTE = "Today's date is {date}."
 
@@ -210,7 +210,7 @@ async def _pull_with_inactivity_watchdog(
     fixed at pull start: while we await the next yield, any append to the shared
     event log by this agent OR a descendant fires `coordinator.note_activity()`,
     which pushes this scope's deadline forward. So a parent parked in an
-    in-process subagent dispatch — and a busy claude_code leaf that appends to
+    in-process subagent dispatch — and a busy claude leaf that appends to
     elog without yielding (neither produces generator yields) — is kept alive by
     its own activity instead of being falsely killed at start+window. A genuinely
     hung agent (no self/subtree appends for the window) still times out: the pull

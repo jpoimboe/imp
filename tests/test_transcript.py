@@ -923,7 +923,7 @@ def _interrupt_tail(
     results: tuple[ToolResultBlock, ...] | None = None,
     marker: str = _MARKER,
 ) -> tuple[list[Message], Transcript]:
-    """The live-observed claude_code tail: assistant text, assistant tool_use(s),
+    """The live-observed claude tail: assistant text, assistant tool_use(s),
     user tool_result(s) carrying claude-p's rejection copy, then the marker turn."""
     if results is None:
         results = tuple(

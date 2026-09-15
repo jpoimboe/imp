@@ -120,7 +120,7 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
                 color: bool, over_bg: bool) -> tuple[str, str]:
     """The position row's two right-group candidates, widest first:
-    `claude_code · session 62% (3h left) · week 7% (5d left)`, and the same
+    `claude · session 62% (3h left) · week 7% (5d left)`, and the same
     windows without the provider segment for a row too narrow to carry it. The
     provider name and the window labels are uncolored and the countdown gray;
     only the percentage is hued, banded on the displayed integer so a number can

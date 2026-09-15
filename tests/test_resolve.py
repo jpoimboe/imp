@@ -151,14 +151,14 @@ def test_differ_from_flips_vendor_when_both_available() -> None:
 def test_differ_from_single_provider_falls_back_same_vendor_model() -> None:
     """spec Decision §9: single-provider install, differ_from gracefully
     falls back to same-vendor (no error)."""
-    _OPENAI_PRESENT[0] = False  # only claude_code available
+    _OPENAI_PRESENT[0] = False  # only claude available
     wf = _wf(
         [_step("s1", "high", "a"),
          _step("s2", "high", "b", differ_from="s1")],
         {"a": _agent("a"), "b": _agent("b")},
     )
     _tiers, steps, details = resolve_run(wf, _cfg())
-    # s2 falls back to claude_code/opus (same vendor, same model -> tier 3).
+    # s2 falls back to claude/opus (same vendor, same model -> tier 3).
     assert steps["s2"].provider == "claude"
     assert details["steps"]["s2"]["differ_tier"] == 3
 
@@ -198,7 +198,7 @@ def test_no_provider_available_raises() -> None:
     """If every configured provider is env-unavailable, ProviderUnavailable
     surfaces at tier resolution."""
     _OPENAI_PRESENT[0] = False
-    # only claude_code in config and we force its env_check off via re-register.
+    # only claude in config and we force its env_check off via re-register.
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "claude", env_check=lambda: False,

@@ -1,4 +1,4 @@
-"""Deterministic in-session fold-recovery for the claude_code provider."""
+"""Deterministic in-session fold-recovery for the claude provider."""
 
 from __future__ import annotations
 

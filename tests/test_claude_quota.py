@@ -1,4 +1,4 @@
-"""claude_code's rate-limit telemetry, normalized (spec §1)."""
+"""claude's rate-limit telemetry, normalized (spec §1)."""
 
 from __future__ import annotations
 

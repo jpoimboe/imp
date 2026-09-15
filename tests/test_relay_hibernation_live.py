@@ -1,6 +1,6 @@
 """Relay-hibernation invariant, codified (u8rfr8).
 
-Gated behind `--run-live` (claude_code). Drives, over a real pty via impty's
+Gated behind `--run-live` (claude). Drives, over a real pty via impty's
 TerminalSession Python API:
 
   start → poll events.jsonl for the bash tool_call → SIGINT (the cooperative

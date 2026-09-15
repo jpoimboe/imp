@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Shared agent-text error classifier for the observe runners (claude_code, codex)."""
+"""Shared agent-text error classifier for the observe runners (claude, codex)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""In-session nudge recovery for the claude_code provider (post-turn re-query)."""
+"""In-session nudge recovery for the claude provider (post-turn re-query)."""
 
 from __future__ import annotations
 

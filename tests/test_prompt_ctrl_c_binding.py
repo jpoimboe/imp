@@ -42,7 +42,7 @@ async def test_ask_async_passes_handle_sigint_false() -> None:
     # handle_sigint=False keeps prompt_toolkit from owning SIGINT during the
     # prompt, so an out-of-band SIGINT lands in imp's InterruptCoordinator loop
     # handler and routes through the exit path (instead of a KBI that crosses the
-    # claude_code MCP boundary and crashes anyio.run).
+    # claude MCP boundary and crashes anyio.run).
     captured: dict[str, object] = {}
 
     class _SpySession:

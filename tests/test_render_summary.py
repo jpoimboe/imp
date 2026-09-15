@@ -308,7 +308,7 @@ def _codex(agent_id: str, ts: str, *, model="gpt-5.6-sol",
 
 
 def _cc(agent_id: str, ts: str, *, auth_mode=None) -> dict:
-    """A claude_code agent_message: ignored by the accounting path entirely —
+    """A claude agent_message: ignored by the accounting path entirely —
     its usage is the unreliable start-of-message snapshot."""
     return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
             "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
@@ -637,7 +637,7 @@ def test_claude_cost_is_the_vendor_figure_not_the_price_table():
 
 def _fallback_events(model_usage: dict, *, auth_mode: str | None = None,
                      with_query_result: bool = True) -> list[dict]:
-    """A claude_code step whose query_result carries no `total_cost_usd`."""
+    """A claude step whose query_result carries no `total_cost_usd`."""
     events = [
         _started("reviewer", "build", "2026-01-01T00:00:00+00:00"),
         _cc("a1", "2026-01-01T00:00:01+00:00", auth_mode=auth_mode),
@@ -649,7 +649,7 @@ def _fallback_events(model_usage: dict, *, auth_mode: str | None = None,
     return events
 
 
-def test_a_claude_code_row_with_no_vendor_cost_is_priced_from_the_table():
+def test_a_claude_row_with_no_vendor_cost_is_priced_from_the_table():
     # AC 1: the SDK declares total_cost_usd as `float | None`; with none on the
     # wire the row is priced per model instead of being credited $0.00.
     rows = build_summary(_fallback_events(_FALLBACK_USAGE))
@@ -661,7 +661,7 @@ def test_a_claude_code_row_with_no_vendor_cost_is_priced_from_the_table():
             - summary_totals(without, 60.0)[1].dollars) == pytest.approx(0.195)
 
 
-def test_a_metered_claude_code_row_priced_from_the_table_renders_a_tilde():
+def test_a_metered_claude_row_priced_from_the_table_renders_a_tilde():
     # AC 2: apikey auth is metered, so the same computed figure loses the
     # brackets and takes the tilde.
     rows = build_summary(
@@ -793,7 +793,7 @@ def test_anthropic_and_openai_rows_are_metered_without_an_auth_mode():
         assert rows[0].usage.priced == 1, provider
 
 
-def test_a_claude_code_row_with_no_auth_mode_is_notional():
+def test_a_claude_row_with_no_auth_mode_is_notional():
     # AC 16(c): an old log records no auth mode, and unknown renders notional.
     rows = build_summary([
         _started("coder", "build", "2026-01-01T00:00:00+00:00"),
@@ -804,7 +804,7 @@ def test_a_claude_code_row_with_no_auth_mode_is_notional():
     assert rows[0].usage.notional == 1
 
 
-def test_a_claude_code_row_with_apikey_auth_is_metered():
+def test_a_claude_row_with_apikey_auth_is_metered():
     # AC 16(b): auth_mode rides on the agent_message; the query_result inherits
     # it from the preceding message for that agent.
     rows = build_summary([
@@ -1448,7 +1448,7 @@ def test_an_openai_request_over_272k_is_surcharged_end_to_end():
     assert over_boundary.totals.dollars == pytest.approx(2.476008)
 
 
-def test_metered_marker_reads_auth_mode_on_codex_and_claude_code():
+def test_metered_marker_reads_auth_mode_on_codex_and_claude():
     apikey = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00",
                               auth_mode="apikey"),
                        _patch("a1", input=100_000, output=10_000,

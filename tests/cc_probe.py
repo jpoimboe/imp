@@ -5,7 +5,7 @@ whatever `claude` is on PATH), launch it with the exact --disallowedTools
 list _build_options produces, and read the `init` system message, where
 claude advertises its live tool registry. Anything advertised beyond the
 ToolSearch exemption is a built-in the agent could call from every
-claude_code step.
+claude step.
 
 Probing under the deny posture rather than bare is load-bearing: some
 built-ins only materialize once others are denied, so a baseline probe

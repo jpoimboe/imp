@@ -295,7 +295,7 @@ async def test_resume_empty_session_with_stored_context_runs_fresh(
         tmp_path: Path, provider_registry) -> None:
     # The watchdog-kill shape: the step RAN before, so the log holds an
     # engine_message/system_prompt event — but the provider never flushed a
-    # transcript (claude_code flushes only at the end-of-run result boundary),
+    # transcript (claude flushes only at the end-of-run result boundary),
     # so the restart finds an empty one. The stored-prompt restore must not win
     # over the fresh re-render: system_prompt_override suppresses first-user-
     # message composition, so the runner would get initial_messages=() with no

@@ -265,7 +265,7 @@ class InterruptCoordinator:
         # callback here; `note_activity()` fires them on every shared-event-log
         # append by this agent OR any descendant. This is the ONLY liveness
         # signal that keeps flowing while a parent agent is parked in an
-        # in-process subagent dispatch (claude_code yields nothing then), and it
+        # in-process subagent dispatch (claude yields nothing then), and it
         # is why a busy subtree no longer trips the parent's watchdog. Shared
         # subtree-wide (one coordinator per run), so a child's appends push every
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.

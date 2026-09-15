@@ -10,7 +10,7 @@ Append-discipline rules (load-bearing for replay correctness):
 
 Rule 2 is best-effort: mid-tool Ctrl+C (spec §6.15) can leave the last
 assistant message with a tool_use whose tool_result was never persisted.
-For claude_code this is unavoidable — the SDK spawns claude-p in our
+For claude this is unavoidable — the SDK spawns claude-p in our
 process group, so SIGINT kills the subprocess before it can emit the
 tool_result back to our receive loop. For anthropic / openai the same
 shape occurs when the executor's `should_pause` check fires after we
@@ -74,7 +74,7 @@ RESUME_DEPENDENCY_NUDGE = (
 # Injected once onto every synthesized resume turn. On resume the transcript is
 # replayed to the provider, and reconstructed tool_results can surface to the
 # model as errors ("internal error") even when the original action succeeded —
-# observed under claude_code's stream-json replay, and a genuine shape under the
+# observed under claude's stream-json replay, and a genuine shape under the
 # is_error placeholders this module writes for interrupted/superseded tool_uses.
 # The note keeps the model from redoing durable work it can simply verify.
 RESUME_DURABILITY_NOTE = (
@@ -225,7 +225,7 @@ def repair_dangling_tool_use_on_resume(
          NEW trailing user message with a placeholder tool_result for each plus the
          durability note, append it to `messages` (in place) and `transcript`.
       2. The last message is a USER turn that immediately follows an assistant turn
-         carrying unmatched tool_use blocks — e.g. a claude_code
+         carrying unmatched tool_use blocks — e.g. a claude
          '[Request interrupted by user]' message persisted after the tool_use.
          Anthropic requires the tool_result to live in the user turn directly after
          the tool_use, so inject the placeholder result(s) for the UNMATCHED
@@ -240,7 +240,7 @@ def repair_dangling_tool_use_on_resume(
     The Message is mutated in place in `messages` and `transcript`; callers iterate
     the returned tuple to emit one tool_result event per synthesized block.
 
-    When `feedback` is given (the claude_code native rework delta), the shape-1
+    When `feedback` is given (the claude native rework delta), the shape-1
     dangling `complete_step` block's is_error result carries the framed feedback
     (`REWORK_RESULT_FRAME + "\\n\\n" + feedback`) instead of the synthetic
     "interrupted" filler, so `claude-p` pairs the dangling call against the

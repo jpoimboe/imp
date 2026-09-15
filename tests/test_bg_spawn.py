@@ -164,7 +164,7 @@ def test_foreground_bash_unchanged_and_ensure_ascii_false(tmp_path: Path) -> Non
 
 def test_run_in_background_refused_when_not_enabled(tmp_path: Path) -> None:
     """Providers that expose registry bash WITHOUT the bg wiring
-    (claude_code/codex MCP wrapping) must get a loud refusal, not an
+    (claude/codex MCP wrapping) must get a loud refusal, not an
     unmanageable orphan process."""
     async def main() -> None:
         ctx = _ctx(tmp_path)

@@ -1,6 +1,6 @@
 """Background-execution parity for the MCP-wrapped providers.
 
-claude_code and codex execute imp's registry tools in-process (SDK MCP
+claude and codex execute imp's registry tools in-process (SDK MCP
 wrappers / codex_mcp.dispatch_tool) — the spec's "bash never fires there"
 claim was false at the production site. This file pins the parity wiring:
 injection, the background_enabled flag, and teardown surfaces."""
@@ -50,8 +50,8 @@ def test_codex_build_tools_no_bg_without_bash() -> None:
     assert "bash_output" not in tools and "bash_kill" not in tools
 
 
-def test_codex_no_claude_code_reachin() -> None:
-    """AC #4b: codex_runner no longer imports any claude_code private internal."""
+def test_codex_no_claude_reachin() -> None:
+    """AC #4b: codex_runner no longer imports any claude private internal."""
     import inspect
 
     from imp.providers import codex_runner
@@ -158,7 +158,7 @@ def test_cc_interrupt_none_ctx_safe(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
-    """Teardown site 2 under claude_code: aclosing run() mid-conversation
+    """Teardown site 2 under claude: aclosing run() mid-conversation
     kills the backgrounded group via the new finally (PEP 525: _run_loop's
     own finally would only GC-finalize).
 

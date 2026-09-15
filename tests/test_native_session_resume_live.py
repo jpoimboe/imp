@@ -1,6 +1,6 @@
-"""Resumed claude_code step does not redo prior reads (ckx9f5 regression).
+"""Resumed claude step does not redo prior reads (ckx9f5 regression).
 
-Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. A multi-read
+Gated behind `--run-live` (claude) + the `claude` CLI on PATH. A multi-read
 step is paused mid-bash and resumed; the prior reads must be recalled faithfully
 (no '[Tool result missing…]' placeholder redo) and the resume must complete without
 re-reading either file. A mid-bash SIGINT leaves a dangling bash tool_use, which

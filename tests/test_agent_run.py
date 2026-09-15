@@ -588,7 +588,7 @@ async def test_drive_invocation_survives_when_subtree_active(
     far longer than the inactivity window is NOT torn down, as long as the shared
     subtree keeps signalling liveness via `coordinator.note_activity()`.
 
-    This is the real claude_code shape: a task-lead parked in an in-process
+    This is the real claude shape: a task-lead parked in an in-process
     subagent dispatch (or a busy leaf that appends to the shared elog without
     yielding) produces no generator yields for minutes, yet is fully alive.
 
@@ -663,7 +663,7 @@ def test_shared_log_append_pulses_coordinator_activity(tmp_path: Path) -> None:
     """B.2 production wiring: every append to the run's shared event log pulses
     coordinator.note_activity() (which resets the inactivity watchdog), and the
     original on_event fan-out is preserved. Without this, the unit-level watchdog
-    fix would pass while the real claude_code window never resets — the live
+    fix would pass while the real claude window never resets — the live
     hazard the plan calls out."""
     from imp.engine.executor import _liveness_on_event
     from imp.engine.state import JsonlEventLog, State

@@ -364,7 +364,7 @@ def test_agent_message_ctx_resolves_window_from_the_catalog() -> None:
 
 
 def test_agent_message_ctx_prefers_the_reported_window() -> None:
-    # claude_code reports its own window; it wins over the catalog's (200000,
+    # claude reports its own window; it wins over the catalog's (200000,
     # limit 160000), giving the 200000 ceiling here. Occupancy past the limit
     # reports past 100%, and the legacy percentage is ignored — 203000/200000 is
     # 101.5%, not the 79.9% the payload claims.

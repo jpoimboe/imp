@@ -120,7 +120,7 @@ async def test_interject_reply_clears_waiting_halt(tmp_path: Path) -> None:
 def test_every_provider_call_forwards_halt_writer() -> None:
     # Structural guard: the wait-reply resolution must forward invocation.halt_writer.
     # anthropic/openai share the PushSession base (their forwarding lives there once);
-    # codex_runner and claude_code forward directly.
+    # codex_runner and claude forward directly.
     import imp.providers.claude as c
     import imp.providers.codex_runner as cx
     import imp.providers.push_session as ps
@@ -140,7 +140,7 @@ def test_every_provider_call_forwards_halt_clearer() -> None:
     # Structural guard: the wait-reply resolution must forward invocation.halt_clearer,
     # mirroring the halt_writer guard, so a dropped forward is caught without a full round-trip.
     # anthropic/openai share the PushSession base (their forwarding lives there once);
-    # codex_runner and claude_code forward directly.
+    # codex_runner and claude forward directly.
     import imp.providers.claude as c
     import imp.providers.codex_runner as cx
     import imp.providers.push_session as ps

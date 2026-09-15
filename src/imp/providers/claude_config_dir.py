@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Ephemeral CLAUDE_CONFIG_DIR for fresh claude_code starts; caller cleans up."""
+"""Ephemeral CLAUDE_CONFIG_DIR for fresh claude starts; caller cleans up."""
 from __future__ import annotations
 
 import shutil

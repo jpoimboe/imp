@@ -81,9 +81,9 @@ def _empty_path(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(empty_bin))
 
 
-def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp_path):
+def test_provider_available_claude_resolves_the_sdk_binary(monkeypatch, tmp_path):
     """The SDK spawns its bundled copy and never consults the PATH `claude`, so a host
-    that has the SDK and no PATH claude must still run the claude_code live lane."""
+    that has the SDK and no PATH claude must still run the claude live lane."""
     import tests._live as live
     _empty_path(monkeypatch, tmp_path)
     # A path that was never created: the check resolves the binary, it must neither
@@ -96,7 +96,7 @@ def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp
     assert live.provider_available("claude") is None
 
 
-def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path):
+def test_provider_available_claude_missing_everywhere(monkeypatch, tmp_path):
     """When the SDK's own resolution comes up empty, the reason names both places it
     looked — the bundled binary and PATH."""
     import tests._live as live
@@ -292,7 +292,7 @@ def _bash_call(tool_id="b1"):
 
 def _bash_result(tool_id="b1", *, returncode, stderr, stdout="", shape="str"):
     # shape="str": the anthropic/openai in-process runner stores the bash JSON
-    # verbatim as a string. shape="list": claude_code's SDK wraps it as a list
+    # verbatim as a string. shape="list": claude's SDK wraps it as a list
     # of {"type":"text","text": <json string>} parts (see the real fixture
     # tests/fixtures/cc_tool_counter_burst.jsonl).
     inner = _json.dumps(
@@ -311,9 +311,9 @@ def test_precondition_failed_returns_exact_reason_on_overlay_mount(tmp_path):
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_failed_returns_reason_on_claude_code_list_content(tmp_path):
-    # claude_code's bash tool_result content is a LIST of text parts, not a
-    # string; the mount failure must still be detected so the two claude_code
+def test_precondition_failed_returns_reason_on_claude_list_content(tmp_path):
+    # claude's bash tool_result content is a LIST of text parts, not a
+    # string; the mount failure must still be detected so the two claude
     # targets SKIP (spec AC: all five tests SKIP on the overlay mount failure).
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
@@ -323,7 +323,7 @@ def test_precondition_failed_returns_reason_on_claude_code_list_content(tmp_path
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_returns_none_on_clean_claude_code_list_content(tmp_path):
+def test_precondition_returns_none_on_clean_claude_list_content(tmp_path):
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         _bash_call(),

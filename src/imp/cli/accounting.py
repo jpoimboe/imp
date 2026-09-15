@@ -51,7 +51,7 @@ class RowUsage:
 
 def is_metered(provider: str | None, auth_mode: str | None) -> bool:
     """anthropic/openai reach the API by key or not at all; codex and
-    claude_code carry an auth_mode, and anything but `apikey` is notional."""
+    claude carry an auth_mode, and anything but `apikey` is notional."""
     return provider in _METERED_PROVIDERS or auth_mode == "apikey"
 
 
@@ -73,7 +73,7 @@ def contribution(billing: BillingUsage, dollars: float | None, *,
 def collapse_cumulative_query_results(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """claude_code `query_result` rows are cumulative within one SDK session, so
+    """claude `query_result` rows are cumulative within one SDK session, so
     only the last row per (agent, session) survives: same id -> take the last,
     different id -> both survive and add. Rows carrying no session id (a
     read-only archive root is never migrated) share one bucket per agent, which
@@ -137,7 +137,7 @@ def _model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
 
 
 def billing_from_model_usage(model_usage: dict[str, Any]) -> BillingUsage:
-    """A claude_code `query_result.model_usage` rollup -> one quadruple over
+    """A claude `query_result.model_usage` rollup -> one quadruple over
     every model in it, the background haiku included.
 
     The web-search count rides along on both paths, so "billable" means the same
@@ -159,7 +159,7 @@ def billing_from_model_usage(model_usage: dict[str, Any]) -> BillingUsage:
 def vendor_contribution(model_usage: dict[str, Any],
                         total_cost_usd: float | None, *,
                         metered: bool) -> RowUsage | None:
-    """A claude_code `query_result` as a row contribution: the vendor's own cost
+    """A claude `query_result` as a row contribution: the vendor's own cost
     when it carries one, else each model in the rollup priced from the table.
     None when the row carries neither dollars nor billable usage —
     `total_cost_usd` is `float | None` on the wire, so that row is reachable."""
@@ -204,7 +204,7 @@ def _billing_from_flat(usage: dict[str, Any]) -> BillingUsage:
 def computed_contribution(model: str | None, billing: BillingUsage,
                           prompt_tokens: int | None, *,
                           metered: bool) -> RowUsage:
-    """A contribution priced from the table — every provider, claude_code
+    """A contribution priced from the table — every provider, claude
     included whenever its own dollar figure never arrived."""
     return contribution(billing, cost_usd(model, billing, prompt_tokens),
                         metered=metered)

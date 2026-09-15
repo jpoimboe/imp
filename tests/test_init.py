@@ -182,7 +182,7 @@ def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
     assert "tiers" not in proj
 
 
-def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
+def test_supports_claude_no_env_prompt(tmp_path: Path) -> None:
     def _no_input(_prompt: str = "") -> str:
         raise AssertionError(f"unexpected input prompt: {_prompt!r}")
 
@@ -259,13 +259,13 @@ def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.Monke
     assert "install bubblewrap" not in "\n".join(msgs).lower()
 
 
-def test_initial_selection_preselects_claude_code() -> None:
+def test_initial_selection_preselects_claude() -> None:
     from imp.cli.init import _initial_selection
     available = ["claude", "anthropic", "openai", "codex"]
     assert _initial_selection(available) == {0}
 
 
-def test_initial_selection_empty_when_claude_code_absent() -> None:
+def test_initial_selection_empty_when_claude_absent() -> None:
     from imp.cli.init import _initial_selection
     assert _initial_selection(["anthropic", "openai"]) == set()
 
@@ -1303,7 +1303,7 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
 def test_picker_confirmation_hints_every_enabled_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """claude_code gets a hint now — it used to be silently skipped for having no env var."""
+    """claude gets a hint now — it used to be silently skipped for having no env var."""
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
     msgs: list[str] = []

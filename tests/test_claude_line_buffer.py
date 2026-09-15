@@ -1,4 +1,4 @@
-"""Regression: an image tool result must survive the claude_code transport.
+"""Regression: an image tool result must survive the claude transport.
 
 `_build_options` never set `max_buffer_size`, so claude_agent_sdk's subprocess
 transport applied its 1 MiB per-stream-json-line default. The CLI echoes an

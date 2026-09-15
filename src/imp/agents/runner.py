@@ -100,11 +100,11 @@ _MCP_PREFIX = "mcp__imp__"
 def canonicalize_tool_name(name: str) -> str:
     """Strip the provider-specific MCP namespace from a persisted tool name.
 
-    claude_code exposes imp's tools as ``mcp__imp__<name>`` and persists that
+    claude exposes imp's tools as ``mcp__imp__<name>`` and persists that
     prefixed form in the transcript; anthropic and openai use the bare ``<name>``.
     Any logic that matches a persisted tool by bare name (resume-shape
     classification, dangling-`complete_step` repair) MUST canonicalize first, or
-    it silently no-ops on claude_code transcripts (kibe87 incident, 2026-07-03)."""
+    it silently no-ops on claude transcripts (kibe87 incident, 2026-07-03)."""
     return name[len(_MCP_PREFIX):] if name.startswith(_MCP_PREFIX) else name
 
 
@@ -141,7 +141,7 @@ class QuestContext:
 @dataclass(frozen=True, slots=True)
 class AgentInvocation:
     agent_def: AgentDef
-    provider_name: str                     # "anthropic" | "openai" | "claude_code"
+    provider_name: str                     # "anthropic" | "openai" | "claude"
     model_name: str
     system_prompt: str
     initial_messages: tuple[Message, ...]
@@ -214,7 +214,7 @@ class AgentInvocation:
     # the model as the `task` tool's optional `tier` enum. () = feature off.
     tiers: tuple[str, ...] = ()
     # The tier label this invocation resolved against ("low"|"medium"|"high"), so
-    # a provider can set a per-tier posture (e.g. claude_code disables extended
+    # a provider can set a per-tier posture (e.g. claude disables extended
     # thinking on "low" to match anthropic). None = no tier label (legacy/test, or
     # a subagent inheriting the parent's provider/model without an explicit tier).
     tier: str | None = None

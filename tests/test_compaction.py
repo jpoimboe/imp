@@ -90,7 +90,7 @@ def test_compaction_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_compaction_removes_the_native_store_when_present(tmp_path: Path) -> None:
-    # claude_code: the step has a claude_session/ store beside transcript.jsonl.
+    # claude: the step has a claude_session/ store beside transcript.jsonl.
     _seed(tmp_path)
     store = session_store_for(tmp_path)
     key = {"project_key": "/p", "session_id": "s1"}

@@ -246,7 +246,7 @@ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
                             "call_id": tr.tool_use_id, "output": output})
             # Co-riding text (resume feedback / durability note) must survive:
             # emit it as a follow-on user message so it reaches the model. The
-            # anthropic/claude_code builders render this mixed content natively.
+            # anthropic/claude builders render this mixed content natively.
             text = _join_text(m.content)
             if text:
                 out.append({"type": "message", "role": "user",

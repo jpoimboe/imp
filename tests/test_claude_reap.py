@@ -1,4 +1,4 @@
-"""Tests for claude_code's grandchild-reaping helper (_reap_transport_group)."""
+"""Tests for claude's grandchild-reaping helper (_reap_transport_group)."""
 from __future__ import annotations
 
 import os

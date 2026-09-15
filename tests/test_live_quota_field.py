@@ -170,7 +170,7 @@ def test_the_field_names_the_readings_own_provider() -> None:
     full, windows = quota_field(codex, now_epoch=_NOW, color=False, over_bg=False)
     assert full == "codex · session 62% (3h left) · week 91% (5d left)"
     assert windows == "session 62% (3h left) · week 91% (5d left)"
-    # The name is the reading's, never the activity's: a claude_code step whose
+    # The name is the reading's, never the activity's: a claude step whose
     # recorded reading came from codex still says codex.
     row = _row(activity=_act(provider="claude"),
                carrier=_carrier(codex, auth_mode="subscription"))

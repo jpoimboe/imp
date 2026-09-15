@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Spawn the claude_code CLI in its own session so a terminal Ctrl-C reaches imp alone.
+"""Spawn the claude CLI in its own session so a terminal Ctrl-C reaches imp alone.
 
 `claude_agent_sdk/_internal/transport/subprocess_cli.py` spawns the `claude` CLI
 via `anyio.open_process(...)` WITHOUT `start_new_session`,

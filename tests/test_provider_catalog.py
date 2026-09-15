@@ -123,7 +123,7 @@ def test_sdk_crossed_fires_at_the_200k_ceiling_on_a_big_window() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
     assert sdk_context_threshold_crossed(199_999, 1_050_000) is False
     assert sdk_context_threshold_crossed(200_000, 1_050_000) is True
-    # The claude_code path on a live 1M window.
+    # The claude path on a live 1M window.
     assert sdk_context_threshold_crossed(200_000, 1_000_000) is True
     assert sdk_context_threshold_crossed(199_999, 1_000_000) is False
 
@@ -342,12 +342,12 @@ def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
     assert anthropic_1m is not None
     assert anthropic_1m.window == 1_000_000
-    claude_code_1m = limits_for("claude", "claude-opus-5[1m]")
-    assert claude_code_1m is not None
-    assert claude_code_1m.window == 1_000_000
-    claude_code_opus = limits_for("claude", "opus")
-    assert claude_code_opus is not None
-    assert claude_code_opus.window == 200_000
+    claude_1m = limits_for("claude", "claude-opus-5[1m]")
+    assert claude_1m is not None
+    assert claude_1m.window == 1_000_000
+    claude_opus = limits_for("claude", "opus")
+    assert claude_opus is not None
+    assert claude_opus.window == 200_000
 
 
 def test_limits_for_longest_prefix_covers_dated_ids() -> None:
@@ -355,9 +355,9 @@ def test_limits_for_longest_prefix_covers_dated_ids() -> None:
     anthropic_dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert anthropic_dated is not None
     assert anthropic_dated.window == 200_000
-    claude_code_dated = limits_for("claude", "claude-opus-5-20260315")
-    assert claude_code_dated is not None
-    assert claude_code_dated.window == 200_000
+    claude_dated = limits_for("claude", "claude-opus-5-20260315")
+    assert claude_dated is not None
+    assert claude_dated.window == 200_000
 
 
 def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:

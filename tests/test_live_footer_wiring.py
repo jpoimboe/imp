@@ -52,7 +52,7 @@ def _reading(provider: str, *windows: QuotaWindow) -> QuotaReading:
 
 def _cc_events(*tail: dict[str, Any],
                auth_mode: str = "apikey") -> list[dict[str, Any]]:
-    """A claude_code step: its agent_message usage is never priced, so any dollars
+    """A claude step: its agent_message usage is never priced, so any dollars
     on this row can only have come from a query_result."""
     return [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
@@ -454,7 +454,7 @@ def test_a_subagent_provider_never_becomes_the_footers_fallback() -> None:
 
 # AC 11
 def test_a_chrome_step_with_no_reading_and_no_dollars_renders_no_group() -> None:
-    # A claude_code agent_message prices nothing, and no reading was recorded.
+    # A claude agent_message prices nothing, and no reading was recorded.
     row = _chrome_row(_cc_events(auth_mode="subscription"))
     assert row == "t"
     assert "n/a" not in row and "—" not in row

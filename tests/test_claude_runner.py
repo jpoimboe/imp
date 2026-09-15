@@ -490,7 +490,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
-    """AWAITING_USER resume (claude_code): a paused transcript ends on a bare
+    """AWAITING_USER resume (claude): a paused transcript ends on a bare
     assistant turn; the runner solicits the human and delivers the reply as a
     plain user TextBlock message (NOT a tool_result) before driving the next LLM
     call."""
@@ -607,7 +607,7 @@ def test_contains_tool_result_discriminates_turn_kinds() -> None:
 
 @pytest.mark.anyio
 async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
-    """Extended-thinking output from claude_code is captured as a `thinking`
+    """Extended-thinking output from claude is captured as a `thinking`
     event in the log, not folded into runner_warning."""
     (tmp_path / "art").mkdir()
     scripted = [
@@ -893,7 +893,7 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
 
 
 def test_claude_provider_registered_and_resolves() -> None:
-    """The claude_code provider registers on the first registry read; resolve_run
+    """The claude provider registers on the first registry read; resolve_run
     picks it up from a cleared registry when claude is on PATH."""
     import shutil
     from pathlib import Path
@@ -3836,7 +3836,7 @@ async def test_coalesces_one_agent_message_per_message_id(tmp_path: Path) -> Non
 async def test_agent_message_precedes_tool_calls_for_prose_and_tool_turn(
     tmp_path: Path,
 ) -> None:
-    # AC (claude_code ordering): for a turn carrying both prose and tool_use,
+    # AC (claude ordering): for a turn carrying both prose and tool_use,
     # the coalesced agent_message is emitted BEFORE that turn's tool_call events.
     # The prose group flushes at the text->tool_use transition, not at the next
     # message boundary. The coalesced payload is unchanged ([text,tool_use,tool_use]).
@@ -4301,7 +4301,7 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
 async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_message(
     tmp_path: Path,
 ) -> None:
-    """claude_code retry-continue on a bare turn-end: no awaiting_user_input, no
+    """claude retry-continue on a bare turn-end: no awaiting_user_input, no
     user_message; the nudge is an internal engine_message/continuation event."""
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript

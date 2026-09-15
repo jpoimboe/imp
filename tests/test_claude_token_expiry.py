@@ -1,4 +1,4 @@
-"""Part C: best-effort token-expiry diagnostic for claude_code auth errors."""
+"""Part C: best-effort token-expiry diagnostic for claude auth errors."""
 
 from __future__ import annotations
 

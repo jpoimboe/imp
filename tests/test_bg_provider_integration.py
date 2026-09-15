@@ -199,7 +199,7 @@ async def test_post_api_sweep_runs_before_first_dispatch(
 async def test_wired_providers_enable_background(tmp_path: Path) -> None:
     """All wired providers construct their ToolContext with background_enabled=True.
     anthropic/openai wire it via the shared PushSession base (push_session.py);
-    claude_code/codex_runner wire it directly. This pins the flag against a silent
+    claude/codex_runner wire it directly. This pins the flag against a silent
     kwarg removal; runtime behavior is covered by the e2e spawn tests in this file
     and tests/test_bg_cc_codex_parity.py."""
     import re

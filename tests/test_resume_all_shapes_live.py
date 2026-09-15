@@ -1,6 +1,6 @@
 """Store-backed native-resume round-trips against a real `claude` subprocess.
 
-Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. Each test
+Gated behind `--run-live` (claude) + the `claude` CLI on PATH. Each test
 seeds a PARTIAL session store (the turns the SDK batcher would have flushed at
 the prior `result` boundary) plus the matching transcript.jsonl tail, then drives
 ClaudeAgentRunner.run against a live claude (client_factory=None). The

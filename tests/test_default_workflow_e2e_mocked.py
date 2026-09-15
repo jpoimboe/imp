@@ -337,7 +337,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
 
 
 @pytest.mark.anyio
-async def test_full_default_workflow_completes_with_canned_claude_code(
+async def test_full_default_workflow_completes_with_canned_claude(
     tmp_path: Path,
 ) -> None:
     from typing import Any

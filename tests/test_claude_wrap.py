@@ -78,7 +78,7 @@ async def test_wrap_complete_step_captures_args(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) -> None:
-    """claude_code assigns `args` verbatim and nothing downstream filters, so an
+    """claude assigns `args` verbatim and nothing downstream filters, so an
     optional the agent did not send must simply be absent (regression guard)."""
     state = _RunState()
     schema = OutputSchema(
@@ -305,7 +305,7 @@ async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
 async def test_wrapper_sweeps_bg_on_every_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Decision 10 dispatch site, claude_code edition: every MCP tool dispatch
+    """Decision 10 dispatch site, claude edition: every MCP tool dispatch
     sweeps the background registry — module-attr call so one monkeypatch
     covers all sites."""
     import imp.agents.tools.bg as bg_mod
@@ -332,7 +332,7 @@ async def test_wrapper_sweeps_bg_on_every_dispatch(
 def test_cc_task_tool_annotated_readonly_when_parallel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC23: claude_code wraps `task` with ToolAnnotations(readOnlyHint=True) via the
+    """AC23: claude wraps `task` with ToolAnnotations(readOnlyHint=True) via the
     real claude_agent_sdk.tool annotations= parameter, at width > 1."""
     from claude_agent_sdk import tool as sdk_tool
 
@@ -407,7 +407,7 @@ def test_cc_task_annotation_dropped_by_kill_switch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC21 (bridge half): IMP_MAX_PARALLEL_TASKS=1 drops the readOnlyHint at the
-    claude_code registration site."""
+    claude registration site."""
     from claude_agent_sdk import tool as sdk_tool
 
     from imp.agents.subagents import make_task_tool
@@ -996,7 +996,7 @@ async def test_wrap_resolves_the_in_flight_entry_on_the_parts_return(
 async def test_wrap_task_over_cap_result_spills_and_records_the_wrapped_body(
     tmp_path: Path,
 ) -> None:
-    # AC 9(c)/AC 10: the claude_code sub_agent arm wraps its success result, so the
+    # AC 9(c)/AC 10: the claude sub_agent arm wraps its success result, so the
     # body handed to the model and the minted tool_result recorded in the event log
     # are byte-identical, and the full result stays recoverable on disk.
     from imp.agents.subagents import make_task_tool

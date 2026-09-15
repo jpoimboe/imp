@@ -18,7 +18,7 @@ def test_agent_result_event_feeds_events_namespace() -> None:
 def test_no_agent_output_control_yields_remain() -> None:
     # Guards against a MISSED yield site (each provider logs its yields verbatim,
     # so a stray `agent_output` yield is never captured by the renamed consumer
-    # and silently drops the deliverable). claude_code has THREE such yields.
+    # and silently drops the deliverable). claude has THREE such yields.
     import inspect
 
     from imp.agents import dispatch

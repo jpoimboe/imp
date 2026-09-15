@@ -458,7 +458,7 @@ async def test_a_same_name_pin_leaves_the_session_unstashed(
 async def test_a_pin_applied_at_entry_retires_at_the_dispatch_that_follows(
     tmp_path: Path, floor_availability,
 ) -> None:
-    # The cross-process headline (AC 13/14): a step parked on claude_code,
+    # The cross-process headline (AC 13/14): a step parked on claude,
     # switched to codex by another process, then resumed. Reconcile (a) re-points
     # the map at entry and the guard retires at the dispatch — each half is
     # proven above; this is their composition, which is what the user lives.

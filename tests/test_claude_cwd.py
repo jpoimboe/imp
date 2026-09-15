@@ -1,4 +1,4 @@
-"""Regression: the claude_code provider must pin the `claude` subprocess to
+"""Regression: the claude provider must pin the `claude` subprocess to
 the change's project_root.
 
 Bug: `_build_options` never set `ClaudeAgentOptions.cwd`. The SDK then launches

@@ -135,7 +135,7 @@ def test_the_guard_compares_the_tier_map_not_a_step_override(
     tmp_path: Path, floor_availability,
 ) -> None:
     # AC 8e: on a step whose /model override names openai, `openai` is a real
-    # switch and `claude_code` is the redundant one. A guard read off
+    # switch and `claude` is the redundant one. A guard read off
     # resolve_current_model inverts both.
     quest, state, _wf = _seed(tmp_path)
     floor_availability({"claude", "codex", "openai"})
@@ -202,7 +202,7 @@ async def test_pre_session_provider_resolves_the_quest_onto_that_vendor(
     )
 
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
-    _floor_config(tmp_path)                       # providers: [claude_code]
+    _floor_config(tmp_path)                       # providers: [claude]
     floor_availability({"claude", "codex"}, factory=_ok_factory)
 
     assert handle_slash_line("/provider codex", quest=quest,

@@ -306,7 +306,7 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
 
 def _drain_interject_message(coordinator: Any, elog: Any,
                              agent_id: str) -> Message | None:
-    """claude_code variant of agent_run.deliver_interject. The SDK is queried
+    """claude variant of agent_run.deliver_interject. The SDK is queried
     with a STRING, not a messages list, so the caller folds the returned
     message's text into the next query itself — here we only drain the queue,
     returning a user Message (or None when empty). The caller appends it to
@@ -697,7 +697,7 @@ def _python_schema_for_tool(t: Tool) -> dict[str, Any]:
     return {name: _python_type_for_property(spec) for name, spec in props.items()}
 
 
-# Bypass posture for the claude_code provider: the imp tools are exposed through a
+# Bypass posture for the claude provider: the imp tools are exposed through a
 # strict allowlist (allowed_tools=[mcp__imp__…], strict_mcp_config=True in
 # _build_options), so a task readOnlyHint cannot grant read-only auto-approval
 # beyond imp's own permission layer. The hint below is DERIVED from this flag so a
@@ -791,7 +791,7 @@ def _wrap_one(
                 "(same-loop topology pin)")
         inflight_key: str | None = None
         try:
-            # Decision 10 sweep site: EVERY tool dispatch — the claude_code
+            # Decision 10 sweep site: EVERY tool dispatch — the claude
             # analog of agents/dispatch.py's first-statement sweep. Inside the
             # try: a sweep raise must degrade to an is_error tool result, not
             # crash the SDK handler. Module-attr call so tests monkeypatch
@@ -937,7 +937,7 @@ def _wrap_one(
             # clean synchronous unwind through the claude_agent_sdk loop is NOT
             # reachable — the SDK owns the conversation and a tool callback
             # raising does not propagate to _run_loop as a Python exception. In
-            # practice a subagent-origin pause under claude_code degrades to an
+            # practice a subagent-origin pause under claude degrades to an
             # is_error tool_result. Acceptable: resume = restart the subtree, and
             # subagents are restart-safe by design.
             text = f"{type(exc).__name__}: {exc}"
@@ -1175,7 +1175,7 @@ def _join_text(content: tuple[Any, ...]) -> str:
 
 
 def _serialize_claude_message(sdk_msg: Any) -> dict[str, Any]:
-    """Serialize an SDK AssistantMessage to agent_message.raw. claude_code has
+    """Serialize an SDK AssistantMessage to agent_message.raw. claude has
     no interceptable per-turn API call, so this is a normalized view: canonical
     tool names, thinking preserved, best-effort usage/stop_reason."""
     content: list[dict[str, Any]] = []
@@ -1373,7 +1373,7 @@ _NO_RESULT_SENTINEL = object()
 
 
 class ClaudeSession(ObserveSession):
-    """The observe `Session` claude_code's `run()` drives via `run_agent_loop`.
+    """The observe `Session` claude's `run()` drives via `run_agent_loop`.
 
     Each hook body is a relocated region of the old `_run_loop`, delegating to
     the surviving module-level helpers. `_enter` builds ctx/tools/client/state and

@@ -31,7 +31,7 @@ def _ensure_builtin_providers() -> None:
 
 @pytest.mark.live("claude")
 @pytest.mark.anyio
-async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
+async def test_one_step_walk_against_claude(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")

@@ -49,7 +49,7 @@ _HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
 
 
 def _agent_message_is_turn_end(payload: dict[str, Any]) -> bool:
-    # load-bearing: codex None = turn-end; claude_code None = mid-stream fragment
+    # load-bearing: codex None = turn-end; claude None = mid-stream fragment
     provider = payload.get("provider")
     if provider == "openai":
         return payload.get("stop_reason") in _OPENAI_TERMINAL_STATUSES
@@ -954,7 +954,7 @@ class NarrativeBuilder:
             cwin_any = payload.get("context_window")
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
             # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
-            # claude_code) — no gauge signal, hold last good values. pt is None
+            # claude) — no gauge signal, hold last good values. pt is None
             # (usage absent) is distinct: a provider reading still updates.
             if pt != 0 and (not is_subagent or agent_id == self._own_agent_id):
                 # The provider's own reading is true occupancy; the billing sum only
@@ -1877,7 +1877,7 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         block = _sole_success_tool_result(p)
         if block is not None:
             # Live-safe resume reply: the sole block is a success tool_result
-            # carrying the human's reply (anthropic/openai/claude_code resume shape).
+            # carrying the human's reply (anthropic/openai/claude resume shape).
             text = _summarize_result(block.get("content"))
     if event.get("_replay"):
         if subtype == "intent" and self._opening_intent_node is not None:
@@ -2034,7 +2034,7 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
     # Terminal state for Part D's glyph. Prefer an explicit payload kind (the
-    # claude_code degraded-pause path sets kind="interrupted"); else detect the
+    # claude degraded-pause path sets kind="interrupted"); else detect the
     # bracketed marker an is_error failure message embeds ("... [stalled]" /
     # "... [interrupted]" — the codex degraded-pause path appends the latter).
     # The brackets keep the match precise (low false-positive).

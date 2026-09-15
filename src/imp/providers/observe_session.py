@@ -3,7 +3,7 @@
 """Provider-agnostic observe-`Session` base for `run_agent_loop`.
 
 `ObserveSession` owns the observe control skeleton extracted from the
-claude_code runner's old `_run_loop`: the per-turn SDK-message stream, the
+claude runner's old `_run_loop`: the per-turn SDK-message stream, the
 tool-host-mediated `complete_step` capture surface, and the LoopGuard
 single-feed ordering. Provider specifics (transport, history/resume
 translation, isolated-home lifecycle, classify, cancellation) are the abstract

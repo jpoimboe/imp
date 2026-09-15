@@ -49,7 +49,7 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
     interrupt first surfaces a bare-turn-end `awaiting_user_input` gate, and the
     client's solicit hits EOF on the test's piped stdin and tears down before the
     daemon settles into pause. Reading state.json once immediately therefore
-    races the write (visible with claude_code, whose interrupt path — in-flight
+    races the write (visible with claude, whose interrupt path — in-flight
     bash → rejected tool use → query error → turn end — is slow enough to lose
     the race; in-process anthropic/openai usually win it). Poll for the durable
     paused state instead of assuming a synchronous write."""
@@ -243,13 +243,13 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 # fire mid-subprocess before imp's own internal timeouts do (which yield real
 # diagnostics instead of a killed worker).
 @pytest.mark.timeout(880)
-def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
+def test_ctrl_c_during_bash_pauses_then_resume_completes_claude(
     tmp_path: Path,
 ) -> None:
     _seed_project(tmp_path)
     # Override the anthropic config.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed
-    # tree) carries the claude_code pin.
+    # tree) carries the claude pin.
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main

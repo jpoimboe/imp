@@ -672,7 +672,7 @@ def test_raising_tool_yields_iserror_result_naming_the_exception_type(
 
 
 def test_codex_run_state_has_no_runtime_errors_field() -> None:
-    """Its only writer was the swallow arm that now re-raises. claude_code has an
+    """Its only writer was the swallow arm that now re-raises. claude has an
     independent field of the same name that must survive."""
     from dataclasses import fields
 

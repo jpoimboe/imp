@@ -60,7 +60,7 @@ def test_default_workflow_loads_and_resolves_review_steps() -> None:
 
 
 def test_review_steps_resolve_same_vendor_single_provider() -> None:
-    """With only claude_code env-available, the medium tier still resolves to
+    """With only claude env-available, the medium tier still resolves to
     sonnet — no error, no cross-vendor requirement, no diverged review steps."""
     _OPENAI[0] = False
     wf = load_workflow(bundled_workflow_dir("default"))

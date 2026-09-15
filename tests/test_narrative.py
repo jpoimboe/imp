@@ -711,7 +711,7 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
 
 def test_task_result_present_canonical_close_carries_outcome_no_orphan() -> None:
     # Present+matching (the anthropic/openai/codex shape AND post-Part-1
-    # claude_code): a `task` tool_call + tool_result sharing the same non-empty
+    # claude): a `task` tool_call + tool_result sharing the same non-empty
     # block id, with parent prose AFTER the result. The fold must close via the
     # canonical _h_tool_result path carrying the outcome (is_error/glyph), NOT via
     # resume-close, and there must be NO orphan "tool" burst line.
@@ -797,8 +797,8 @@ def test_legacy_unstamped_codex_fold_salvaged_by_resume_close() -> None:
 
 
 def test_claude_midstream_fragment_does_not_salvage_close() -> None:
-    # claude_code emits stop_reason=None on mid-stream fragments — value-identical
-    # to codex's turn-end None. The provider gate must keep claude_code fragments
+    # claude emits stop_reason=None on mid-stream fragments — value-identical
+    # to codex's turn-end None. The provider gate must keep claude fragments
     # mid-turn: a fragment must NOT salvage-close an open task fold (it closes
     # later via its canonical task tool_result or the step_completed backstop).
     b = nv.NarrativeBuilder()
@@ -843,7 +843,7 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
 
 
 def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
-    # Regression (ecui5x): a backgrounded claude_code `task` dispatch is stamped
+    # Regression (ecui5x): a backgrounded claude `task` dispatch is stamped
     # id_ns="block" on the CALL (matching its result), so awaits_result=True and
     # the fold is shielded from resume-close. The parent then runs its OWN
     # non-task tool_call (a web_search) while the subagent is still in flight —
@@ -1164,7 +1164,7 @@ def test_real_prose_flushes_the_burst() -> None:
 
 def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
     # New contract (replaces the old §11 mismatched-id heuristic, removed when
-    # Part 1 made claude_code mint a real block id matching the call+result).
+    # Part 1 made claude mint a real block id matching the call+result).
     # The task tool_call and its tool_result share the SAME non-empty block id;
     # the fold closes via _h_tool_result's block-id match, carrying the outcome.
     b = nv.NarrativeBuilder()
@@ -2961,7 +2961,7 @@ def test_query_result_renders_without_fallback() -> None:
 
 
 def test_claude_turn_end_detection_uses_real_stop_reason() -> None:
-    # The coalesced claude_code llm_response now carries a real stop_reason, so
+    # The coalesced claude llm_response now carries a real stop_reason, so
     # turn-end detection works through the standard frozenset path.
     assert nv._agent_message_is_turn_end(
         {"provider": "claude", "stop_reason": "end_turn"}) is True

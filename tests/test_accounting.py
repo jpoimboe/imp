@@ -66,7 +66,7 @@ def test_metered_is_provider_aware() -> None:
     # anthropic/openai reach the API by key or not at all — no auth_mode row.
     assert is_metered("anthropic", None) is True
     assert is_metered("openai", None) is True
-    # codex and claude_code carry one; anything but apikey is notional.
+    # codex and claude carry one; anything but apikey is notional.
     assert is_metered("codex", "apikey") is True
     assert is_metered("claude", "apikey") is True
     assert is_metered("claude", "subscription") is False

@@ -1,4 +1,4 @@
-"""The impty snapshot path must hand claude_code a payload its transport can carry.
+"""The impty snapshot path must hand claude a payload its transport can carry.
 
 Auto-fit rasterizes under IMAGE_MAX_DIM, so process_image passes the PNG through
 untouched — no resize, no re-encode. That resample was the inflation: it turned crisp

@@ -60,7 +60,7 @@ def test_stall_redrive_balances_torn_down_turn_no_replay(tmp_path) -> None:
 def test_parse_message_dispatches_each_provider_to_its_own_wire_format() -> None:
     """Each registry key must reach the parser for that provider's wire format,
     not merely *a* parser: anthropic (and scripted, which shares it) preserves
-    thinking blocks, claude_code/codex drop them, and openai reads Responses
+    thinking blocks, claude/codex drop them, and openai reads Responses
     `output[]` rather than `content[]`."""
     blocks_raw = {"content": [
         {"type": "thinking", "thinking": "hmm", "signature": "sig"},

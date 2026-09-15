@@ -110,7 +110,7 @@ def test_current_reflects_pin_written_by_another_process(
     # client still holds the original in-memory Quest.
     quest, state, _wf = _seed(tmp_path)
     floor_availability({"claude", "codex"})
-    # state already resolved to claude_code — ensures the reload, not the
+    # state already resolved to claude — ensures the reload, not the
     # fallback, is what surfaces "codex".
     state.resolved_tiers = _tiers("claude")
     state.save(quest.state_dir)

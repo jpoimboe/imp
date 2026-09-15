@@ -22,7 +22,7 @@ def _tiers(provider: str) -> dict[str, ProviderModel]:
 
 
 def _seed(tmp_path: Path) -> tuple[Quest, State, Any]:
-    """A quest already resolved onto claude_code, as a stopped run left it."""
+    """A quest already resolved onto claude, as a stopped run left it."""
     quest, _phase, _step = _seed_minimal_workflow(tmp_path)
     (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [claude]\n")

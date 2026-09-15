@@ -20,7 +20,7 @@ from __future__ import annotations
 #
 # This window measures PROCESS LIVENESS, not semantic-event cadence: every
 # provider pulses coordinator.note_activity() once per received model event
-# (claude_code partial StreamEvents; codex streamed events; the anthropic and
+# (claude partial StreamEvents; codex streamed events; the anthropic and
 # openai streaming requests), so a long-but-streaming turn keeps resetting the
 # deadline while a genuinely wedged producer (zero bytes) trips it. 300 s gives
 # ~5x headroom over realistic model time-to-first-token while catching a true

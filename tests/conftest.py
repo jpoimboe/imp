@@ -246,7 +246,7 @@ def _stub_provider_api_keys(
     case); ordinary tests get the stub so module-level provider construction
     works.
 
-    Live provider tests spawn subprocesses (or the claude_code provider's
+    Live provider tests spawn subprocesses (or the claude provider's
     nested `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it
     to "sk-test" would give the subprocess a fake key and cause "Invalid API
     key" / 401 errors. The exemption is keyed to the `_live` filename

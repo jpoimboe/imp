@@ -24,7 +24,7 @@ def _ok_factory(model: str) -> object:
 
 
 def _floor_config(root: Path) -> None:
-    """Configure claude_code as the whole provider order and name no tiers, so
+    """Configure claude as the whole provider order and name no tiers, so
     every tier model comes from the built-in floor — the shape a pin has to reach
     past, since codex is not in the configured list at all."""
     (project_state_dir(root) / "config.yaml").write_text("providers: [claude]\n")
@@ -46,7 +46,7 @@ async def test_an_unpinned_run_resolves_the_configured_vendor(
     tmp_path: Path, floor_availability,
 ) -> None:
     # The control: same config, same registry, no pin — every tier lands on the
-    # configured claude_code, which is what the pinned run below must change.
+    # configured claude, which is what the pinned run below must change.
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     floor_availability({"claude", "codex"}, factory=_ok_factory)
@@ -83,7 +83,7 @@ async def test_a_workflow_refresh_resolves_new_steps_on_the_pinned_vendor(
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     floor_availability({"claude", "codex"}, factory=_ok_factory)
-    await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude_code
+    await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude
     _reopen(quest)
     quest.set_provider("codex")
 
@@ -119,7 +119,7 @@ async def test_an_unresolvable_pin_is_refused_before_a_workflow_refresh_merge(
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _floor_config(tmp_path)
     floor_availability({"claude", "codex"}, factory=_ok_factory)
-    await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude_code
+    await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude
     _reopen(quest)
     quest.set_provider("codex")
     floor_availability({"claude"}, factory=_ok_factory)
