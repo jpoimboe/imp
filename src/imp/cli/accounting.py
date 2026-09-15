@@ -76,7 +76,7 @@ def collapse_cumulative_query_results(
     """claude `query_result` rows are cumulative within one SDK session, so
     only the last row per (agent, session) survives: same id -> take the last,
     different id -> both survive and add. Rows carrying no session id (a
-    read-only archive root is never migrated) share one bucket per agent, which
+    read-only archive root is never rebuilt) share one bucket per agent, which
     under-counts rather than reinstating the cumulative over-report."""
     last: dict[tuple[str | None, str], int] = {}
     for i, event in enumerate(events):

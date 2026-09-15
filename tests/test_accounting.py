@@ -104,7 +104,7 @@ def test_collapse_keeps_sessions_of_different_agents_apart() -> None:
 
 
 def test_collapse_folds_an_agents_id_less_rows_into_one_session() -> None:
-    # A read-only (cross-project) archive root is never migrated, so its rows
+    # A read-only (cross-project) archive root is never rebuilt, so its rows
     # carry no session_id. Folding them into ONE session per agent under-counts
     # rather than reinstating the cumulative over-report.
     events = [_qr("a1", None, 3.00), _qr("a1", None, 12.50)]

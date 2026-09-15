@@ -1,4 +1,4 @@
-"""ensure_current on a read-only archive root: skip the migration, keep reading."""
+"""ensure_current on a read-only archive root: skip the rebuild, keep reading."""
 from __future__ import annotations
 
 import json
@@ -85,25 +85,27 @@ def test_stale_index_stamp_on_a_read_only_archive_is_not_rebuilt(
     assert [row[0] for row in read.completed_rows(tmp_path)] == [ARCH]
 
 
-def test_missing_data_version_marker_on_a_read_only_archive_is_not_migrated(
+def test_missing_data_version_marker_on_a_read_only_archive_is_left_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_archived_quest(tmp_path)
     marker = archive.data_version_path(tmp_path)
-    marker.unlink()                              # pre-triad shape: version reads as 0
+    marker.unlink()                              # no marker: the data version reads as 0
     _clear_lock_file(tmp_path)
     _deny_writes(monkeypatch, archive.archive_root(tmp_path))
 
     archive.ensure_current(tmp_path)
 
-    assert not marker.exists()                   # the blob migration never ran
+    assert not marker.exists()                   # nothing stamped the marker
     assert not _lock_file(tmp_path).exists()
     assert [row[0] for row in read.completed_rows(tmp_path)] == [ARCH]
 
 
-def test_a_writable_stale_archive_still_migrates(tmp_path: Path) -> None:
+def test_a_writable_stale_index_stamp_is_rebuilt(tmp_path: Path) -> None:
+    """The index half of the self-healing contract, gated on a current blob floor."""
     _seed_archived_quest(tmp_path)
     _stamp_user_version(tmp_path, 4)
+    assert archive._read_data_version(tmp_path) == archive._DATA_VERSION
 
     archive.ensure_current(tmp_path)
 
