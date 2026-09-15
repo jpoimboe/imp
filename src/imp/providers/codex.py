@@ -3,7 +3,7 @@
 """Codex backend provider (spec: `2026-06-05-add-codex-provider`).
 
 Drives the OpenAI Codex CLI as a brain that calls imp's tools over an
-in-process streamable-HTTP MCP server. Mirrors `claude_code.py`'s runner shape;
+in-process streamable-HTTP MCP server. Mirrors `claude.py`'s runner shape;
 the differences are in this module's siblings:
 
   - `codex_exec.py`    — the `codex exec --json` spawn, read loop, and teardown.
@@ -18,7 +18,7 @@ binding absent before the sandbox is consulted. imp's own MCP tools run in
 imp's process, outside that sandbox, and are auto-approved per server via
 config.toml.
 
-`_env_check` requires only `codex` on PATH, matching `claude_code._env_check`.
+`_env_check` requires only `codex` on PATH, matching `claude._env_check`.
 """
 
 from __future__ import annotations

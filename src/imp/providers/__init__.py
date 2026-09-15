@@ -55,7 +55,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
         auth_hint="set OPENAI_API_KEY",
     ),
     "claude_code": BuiltinFloor(
-        module="claude_code",
+        module="claude",
         tier_defaults={
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",

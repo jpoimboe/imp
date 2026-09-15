@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from imp.providers import errors as perr
-from imp.providers.claude_code import _termination_from_result
+from imp.providers.claude import _termination_from_result
 from imp.providers.observe_classify import (
     _classify_agent_text,
     classifies_as_provider_error,

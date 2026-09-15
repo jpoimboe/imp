@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.providers.anthropic import _build_tools as anthropic_build
-from imp.providers.claude_code import _build_tools as cc_build
+from imp.providers.claude import _build_tools as cc_build
 from imp.providers.openai import _build_tools as openai_build
 
 

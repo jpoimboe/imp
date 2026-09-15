@@ -13,7 +13,7 @@ import itertools
 from typing import Any
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.providers.claude_code import (
+from imp.providers.claude import (
     _merge_assistant_fragments,
     _project_for_cli,
     _stream_history,

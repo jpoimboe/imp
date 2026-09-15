@@ -12,7 +12,7 @@ import pytest
 from imp.providers import BUILTIN_FLOOR, register_builtin_providers, resolve
 from imp.providers.config import ProviderModel
 
-_MODULES = ["anthropic", "openai", "claude_code", "codex"]
+_MODEL_BEARING = ["anthropic", "openai", "claude_code", "codex"]
 _REQUIRED = {"low", "medium", "high"}
 _BUILTINS = ["anthropic", "claude_code", "codex", "openai", "scripted"]
 
@@ -23,7 +23,7 @@ class _Cfg:
     providers: ClassVar[tuple[str, ...]] = ("anthropic",)
 
 
-@pytest.mark.parametrize("name", _MODULES)
+@pytest.mark.parametrize("name", _MODEL_BEARING)
 def test_tier_defaults_cover_required_tiers(name: str) -> None:
     tiers = BUILTIN_FLOOR[name].tier_defaults
     assert tiers is not None
@@ -106,7 +106,7 @@ def test_importing_the_package_registers_nothing() -> None:
         "from imp.providers import resolve\n"
         "PROVIDER_MODULES = {\n"
         "    'imp.providers.anthropic', 'imp.providers.openai',\n"
-        "    'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "    'imp.providers.claude', 'imp.providers.codex',\n"
         "    'imp.providers.codex_runner', 'imp.providers.scripted'}\n"
         "def leaked():\n"
         "    out = sorted(n for n in sys.modules if n in PROVIDER_MODULES)\n"
@@ -176,7 +176,7 @@ def test_iter_provider_defaults_returns_the_whole_builtin_floor() -> None:
     assert sorted(defaults) == _BUILTINS
     actual = {n: (d.tier_defaults, d.env_var) for n, d in defaults.items()}
     assert actual == _EXPECTED_FLOOR
-    for name in _MODULES:
+    for name in _MODEL_BEARING:
         tiers = defaults[name].tier_defaults
         assert tiers is not None, f"{name} contributes no floor tiers"
         assert set(tiers) >= _REQUIRED
@@ -238,9 +238,9 @@ def test_builtin_floor_table_names_a_module_for_every_builtin() -> None:
         assert callable(mod._factory), name
 
 
-@pytest.mark.parametrize("mod_name", _MODULES)
-def test_provider_modules_no_longer_declare_floor_constants(mod_name: str) -> None:
-    mod = importlib.import_module(f"imp.providers.{mod_name}")
+@pytest.mark.parametrize("name", _MODEL_BEARING)
+def test_provider_modules_no_longer_declare_floor_constants(name: str) -> None:
+    mod = importlib.import_module(f"imp.providers.{BUILTIN_FLOOR[name].module}")
     assert not hasattr(mod, "TIER_DEFAULTS")
     assert not hasattr(mod, "ENV_VAR")
 

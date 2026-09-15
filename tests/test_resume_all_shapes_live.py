@@ -29,8 +29,8 @@ from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers import claude_code
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers import claude
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.claude_session_store import (
     message_to_session_records,
     session_key,
@@ -186,9 +186,9 @@ async def test_send_to_llm_store_backed_native_resume(
     # full transcript (3 turns). Both would otherwise satisfy the behavioral
     # assertions below.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
@@ -261,9 +261,9 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # placeholder tool_result for the dangling t1 (1 turn) to kick the next turn.
     # An empty delta would deadlock (claude-p never self-starts a loaded session).
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
@@ -367,9 +367,9 @@ async def test_complete_step_handback_native_resume(
     # Spy on the first-query stream: the native path streams ONLY the handback
     # (1 user turn) — the is_error feedback result that pairs the dangling call.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
@@ -450,9 +450,9 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     # resume streams ONLY the delivered feedback turn (1 turn); a stream-json
     # fallback would replay the full transcript.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
@@ -526,9 +526,9 @@ async def test_midrun_interrupt_resume_continues_agent(
     # Spy on the first-query history stream: the native continue path streams ONLY
     # the continuation-nudge turn (1 turn); a solicit/replay would look different.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     runner = ClaudeCodeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)

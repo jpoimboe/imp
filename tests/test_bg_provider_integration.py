@@ -204,7 +204,7 @@ async def test_wired_providers_enable_background(tmp_path: Path) -> None:
     and tests/test_bg_cc_codex_parity.py."""
     import re
     from pathlib import Path as _P
-    for mod in ("push_session", "claude_code", "codex_runner"):
+    for mod in ("push_session", "claude", "codex_runner"):
         src = _P(f"src/imp/providers/{mod}.py").read_text(encoding="utf-8")
         assert re.search(r"background_enabled=True", src), mod
 

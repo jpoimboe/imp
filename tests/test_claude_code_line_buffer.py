@@ -19,7 +19,7 @@ from imp.agents.runner import AgentInvocation, ImagePart, QuestContext
 from imp.agents.tools.image import BASE64_TARGET_BYTES
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import (
+from imp.providers.claude import (
     _CLI_LINE_BUFFER_BYTES,
     ClaudeCodeAgentRunner,
     _tool_response_parts,

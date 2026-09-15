@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers import anthropic, claude_code, openai, scripted
+from imp.providers import anthropic, claude, openai, scripted
 
 # wait_for_user is no longer a registered tool on ANY provider: a bare turn-end
 # is the yield. Even the offline scripted provider routes its bare turn-end
 # through the shared continuation handler instead of a wait_for_user tool_use.
-PROVIDERS = [anthropic, openai, claude_code, scripted]
+PROVIDERS = [anthropic, openai, claude, scripted]
 
 
 def _agent(tools):

@@ -8,11 +8,11 @@ from typing import Any, Literal
 
 import pytest
 
-import imp.providers.claude_code as cc
+import imp.providers.claude as cc
 import imp.providers.observe_classify as ocls
 from imp.engine.state import InMemoryEventLog
 from imp.providers import errors as perr
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexSession
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests.cc_fakes import (

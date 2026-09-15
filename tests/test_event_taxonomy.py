@@ -24,13 +24,13 @@ def test_no_agent_output_control_yields_remain() -> None:
     from imp.agents import dispatch
     from imp.providers import (
         anthropic,
-        claude_code,
+        claude,
         codex_runner,
         openai,
         scripted,
     )
 
-    for mod in (dispatch, anthropic, openai, claude_code, codex_runner, scripted):
+    for mod in (dispatch, anthropic, openai, claude, codex_runner, scripted):
         assert '"type": "agent_output"' not in inspect.getsource(mod), mod.__name__
     # the consumer no longer looks for the old type
     from imp.engine import agent_run

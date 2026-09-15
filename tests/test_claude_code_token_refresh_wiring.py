@@ -13,9 +13,9 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers import claude_code
+from imp.providers import claude
 from imp.providers import claude_token_refresh as ctr
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 
 NOW = 1_000_000_000_000
@@ -82,9 +82,9 @@ async def test_fresh_spawn_refreshes_before_config_dir_copy(
         (cfg / "projects").mkdir(parents=True, exist_ok=True)
         return cfg
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
     runner = ClaudeCodeAgentRunner(
@@ -118,9 +118,9 @@ async def test_native_resume_refreshes_without_materializing(
         calls.append("materialize")
         raise AssertionError("native resume must not copy a fresh config dir")
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, log)
@@ -156,9 +156,9 @@ async def test_dead_token_raises_terminal_auth_without_materializing(
     def _fake_materialize() -> Path:
         raise AssertionError("dead token must short-circuit before config copy")
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _dead)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _dead)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
     runner = ClaudeCodeAgentRunner(
@@ -195,9 +195,9 @@ def _probe_seam(
         (cfg / "projects").mkdir(parents=True, exist_ok=True)
         return cfg
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
     return calls
 
 
@@ -346,9 +346,9 @@ async def test_fresh_spawn_records_the_post_refresh_canonical_expiry(
         (cfg / "projects").mkdir(parents=True, exist_ok=True)
         return cfg
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
     runner = ClaudeCodeAgentRunner(
@@ -379,9 +379,9 @@ async def test_native_resume_records_the_canonical_expiry_too(
         materialized.append(True)
         raise AssertionError("native resume must not copy a fresh config dir")
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, log)
@@ -436,7 +436,7 @@ def _expiry_reads(monkeypatch: pytest.MonkeyPatch,
         taken.append(value)
         return value
 
-    monkeypatch.setattr(claude_code, "canonical_expires_at", _fake)
+    monkeypatch.setattr(claude, "canonical_expires_at", _fake)
     return taken
 
 
@@ -463,9 +463,9 @@ async def test_rotation_race_on_native_resume_stays_retryable(
         materialized.append(True)
         raise AssertionError("native resume must not copy a fresh config dir")
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
-        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+        claude, "materialize_fresh_config_dir", _fake_materialize)
     reads = _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()

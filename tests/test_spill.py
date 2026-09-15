@@ -149,7 +149,7 @@ def test_every_dispatch_task_call_site_wraps_its_result() -> None:
     # three dispatch paths (anthropic/openai, codex, claude_code).
     sites = _dispatch_task_call_sites()
     assert {rel for rel, _, _, _ in sites} >= {
-        "agents/dispatch.py", "providers/codex_mcp.py", "providers/claude_code.py"
+        "agents/dispatch.py", "providers/codex_mcp.py", "providers/claude.py"
     }
     for rel, func, lineno, has_wrap in sites:
         assert has_wrap, (

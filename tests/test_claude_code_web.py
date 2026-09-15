@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers.claude_code import ClaudeCodeAgentRunner, _parse_cc_web_citations
+from imp.providers.claude import ClaudeCodeAgentRunner, _parse_cc_web_citations
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,

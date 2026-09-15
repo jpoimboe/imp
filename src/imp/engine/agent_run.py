@@ -48,7 +48,7 @@ from imp.agents.transcript import (
 )
 from imp.assets import engine_prompt
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.completion import (  # re-exports for claude_code.py
+from imp.engine.completion import (  # re-exports for claude.py
     INTERRUPT_STEER_HINT as INTERRUPT_STEER_HINT,
 )
 from imp.engine.completion import (

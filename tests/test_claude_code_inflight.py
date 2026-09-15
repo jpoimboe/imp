@@ -14,7 +14,7 @@ from imp.agents.runner import (
 )
 from imp.agents.transcript import captured_result_key
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude_code import (
+from imp.providers.claude import (
     INFLIGHT_RESULT_BOUND_S,
     _correct_withheld_results,
     _InFlightOutcome,

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from imp.providers import errors as perr
-from imp.providers.claude_code import _read_token_expiry, _termination_from_result
+from imp.providers.claude import _read_token_expiry, _termination_from_result
 from tests.cc_fakes import result
 
 NOW = 1_700_000_000_000  # fixed "now" in epoch ms for deterministic comparisons

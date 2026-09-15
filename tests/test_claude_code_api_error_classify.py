@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from imp.providers import errors as perr
-from imp.providers.claude_code import _classify_agent_text, _termination_from_result
+from imp.providers.claude import _classify_agent_text, _termination_from_result
 from tests.cc_fakes import result
 
 
@@ -188,7 +188,7 @@ def test_termination_connection_refused_is_network_not_terminated() -> None:
     # back NetworkError (-> RetryWithBackoff), never TerminatedError (-> Pause).
     from types import SimpleNamespace
 
-    from imp.providers.claude_code import _termination_from_result
+    from imp.providers.claude import _termination_from_result
     sdk_msg = SimpleNamespace(
         is_error=True, subtype="success", api_error_status=None,
         stop_reason=None, errors=None)
@@ -199,7 +199,7 @@ def test_termination_connection_refused_is_network_not_terminated() -> None:
 
 
 def test_transient_phrases_constant_removed() -> None:
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
     assert not hasattr(cc, "_TRANSIENT_PHRASES")
 
 

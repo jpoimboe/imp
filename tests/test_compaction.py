@@ -8,7 +8,7 @@ import anyio
 from imp.agents.compaction import ENGINE_NOTE, RESULT_PLACEHOLDER, compact_transcript
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.providers.claude_code import _project_for_cli
+from imp.providers.claude import _project_for_cli
 from imp.providers.claude_session_store import (
     message_to_session_records,
     session_store_for,

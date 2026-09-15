@@ -16,7 +16,7 @@ from imp.engine.reincarnation import handoff_instruction, handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import (
+from imp.providers.claude import (
     ClaudeCodeAgentRunner,
     _InFlightOutcome,
     _wrap_one,
@@ -371,7 +371,7 @@ async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
     ResultMessage. The persisted transcript must carry what the tool really did —
     and the capture sidecar cannot be the source: the spy pins that it did not yet
     exist at the moment imp read it."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     real_load = cc._load_captured_tool_results
     reads: list[bool] = []
@@ -425,7 +425,7 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
     """A call that never finishes gets an honest statement of uncertainty on the
     transcript — is_error, but never the SDK's claim of rejection."""
     from imp.agents.transcript import captured_result_key
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
     (tmp_path / "art").mkdir()
@@ -577,7 +577,7 @@ async def test_handoff_increment_states_uncertainty_when_the_bound_expires(
     """A call still wedged when the bound expires is named in the increment with the
     honest uncertainty sentence — never the SDK's claim of rejection."""
     from imp.agents.transcript import captured_result_key
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
     (tmp_path / "art").mkdir()

@@ -7,7 +7,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers.claude_code import (
+from imp.providers.claude import (
     ClaudeCodeAgentRunner,
     _make_impty_sdk_tools,
 )

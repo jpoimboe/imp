@@ -12,7 +12,7 @@ import pytest
 from imp.agents.runner import TextBlock
 from imp.agents.transcript import Transcript
 from imp.engine.state import JsonlEventLog
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.codex_fakes import (

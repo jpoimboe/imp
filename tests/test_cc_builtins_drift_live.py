@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.cc_probe import invocation, probe_advertised_tools, resolve_cli
 
 pytestmark = pytest.mark.live("claude_code")

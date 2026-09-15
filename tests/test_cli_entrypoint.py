@@ -334,7 +334,7 @@ _FORBIDDEN_TOP_LEVEL = frozenset({
 })
 _PROVIDER_MODULES = frozenset({
     "imp.providers.anthropic", "imp.providers.openai",
-    "imp.providers.claude_code", "imp.providers.codex",
+    "imp.providers.claude", "imp.providers.codex",
     "imp.providers.codex_runner", "imp.providers.scripted",
 })
 

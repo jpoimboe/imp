@@ -342,7 +342,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 ) -> None:
     from typing import Any
 
-    from imp.providers.claude_code import ClaudeCodeProvider
+    from imp.providers.claude import ClaudeCodeProvider
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,

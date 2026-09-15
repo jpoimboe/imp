@@ -12,7 +12,7 @@ import pytest
 
 from imp.agents.runner import Message, TextBlock
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude_code import ClaudeCodeSession
+from imp.providers.claude import ClaudeCodeSession
 from imp.providers.codex_runner import CodexSession
 
 

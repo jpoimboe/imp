@@ -18,7 +18,7 @@ from imp.agents.runner import (
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.claude_session_store import (
     ImpSessionStore,
     resume_session_id,
@@ -382,7 +382,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
 async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
     tmp_path: Path,
 ) -> None:
-    """Receive-loop suppression branch (claude_code.py, user-role ToolResultBlock
+    """Receive-loop suppression branch (claude.py, user-role ToolResultBlock
     handling). When the SDK echoes the `task` tool_result back through the receive
     loop, the runner must:
       (a) SUPPRESS that echo — _impl already appended the canonical, minted
@@ -401,7 +401,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 
     from imp.agents.runner import ToolResultBlock as RealToolResultBlock
     from imp.agents.runner import ToolUseBlock as RealToolUseBlock
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from tests.cc_fakes import FakeToolResultBlock, FakeUserMessage
 
     (tmp_path / "art").mkdir()
@@ -643,7 +643,7 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
 
 
 def test_classify_agent_text_invalid_api_key() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text("Some preamble. Invalid API key, sorry.", output_tokens=0)
@@ -651,7 +651,7 @@ def test_classify_agent_text_invalid_api_key() -> None:
 
 
 def test_classify_agent_text_login_required() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text("Please run `/login` first.", output_tokens=0)
@@ -659,7 +659,7 @@ def test_classify_agent_text_login_required() -> None:
 
 
 def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     # The mona44 mid-run logout message carries no backticks; anchored
@@ -669,7 +669,7 @@ def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
 
 
 def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     # Full-text mode (used by _termination_from_result on erroring turns)
@@ -680,7 +680,7 @@ def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
 
 
 def test_classify_agent_text_login_required_backticked_still_terminal_auth() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     # Regression: the backticked variant must still classify as auth_terminal.
@@ -689,7 +689,7 @@ def test_classify_agent_text_login_required_backticked_still_terminal_auth() -> 
 
 
 def test_classify_agent_text_quota_usage_limit() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text(
@@ -698,7 +698,7 @@ def test_classify_agent_text_quota_usage_limit() -> None:
 
 
 def test_classify_agent_text_credit_balance() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text(
@@ -707,7 +707,7 @@ def test_classify_agent_text_credit_balance() -> None:
 
 
 def test_classify_agent_text_benign_returns_none() -> None:
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     assert cc._classify_agent_text(
         "I'm working on the task. One moment.", output_tokens=0) is None
     # Pattern conservatism: a tool result that *mentions* auth errors must
@@ -719,7 +719,7 @@ def test_classify_agent_text_benign_returns_none() -> None:
 
 def test_text_of_concatenates_textblocks_only() -> None:
     from imp.agents.runner import Message, TextBlock, ToolUseBlock
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     msg = Message(
         role="assistant",
@@ -911,7 +911,7 @@ def test_claude_code_provider_registered_and_resolves() -> None:
         WorkflowDefaults,
     )
     from imp.providers import resolve
-    from imp.providers.claude_code import ClaudeCodeProvider
+    from imp.providers.claude import ClaudeCodeProvider
     from imp.providers.config import Config
 
     resolve.reset_providers_for_tests()
@@ -1147,7 +1147,7 @@ async def test_force_kill_sigkills_transport_group_without_waiting(
     import asyncio
     import signal
 
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
 
     calls: list[tuple[int | None, int]] = []
 
@@ -1211,7 +1211,7 @@ async def test_force_kill_sigkills_transport_group_without_waiting(
 @pytest.mark.anyio
 async def test_force_kill_without_live_client_is_safe() -> None:
     """force_kill() before run() (no client/transport) must not raise."""
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
 
     runner = cc.ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
     await runner.force_kill()   # no client connected; must be a safe no-op
@@ -1323,7 +1323,7 @@ async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path
 
 def test_termination_from_result_nonzero_exit_is_terminated() -> None:
     """Nonzero subprocess exit triggers TerminatedError independent of is_error."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     benign = "The build finished but complete_step was never called."
@@ -1339,7 +1339,7 @@ def test_termination_from_result_nonzero_exit_is_terminated() -> None:
 def test_termination_preserves_text_5xx_as_network() -> None:
     """An is_error ResultMessage whose last text is `API Error: 500 …` keeps the
     NetworkError category (network → RetryWithBackoff), not TerminatedError."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1352,7 +1352,7 @@ def test_termination_preserves_text_5xx_as_network() -> None:
 
 def test_termination_preserves_text_429_as_rate_limit() -> None:
     """`API Error: 429 …` is the only 429 path; it keeps the RateLimitError category."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1363,7 +1363,7 @@ def test_termination_preserves_text_429_as_rate_limit() -> None:
 
 def test_termination_quota_and_auth_still_pause() -> None:
     """Terminal causes keep their pausing categories, unchanged."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     quota = cc._termination_from_result(
@@ -1376,7 +1376,7 @@ def test_termination_quota_and_auth_still_pause() -> None:
 
 def test_termination_unrecognized_text_is_terminated() -> None:
     """is_error with unrecognized text and null status stays TerminatedError (pauses)."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1387,7 +1387,7 @@ def test_termination_unrecognized_text_is_terminated() -> None:
 def test_termination_4xx_non_429_is_terminated() -> None:
     """A 4xx (non-429) api_error_status collapses to TerminatedError — ApiError
     is intentionally not in the preserved-type set, so 4xx stays as a pause."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1397,7 +1397,7 @@ def test_termination_4xx_non_429_is_terminated() -> None:
 
 def test_termination_api_error_status_5xx_is_network() -> None:
     """A 5xx api_error_status with code-less text classifies as NetworkError."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1410,7 +1410,7 @@ def test_termination_api_error_status_5xx_is_network() -> None:
 def test_termination_api_error_status_429_is_rate_limit() -> None:
     """A 429 api_error_status classifies as RateLimitError (recoverable backoff),
     not TerminatedError, even when the agent text carries no routable code."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1422,7 +1422,7 @@ def test_termination_api_error_status_429_is_rate_limit() -> None:
 def test_termination_text_label_wins_over_api_error_status() -> None:
     """Text classification wins over api_error_status: if _classify_agent_text
     returns a label, the 5xx status fallback does not override it."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1434,7 +1434,7 @@ def test_termination_text_label_wins_over_api_error_status() -> None:
 def test_termination_codeless_phrase_null_status_is_network() -> None:
     """A code-less `API Error: Internal server error` with null status survives
     as NetworkError through _termination_from_result."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1446,7 +1446,7 @@ def test_termination_codeless_phrase_null_status_is_network() -> None:
 def test_termination_api_error_status_401_is_auth() -> None:
     """A 401 status with code-less text classifies as AuthError (not Terminated),
     carrying kind=http_401 so the eventual pause reads as a credential issue."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1460,7 +1460,7 @@ def test_termination_api_error_status_401_is_auth() -> None:
 def test_termination_api_error_status_403_is_auth() -> None:
     """A 403 status with code-less text classifies as AuthError (not Terminated),
     carrying kind=http_403."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1474,7 +1474,7 @@ def test_termination_api_error_status_403_is_auth() -> None:
 def test_termination_api_error_status_400_stays_terminated() -> None:
     """A 4xx-bug status (400) with code-less text is NOT rescued by the auth
     fallback — it stays TerminatedError (immediate pause), as before."""
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
@@ -1518,7 +1518,7 @@ def test_build_client_installs_session_isolation_on_real_arm(
 @pytest.mark.anyio
 async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> None:
     from imp.agents.tools.context import ToolContext
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     async def _fake_dispatch(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return "sub done"
@@ -1556,7 +1556,7 @@ async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> N
 @pytest.mark.anyio
 async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> None:
     from imp.agents.tools.context import ToolContext
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     async def _fake_dispatch(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return "sub done"
@@ -2480,7 +2480,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
     # An all-TextBlock user turn serializes content to a PLAIN STRING via
-    # _join_text (claude_code.py:864-866), not a list of blocks.
+    # _join_text (claude.py:864-866), not a list of blocks.
     assert streamed[0]["message"]["content"] == "DISPATCH"
 
 
@@ -2949,8 +2949,8 @@ def test_run_state_has_no_wait_for_user_pause_fields() -> None:
     import dataclasses
     import inspect
 
-    import imp.providers.claude_code as cc_mod
-    from imp.providers.claude_code import _RunState
+    import imp.providers.claude as cc_mod
+    from imp.providers.claude import _RunState
 
     names = {f.name for f in dataclasses.fields(_RunState)}
     assert "awaiting_user" not in names
@@ -4107,7 +4107,7 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
 async def test_claude_code_impl_records_tool_duration(
     tmp_path: Path, monkeypatch: Any,
 ) -> None:
-    import imp.providers.claude_code as cc_mod
+    import imp.providers.claude as cc_mod
     from imp.agents.tools.context import ToolContext
 
     async def _noop(_ctx: Any) -> None:
@@ -4183,7 +4183,7 @@ async def test_claude_code_tool_result_carries_recorded_duration(
 async def test_claude_code_tool_result_duration_non_none_e2e(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import imp.providers.claude_code as cc_mod
+    import imp.providers.claude as cc_mod
     orig_cls = cc_mod._RunState
     def _seeded_state():
         s = orig_cls()
@@ -4484,7 +4484,7 @@ async def test_multi_fragment_group_uses_harvested_usage(
 
 def test_load_captured_tool_results_reads_sidecar(tmp_path: Path) -> None:
     from imp.agents.transcript import captured_result_key
-    from imp.providers.claude_code import (
+    from imp.providers.claude import (
         CAPTURED_TOOL_RESULTS_FILENAME,
         _load_captured_tool_results,
     )
@@ -4504,7 +4504,7 @@ def test_load_captured_tool_results_reads_sidecar(tmp_path: Path) -> None:
 
 
 def test_load_captured_tool_results_missing_file_is_empty(tmp_path: Path) -> None:
-    from imp.providers.claude_code import _load_captured_tool_results
+    from imp.providers.claude import _load_captured_tool_results
 
     assert _load_captured_tool_results(tmp_path) == {}
 
@@ -4513,7 +4513,7 @@ def test_load_captured_tool_results_missing_file_is_empty(tmp_path: Path) -> Non
 async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code import CAPTURED_TOOL_RESULTS_FILENAME
+    from imp.providers.claude import CAPTURED_TOOL_RESULTS_FILENAME
     from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
@@ -4575,7 +4575,7 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
 
 def test_history_dicts_renders_merged_user_text_blocks_separately() -> None:
     """Merged user text turns render as separate text blocks, not one fused string."""
-    from imp.providers.claude_code import (
+    from imp.providers.claude import (
         _history_dicts,
         _merge_assistant_fragments,
     )
@@ -4595,7 +4595,7 @@ def test_history_dicts_renders_merged_user_text_blocks_separately() -> None:
 
 def test_history_dicts_keeps_lone_user_text_as_plain_string() -> None:
     """A lone user text block keeps the canonical plain-string content form."""
-    from imp.providers.claude_code import _history_dicts
+    from imp.providers.claude import _history_dicts
 
     dicts = list(_history_dicts([
         Message(role="user", content=(TextBlock(text="solo"),)),
@@ -4806,7 +4806,7 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     import asyncio
 
     from imp.agents.subagents import make_task_tool
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
         cap["tool_call_event_id"] = tool_call_event_id
@@ -4903,7 +4903,7 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
     import asyncio
 
     from imp.agents.subagents import make_task_tool
-    from imp.providers import claude_code as cc
+    from imp.providers import claude as cc
 
     async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
         return "sub done"
@@ -5059,7 +5059,7 @@ async def test_cc_run_aclose_cascades_to_run_loop(
             closed.append(True)
 
     runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
-    monkeypatch.setattr("imp.providers.claude_code.run_agent_loop",
+    monkeypatch.setattr("imp.providers.claude.run_agent_loop",
                         lambda invocation, session: _fake_loop(invocation))
 
     gen = runner.run(_inv(tmp_path))
@@ -5102,7 +5102,7 @@ async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> No
     replaced, not counted as turns and not allowed to displace real ones."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
-    from imp.providers.claude_code import _project_for_cli
+    from imp.providers.claude import _project_for_cli
     from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
@@ -5341,7 +5341,7 @@ async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
 
 
 def test_auth_mode_maps_api_key_source_to_the_metered_marker() -> None:
-    from imp.providers.claude_code import _auth_mode_from_init
+    from imp.providers.claude import _auth_mode_from_init
     assert _auth_mode_from_init({"apiKeySource": "none"}) == "subscription"
     assert _auth_mode_from_init({"apiKeySource": "user"}) == "apikey"
     assert _auth_mode_from_init(

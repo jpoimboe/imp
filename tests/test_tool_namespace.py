@@ -435,7 +435,7 @@ def test_a_base_policy_change_rebuilds_the_namespace():
 
 def test_a_steer_leaves_the_namespace_usable():
     # AC 19. The cooperative-steer branch kills and then RE-QUERIES with the same
-    # ctx (claude_code.py:1859 -> _requery_pending -> return False). Closing there
+    # ctx (claude.py:1859 -> _requery_pending -> return False). Closing there
     # would destroy the namespace while the run continues, and the pinned fds fail
     # closed — every later bash call would die "nsenter: fork failed".
     root = _make_root()

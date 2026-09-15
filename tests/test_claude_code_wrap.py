@@ -23,7 +23,7 @@ from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import captured_result_key
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import _RunState, _wrap_one
+from imp.providers.claude import _RunState, _wrap_one
 
 
 @pytest.fixture
@@ -273,7 +273,7 @@ async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
     so the receive loop can emit tool_killed events later."""
 
     from imp.agents.tools import get_registry
-    from imp.providers.claude_code import _RunState, _wrap_one
+    from imp.providers.claude import _RunState, _wrap_one
 
     state = _RunState()
     bash_tool = get_registry()["bash"]
@@ -432,7 +432,7 @@ def test_cc_task_annotation_derived_from_allowlist(
     monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
     reset_parallelism_cache()
     monkeypatch.setattr(
-        "imp.providers.claude_code.CLAUDE_CODE_ALLOWLIST_MODE", False)
+        "imp.providers.claude.CLAUDE_CODE_ALLOWLIST_MODE", False)
     try:
         wrapped = _wrap_one(
             "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
@@ -537,7 +537,7 @@ async def test_wrap_task_suspension_marks_result_interrupted(
     # dispatch_task's SubagentSuspended degrades to an is_error task tool_result.
     # That degraded result must carry a structured kind="interrupted" so the
     # renderer classifies the fold as (interrupted), not (failed).
-    import imp.providers.claude_code as cc_mod
+    import imp.providers.claude as cc_mod
     from imp.agents.subagents import SubagentSuspended, make_task_tool
     from imp.engine.state import InMemoryEventLog
 
@@ -568,7 +568,7 @@ async def test_wrap_task_suspension_marks_result_interrupted(
 
 @pytest.mark.anyio
 async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
-    import imp.providers.claude_code as cc_mod
+    import imp.providers.claude as cc_mod
     from imp.engine.state import InMemoryEventLog
 
     seen: dict = {}
@@ -825,7 +825,7 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
     production receive-loop-vs-_impl race and the flush-lock barrier are covered
     by the concurrent tests in test_claude_code_runner.py.
     """
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
     from imp.engine.state import InMemoryEventLog
 
     sub_def = AgentDef(

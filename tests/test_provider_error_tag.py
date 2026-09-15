@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from imp.engine.state import JsonlEventLog
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.observe_classify import matches_error_prose
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use

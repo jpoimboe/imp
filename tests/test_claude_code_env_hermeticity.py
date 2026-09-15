@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 
 _BLANKED_KEYS = (
     "MAX_THINKING_TOKENS",

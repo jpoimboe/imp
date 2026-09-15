@@ -16,8 +16,8 @@ import anyio
 import pytest
 
 from imp.paths import project_state_dir
-from imp.providers import claude_code as cc_mod
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers import claude as cc_mod
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup
 from tests.test_build_tools_wait_for_user import _Inv
@@ -56,7 +56,7 @@ def test_codex_no_claude_code_reachin() -> None:
 
     from imp.providers import codex_runner
     src = inspect.getsource(codex_runner)
-    assert "from imp.providers.claude_code import" not in src
+    assert "from imp.providers.claude import" not in src
 
 
 # ---------------------------------------------------------------------------

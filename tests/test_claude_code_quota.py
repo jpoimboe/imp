@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude_code import ClaudeCodeAgentRunner, quota_from_rate_limit_info
+from imp.providers.claude import ClaudeCodeAgentRunner, quota_from_rate_limit_info
 from imp.providers.quota import QuotaWindow
 from tests.cc_fakes import (
     FakeClaudeSDKClient,

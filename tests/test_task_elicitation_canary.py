@@ -49,7 +49,7 @@ def test_claude_code_task_description_has_elicitation_language(
     from claude_agent_sdk import tool as sdk_tool
 
     from imp.agents.tools.context import ToolContext
-    from imp.providers.claude_code import _RunState, _wrap_one
+    from imp.providers.claude import _RunState, _wrap_one
     ctx = ToolContext(
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",

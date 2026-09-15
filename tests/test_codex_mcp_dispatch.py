@@ -514,7 +514,7 @@ def test_negative_rc_bash_records_killed_tool(tmp_path: Path) -> None:
     state = RunState(cap=10)
     asyncio.run(dispatch_tool(tool=bash, args={"command": "sleep 100"},
                               ctx=ctx, state=state))
-    # Sibling shape (claude_code.py): {id, name, signal}. codex args carry no
+    # Sibling shape (claude.py): {id, name, signal}. codex args carry no
     # __tool_use_id__, so id is "" (documented weak-id approximation).
     assert state.killed_tool_uses == [{"id": "", "name": "bash", "signal": 9}]
 
@@ -676,7 +676,7 @@ def test_codex_run_state_has_no_runtime_errors_field() -> None:
     independent field of the same name that must survive."""
     from dataclasses import fields
 
-    from imp.providers.claude_code import _RunState as ClaudeCodeRunState
+    from imp.providers.claude import _RunState as ClaudeCodeRunState
 
     assert "runtime_errors" not in {f.name for f in fields(RunState)}
     assert "runtime_errors" in {f.name for f in fields(ClaudeCodeRunState)}

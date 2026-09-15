@@ -96,7 +96,7 @@ def test_building_the_parse_table_imports_no_provider_module() -> None:
     code = (
         "import sys, imp.engine.replay\n"
         "watched = {'imp.providers.anthropic', 'imp.providers.openai',\n"
-        "           'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "           'imp.providers.claude', 'imp.providers.codex',\n"
         "           'imp.providers.codex_runner', 'imp.providers.scripted',\n"
         "           'httpx'}\n"
         "print('LEAKED:' + ','.join(sorted(watched & sys.modules.keys())))\n"
@@ -119,7 +119,7 @@ def test_building_the_parse_table_imports_no_provider_module() -> None:
 
 
 def test_the_relocated_parsers_leave_no_re_export_shim() -> None:
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
     import imp.providers.codex_runner as cr
     from imp.providers import message_parsers
 

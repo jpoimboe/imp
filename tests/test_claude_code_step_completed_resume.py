@@ -18,8 +18,8 @@ from imp.agents.transcript import RESUME_REDO_NUDGE, Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers import claude_code
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers import claude
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
 
@@ -86,9 +86,9 @@ async def test_step_completed_rework_delivers_feedback_as_user_turn_natively(
 
     # Spy on the first-query history stream to prove the native single-turn delta.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
     def factory(opts: Any) -> FakeClaudeSDKClient:

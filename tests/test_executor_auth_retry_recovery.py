@@ -15,9 +15,9 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from imp.providers import claude_code
+from imp.providers import claude
 from imp.providers import claude_token_refresh as ctr
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.golive_fakes import GoLiveOnce, patch_policy_builder
 
@@ -372,7 +372,7 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
             return ctr.RefreshOutcome(ctr.NOT_APPLICABLE)
         return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
 
-    monkeypatch.setattr(claude_code, "refresh_canonical_token", _dead_on_force)
+    monkeypatch.setattr(claude, "refresh_canonical_token", _dead_on_force)
 
     async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None

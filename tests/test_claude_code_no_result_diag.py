@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from imp.providers.claude_code import _subprocess_diag
+from imp.providers.claude import _subprocess_diag
 
 
 class _FakeTransportClient:

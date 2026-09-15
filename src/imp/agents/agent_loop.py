@@ -174,7 +174,7 @@ async def run_agent_loop(
             if session.cancelled():
                 # An interrupt landed while resolving the continuation: pause at
                 # the turn boundary instead of writing a continuation the agent
-                # was Ctrl-C'd out of (old claude_code.py:2511-2524).
+                # was Ctrl-C'd out of (old claude.py:2511-2524).
                 yield {"type": "error", "payload": {
                     "category": "config",
                     "kind": "interrupted",

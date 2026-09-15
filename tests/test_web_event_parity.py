@@ -8,7 +8,7 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import _emit_anthropic_web_events
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from imp.providers.openai import _emit_openai_web_events
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, tool_result, tool_use, user
 from tests.openai_fakes import resp_message, resp_response, resp_web_search_call

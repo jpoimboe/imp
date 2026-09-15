@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests import cc_probe
 from tests.cc_probe import (
     PROBE_ATTEMPTS,

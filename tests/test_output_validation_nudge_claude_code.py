@@ -8,7 +8,7 @@ import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, tool_use
 from tests.test_claude_code_runner import _inv
 

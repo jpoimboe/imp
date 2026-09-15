@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from imp.providers.claude_code import _reap_transport_group
+from imp.providers.claude import _reap_transport_group
 
 
 @pytest.fixture

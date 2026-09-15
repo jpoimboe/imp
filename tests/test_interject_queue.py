@@ -256,7 +256,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
     from dataclasses import replace
 
     from imp.agents.runner import QuestContext as _CC
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeCodeAgentRunner
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,

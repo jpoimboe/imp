@@ -49,7 +49,7 @@ def test_no_private_reachthrough_across_providers() -> None:
     allowed_substrings = (
         "src/imp/providers/anthropic.py",
         "src/imp/providers/openai.py",
-        "src/imp/providers/claude_code.py",
+        "src/imp/providers/claude.py",
         "src/imp/providers/codex.py",
         "src/imp/providers/codex_runner.py",
         "src/imp/cli/session_controls.py",

@@ -47,7 +47,7 @@ from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
-from imp.providers.claude_code import ClaudeCodeAgentRunner, _RunState, _wrap_one
+from imp.providers.claude import ClaudeCodeAgentRunner, _RunState, _wrap_one
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import (
     FakeAsyncAnthropic,

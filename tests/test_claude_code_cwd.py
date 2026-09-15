@@ -28,7 +28,7 @@ from imp.engine.types import (
     SourceLoc,
 )
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 
 
 def _invocation(project_root: Path) -> AgentInvocation:

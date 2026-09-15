@@ -6,7 +6,7 @@ from pathlib import Path
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeCodeAgentRunner
 
 
 def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:

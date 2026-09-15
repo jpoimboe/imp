@@ -16,7 +16,7 @@ from pathlib import Path
 import pyte
 
 from imp.agents.tools.image import process_image
-from imp.providers.claude_code import _CLI_LINE_BUFFER_BYTES
+from imp.providers.claude import _CLI_LINE_BUFFER_BYTES
 from impty.render import render_screen
 from impty.screen import TerminalScreen
 
