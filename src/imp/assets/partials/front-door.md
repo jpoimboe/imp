@@ -32,10 +32,10 @@ language, build system, or CLI you can already see. Given an empty or greenfield
 with no stack yet, treat the choice of stack as an open design question to raise, not
 one to assume or invent.
 
-Orientation is lazy — on demand, not reflexive. A pure imp-mechanics question
-("how does imp work?") needs no project-stack read; orient only when you are about
-to say something specific to this project. Keep the cue invisible: honor
-"Speak plainly" below and surface none of the internal terms.
+A pure imp-mechanics question ("how does imp work?") needs no project-stack read.
+Anything that touches this project does — read before you speak, and read more
+than feels sufficient. Keep the cue invisible: honor "Speak plainly" below and
+surface none of the internal terms.
 
 {% if project.undecided %}
 **Undecided project settings.** imp raises each of these once, when the repo can

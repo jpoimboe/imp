@@ -56,9 +56,9 @@ def _render(workflow: str, agent: str, undecided: Undecided) -> str:
 def test_block_is_verbatim_and_sits_with_the_orientation_guidance() -> None:
     fd = FRONT_DOOR.read_text()
     assert BLOCK in fd
-    lazy = fd.index("Orientation is lazy — on demand, not reflexive.")
+    orient = fd.index("Anything that touches this project does — read before you speak")
     principles = fd.index('{% include "partials/spec-design-principles.md" %}')
-    assert lazy < fd.index(BLOCK) < principles
+    assert orient < fd.index(BLOCK) < principles
 
 
 def test_threshold_raises_only_the_undecided_settings() -> None:
