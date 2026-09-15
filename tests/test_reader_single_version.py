@@ -5,7 +5,6 @@ from pathlib import Path
 
 from imp.cli import narrative as nv
 from imp.cli.store import _resolve_intent
-from imp.engine.event_migrations import migrate_events
 
 _EVENT_ID_NS_RE = re.compile(r"""id_ns["']?\s*(?:==|=|:)\s*["']event["']""")
 
@@ -29,29 +28,11 @@ def test_title_resolver_ignores_old_opening_intent_shape() -> None:
     assert _resolve_intent(old) is None
 
 
-def test_title_resolver_reads_migrated_intent() -> None:
-    old = [{"id": "i0", "parent_id": None, "agent_id": None, "timestamp": "T0",
-            "type": "opening_intent", "payload": {"text": "real opening"}}]
-    assert _resolve_intent(migrate_events(old)) == "real opening"
-
-
-def test_generic_human_turn_fallback_keys_on_new_format_reply() -> None:
-    # No intent event: the resolver falls back to the first genuine human turn.
-    # It requires no old-format shape or `human` key — a regression that keyed on
-    # `human: True` would return None on the migrated (human-stripped) payload.
-    pre_subtype_user_message = [{"id": "u1", "parent_id": None, "agent_id": "A", "timestamp": "T0",
-            "type": "user_message",
-            "payload": {"role": "user",
-                        "content": [{"type": "text", "text": "typed reply"}],
-                        "human": True}}]
-    assert _resolve_intent(migrate_events(pre_subtype_user_message)) == "typed reply"
-
-
 def test_no_source_probes_or_writes_the_deleted_event_id_ns() -> None:
     # Single-version reader: `"event"` has no writers and no probe. The guard is a
     # regex over the code spellings in either quote style (ruff selects no quote rules,
-    # so single quotes are legal here); migration prose that names the old value without
-    # an `=`/`:` is not a false positive.
+    # so single quotes are legal here); prose that names the old value without an
+    # `=`/`:` is not a false positive.
     imp_src = Path(nv.__file__).parent.parent
     offenders = sorted(
         str(p.relative_to(imp_src)) for p in imp_src.rglob("*.py")

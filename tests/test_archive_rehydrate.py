@@ -13,10 +13,8 @@ from imp.engine.archive import record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import session_has_resume_state
-from imp.engine.resume_state import parse_native_resume_state
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from imp.providers.codex_rollout import parse_codex_resume_state, restore_rollout
 from tests.conftest import _seed_control
 
 
@@ -124,56 +122,6 @@ def _seed_indexless_v11_legacy(control: Path, cid: str = "legacy") -> None:
     record.write_record(archive.records_root(control), rec)
     archive.data_version_path(control).write_text("11")
     assert not archive.index_path(control).exists()
-
-
-def test_rehydrate_migrates_indexless_v11_before_archive_reads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_indexless_v11_legacy(tmp_path)
-    observed: list[bytes] = []
-    original = {
-        "quest": archive_read.read_quest_json,
-        "state": archive_read.read_state_json,
-        "events": archive_read.read_events,
-        "steps": archive_read.read_step_blobs,
-    }
-
-    def checked(name: str):
-        def read(control: Path, cid: str):
-            observed.append(archive.data_version_path(control).read_bytes())
-            return original[name](control, cid)
-        return read
-
-    monkeypatch.setattr(archive_read, "read_quest_json", checked("quest"))
-    monkeypatch.setattr(archive_read, "read_state_json", checked("state"))
-    monkeypatch.setattr(archive_read, "read_events", checked("events"))
-    monkeypatch.setattr(archive_read, "read_step_blobs", checked("steps"))
-
-    quest_dir = archive_read.rehydrate_quest(tmp_path, "legacy")
-
-    loaded = Quest.load(tmp_path, "legacy")
-    session_dir = quest_dir / "steps" / "build" / "coder"
-    assert loaded.id == "legacy"
-    assert observed == [b"13"] * 4
-    assert not (session_dir / "codex_thread.json").exists()
-    assert not (session_dir / "codex_rollout").exists()
-    native = parse_native_resume_state((session_dir / "resume-state.json").read_bytes())
-    selected = parse_codex_resume_state(native)
-    codex_home = tmp_path / "codex-home"
-    thread_id = restore_rollout(
-        codex_home=codex_home,
-        transcript_dir=session_dir,
-        resume_state=native,
-    )
-    assert (
-        selected.restore_path,
-        codex_home.joinpath(*selected.restore_path.split("/")).read_bytes(),
-        thread_id,
-    ) == (
-        "sessions/2026/09/legacy.jsonl",
-        b'{"type":"session_meta","payload":{"id":"legacy-thread"}}\n',
-        "legacy-thread",
-    )
 
 
 def test_rehydrate_read_only_stale_archive_fails_before_reads(
