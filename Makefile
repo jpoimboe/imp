@@ -80,7 +80,7 @@ test-verbose: require-venv ## Same as `test` but with -v.
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
   tests/test_default_workflow_e2e_live_openai.py \
-  tests/test_default_workflow_e2e_live_claude_code.py \
+  tests/test_default_workflow_e2e_live_claude.py \
   tests/test_mid_step_resume_live.py \
   tests/test_openai_gate_feedback_resume_live.py \
   tests/test_resume_all_shapes_live.py \
@@ -108,7 +108,7 @@ test-live-quick: require-venv ## One-step live test for each provider whose tool
 	  $(PYTEST) --run-live -v \
 	    tests/test_default_workflow_e2e_live.py \
 	    tests/test_default_workflow_e2e_live_openai.py \
-	    tests/test_default_workflow_e2e_live_claude_code.py
+	    tests/test_default_workflow_e2e_live_claude.py
 
 .PHONY: test-live-codex-parallel
 test-live-codex-parallel: require-venv ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).

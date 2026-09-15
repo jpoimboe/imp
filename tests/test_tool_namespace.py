@@ -314,7 +314,7 @@ def test_a_command_imp_kills_reports_a_negative_returncode():
     # where the command's own signal does not. This pins the half that moved —
     # a REAL imp kill through a join still yields a negative code. The other half,
     # negative code -> killed_tool_uses, is unchanged by this quest and already
-    # pinned per provider against a stubbed rc: test_claude_code_wrap.py:285 and
+    # pinned per provider against a stubbed rc: test_claude_wrap.py:285 and
     # test_codex_mcp_dispatch.py::test_negative_rc_bash_records_killed_tool.
     root = _make_root()
     try:

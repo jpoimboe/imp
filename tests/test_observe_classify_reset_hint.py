@@ -23,7 +23,7 @@ from tests.cc_fakes import (
     system_init,
     text,
 )
-from tests.test_claude_code_runner import _inv
+from tests.test_claude_runner import _inv
 
 _NOW = 1788400000.0
 _SESSION_LIMIT = "You've hit your session limit · resets 4am (America/Los_Angeles)"

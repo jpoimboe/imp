@@ -311,7 +311,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_claude_code_resume_entry_drain_before_first_query(
+async def test_claude_resume_entry_drain_before_first_query(
     tmp_path: Path,
 ) -> None:
     """Interjects queued before resume must appear in the FIRST client.query()

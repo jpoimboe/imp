@@ -19,7 +19,7 @@ from tests.cc_fakes import (
     text,
     tool_use,
 )
-from tests.test_claude_code_runner import _inv
+from tests.test_claude_runner import _inv
 
 # The live 2.1.259 payload, verbatim from the quest's spike capture.
 _RAW = {

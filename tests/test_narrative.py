@@ -796,7 +796,7 @@ def test_legacy_unstamped_codex_fold_salvaged_by_resume_close() -> None:
     assert act2 is None or "subagent(reviewer)" not in (act2.verb or "")
 
 
-def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
+def test_claude_midstream_fragment_does_not_salvage_close() -> None:
     # claude_code emits stop_reason=None on mid-stream fragments — value-identical
     # to codex's turn-end None. The provider gate must keep claude_code fragments
     # mid-turn: a fragment must NOT salvage-close an open task fold (it closes
@@ -2960,7 +2960,7 @@ def test_query_result_renders_without_fallback() -> None:
     assert not any(isinstance(n, nv.FallbackLine) for n in _walk(tree.root))
 
 
-def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
+def test_claude_turn_end_detection_uses_real_stop_reason() -> None:
     # The coalesced claude_code llm_response now carries a real stop_reason, so
     # turn-end detection works through the standard frozenset path.
     assert nv._agent_message_is_turn_end(

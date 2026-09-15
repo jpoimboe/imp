@@ -1,4 +1,4 @@
-# tests/test_claude_code_stderr_capture.py
+# tests/test_claude_stderr_capture.py
 from __future__ import annotations
 
 from pathlib import Path

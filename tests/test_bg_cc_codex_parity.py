@@ -99,7 +99,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
 
     from imp.cli.signals import InterruptCoordinator
     from tests.cc_fakes import CooperativeClient, assistant, result, text
-    from tests.test_claude_code_runner import _inv
+    from tests.test_claude_runner import _inv
 
     coord = InterruptCoordinator()
     after_steer = [assistant(text("done")), result()]
@@ -176,7 +176,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
     This correctly pins "aclose → bg group dead via run()'s finally" without
     depending on MCP tool dispatch through the fake harness.
     """
-    from tests.test_claude_code_runner import _inv
+    from tests.test_claude_runner import _inv
 
     class _StallingClient:
         """Client whose query() stalls forever, allowing mid-drive ctx inspection."""

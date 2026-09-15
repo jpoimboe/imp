@@ -598,7 +598,7 @@ def test_codex_subagent_figures_routed_via_usage_patch():
     assert rows[0].usage == RowUsage()
 
 
-def test_claude_code_tokens_come_solely_from_model_usage():
+def test_claude_tokens_come_solely_from_model_usage():
     # AC 2: the agent_message says 9999/8888 and must not contribute; the
     # model_usage rollup says 110+1100+200 in and 55 out, haiku included.
     rows = build_summary([
@@ -618,7 +618,7 @@ def test_claude_code_tokens_come_solely_from_model_usage():
     assert usage.fresh_input == 110          # not 9999, and no partial sum of it
 
 
-def test_claude_code_cost_is_the_vendor_figure_not_the_price_table():
+def test_claude_cost_is_the_vendor_figure_not_the_price_table():
     # AC 5: the table would compute $0.00018 for these tokens; the vendor says
     # $0.99, and the vendor figure is what the row carries.
     rows = build_summary([

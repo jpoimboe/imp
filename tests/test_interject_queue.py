@@ -250,7 +250,7 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_claude_code_delivers_interject_at_requery_boundary(
+async def test_claude_delivers_interject_at_requery_boundary(
     tmp_path: Path,
 ) -> None:
     from dataclasses import replace

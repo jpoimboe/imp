@@ -190,7 +190,7 @@ def _cc_drive(
 
 
 @pytest.mark.anyio
-async def test_claude_code_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
+async def test_claude_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     runner, inv = _cc_drive(tmp_path, log)

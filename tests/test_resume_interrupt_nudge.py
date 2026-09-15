@@ -204,7 +204,7 @@ def _continuations(log: Any) -> list[dict[str, Any]]:
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_delivers_the_nudge(
+async def test_claude_interrupt_marker_resume_delivers_the_nudge(
     tmp_path: Path,
 ) -> None:
     """Criterion 8: with the marker turn repaired away, pending_human_tail is
@@ -218,7 +218,7 @@ async def test_claude_code_interrupt_marker_resume_delivers_the_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_ships_no_rejection_framing(
+async def test_claude_interrupt_marker_resume_ships_no_rejection_framing(
     tmp_path: Path,
 ) -> None:
     """Criterion 9: neither claude-p's rejection copy nor its marker reaches the
@@ -232,7 +232,7 @@ async def test_claude_code_interrupt_marker_resume_ships_no_rejection_framing(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_journals_no_tool_result(
+async def test_claude_interrupt_marker_resume_journals_no_tool_result(
     tmp_path: Path,
 ) -> None:
     """Criterion 10: the pause already journaled this call's outcome, so the
@@ -328,7 +328,7 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_resume_appends_continuation_nudge(
+async def test_claude_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
@@ -405,7 +405,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_pending_human_tail_suppresses_nudge(
+async def test_claude_pending_human_tail_suppresses_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
@@ -610,7 +610,7 @@ async def test_openai_provider_retry_resume_injects_the_retry_note(
 
 
 @pytest.mark.anyio
-async def test_claude_code_provider_retry_resume_journals_the_retry_note(
+async def test_claude_provider_retry_resume_journals_the_retry_note(
     tmp_path: Path,
 ) -> None:
     """claude_code's resume-continue condition: the note is journaled as an
@@ -672,7 +672,7 @@ async def test_anthropic_dependency_resume_injects_the_dependency_note(
 
 
 @pytest.mark.anyio
-async def test_claude_code_dependency_resume_journals_the_dependency_note(
+async def test_claude_dependency_resume_journals_the_dependency_note(
     tmp_path: Path,
 ) -> None:
     """claude_code is the provider the dependency wait actually runs under: the
@@ -732,7 +732,7 @@ def _seed_between_turns_marker_transcript(inv_dir: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_claude_code_subagent_interrupt_marker_resume_continues(
+async def test_claude_subagent_interrupt_marker_resume_continues(
     tmp_path: Path,
 ) -> None:
     """Criterion 11(a): at subagent_depth > 0 with no user_input_fn the repaired
@@ -755,7 +755,7 @@ async def test_claude_code_subagent_interrupt_marker_resume_continues(
 
 
 @pytest.mark.anyio
-async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
+async def test_claude_subagent_between_turns_marker_resume_unchanged(
     tmp_path: Path,
 ) -> None:
     """Criterion 11(b): the between-turns marker at subagent_depth > 0 resumes
@@ -777,7 +777,7 @@ async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interject_wins_over_repaired_interrupt_nudge(
+async def test_claude_interject_wins_over_repaired_interrupt_nudge(
     tmp_path: Path,
 ) -> None:
     """Criterion 13: a Ctrl-C steer's typed text is drained and delivered instead

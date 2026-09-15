@@ -3,7 +3,7 @@
 Auto-fit rasterizes under IMAGE_MAX_DIM, so process_image passes the PNG through
 untouched — no resize, no re-encode. That resample was the inflation: it turned crisp
 terminal text into antialiased gradients PNG compresses far worse, pushing a routine
-screenshot past the CLI's per-line buffer (sized in tests/test_claude_code_line_buffer.py).
+screenshot past the CLI's per-line buffer (sized in tests/test_claude_line_buffer.py).
 This test ties the two halves together; it lives on the imp side so tests/impty/ stays
 free of imp imports.
 """

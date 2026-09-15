@@ -24,7 +24,7 @@ from tests.codex_fakes import (
     turn_completed_without_usage,
     turn_failed,
 )
-from tests.test_claude_code_runner import _inv
+from tests.test_claude_runner import _inv
 from tests.test_codex_cancel_paths import _invocation, _seed_git_and_auth
 
 QUOTA_CHROME = "You have reached your usage limit"

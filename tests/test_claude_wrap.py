@@ -823,7 +823,7 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
     appends the sub_agent tool_call, and dispatch_task receives that tool_call's
     EVENT id (the parent link, AC #5). This pins _impl's call ordering only; the
     production receive-loop-vs-_impl race and the flush-lock barrier are covered
-    by the concurrent tests in test_claude_code_runner.py.
+    by the concurrent tests in test_claude_runner.py.
     """
     import imp.providers.claude as cc
     from imp.engine.state import InMemoryEventLog

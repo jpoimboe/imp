@@ -1,4 +1,4 @@
-# tests/test_claude_code_session_store.py
+# tests/test_claude_session_store.py
 from __future__ import annotations
 
 import tempfile

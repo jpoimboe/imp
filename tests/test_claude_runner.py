@@ -1,4 +1,4 @@
-# tests/test_claude_code_runner.py
+# tests/test_claude_runner.py
 from __future__ import annotations
 
 import contextlib
@@ -892,7 +892,7 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
     assert kinds[-1] == "agent_result"
 
 
-def test_claude_code_provider_registered_and_resolves() -> None:
+def test_claude_provider_registered_and_resolves() -> None:
     """The claude_code provider registers on the first registry read; resolve_run
     picks it up from a cleared registry when claude is on PATH."""
     import shutil
@@ -4104,7 +4104,7 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
 
 
 @pytest.mark.anyio
-async def test_claude_code_impl_records_tool_duration(
+async def test_claude_impl_records_tool_duration(
     tmp_path: Path, monkeypatch: Any,
 ) -> None:
     import imp.providers.claude as cc_mod
@@ -4141,7 +4141,7 @@ async def test_claude_code_impl_records_tool_duration(
 
 
 @pytest.mark.anyio
-async def test_claude_code_tool_result_carries_recorded_duration(
+async def test_claude_tool_result_carries_recorded_duration(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "art").mkdir()
@@ -4180,7 +4180,7 @@ async def test_claude_code_tool_result_carries_recorded_duration(
 
 
 @pytest.mark.anyio
-async def test_claude_code_tool_result_duration_non_none_e2e(
+async def test_claude_tool_result_duration_non_none_e2e(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.providers.claude as cc_mod

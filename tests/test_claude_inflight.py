@@ -1,4 +1,4 @@
-# tests/test_claude_code_inflight.py
+# tests/test_claude_inflight.py
 from __future__ import annotations
 
 import asyncio

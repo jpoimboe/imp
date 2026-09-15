@@ -43,7 +43,7 @@ def test_codex_task_description_has_elicitation_language(tmp_path: Path) -> None
     assert _BATCH_WAIT in desc
 
 
-def test_claude_code_task_description_has_elicitation_language(
+def test_claude_task_description_has_elicitation_language(
     tmp_path: Path,
 ) -> None:
     from claude_agent_sdk import tool as sdk_tool

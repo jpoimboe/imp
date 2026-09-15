@@ -18,7 +18,7 @@ from imp.providers.catalog import (
 )
 
 
-def test_claude_code_catalog_opus_1m_entry() -> None:
+def test_claude_catalog_opus_1m_entry() -> None:
     info = model_info(CLAUDE, "claude-opus-4-8[1m]")
     assert info.window == 1_000_000
     # The bracketed alias IS the CLI model id: it requests 1M under both
@@ -38,7 +38,7 @@ def test_anthropic_catalog_opus_1m_entry() -> None:
     assert info.betas == ("context-1m-2025-08-07",)
 
 
-def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
+def test_claude_catalog_opus_entry_is_plain_200k() -> None:
     info = model_info(CLAUDE, "opus")
     assert info.window == 200_000
     assert info.betas == ()
@@ -212,7 +212,7 @@ def test_text_only_flag_forces_no_vision(monkeypatch) -> None:
     assert model_supports_vision("anthropic", "text-only") is False
 
 
-def test_claude_code_catalog_has_fable_entries() -> None:
+def test_claude_catalog_has_fable_entries() -> None:
     # Both aliases are present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus entries.
     assert "claude-fable-5" in CLAUDE
@@ -238,7 +238,7 @@ def test_anthropic_catalog_has_fable_entries() -> None:
     )
 
 
-def test_claude_code_catalog_has_opus_5_entries() -> None:
+def test_claude_catalog_has_opus_5_entries() -> None:
     # Both aliases present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus/fable entries.
     assert "claude-opus-5" in CLAUDE
