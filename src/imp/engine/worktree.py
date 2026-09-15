@@ -21,7 +21,6 @@ import filelock
 
 from imp.paths import project_state_dir
 
-
 _GITIGNORE_COMMIT_MSG = """\
 gitignore: exclude imp's internal state directory
 
