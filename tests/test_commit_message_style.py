@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ASSETS = Path("src/imp/assets")
@@ -8,6 +9,11 @@ DEFAULT_AGENTS = ASSETS / "workflows" / "default" / "agents"
 MINIMAL_AGENTS = ASSETS / "workflows" / "minimal" / "agents"
 MEMORY_AGENTS = ASSETS / "workflows" / "memory" / "agents"
 INCLUDE = '{% include "partials/commit-style.md" %}'
+
+# A literal invocation must name a message file or be a fixup; the prose
+# prohibition "`git add`/`git commit`" is the one non-invocation spelling.
+ALLOWED_TAILS = (" -F", " --fixup=", " --allow-empty -F")
+PROHIBITION_PREFIX = "`git add`/`"
 
 
 def test_commit_style_partial_states_the_canonical_rule() -> None:
@@ -108,3 +114,26 @@ def test_summarizer_pins_the_leading_paragraph_contract() -> None:
     assert "Everything before the first blank line becomes the merge commit's body." in flat
     # The existing headline framing survives the addition.
     assert "one tight paragraph: what this quest accomplishes and why" in flat
+
+
+def _asset_texts() -> list[tuple[Path, str]]:
+    return [(p, p.read_text()) for p in sorted(ASSETS.rglob("*"))
+            if p.is_file() and p.suffix in {".md", ".sh", ".yaml"}]
+
+
+def test_no_asset_teaches_a_dash_m_commit() -> None:
+    offenders = [str(p) for p, text in _asset_texts() if "git commit -m" in text]
+    assert offenders == [], f"-m commit survives in: {offenders}"
+
+
+def test_every_asset_git_commit_invocation_names_a_message_file_or_fixup() -> None:
+    offenders: list[str] = []
+    for path, text in _asset_texts():
+        for match in re.finditer(r"git commit(?![-\w])", text):
+            head = text[:match.start()]
+            if head.endswith(PROHIBITION_PREFIX):
+                continue
+            if not text[match.end():].startswith(ALLOWED_TAILS):
+                line = head.count("\n") + 1
+                offenders.append(f"{path}:{line}")
+    assert offenders == [], f"bare `git commit` at: {offenders}"
