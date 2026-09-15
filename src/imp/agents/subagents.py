@@ -268,6 +268,8 @@ async def dispatch_task(
 
     subagent_def = ctx.subagent_defs[subagent_name]
     invocation_id, target_dir = _allocate_subagent_dir(ctx, subagent_name)
+    # mirrors the transcript dir name so scratch and transcript correlate when debugging
+    scratch_slot = target_dir.name
 
     from imp.assets import resolve_workflow_dir
     from imp.engine.sandbox import with_scratch_slot
@@ -297,7 +299,7 @@ async def dispatch_task(
                 _build_isolated_policy(
                     ctx.quest, spike_worktree, ctx.test_gates,
                     parent_policy=ctx.sandbox_policy),
-                target_dir.name)
+                scratch_slot)
             dispatch_policy, home_cleanup = _attach_isolated_home(
                 dispatch_policy, spike_worktree, ctx.quest.quest_dir)
             if not dispatch_policy.active and ctx.event_log is not None:
@@ -305,12 +307,10 @@ async def dispatch_task(
                     agent_id=ctx.agent_id, type="sandbox_inactive",
                     payload={"reason": dispatch_policy.note})
         else:
-            # target_dir.name is this dispatch's <subagent>-<invocation_id>, so the
-            # scratch slot and the transcript dir cannot drift apart.
             dispatch_policy = ctx.sandbox_policy
             if dispatch_policy is not None:      # no policy at all → nothing to slot
                 dispatch_policy = with_scratch_slot(
-                    dispatch_policy, target_dir.name)
+                    dispatch_policy, scratch_slot)
 
         cc = ctx.quest_context or QuestContext(
             id="", title="", project_root=ctx.project_root,
