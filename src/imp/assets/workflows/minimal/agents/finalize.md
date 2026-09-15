@@ -22,8 +22,6 @@ directly, and complete the run once they are satisfied.
 
 {% include "partials/sandbox-limits.md" %}
 
-{% include "partials/commit-style.md" %}
-
 {% if run.autonomous %}
 **Autonomous run — no human at the gate.** The commits are already reviewer-approved and
 the minimal workflow has nothing deferred to seed, so there is nothing to review
@@ -32,6 +30,9 @@ complete immediately without soliciting, finishing with `complete_step(status="S
 The run then runs off the end into the no-merge `done` completion, leaving the commits on
 `imp/{{ quest.id }}`.
 {% else %}
+
+{% include "partials/commit-style.md" %}
+
 ## Compose the summary
 
 There is no summarizer step and no summary artifact — compose your own intent-level
