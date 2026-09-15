@@ -160,8 +160,8 @@ def test_explain_traces_one_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_cli_authenticated_provider_skips_key_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """claude_code/codex authenticate via login, not an API key — render must NOT
-    fabricate a `CLAUDE_CODE_API_KEY not set` line (finding I1)."""
+    """claude/codex authenticate via login, not an API key — render must NOT
+    fabricate a `CLAUDE_API_KEY not set` line (finding I1)."""
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [claude]\n")
@@ -171,7 +171,7 @@ def test_cli_authenticated_provider_skips_key_check(
     render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     assert "(CLI-authenticated)" in text
-    assert "CLAUDE_CODE_API_KEY" not in text
+    assert "CLAUDE_API_KEY" not in text
 
 
 def test_render_lists_available_drivers(

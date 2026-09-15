@@ -87,9 +87,9 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
     defaults = iter_provider_defaults()
     for vendor in cfg.providers:
         d = defaults.get(vendor)
-        # CLI-authenticated providers (claude_code, codex) declare env_var=None
+        # CLI-authenticated providers (claude, codex) declare env_var=None
         # in the floor — they authenticate via `claude login` / `codex login`,
-        # not an API key. Don't fabricate a `CLAUDE_CODE_API_KEY not set` check
+        # not an API key. Don't fabricate a `CLAUDE_API_KEY not set` check
         # (env_for would invent that name) for a provider that's correctly set up.
         # An explicit provider_envs override means the operator opted into a key.
         if d is not None and d.env_var is None and vendor not in cfg.provider_envs:
