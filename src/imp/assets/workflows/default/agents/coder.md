@@ -63,11 +63,13 @@ End your turn with a message leading with `BLOCKED` or `NEEDS_CONTEXT`. Describe
 
 Commit with **raw `git`** in `bash` (working dir is the project root; use relative paths or `$IMP_PROJECT_ROOT`). Do **not** add a `Task:` trailer and do **not** add a `Quest:` trailer — the workflow stamps `Quest:` once at the top of the review phase, after history is final. The task-lead's dispatch message tells you which mode to use.
 
+{% include "partials/commit-style.md" %}
+
 **INITIAL task work** — a new commit:
 
 ```
 git add <changed files>
-git commit -m "<type>: <task summary>"
+git commit -F "$TMPDIR/msg"
 ```
 
 **WITHIN-LOOP review fix** (same task): edit the tree to the desired **final** state, then record a fixup — never `--amend`, never history surgery:
@@ -86,7 +88,14 @@ git add <changed files>
 git commit --fixup=<SHA>
 ```
 
-Every `fixup!` commit is transient — `autosquash` folds it into its target before review, so the final branch is one clean commit per task. You never rebase, reset, or amend yourself.
+**REWORDING** — when a review fix changes what the message says (a different
+approach, a consequence that no longer holds), record the corrected message as an
+`amend!` commit. Write the full replacement to a file whose first line is `amend! `
+plus the target commit's subject, then a blank line, then the new subject and body:
+
+    git commit --allow-empty -F "$TMPDIR/msg"
+
+Every `fixup!` and `amend!` commit is transient — `autosquash` folds it into its target before review, so the final branch is one clean commit per task. You never rebase, reset, or amend yourself.
 
 ## Self-Review
 

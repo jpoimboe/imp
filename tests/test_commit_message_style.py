@@ -4,6 +4,8 @@ from pathlib import Path
 
 ASSETS = Path("src/imp/assets")
 PARTIAL = ASSETS / "partials" / "commit-style.md"
+DEFAULT_AGENTS = ASSETS / "workflows" / "default" / "agents"
+INCLUDE = '{% include "partials/commit-style.md" %}'
 
 
 def test_commit_style_partial_states_the_canonical_rule() -> None:
@@ -27,3 +29,19 @@ def test_commit_style_partial_states_the_canonical_rule() -> None:
     assert "**Voice:** impersonal" in flat
     assert "Never reference a commit from this same quest" in flat
     assert "git commit -m" not in text
+
+
+def test_coder_includes_the_commit_style_partial() -> None:
+    text = (DEFAULT_AGENTS / "coder.md").read_text()
+    assert INCLUDE in text
+    assert 'git commit -F "$TMPDIR/msg"' in text
+    assert "git commit -m" not in text
+
+
+def test_coder_documents_the_amend_reword_mode() -> None:
+    flat = " ".join((DEFAULT_AGENTS / "coder.md").read_text().split())
+    assert "**REWORDING**" in flat
+    # The message file's first line is the reword directive git's autosquash reads.
+    assert "first line is `amend! ` plus the target commit's subject" in flat
+    assert 'git commit --allow-empty -F "$TMPDIR/msg"' in flat
+    assert "Every `fixup!` and `amend!` commit is transient" in flat
