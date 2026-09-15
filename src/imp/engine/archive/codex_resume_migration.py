@@ -11,6 +11,7 @@ from imp.engine.codex_resume_migration import parse_legacy_codex_resume_state
 from imp.engine.resume_state import (
     RESUME_STATE_NAME,
     InvalidResumeState,
+    NativeResumeState,
     encode_native_resume_state,
     parse_native_resume_state,
 )
@@ -97,8 +98,13 @@ def _current_plan(
         return None
 
     manifest_bytes = _read_blob(step_blobs, manifest_path, read_blob)
-    resume_state = parse_native_resume_state(manifest_bytes)
-    if resume_state.provider != "codex":
+    resume_state: NativeResumeState | None
+    try:
+        # Unreadable, or naming a provider this install no longer registers: not codex state.
+        resume_state = parse_native_resume_state(manifest_bytes)
+    except InvalidResumeState:
+        resume_state = None
+    if resume_state is None or resume_state.provider != "codex":
         if present_slots:
             raise InvalidResumeState()
         return None
