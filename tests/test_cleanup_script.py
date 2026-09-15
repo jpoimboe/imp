@@ -430,3 +430,105 @@ def test_clean_fold_changing_the_tree_hands_off_exit_2(tmp_path: Path) -> None:
         assert _trailer(pr, h) == ID, f"{h} not stamped"
     # ... and the commit the agent resets to still holds the pre-fold tree.
     assert _git(pr, "rev-parse", f"{before_head}^{{tree}}").stdout.strip() == before_tree
+
+
+# ── amend! reword folding ────────────────────────────────────────────────────
+
+A_MSG = "alpha: add the a module\n\nThe module is loaded unconditionally at import.\n"
+B_MSG = "beta: add the b module\n\nThe b module does not depend on a.\n"
+REWORD = (
+    "alpha: add the a module behind a flag\n"
+    "\n"
+    "The first message describes an unconditional load, which is not what\n"
+    "landed once the call moved behind a flag.\n"
+    "\n"
+    "Describe the flag instead.\n"
+)
+AMEND_MSG = f"amend! alpha: add the a module\n\n{REWORD}"
+
+
+def _message(pr: Path, ref: str) -> str:
+    return _git(pr, "log", "-1", "--format=%B", ref).stdout.strip()
+
+
+def test_amend_reword_replaces_a_buried_commits_message(tmp_path: Path) -> None:
+    """A hand-written `amend! <subject>` commit is git's own reword directive: the
+    fold replaces its (buried) target's message, leaves that commit's tree and every
+    later commit alone, and survives nowhere in the resulting log."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    _git(pr, "checkout", "-b", "imp/x")
+    msg = tmp_path / "msg"          # outside pr: an untracked file there fails cleanup
+    (pr / "a.txt").write_text("a\n")
+    _git(pr, "add", "a.txt")
+    msg.write_text(A_MSG)
+    _git(pr, "commit", "-F", str(msg))
+    a_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+    (pr / "b.txt").write_text("b\n")
+    _git(pr, "add", "b.txt")
+    msg.write_text(B_MSG)
+    _git(pr, "commit", "-F", str(msg))           # A is now buried under B
+    b_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+    msg.write_text(AMEND_MSG)
+    _git(pr, "commit", "--allow-empty", "-F", str(msg))
+
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    # No directive left, and the reword added no commit of its own.
+    assert not any(s.startswith(("fixup!", "squash!", "amend!"))
+                   for s in _subjects(pr, fork))
+    assert _subjects(pr, fork) == ["beta: add the b module",
+                                   "alpha: add the a module behind a flag"]
+    # A's message is the amend! commit's body, plus the stamp trailer.
+    assert _message(pr, "HEAD~1") == f"{REWORD.strip()}\n\nQuest: {ID}"
+    # A's tree is byte-identical: a reword touches no content.
+    assert _git(pr, "rev-parse", "HEAD~1^{tree}").stdout.strip() == a_tree
+    # B is intact — its message body and its tree.
+    assert _message(pr, "HEAD") == f"{B_MSG.strip()}\n\nQuest: {ID}"
+    assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() == b_tree
+    for h in _git(pr, "rev-list", "--no-merges", f"{fork}..HEAD").stdout.split():
+        assert _trailer(pr, h) == ID, f"{h} not stamped"
+
+
+def test_amend_reword_folds_alongside_a_fixup_for_the_same_commit(
+        tmp_path: Path) -> None:
+    """The dispatched shape: a within-loop fix lands as `fixup!` and its corrected
+    message as `amend!` in the same cleanup run. The fix folds into the target's
+    content and the reword replaces that same commit's message."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    _git(pr, "checkout", "-b", "imp/x")
+    msg = tmp_path / "msg"
+    (pr / "a.txt").write_text("a\n")
+    _git(pr, "add", "a.txt")
+    msg.write_text(A_MSG)
+    _git(pr, "commit", "-F", str(msg))
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "b.txt").write_text("b\n")
+    _git(pr, "add", "b.txt")
+    msg.write_text(B_MSG)
+    _git(pr, "commit", "-F", str(msg))
+    (pr / "a.txt").write_text("a fixed\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    msg.write_text(AMEND_MSG)
+    _git(pr, "commit", "--allow-empty", "-F", str(msg))
+    before_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    assert not any(s.startswith(("fixup!", "squash!", "amend!"))
+                   for s in _subjects(pr, fork))
+    assert _subjects(pr, fork) == ["beta: add the b module",
+                                   "alpha: add the a module behind a flag"]
+    assert _message(pr, "HEAD~1") == f"{REWORD.strip()}\n\nQuest: {ID}"
+    # The fixup's content folded into the reworded commit, not onto the tip.
+    assert _git(pr, "show", "HEAD~1:a.txt").stdout == "a fixed\n"
+    # Folding both directives is tree-preserving, so cleanup stamps and exits 0.
+    assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() == before_tree
+    for h in _git(pr, "rev-list", "--no-merges", f"{fork}..HEAD").stdout.split():
+        assert _trailer(pr, h) == ID, f"{h} not stamped"
