@@ -15,6 +15,16 @@ watchdog — and resumed later from the event log without discarding the in-flig
 step. Pause and resume work because the event log is the source of truth, not
 in-memory state.
 
+## Context handoff
+
+An agent hands off and restarts with fresh context at 200k tokens, or at 80% of
+the model's context window when that is smaller. The gauge in the status bar
+measures occupancy against that point rather than against the window, so a full
+bar means a handoff is imminent on every provider and model. On crossing, the
+agent writes a handoff note and a fresh session resumes from it — no silent
+compaction, no lost work. `context.max_reincarnations` (default 2) caps how many
+times this may happen within one step before imp pauses to you.
+
 ## Per-role, multi-vendor model selection
 
 Model choice is per-role. A multi-vendor config can run different roles on
