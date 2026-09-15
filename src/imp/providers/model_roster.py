@@ -5,7 +5,7 @@
 For each env-available provider the roster is the de-duplicated union of:
   1. imp's catalog aliases for that provider,
   2. the model names the effective config's `tiers` block names for it, and
-  3. for `claude_code` only: the values in Claude Code's local model cache.
+  3. for `claude` only: the values in Claude Code's local model cache.
 Discovery is pure over its inputs — the caller reads the cache and passes it in —
 so it needs no disk or network access. Entries are bare model-name strings; the
 listing carries no descriptions."""
@@ -35,7 +35,7 @@ def discover_roster(
             model = vendor_map.get(provider)
             if model is not None:
                 names.append(model)
-        if provider == "claude_code":
+        if provider == "claude":
             names.extend(opt.value for opt in claude_options)
         order: list[str] = []
         for name in names:

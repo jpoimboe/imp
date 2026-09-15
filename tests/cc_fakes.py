@@ -1,4 +1,4 @@
-"""Fake ClaudeSDKClient for unit-testing ClaudeCodeAgentRunner.
+"""Fake ClaudeSDKClient for unit-testing ClaudeAgentRunner.
 
 The real SDK exposes:
   - ClaudeSDKClient(opts).__aenter__ / __aexit__

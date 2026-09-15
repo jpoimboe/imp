@@ -13,7 +13,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from imp.providers.scripted import ScriptedAgentRunner
@@ -165,20 +165,20 @@ async def test_openai_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
 
 def _cc_drive(
     tmp_path: Path, log: InMemoryEventLog,
-) -> tuple[ClaudeCodeAgentRunner, AgentInvocation]:
+) -> tuple[ClaudeAgentRunner, AgentInvocation]:
     scripted = [
         cc_assistant(cc_tool_use("c1", "complete_step", {"status": "Success"})),
         cc_result(),
     ]
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=fake_client_factory,
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        provider_name="claude", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
@@ -190,7 +190,7 @@ def _cc_drive(
 
 
 @pytest.mark.anyio
-async def test_claude_code_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
+async def test_claude_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     runner, inv = _cc_drive(tmp_path, log)

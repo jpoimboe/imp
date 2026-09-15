@@ -8,11 +8,11 @@ from typing import Any, Literal
 
 import pytest
 
-import imp.providers.claude_code as cc
+import imp.providers.claude as cc
 import imp.providers.observe_classify as ocls
 from imp.engine.state import InMemoryEventLog
 from imp.providers import errors as perr
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexSession
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests.cc_fakes import (
@@ -23,7 +23,7 @@ from tests.cc_fakes import (
     system_init,
     text,
 )
-from tests.test_claude_code_runner import _inv
+from tests.test_claude_runner import _inv
 
 _NOW = 1788400000.0
 _SESSION_LIMIT = "You've hit your session limit · resets 4am (America/Los_Angeles)"
@@ -37,7 +37,7 @@ def anyio_backend() -> str:
 
 
 def _reading(*windows: tuple[str, float, int | None],
-             provider: Literal["codex", "claude_code"] = "claude_code") -> QuotaReading:
+             provider: Literal["codex", "claude"] = "claude") -> QuotaReading:
     return QuotaReading(
         provider=provider, plan=None,
         windows=tuple(QuotaWindow(label=lb, used_pct=pct, resets_at=r)
@@ -170,7 +170,7 @@ async def test_a_streamed_rate_limit_event_feeds_the_retry_hint(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(
         _inv(tmp_path, event_log=InMemoryEventLog()))]

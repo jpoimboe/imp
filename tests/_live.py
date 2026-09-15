@@ -5,7 +5,7 @@ Live tests carry `@pytest.mark.live(<provider>)` and run only under
 live_skip_reason / provider_available below). A selected provider whose
 toolchain or credentials are absent skips (not fails) at collection.
 
-The claude_code check resolves the CLI the SDK itself spawns -- its bundled
+The claude check resolves the CLI the SDK itself spawns -- its bundled
 binary, then PATH, then the SDK's fixed locations -- not whatever `claude`
 happens to be on PATH, which the SDK never consults. It is a presence check:
 resolution only, no spawn.
@@ -33,7 +33,7 @@ import pytest
 from imp.paths import project_state_dir
 from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
-KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
+KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude", "codex")
 
 # Sentinel stored as the --run-live option's `const` (bare flag => all providers).
 RUN_LIVE_ALL = object()
@@ -86,9 +86,9 @@ def openai_key() -> str | None:
 
 def provider_available(provider: str) -> str | None:
     """None if the provider's toolchain + credentials are present on this
-    machine, else a human-readable reason naming what is missing. claude_code
+    machine, else a human-readable reason naming what is missing. claude
     resolves the binary the SDK will spawn, without spawning it."""
-    if provider == "claude_code":
+    if provider == "claude":
         from claude_agent_sdk import ClaudeAgentOptions, CLINotFoundError
         from claude_agent_sdk._internal.transport.subprocess_cli import (
             SubprocessCLITransport,
@@ -139,7 +139,7 @@ def _bash_result_dicts(content: object):
     """Yield each parsed {stdout, stderr, returncode} dict from a bash
     tool_result `content`, which is EITHER a JSON string (the anthropic/openai
     in-process runner stores the bash JSON verbatim) OR a list of
-    {"type": "text", "text": <json string>} parts (claude_code's SDK wraps it;
+    {"type": "text", "text": <json string>} parts (claude's SDK wraps it;
     see tests/fixtures/cc_tool_counter_burst.jsonl and the non-string branch in
     src/imp/engine/events_digest.py)."""
     texts: list[str] = []
@@ -172,7 +172,7 @@ def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
     A `tool_result` payload carries no tool name, so bash results are found by
     correlating `payload["id"]` back to a preceding bash `tool_call`. The bash
     result JSON ({stdout, stderr, returncode}) is a string for the in-process
-    providers and list-wrapped for claude_code — `_bash_result_dicts`
+    providers and list-wrapped for claude — `_bash_result_dicts`
     normalises both shapes.
     """
     if not events_path.exists():

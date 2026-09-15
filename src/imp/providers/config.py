@@ -3,11 +3,11 @@
 """Parse a single config layer: the project, global, or local config file.
 Schema (post 2026-06-04-roles-to-tiers):
 
-    providers: [claude_code, openai]      # ordered preference list
+    providers: [claude, openai]           # ordered preference list
     tiers:
-      low:    {claude_code: haiku,  openai: gpt-5.6-luna}
-      medium: {claude_code: sonnet, openai: gpt-5.6-terra}
-      high:   {claude_code: opus,   openai: gpt-5.6-sol}
+      low:    {claude: haiku,  openai: gpt-5.6-luna}
+      medium: {claude: sonnet, openai: gpt-5.6-terra}
+      high:   {claude: opus,   openai: gpt-5.6-sol}
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
     test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast); false if none needed
@@ -233,7 +233,7 @@ def _parse_providers(raw: Any, src: SourceLoc) -> tuple[str, ...]:
         raise LoadError(
             f"{src.file.name} 'providers:' must be a non-empty list of provider names",
             src,
-            hint="run 'imp config set providers claude_code' to fix",
+            hint="run 'imp config set providers claude' to fix",
         )
     out: list[str] = []
     seen: set[str] = set()

@@ -28,11 +28,11 @@ def _state(resolved_steps, resolved_tiers, step="brainstorm"):
 
 def test_current_provider_model_prefers_step_then_tier() -> None:
     wf = _Workflow([_Step("brainstorm", "high")])
-    tiers = {"high": ProviderModel("claude_code", "opus")}
+    tiers = {"high": ProviderModel("claude", "opus")}
     # No per-step entry: falls back to the tier map.
     st = _state({}, tiers)
     assert current_provider_model(st, wf, "brainstorm") == ProviderModel(
-        "claude_code", "opus")
+        "claude", "opus")
     # Per-step entry wins.
     st2 = _state({"brainstorm": ProviderModel("openai", "gpt-5")}, tiers)
     assert current_provider_model(st2, wf, "brainstorm") == ProviderModel(
@@ -43,14 +43,14 @@ def test_apply_bare_model_keeps_current_provider(monkeypatch) -> None:
     import imp.engine.model_override as mod
     wf = _Workflow([_Step("brainstorm", "high")])
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
-    st = _state({}, {"high": ProviderModel("claude_code", "opus")})
+    st = _state({}, {"high": ProviderModel("claude", "opus")})
     quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
 
     apply_model_override(quest, st, "claude-fable-5", step_name="brainstorm")
 
     assert st.resolved_steps["brainstorm"] == ProviderModel(
-        "claude_code", "claude-fable-5")
+        "claude", "claude-fable-5")
 
 
 def test_apply_provider_model_switches_provider(monkeypatch) -> None:
@@ -58,7 +58,7 @@ def test_apply_provider_model_switches_provider(monkeypatch) -> None:
     wf = _Workflow([_Step("brainstorm", "high")])
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
-    st = _state({}, {"high": ProviderModel("claude_code", "opus")})
+    st = _state({}, {"high": ProviderModel("claude", "opus")})
     quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
 
     apply_model_override(
@@ -73,13 +73,13 @@ def test_apply_initializes_none_resolved_steps(monkeypatch) -> None:
     wf = _Workflow([_Step("brainstorm", "high")])
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
-    st = _state(None, {"high": ProviderModel("claude_code", "opus")})
+    st = _state(None, {"high": ProviderModel("claude", "opus")})
     quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
 
     apply_model_override(quest, st, "claude-fable-5", step_name="brainstorm")
 
     assert st.resolved_steps == {
-        "brainstorm": ProviderModel("claude_code", "claude-fable-5")}
+        "brainstorm": ProviderModel("claude", "claude-fable-5")}
 
 
 def test_resolve_current_model_prefers_step_override() -> None:
@@ -88,7 +88,7 @@ def test_resolve_current_model_prefers_step_override() -> None:
     wf = _Workflow([_Step("brainstorm", "high")])
     st = _state(
         {"brainstorm": ProviderModel("openai", "gpt-5.5")},
-        {"high": ProviderModel("claude_code", "claude-opus-4-8[1m]")})
+        {"high": ProviderModel("claude", "claude-opus-4-8[1m]")})
     assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
         "openai", "gpt-5.5")
 
@@ -98,9 +98,9 @@ def test_resolve_current_model_uses_tier_when_no_override() -> None:
 
     wf = _Workflow([_Step("brainstorm", "high")])
     st = _state(
-        None, {"high": ProviderModel("claude_code", "claude-opus-4-8[1m]")})
+        None, {"high": ProviderModel("claude", "claude-opus-4-8[1m]")})
     assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
-        "claude_code", "claude-opus-4-8[1m]")
+        "claude", "claude-opus-4-8[1m]")
 
 
 def test_resolve_current_model_resolves_tiers_when_unresolved(monkeypatch) -> None:
@@ -125,7 +125,7 @@ def test_apply_astra_selection_persists_the_exact_provider_model(
     monkeypatch.setattr(
         mod, "load_workflow", lambda *a, **k: _Workflow([_Step("brainstorm", "high")]))
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
-    state = _state({}, {"high": ProviderModel("claude_code", "opus")})
+    state = _state({}, {"high": ProviderModel("claude", "opus")})
     quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
 
     apply_model_override(

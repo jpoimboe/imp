@@ -4,7 +4,7 @@
 `TerminalSession`. Owns the session and exposes the eight tool bodies (start,
 view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The method
 docstrings are the FULL tool descriptions, surfaced only by the standalone stdio
-server; both provider hosts (claude_code SDK tools, codex FastMCP) show the
+server; both provider hosts (claude SDK tools, codex FastMCP) show the
 one-line `THIN_DESCRIPTIONS` in `impty.mcp` instead, so agent-facing wording has
 to be kept in step across the two. Calls are blocking (wait_idle, time.sleep, pty
 reads); each in-process host offloads them to a thread, and this layer clamps

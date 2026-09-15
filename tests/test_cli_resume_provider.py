@@ -29,7 +29,7 @@ def _pin_of(quest: Quest) -> object:
 
 
 def _seed(tmp_path: Path, *, live: bool = False,
-          resolved: str = "claude_code") -> Quest:
+          resolved: str = "claude") -> Quest:
     _seed_control(tmp_path)
     quest = Quest.create(tmp_path, title="demo", quest_id="feat",
                          base_branch="main")
@@ -84,14 +84,14 @@ def test_an_unknown_provider_exits_two_before_touching_the_quest(
     quest = _seed(tmp_path)
     monkeypatch.chdir(tmp_path)
     _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = anyio.run(m._async_cmd_resume, _ns(provider="bogus"))
 
     assert rc == 2
     assert capsys.readouterr().err.strip() == (
         "imp: --provider: unknown provider 'bogus' "
-        "(available here: claude_code, codex; needs setup: anthropic, openai)")
+        "(available here: claude, codex; needs setup: anthropic, openai)")
     assert _pin_of(quest) is None
 
 
@@ -101,7 +101,7 @@ def test_a_stopped_quest_gets_the_pin_written_before_attach(
     quest = _seed(tmp_path, live=False)
     monkeypatch.chdir(tmp_path)
     seen = _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = anyio.run(m._async_cmd_resume, _ns(provider="codex"))
 
@@ -118,7 +118,7 @@ def test_a_live_quest_gets_a_frame_and_no_disk_write(
     quest = _seed(tmp_path, live=True)
     monkeypatch.chdir(tmp_path)
     seen = _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = anyio.run(m._async_cmd_resume, _ns(provider="codex"))
 
@@ -133,7 +133,7 @@ def test_naming_the_vendor_already_resolved_changes_nothing(
     quest = _seed(tmp_path, live=True, resolved="codex")
     monkeypatch.chdir(tmp_path)
     seen = _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = anyio.run(m._async_cmd_resume, _ns(provider="codex"))
 
@@ -152,7 +152,7 @@ def test_a_non_resumable_status_leaves_no_mutated_quest_json(
     state.save(quest.state_dir)
     monkeypatch.chdir(tmp_path)
     _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = anyio.run(m._async_cmd_resume, _ns(provider="codex"))
 
@@ -170,7 +170,7 @@ def test_a_never_started_seed_draft_still_takes_the_pin(
         seed_opening="do the thing")
     monkeypatch.chdir(tmp_path)
     _stub_headless(monkeypatch)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     fresh: list[Quest] = []
 
     async def _fake_fresh(quest: Quest, *, args: Any) -> int:
@@ -197,7 +197,7 @@ def test_the_inert_path_carries_the_frame_too(
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question",
                         lambda quest: "Pending Q?")
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     seen: dict[str, Any] = {}
 
     async def _fake_inert(quest: Quest, question: str, *, marker: str,
@@ -220,7 +220,7 @@ def test_the_interactive_path_threads_the_frame(
 ) -> None:
     _seed(tmp_path, live=True)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)

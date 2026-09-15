@@ -60,7 +60,7 @@ def test_stall_redrive_balances_torn_down_turn_no_replay(tmp_path) -> None:
 def test_parse_message_dispatches_each_provider_to_its_own_wire_format() -> None:
     """Each registry key must reach the parser for that provider's wire format,
     not merely *a* parser: anthropic (and scripted, which shares it) preserves
-    thinking blocks, claude_code/codex drop them, and openai reads Responses
+    thinking blocks, claude/codex drop them, and openai reads Responses
     `output[]` rather than `content[]`."""
     blocks_raw = {"content": [
         {"type": "thinking", "thinking": "hmm", "signature": "sig"},
@@ -70,7 +70,7 @@ def test_parse_message_dispatches_each_provider_to_its_own_wire_format() -> None
             ThinkingBlock(thinking="hmm", signature="sig"),
             TextBlock(text="hi"),
         ), provider
-    for provider in ("claude_code", "codex"):
+    for provider in ("claude", "codex"):
         assert parse_message(provider, blocks_raw).content == (
             TextBlock(text="hi"),
         ), provider
@@ -96,7 +96,7 @@ def test_building_the_parse_table_imports_no_provider_module() -> None:
     code = (
         "import sys, imp.engine.replay\n"
         "watched = {'imp.providers.anthropic', 'imp.providers.openai',\n"
-        "           'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "           'imp.providers.claude', 'imp.providers.codex',\n"
         "           'imp.providers.codex_runner', 'imp.providers.scripted',\n"
         "           'httpx'}\n"
         "print('LEAKED:' + ','.join(sorted(watched & sys.modules.keys())))\n"
@@ -112,18 +112,18 @@ def test_building_the_parse_table_imports_no_provider_module() -> None:
     assert reported.keys() == {"LEAKED", "PARSERS"}, (
         f"child did not report both lines; stdout was {proc.stdout!r}"
     )
-    assert reported["PARSERS"] == "anthropic,claude_code,codex,openai,scripted"
+    assert reported["PARSERS"] == "anthropic,claude,codex,openai,scripted"
     assert reported["LEAKED"] == "", (
         f"importing imp.engine.replay loaded: {reported['LEAKED']}"
     )
 
 
 def test_the_relocated_parsers_leave_no_re_export_shim() -> None:
-    import imp.providers.claude_code as cc
+    import imp.providers.claude as cc
     import imp.providers.codex_runner as cr
     from imp.providers import message_parsers
 
-    assert not hasattr(cc, "_parse_claude_code_message")
+    assert not hasattr(cc, "_parse_claude_message")
     assert not hasattr(cr, "_parse_codex_message")
-    assert callable(message_parsers._parse_claude_code_message)
+    assert callable(message_parsers._parse_claude_message)
     assert callable(message_parsers._parse_codex_message)

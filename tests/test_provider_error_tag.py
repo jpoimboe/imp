@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from imp.engine.state import JsonlEventLog
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.observe_classify import matches_error_prose
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
@@ -20,7 +20,7 @@ from tests.codex_fakes import (
     thread_started,
     turn_completed,
 )
-from tests.test_claude_code_runner import _inv
+from tests.test_claude_runner import _inv
 from tests.test_codex_cancel_paths import _invocation, _seed_git_and_auth
 
 AUTH_PROSE = "Failed to authenticate. API Error: 401 OAuth access token has been revoked."
@@ -44,7 +44,7 @@ def test_the_grouping_predicate_is_wording_only_and_anchored() -> None:
 
 
 @pytest.mark.anyio
-async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
+async def test_claude_tags_the_failing_turn_and_pins_the_row_order(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "art").mkdir()
@@ -54,7 +54,7 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     rows = _rows(tmp_path)
@@ -68,7 +68,7 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
 
 
 @pytest.mark.anyio
-async def test_claude_code_splits_the_group_at_the_error_fragment(
+async def test_claude_splits_the_group_at_the_error_fragment(
     tmp_path: Path,
 ) -> None:
     # A classifying fragment triggers a flush so it gets its own tagged node;
@@ -81,7 +81,7 @@ async def test_claude_code_splits_the_group_at_the_error_fragment(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]
@@ -95,7 +95,7 @@ async def test_claude_code_splits_the_group_at_the_error_fragment(
 
 
 @pytest.mark.anyio
-async def test_claude_code_leaves_ordinary_prose_untagged(tmp_path: Path) -> None:
+async def test_claude_leaves_ordinary_prose_untagged(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     elog = JsonlEventLog(tmp_path / "e.jsonl")
     scripted = [
@@ -107,7 +107,7 @@ async def test_claude_code_leaves_ordinary_prose_untagged(tmp_path: Path) -> Non
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]

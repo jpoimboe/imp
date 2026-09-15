@@ -346,8 +346,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_twelve() -> None:
-    assert archive._DATA_VERSION == 12
+def test_data_version_bumped_to_thirteen() -> None:
+    assert archive._DATA_VERSION == 13
 
 
 def test_write_data_version_durably_replaces_exact_marker(
@@ -681,7 +681,7 @@ _PRE_SESSION_ID = [
      "payload": {"total_cost_usd": 12.50, "usage": {}, "model_usage": {}}},
     {"id": "s1", "parent_id": None, "agent_id": None,
      "timestamp": "2026-06-02T03:02:00+00:00", "type": "step_started",
-     "payload": {"phase": "build", "step": "coder", "provider": "claude_code",
+     "payload": {"phase": "build", "step": "coder", "provider": "claude",
                  "model": "claude-sonnet-4-6"}},
     {"id": "q3", "parent_id": None, "agent_id": "step:build/coder",
      "timestamp": "2026-06-02T03:03:00+00:00", "type": "query_result",
@@ -868,3 +868,130 @@ def test_an_archived_pin_survives_the_hop(tmp_path: Path) -> None:
     migrated = record.read_record(archive.records_root(tmp_path), "pv02")
     assert migrated is not None
     assert migrated["quest_meta"]["provider"] == "codex"
+
+
+# Un-migrated events: a provider pin on each event type that carries one, including
+# tiers_resolved and the nested `raw` blobs that sit a level down.
+_OLD_ID_EVENTS = [
+    {"id": "o1", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-02T03:00:00+00:00", "type": "step_started",
+     "payload": {"step": "coder", "kind": "agent", "phase": "build", "round": 1,
+                 "provider": "claude_code", "model": "sonnet"}},
+    {"id": "o2", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-02T03:00:01+00:00", "type": "tiers_resolved",
+     "payload": {"tiers": {"medium": {"provider": "claude_code", "model": "sonnet"}},
+                 "steps": {"coder": {"provider": "claude_code", "model": "sonnet"}}}},
+    {"id": "o3", "parent_id": None, "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:02+00:00", "type": "step_context",
+     "payload": {"provider": "claude_code", "model": "sonnet",
+                 "tools_schema": [], "params": {}, "max_tool_calls": 1}},
+    {"id": "o4", "parent_id": None, "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:03+00:00", "type": "agent_message",
+     "payload": {"provider": "claude_code", "model": "sonnet",
+                 "content": [{"type": "text", "text": "ran claude_code once"}],
+                 "raw": {"provider": "claude_code", "usage": {"input_tokens": 1}}}},
+    {"id": "o5", "parent_id": None, "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:04+00:00", "type": "quota_reading",
+     "payload": {"provider": "claude_code", "session_pct": 62,
+                 "raw": {"provider": "claude_code"}}},
+]
+
+
+def _seed_old_id_record(control: Path, cid: str) -> str:
+    """An archived quest still naming the retired id in all three places the hop
+    touches: quest_meta's pin, final_state's resolved maps, and the events blob.
+    layout_version is captured at 22 — the hop must leave it there."""
+    store = LocalBlobStore(archive.blobs_root(control))
+    events_hash = store.put(_jsonl(_OLD_ID_EVENTS))
+    rec = record.build_record(
+        {"id": cid, "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "default", "provider": "claude_code", "layout_version": 22},
+        {"id": cid, "status": "merged", "step": "finalize",
+         "started_at": "2026-06-01T00:00:01+00:00",
+         "resolved_tiers": {"medium": {"provider": "claude_code", "model": "sonnet"}},
+         "resolved_steps": {"coder": {"provider": "claude_code", "model": "sonnet"}}},
+        events_hash)
+    record.write_record(archive.records_root(control), rec)
+    archive.rebuild_index(control)
+    return events_hash
+
+
+def test_migrate_renames_the_old_provider_id_across_the_record(tmp_path: Path) -> None:
+    old_hash = _seed_old_id_record(tmp_path, "cc01")
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "cc01")
+    assert rec is not None
+    by_type = {e["type"]: e["payload"] for e in _events_of(tmp_path, "cc01")}
+    assert (
+        rec["quest_meta"]["provider"],
+        rec["quest_meta"]["layout_version"],
+        rec["final_state"]["resolved_tiers"]["medium"]["provider"],
+        rec["final_state"]["resolved_steps"]["coder"]["provider"],
+        by_type["step_started"]["provider"],
+        by_type["tiers_resolved"]["tiers"]["medium"]["provider"],
+        by_type["tiers_resolved"]["steps"]["coder"]["provider"],
+        by_type["step_context"]["provider"],
+        by_type["agent_message"]["provider"],
+        by_type["agent_message"]["raw"]["provider"],
+        by_type["quota_reading"]["provider"],
+        by_type["quota_reading"]["raw"]["provider"],
+        by_type["agent_message"]["content"][0]["text"],
+        rec["events_hash"] != old_hash,
+        archive.data_version_path(tmp_path).read_text().strip(),
+    ) == (
+        "claude", 22,
+        "claude", "claude",
+        "claude", "claude", "claude", "claude", "claude", "claude",
+        "claude", "claude",
+        "ran claude_code once",   # a claude_code string under a non-provider key stays
+        True,                     # the blob was re-put and the record repointed
+        "13",
+    )
+
+
+def test_a_forced_second_pass_leaves_the_renamed_record_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_old_id_record(tmp_path, "cc02")
+    archive.ensure_current(tmp_path)
+    first = record.read_record(archive.records_root(tmp_path), "cc02")
+    assert first is not None
+    written: list[str] = []
+    real_write = record.write_record
+
+    def spy(records_dir: Path, rec: dict) -> Path:
+        written.append(rec["id"])
+        return real_write(records_dir, rec)
+
+    monkeypatch.setattr(record, "write_record", spy)
+
+    archive._migrate_archive_blobs(tmp_path)     # forced re-run, marker bypassed
+
+    again = record.read_record(archive.records_root(tmp_path), "cc02")
+    assert again is not None
+    # Nothing left to rename, so the record is not rewritten and the blob not re-put.
+    assert (written, again["events_hash"]) == ([], first["events_hash"])
+
+
+# 12, spelled out: the marker every existing install already carries. Without the bump
+# it equals _DATA_VERSION, ensure_current fast-paths, and every such archive keeps the
+# retired id forever.
+_OLD_ID_ERA_DATA_VERSION = 12
+
+
+def test_an_archive_at_the_old_id_era_version_still_gets_renamed(
+    tmp_path: Path,
+) -> None:
+    _seed_old_id_record(tmp_path, "cc03")
+    archive.data_version_path(tmp_path).write_text(str(_OLD_ID_ERA_DATA_VERSION))
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "cc03")
+    assert rec is not None
+    assert rec["quest_meta"]["provider"] == "claude"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)

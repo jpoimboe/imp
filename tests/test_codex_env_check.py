@@ -7,7 +7,7 @@ def test_env_check_false_when_codex_binary_missing(monkeypatch) -> None:
 
 
 def test_env_check_true_with_only_the_binary_present(monkeypatch) -> None:
-    """Binary-only, like claude_code's: no importable-package half survives, so a
+    """Binary-only, like claude's: no importable-package half survives, so a
     run must not be gated on any python package being installed."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
     assert _env_check() is True

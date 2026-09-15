@@ -16,20 +16,20 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from tests._events import control_events
 
 PUSH = ("anthropic", "openai")
-OBSERVE = ("claude_code", "codex")
+OBSERVE = ("claude", "codex")
 PAIRS = PUSH + OBSERVE
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 _MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
-    "claude_code": "claude-sonnet-4-5",
+    "claude": "claude-sonnet-4-5",
     "codex": "gpt-5.5",
 }
 
@@ -107,8 +107,8 @@ def build(pair: str, tmp_path: Path, scripted: Any, *,
         runner = OpenAIAgentRunner(
             model_name=_MODELS[pair],
             client_factory=lambda: FakeResponsesClient(scripted))
-    elif pair == "claude_code":
-        runner = ClaudeCodeAgentRunner(
+    elif pair == "claude":
+        runner = ClaudeAgentRunner(
             model_name=_MODELS[pair],
             client_factory=lambda opts: FakeClaudeSDKClient(
                 opts, scripted_messages=scripted))

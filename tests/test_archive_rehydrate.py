@@ -11,9 +11,9 @@ from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
 from imp.engine.archive import record
 from imp.engine.archive.blobstore import LocalBlobStore
-from imp.engine.quest import Quest
-from imp.engine.reincarnation import session_has_resume_state
-from imp.engine.resume_state import parse_native_resume_state
+from imp.engine.quest import LAYOUT_VERSION, Quest
+from imp.engine.reincarnation import read_session_owner, session_has_resume_state
+from imp.engine.resume_state import NativeResumeState, parse_native_resume_state
 from imp.engine.state import State
 from imp.paths import project_state_dir
 from imp.providers.codex_rollout import parse_codex_resume_state, restore_rollout
@@ -154,7 +154,7 @@ def test_rehydrate_migrates_indexless_v11_before_archive_reads(
     loaded = Quest.load(tmp_path, "legacy")
     session_dir = quest_dir / "steps" / "build" / "coder"
     assert loaded.id == "legacy"
-    assert observed == [b"12"] * 4
+    assert observed == [b"13"] * 4
     assert not (session_dir / "codex_thread.json").exists()
     assert not (session_dir / "codex_rollout").exists()
     native = parse_native_resume_state((session_dir / "resume-state.json").read_bytes())
@@ -202,3 +202,63 @@ def test_rehydrate_read_only_stale_archive_fails_before_reads(
         quest_dir.exists(),
         archive.data_version_path(tmp_path).read_bytes(),
     ) == (str(archive.archive_root(tmp_path)), [], False, b"11")
+
+
+def _archive_old_id_resumable(control: Path, cid: str = "ccold") -> None:
+    """A resumable quest archived under the retired id: the pin, a session-owner
+    sidecar and a native manifest all name it, captured at layout_version 22."""
+    session = control / f"{cid}-steps" / "build" / "coder"
+    session.mkdir(parents=True)
+    (session / "provider").write_text("claude_code")
+    (session / "resume-state.json").write_bytes(json.dumps({
+        "schema_version": 1,
+        "provider": "claude_code",
+        "state": {"session_id": "abc"},
+    }).encode())
+    events = control / f"{cid}.jsonl"
+    events.write_bytes(b"")
+    quest_json = control / f"{cid}-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": cid, "title": "Old", "base_branch": "main", "materialized": False,
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+        "layout_version": 22, "provider": "claude_code"}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "shelved", "step": "coder",
+        "started_at": "2026-06-01T00:00:01+00:00"}))
+    archive.archive_quest(
+        control, cid, events_path=events, quest_json_path=quest_json,
+        state_json_path=state_json, steps_dir=session.parent.parent,
+        resumable=True)
+    # archive_quest stamps the marker current; drop it back so the hop actually runs.
+    archive.data_version_path(control).write_text("12")
+
+
+def test_rehydrated_step_blobs_ride_the_home_hop_to_the_new_provider_id(
+    tmp_path: Path,
+) -> None:
+    _archive_old_id_resumable(tmp_path)
+
+    quest_dir = archive_read.rehydrate_quest(tmp_path, "ccold")
+
+    session = quest_dir / "steps" / "build" / "coder"
+    meta = json.loads((quest_dir / "quest.json").read_text())
+    # The archive hop renamed the pin but left layout_version at 22, so the step
+    # blobs land un-migrated and the home hop is what sweeps them.
+    assert (
+        meta["provider"], meta["layout_version"], (session / "provider").read_text()
+    ) == ("claude", 22, "claude_code")
+
+    quest = Quest.load(tmp_path, "ccold")
+
+    assert (
+        read_session_owner(session),
+        parse_native_resume_state((session / "resume-state.json").read_bytes()),
+        quest.provider,
+        json.loads((quest_dir / "quest.json").read_text())["layout_version"],
+    ) == (
+        "claude",
+        NativeResumeState(provider="claude", state={"session_id": "abc"}),
+        "claude",
+        LAYOUT_VERSION,
+    )

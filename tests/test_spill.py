@@ -146,10 +146,10 @@ def _dispatch_task_call_sites() -> list[tuple[str, str, int, bool]]:
 def test_every_dispatch_task_call_site_wraps_its_result() -> None:
     # AC 9: each dispatch_task call site must have wrap_task_result in its own enclosing
     # function. Asserted over the DISCOVERED set; the floor below proves the scan sees all
-    # three dispatch paths (anthropic/openai, codex, claude_code).
+    # three dispatch paths (anthropic/openai, codex, claude).
     sites = _dispatch_task_call_sites()
     assert {rel for rel, _, _, _ in sites} >= {
-        "agents/dispatch.py", "providers/codex_mcp.py", "providers/claude_code.py"
+        "agents/dispatch.py", "providers/codex_mcp.py", "providers/claude.py"
     }
     for rel, func, lineno, has_wrap in sites:
         assert has_wrap, (

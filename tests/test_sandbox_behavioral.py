@@ -2623,7 +2623,7 @@ def test_teardown_closes_the_pty_session_before_the_namespace(
 ) -> None:
     """AC 8(b): ORDER, not end state. Killing pid 1 of the pid namespace first
     would leave the driver holding a dead child and a corpse screen that still
-    renders — today claude_code tears down in exactly that order."""
+    renders — today claude tears down in exactly that order."""
     root = _make_root()
     order: list[str] = []
     real_ns_close = SandboxNamespace.close

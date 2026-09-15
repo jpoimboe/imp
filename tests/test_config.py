@@ -19,17 +19,17 @@ def _layer(tmp_path: Path, body: str) -> dict:
 
 
 _OK_BODY = (
-    "providers: [claude_code, openai]\n"
+    "providers: [claude, openai]\n"
     "tiers:\n"
-    "  low: {claude_code: haiku, openai: gpt-5.4-mini}\n"
-    "  medium: {claude_code: sonnet, openai: gpt-5.3-codex}\n"
-    "  high: {claude_code: opus, openai: gpt-5.5}\n"
+    "  low: {claude: haiku, openai: gpt-5.4-mini}\n"
+    "  medium: {claude: sonnet, openai: gpt-5.3-codex}\n"
+    "  high: {claude: opus, openai: gpt-5.5}\n"
 )
 
 
 def test_parse_layer_basic(tmp_path: Path) -> None:
     layer = _layer(tmp_path, _OK_BODY)
-    assert layer["providers"] == ("claude_code", "openai")
+    assert layer["providers"] == ("claude", "openai")
     assert set(layer["tiers"]) == {"low", "medium", "high"}
     assert layer["tiers"]["medium"]["openai"] == "gpt-5.3-codex"
 
@@ -55,9 +55,9 @@ def test_absent_providers_tolerated(tmp_path: Path) -> None:
     # the config-split design; was previously load_config raising "providers").
     layer = _layer(tmp_path,
         "tiers:\n"
-        "  low: {claude_code: haiku}\n"
-        "  medium: {claude_code: sonnet}\n"
-        "  high: {claude_code: opus}\n")
+        "  low: {claude: haiku}\n"
+        "  medium: {claude: sonnet}\n"
+        "  high: {claude: opus}\n")
     assert "providers" not in layer
 
 
@@ -65,10 +65,10 @@ def test_partial_tiers_is_valid(tmp_path: Path) -> None:
     # Missing tiers are allowed — the provider-code floor fills them at merge
     # time (spec §7 relaxed _parse_tiers).
     layer = _layer(tmp_path,
-        "providers: [claude_code]\n"
+        "providers: [claude]\n"
         "tiers:\n"
-        "  low: {claude_code: haiku}\n"
-        "  medium: {claude_code: sonnet}\n")
+        "  low: {claude: haiku}\n"
+        "  medium: {claude: sonnet}\n")
     assert set(layer["tiers"]) == {"low", "medium"}
 
 
@@ -81,12 +81,12 @@ def test_absent_file_returns_none(tmp_path: Path) -> None:
 def test_unknown_tier_rejected(tmp_path: Path) -> None:
     with pytest.raises(LoadError, match="tiers:"):
         _layer(tmp_path,
-            "providers: [claude_code]\n"
+            "providers: [claude]\n"
             "tiers:\n"
-            "  low: {claude_code: haiku}\n"
-            "  medium: {claude_code: sonnet}\n"
-            "  high: {claude_code: opus}\n"
-            "  extra: {claude_code: opus}\n")
+            "  low: {claude: haiku}\n"
+            "  medium: {claude: sonnet}\n"
+            "  high: {claude: opus}\n"
+            "  extra: {claude: opus}\n")
 
 
 def test_provider_envs_absent_omitted(tmp_path: Path) -> None:

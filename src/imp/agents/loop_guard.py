@@ -25,7 +25,7 @@ Progress is defined ONLY in terms of per-turn signals a provider loop can see
     review/research/plan agents — whose real output is invisible to a write-only
     progress signal — from being falsely paused.
 
-The claude_code adapter MUST canonicalize MCP-prefixed names before building a
+The claude adapter MUST canonicalize MCP-prefixed names before building a
 TurnRecord (mcp__imp__write_file -> write_file).
 """
 
@@ -99,7 +99,7 @@ def _result_preview(content: str | list[Any] | None) -> str:
 @dataclass
 class TurnRecord:
     """One assistant turn plus its resulting tool outcomes. Built per provider:
-    anthropic/openai assemble it within one loop iteration; claude_code
+    anthropic/openai assemble it within one loop iteration; claude
     accumulates across assistant + following-user receive() iterations."""
     assistant_text: str
     tools: list[ToolOutcome] = field(default_factory=list)

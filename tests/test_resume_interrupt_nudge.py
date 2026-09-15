@@ -108,7 +108,7 @@ _INTERRUPTED_PREFIX = (
 
 
 def _seed_interrupt_marker_transcript(inv_dir: Path) -> None:
-    """The live-observed claude_code tail after a cooperative mid-tool interrupt:
+    """The live-observed claude tail after a cooperative mid-tool interrupt:
     claude-p's own 'rejected / STOP' tool_result, then its marker turn."""
     from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
@@ -126,17 +126,17 @@ def _seed_interrupt_marker_transcript(inv_dir: Path) -> None:
     transcript.append(Message(role="user", content=(TextBlock(text=_MARKER),)))
 
 
-async def _run_claude_code_resume(
+async def _run_claude_resume(
     tmp_path: Path, *, seed: Any = _seed_interrupt_marker_transcript,
     queued: list[str] | None = None, subagent_depth: int = 0,
 ) -> tuple[Any, list[Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Drive a claude_code resume over a seeded transcript. Returns
+    """Drive a claude resume over a seeded transcript. Returns
     (event log, created SDK fakes, session-store records, yielded events).
     The runner is built without a user_input_fn — the dispatch default."""
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
-    from imp.providers.claude_code_session_store import session_key, session_store_for
+    from imp.providers.claude import ClaudeAgentRunner
+    from imp.providers.claude_session_store import session_key, session_store_for
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -158,11 +158,11 @@ async def _run_claude_code_resume(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -204,12 +204,12 @@ def _continuations(log: Any) -> list[dict[str, Any]]:
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_delivers_the_nudge(
+async def test_claude_interrupt_marker_resume_delivers_the_nudge(
     tmp_path: Path,
 ) -> None:
     """Criterion 8: with the marker turn repaired away, pending_human_tail is
     False and the existing guard delivers the continue nudge — exactly once."""
-    log, _created, _records, events = await _run_claude_code_resume(tmp_path)
+    log, _created, _records, events = await _run_claude_resume(tmp_path)
 
     assert events[-1]["type"] == "agent_result"
     conts = _continuations(log)
@@ -218,12 +218,12 @@ async def test_claude_code_interrupt_marker_resume_delivers_the_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_ships_no_rejection_framing(
+async def test_claude_interrupt_marker_resume_ships_no_rejection_framing(
     tmp_path: Path,
 ) -> None:
     """Criterion 9: neither claude-p's rejection copy nor its marker reaches the
     model — the re-framed interrupted body takes their place."""
-    _log, created, records, _events = await _run_claude_code_resume(tmp_path)
+    _log, created, records, _events = await _run_claude_resume(tmp_path)
 
     blob = _shipped_blob(created, records)
     assert "The tool use was rejected" not in blob
@@ -232,13 +232,13 @@ async def test_claude_code_interrupt_marker_resume_ships_no_rejection_framing(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_marker_resume_journals_no_tool_result(
+async def test_claude_interrupt_marker_resume_journals_no_tool_result(
     tmp_path: Path,
 ) -> None:
     """Criterion 10: the pause already journaled this call's outcome, so the
     repair adds nothing — a second entry for the same tool_use_id would falsify
     the history (spec Decisions summary 8)."""
-    log, _created, _records, events = await _run_claude_code_resume(tmp_path)
+    log, _created, _records, events = await _run_claude_resume(tmp_path)
 
     assert events[-1]["type"] == "agent_result"
     assert [e for e in log.read() if e["type"] == "tool_result"] == []
@@ -328,12 +328,12 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interrupt_resume_appends_continuation_nudge(
+async def test_claude_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -356,12 +356,12 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -405,12 +405,12 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
 
 
 @pytest.mark.anyio
-async def test_claude_code_pending_human_tail_suppresses_nudge(
+async def test_claude_pending_human_tail_suppresses_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -434,12 +434,12 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -610,15 +610,15 @@ async def test_openai_provider_retry_resume_injects_the_retry_note(
 
 
 @pytest.mark.anyio
-async def test_claude_code_provider_retry_resume_journals_the_retry_note(
+async def test_claude_provider_retry_resume_journals_the_retry_note(
     tmp_path: Path,
 ) -> None:
-    """claude_code's resume-continue condition: the note is journaled as an
+    """claude's resume-continue condition: the note is journaled as an
     engine_message/continuation and selected from the cause."""
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.transcript import RESUME_RETRY_NUDGE
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -632,12 +632,12 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
                   cc_tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
     inv = AgentInvocation(
-        agent_def=_agent_def(), provider_name="claude_code",
+        agent_def=_agent_def(), provider_name="claude",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
@@ -672,15 +672,15 @@ async def test_anthropic_dependency_resume_injects_the_dependency_note(
 
 
 @pytest.mark.anyio
-async def test_claude_code_dependency_resume_journals_the_dependency_note(
+async def test_claude_dependency_resume_journals_the_dependency_note(
     tmp_path: Path,
 ) -> None:
-    """claude_code is the provider the dependency wait actually runs under: the
+    """claude is the provider the dependency wait actually runs under: the
     re-entered step's single continuation carries the dependency copy."""
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.transcript import RESUME_DEPENDENCY_NUDGE
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -694,12 +694,12 @@ async def test_claude_code_dependency_resume_journals_the_dependency_note(
                   cc_tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
     inv = AgentInvocation(
-        agent_def=_agent_def(), provider_name="claude_code",
+        agent_def=_agent_def(), provider_name="claude",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
@@ -732,14 +732,14 @@ def _seed_between_turns_marker_transcript(inv_dir: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_claude_code_subagent_interrupt_marker_resume_continues(
+async def test_claude_subagent_interrupt_marker_resume_continues(
     tmp_path: Path,
 ) -> None:
     """Criterion 11(a): at subagent_depth > 0 with no user_input_fn the repaired
     resume delivers the nudge and runs to a real complete_step — not the
     no_user_input_fn error terminal, and not a bare EndOfTurn re-emitting the
     interrupted turn's partial text as the subagent's deliverable."""
-    log, _created, _records, events = await _run_claude_code_resume(
+    log, _created, _records, events = await _run_claude_resume(
         tmp_path, subagent_depth=1)
 
     assert not any(
@@ -755,7 +755,7 @@ async def test_claude_code_subagent_interrupt_marker_resume_continues(
 
 
 @pytest.mark.anyio
-async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
+async def test_claude_subagent_between_turns_marker_resume_unchanged(
     tmp_path: Path,
 ) -> None:
     """Criterion 11(b): the between-turns marker at subagent_depth > 0 resumes
@@ -764,7 +764,7 @@ async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
     from imp.agents.runner import TextBlock
     from imp.agents.transcript import Transcript
 
-    log, created, _records, events = await _run_claude_code_resume(
+    log, created, _records, events = await _run_claude_resume(
         tmp_path, seed=_seed_between_turns_marker_transcript, subagent_depth=1)
 
     assert events[-1]["type"] == "agent_result"
@@ -777,13 +777,13 @@ async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
 
 
 @pytest.mark.anyio
-async def test_claude_code_interject_wins_over_repaired_interrupt_nudge(
+async def test_claude_interject_wins_over_repaired_interrupt_nudge(
     tmp_path: Path,
 ) -> None:
     """Criterion 13: a Ctrl-C steer's typed text is drained and delivered instead
     of the nudge, and the repair means it no longer contradicts a tool_result
     telling the model it was rejected."""
-    _log, created, records, events = await _run_claude_code_resume(
+    _log, created, records, events = await _run_claude_resume(
         tmp_path, queued=["actually, run the tests first"])
 
     assert events[-1]["type"] == "agent_result"

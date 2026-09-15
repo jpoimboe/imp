@@ -11,7 +11,7 @@ Also exposes the registration + introspection helpers (`build_server`,
 reuse. Tool **names and parameter schemas** are byte-identical across all three
 surfaces (all introspected from `ImptyDriver`'s methods); the **descriptions
 diverge on purpose** — the standalone stdio server keeps the full method
-docstrings, while the provider surfaces (claude_code + codex) carry the thin
+docstrings, while the provider surfaces (claude + codex) carry the thin
 one-liners from `THIN_DESCRIPTIONS`.
 
 The driver's calls are blocking (wait_idle, time.sleep, pty reads), so every
@@ -31,7 +31,7 @@ from mcp.server.fastmcp import FastMCP
 
 from impty.driver import ImptyDriver
 
-# The provider surfaces (claude_code SDK + codex) show these one-liners instead
+# The provider surfaces (claude SDK + codex) show these one-liners instead
 # of the full ImptyDriver docstrings; the imp-driving-terminal-uis skill is the
 # manual. Authored deliberately (not truncated from docstrings). Keyed by tool
 # name and guarded by test_thin_description_mapping_covers_exactly_the_tool_methods
@@ -83,7 +83,7 @@ class ImptyToolSpec:
     """One impty tool: its FastMCP-introspected name and schema, its
     provider-surface description, and the bound `ImptyDriver` method that
     implements it. Hosts that can't consume a FastMCP instance directly
-    (claude_code's SDK) build their tool from this. The `description` is the thin
+    (claude's SDK) build their tool from this. The `description` is the thin
     `THIN_DESCRIPTIONS` one-liner (this is a provider surface), NOT the full
     method docstring the standalone server uses; name and schema match every
     surface exactly."""

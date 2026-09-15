@@ -1403,7 +1403,7 @@ async def test_dispatch_task_threads_undecided_to_the_child_invocation(tmp_path)
 def test_every_provider_copies_undecided_onto_the_child_context() -> None:
     """The four provider copy lines are the only route from AgentInvocation to
     ToolContext; a missing one gives that provider's subagents the default."""
-    for module in ("claude_code", "codex_runner", "push_session", "scripted"):
+    for module in ("claude", "codex_runner", "push_session", "scripted"):
         src = Path(f"src/imp/providers/{module}.py").read_text()
         assert "ctx.undecided = invocation.undecided" in src, module
 

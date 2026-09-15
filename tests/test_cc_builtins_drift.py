@@ -6,7 +6,7 @@ machinery is tests/cc_probe.py. What stays here needs no CLI, so the
 no-green-from-a-dead-probe property is checked on every fast-gate lap.
 
 WebSearch / WebFetch note (§5.2):
-  These two tools ARE included in ALL_CLAUDE_CODE_BUILTIN_TOOLS so that the
+  These two tools ARE included in ALL_CLAUDE_BUILTIN_TOOLS so that the
   drift guard still catches them if the CLI removes or renames them. However,
   they are *intentionally enabled* by _build_options when an agent declares
   web_search/web_fetch — they are NOT part of the "imp-tools-only" deny
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests import cc_probe
 from tests.cc_probe import (
     PROBE_ATTEMPTS,
@@ -44,7 +44,7 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
     allowlisted when an agent declares web_search/web_fetch (spec §5.2). This
     pins that intent so a future deny-all refactor fails here."""
     inv = invocation(tmp_path, frozenset({"web_search", "web_fetch"}))
-    opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
+    opts = ClaudeAgentRunner("m")._build_options(inv, object(), ["bash"])
     assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)
     assert not ({"WebSearch", "WebFetch"} & set(opts.disallowed_tools))
 

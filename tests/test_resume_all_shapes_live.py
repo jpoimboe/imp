@@ -1,9 +1,9 @@
 """Store-backed native-resume round-trips against a real `claude` subprocess.
 
-Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. Each test
+Gated behind `--run-live` (claude) + the `claude` CLI on PATH. Each test
 seeds a PARTIAL session store (the turns the SDK batcher would have flushed at
 the prior `result` boundary) plus the matching transcript.jsonl tail, then drives
-ClaudeCodeAgentRunner.run against a live claude (client_factory=None). The
+ClaudeAgentRunner.run against a live claude (client_factory=None). The
 runner overwrites the store body with the projection of its own transcript and
 native-resumes; the assertions confirm real claude-p recalls the prior tool
 outputs with zero re-execution and no `400 due to tool use concurrency issues`.
@@ -29,9 +29,9 @@ from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers import claude_code
-from imp.providers.claude_code import ClaudeCodeAgentRunner
-from imp.providers.claude_code_session_store import (
+from imp.providers import claude
+from imp.providers.claude import ClaudeAgentRunner
+from imp.providers.claude_session_store import (
     message_to_session_records,
     session_key,
     session_store_for,
@@ -96,7 +96,7 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code", model_name=_MODEL,
+        provider_name="claude", model_name=_MODEL,
         # Carry imp's production completion instruction verbatim (every real
         # invocation appends completion_instruction(schema) — agent_run.py). The
         # hand-rolled "call complete_step" line alone left haiku free to end the
@@ -139,7 +139,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_send_to_llm_store_backed_native_resume(
@@ -186,12 +186,12 @@ async def test_send_to_llm_store_backed_native_resume(
     # full transcript (3 turns). Both would otherwise satisfy the behavioral
     # assertions below.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume drove a real claude turn to completion (no deadlock, no 400,
@@ -213,7 +213,7 @@ async def test_send_to_llm_store_backed_native_resume(
                for b in streamed[0][0].content)
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -261,12 +261,12 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # placeholder tool_result for the dangling t1 (1 turn) to kick the next turn.
     # An empty delta would deadlock (claude-p never self-starts a loaded session).
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # The run reached completion past the dangling call without the legacy
@@ -311,7 +311,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code", model_name=_MODEL,
+        provider_name="claude", model_name=_MODEL,
         system_prompt=(
             completion_instruction(agent_def.output_schema)
             + "\n\nYou are resuming a step you already finished. Your previous "
@@ -334,7 +334,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     )
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_complete_step_handback_native_resume(
@@ -367,12 +367,12 @@ async def test_complete_step_handback_native_resume(
     # Spy on the first-query stream: the native path streams ONLY the handback
     # (1 user turn) — the is_error feedback result that pairs the dangling call.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume drove a real claude turn to completion (no deadlock, no 400).
@@ -403,7 +403,7 @@ async def test_complete_step_handback_native_resume(
         for b in projected["message"]["content"]), projected
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_step_completed_native_resume_redrives_with_feedback(
@@ -450,12 +450,12 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     # resume streams ONLY the delivered feedback turn (1 turn); a stream-json
     # fallback would replay the full transcript.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     assert events[-1]["type"] == "agent_result", events[-1]
@@ -479,7 +479,7 @@ def _must_not_solicit(_prompt: str) -> str:
         "continue the agent, not park at a prompt")
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_midrun_interrupt_resume_continues_agent(
@@ -526,12 +526,12 @@ async def test_midrun_interrupt_resume_continues_agent(
     # Spy on the first-query history stream: the native continue path streams ONLY
     # the continuation-nudge turn (1 turn); a solicit/replay would look different.
     streamed: list[list[Message]] = []
-    _orig_stream = claude_code._stream_history
+    _orig_stream = claude._stream_history
     monkeypatch.setattr(
-        claude_code, "_stream_history",
+        claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
+    runner = ClaudeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
     events = [ev async for ev in runner.run(inv)]
 
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE

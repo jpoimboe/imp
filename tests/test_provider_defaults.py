@@ -12,9 +12,9 @@ import pytest
 from imp.providers import BUILTIN_FLOOR, register_builtin_providers, resolve
 from imp.providers.config import ProviderModel
 
-_MODULES = ["anthropic", "openai", "claude_code", "codex"]
+_MODEL_BEARING = ["anthropic", "openai", "claude", "codex"]
 _REQUIRED = {"low", "medium", "high"}
-_BUILTINS = ["anthropic", "claude_code", "codex", "openai", "scripted"]
+_BUILTINS = ["anthropic", "claude", "codex", "openai", "scripted"]
 
 
 class _Cfg:
@@ -23,7 +23,7 @@ class _Cfg:
     providers: ClassVar[tuple[str, ...]] = ("anthropic",)
 
 
-@pytest.mark.parametrize("name", _MODULES)
+@pytest.mark.parametrize("name", _MODEL_BEARING)
 def test_tier_defaults_cover_required_tiers(name: str) -> None:
     tiers = BUILTIN_FLOOR[name].tier_defaults
     assert tiers is not None
@@ -39,7 +39,7 @@ def test_env_var_present_for_http_providers() -> None:
 
 
 def test_env_var_none_for_cli_providers() -> None:
-    assert BUILTIN_FLOOR["claude_code"].env_var is None
+    assert BUILTIN_FLOOR["claude"].env_var is None
     assert BUILTIN_FLOOR["codex"].env_var is None
 
 
@@ -106,7 +106,7 @@ def test_importing_the_package_registers_nothing() -> None:
         "from imp.providers import resolve\n"
         "PROVIDER_MODULES = {\n"
         "    'imp.providers.anthropic', 'imp.providers.openai',\n"
-        "    'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "    'imp.providers.claude', 'imp.providers.codex',\n"
         "    'imp.providers.codex_runner', 'imp.providers.scripted'}\n"
         "def leaked():\n"
         "    out = sorted(n for n in sys.modules if n in PROVIDER_MODULES)\n"
@@ -151,7 +151,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         {"low": "gpt-5.6-luna", "medium": "gpt-5.6-terra", "high": "gpt-5.6-sol"},
         "OPENAI_API_KEY",
     ),
-    "claude_code": (
+    "claude": (
         {
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
@@ -176,7 +176,7 @@ def test_iter_provider_defaults_returns_the_whole_builtin_floor() -> None:
     assert sorted(defaults) == _BUILTINS
     actual = {n: (d.tier_defaults, d.env_var) for n, d in defaults.items()}
     assert actual == _EXPECTED_FLOOR
-    for name in _MODULES:
+    for name in _MODEL_BEARING:
         tiers = defaults[name].tier_defaults
         assert tiers is not None, f"{name} contributes no floor tiers"
         assert set(tiers) >= _REQUIRED
@@ -238,9 +238,9 @@ def test_builtin_floor_table_names_a_module_for_every_builtin() -> None:
         assert callable(mod._factory), name
 
 
-@pytest.mark.parametrize("mod_name", _MODULES)
-def test_provider_modules_no_longer_declare_floor_constants(mod_name: str) -> None:
-    mod = importlib.import_module(f"imp.providers.{mod_name}")
+@pytest.mark.parametrize("name", _MODEL_BEARING)
+def test_provider_modules_no_longer_declare_floor_constants(name: str) -> None:
+    mod = importlib.import_module(f"imp.providers.{BUILTIN_FLOOR[name].module}")
     assert not hasattr(mod, "TIER_DEFAULTS")
     assert not hasattr(mod, "ENV_VAR")
 
@@ -257,7 +257,7 @@ def test_scripted_keeps_its_runtime_env_var_but_no_floor_table() -> None:
 # Exact literals: the hint is user-facing copy, so a plausible-but-wrong string
 # must not pass. Table order mirrors the spec's §6 table.
 _EXPECTED_AUTH_HINTS = {
-    "claude_code": "run `claude login`",
+    "claude": "run `claude login`",
     "codex": "run `codex login`",
     "anthropic": "set ANTHROPIC_API_KEY",
     "openai": "set OPENAI_API_KEY",
@@ -272,8 +272,8 @@ def test_every_builtin_carries_its_auth_hint() -> None:
 def test_auth_hint_lines_renders_one_indented_line_per_known_provider() -> None:
     from imp.providers import auth_hint_lines
 
-    assert auth_hint_lines(["claude_code", "anthropic"]) == [
-        "  claude_code — run `claude login`",
+    assert auth_hint_lines(["claude", "anthropic"]) == [
+        "  claude — run `claude login`",
         "  anthropic — set ANTHROPIC_API_KEY",
     ]
 

@@ -621,16 +621,16 @@ def _future_reading() -> QuotaReading:
     session window would coarsen to `2h` and ~11h before the weekly one reads
     `4d`, so a run stalled under load still renders the same countdown."""
     now = int(time.time())
-    return QuotaReading(provider="claude_code", plan=None,
+    return QuotaReading(provider="claude", plan=None,
                         windows=(QuotaWindow("5h", 62.0, now + 10_800),
                                  QuotaWindow("7d", 7.0, now + 430_000)),
                         raw={})
 
 
 def _cc_turn(**payload: Any) -> dict[str, Any]:
-    """A step-level claude_code turn. Its usage prices nothing, so any dollars on
+    """A step-level claude turn. Its usage prices nothing, so any dollars on
     the row could only have come from somewhere else."""
-    return ev("m1", "agent_message", agent_id="step:p/s", provider="claude_code",
+    return ev("m1", "agent_message", agent_id="step:p/s", provider="claude",
               model="claude-opus-5", stop_reason="end_turn",
               raw={"content": [{"type": "text", "text": "done"}]}, usage={},
               **payload)
@@ -675,7 +675,7 @@ async def test_the_inert_row_carries_the_logged_providers_quota(
     row = await _inert_toolbar(monkeypatch, ch)
 
     assert row.startswith(f"{tmp_path.name} · c · C")   # left group unchanged
-    assert row.endswith(f"claude_code · {_WINDOWS}")
+    assert row.endswith(f"claude · {_WINDOWS}")
 
 
 # AC 10(b)
@@ -710,7 +710,7 @@ async def test_the_inert_row_stays_bare_without_a_reading_or_a_priced_turn(
     # A log holding neither a turn nor a reading: today's row, byte for byte.
     assert await _inert_toolbar(monkeypatch, ch) == bare
 
-    # A claude_code turn prices nothing and states no reading: a carrier now
+    # A claude turn prices nothing and states no reading: a carrier now
     # exists, and there is still no group and no placeholder standing in for it.
     _log(ch, _cc_turn(auth_mode="subscription"))
     row = await _inert_toolbar(monkeypatch, ch)

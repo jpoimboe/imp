@@ -6,7 +6,7 @@ runner's private state (`_client`, `_client_factory`, `_model`). Failures
 here mean someone copy-pasted a fixture that monkey-patches a private
 attribute instead of using the constructor's public kwargs.
 
-The runners are: AnthropicAgentRunner, OpenAIAgentRunner, ClaudeCodeAgentRunner,
+The runners are: AnthropicAgentRunner, OpenAIAgentRunner, ClaudeAgentRunner,
 CodexAgentRunner. Their public surface is the AgentRunner protocol (.run,
 .interrupt) plus .model (per Provider protocol). Anything else is private.
 """
@@ -49,7 +49,7 @@ def test_no_private_reachthrough_across_providers() -> None:
     allowed_substrings = (
         "src/imp/providers/anthropic.py",
         "src/imp/providers/openai.py",
-        "src/imp/providers/claude_code.py",
+        "src/imp/providers/claude.py",
         "src/imp/providers/codex.py",
         "src/imp/providers/codex_runner.py",
         "src/imp/cli/session_controls.py",

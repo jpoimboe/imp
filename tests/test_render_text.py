@@ -2496,10 +2496,10 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
     events = [
         ev("1", "quest_created", quest_id=1, title="fix"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
-           model="m", provider="claude_code",
+           model="m", provider="claude",
            timestamp="2026-07-01T00:00:00+00:00"),
         ev("3", "agent_message", agent_id="step:implement/coder",
-           provider="claude_code", model="m", usage={},
+           provider="claude", model="m", usage={},
            raw={"content": [{"type": "text", "text": "Implemented the fix."}]},
            timestamp="2026-07-01T00:00:01+00:00"),
         # The dangling `complete_step`: a tool_call with NO sibling tool_result.

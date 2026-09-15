@@ -181,9 +181,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             if isinstance(agent_id, str):
                 last_msg[agent_id] = (p.get("provider"), p.get("model"),
                                       p.get("auth_mode"))
-            # claude_code's agent_message usage is the unreliable start-of-message
+            # claude's agent_message usage is the unreliable start-of-message
             # snapshot; its authoritative figures arrive on query_result.
-            billing = (None if p.get("provider") == "claude_code"
+            billing = (None if p.get("provider") == "claude"
                        else billing_from_agent_message(p))
             if billing is not None:
                 _credit(computed_contribution(

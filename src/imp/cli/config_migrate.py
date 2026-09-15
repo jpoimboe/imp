@@ -95,10 +95,19 @@ _LIVE_CHECKPOINT_KEY = re.compile(
 )
 
 
+# Live occurrences only, like the matcher above. Not anchored to a key: the id is a
+# `providers:` sequence ITEM as well as a `tiers.<tier>` / `provider_envs:` key. A
+# commented-out block holds nothing for the ruamel rename, so matching one would
+# make every later invocation pay the parse this check exists to skip.
+_LIVE_OLD_PROVIDER = re.compile(r"^[^#\n]*claude_code", re.MULTILINE)
+
+
 def _has_pending(text: str) -> bool:
     """Whether any transform has work to do — the byte pre-check, before any
     ruamel import or parse."""
-    return bool(_LEGACY_OPT_OUT.search(text)) or bool(_LIVE_CHECKPOINT_KEY.search(text))
+    return (bool(_LEGACY_OPT_OUT.search(text))
+            or bool(_LIVE_CHECKPOINT_KEY.search(text))
+            or bool(_LIVE_OLD_PROVIDER.search(text)))
 
 
 def rewrite_config_file(path: Path) -> None:
@@ -113,7 +122,12 @@ def rewrite_config_file(path: Path) -> None:
         return
     # Deferred past the byte pre-check: the post-migration steady state pays no
     # ruamel import and no parse.
-    from imp.cli.config_edit import UnsetOutcome, apply_set, apply_unset
+    from imp.cli.config_edit import (
+        UnsetOutcome,
+        apply_provider_rename,
+        apply_set,
+        apply_unset,
+    )
     from imp.cli.config_write import land, scratch_seam, verify_readable
 
     keys = _legacy_keys(text)
@@ -136,8 +150,13 @@ def rewrite_config_file(path: Path) -> None:
         spelling = "[]" if key == "pythonpath" else '""'
         notices.append(
             f"imp: rewrote {spelling} to false in {display_path(path)} ({key})")
+    renamed = apply_provider_rename(text, "claude_code", "claude")
+    if renamed is not None:
+        text = renamed
+        notices.append("imp: renamed the claude_code provider to claude in "
+                       f"{display_path(path)}")
     if not notices:
-        return                     # a pre-check over-match: apply_unset said ABSENT
+        return          # a pre-check over-match: no transform found its target
     with scratch_seam(path.parent / f".config-migrate-{os.getpid()}",
                       path.name) as scratch:
         verify_readable(scratch, text)

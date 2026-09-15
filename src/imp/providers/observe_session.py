@@ -3,12 +3,12 @@
 """Provider-agnostic observe-`Session` base for `run_agent_loop`.
 
 `ObserveSession` owns the observe control skeleton extracted from the
-claude_code runner's old `_run_loop`: the per-turn SDK-message stream, the
+claude runner's old `_run_loop`: the per-turn SDK-message stream, the
 tool-host-mediated `complete_step` capture surface, and the LoopGuard
 single-feed ordering. Provider specifics (transport, history/resume
 translation, isolated-home lifecycle, classify, cancellation) are the abstract
-hooks a subclass overrides — see `ClaudeCodeSession` in
-`imp.providers.claude_code`.
+hooks a subclass overrides — see `ClaudeSession` in
+`imp.providers.claude`.
 
 The seam mirrors `PushSession` but for the pull-shaped observe providers: the
 tool host (an in-process MCP server, claude-p's own tool loop) executes tools
@@ -119,7 +119,7 @@ class ObserveSession:
                 # complete_step / post-hoc ceiling: hand the driver an EndOfTurn;
                 # it validates the captured complete_step or trips the ceiling.
                 if self._complete_step_called or self.posthoc_ceiling_tripped():
-                    # Co-turn tool visibility (old claude_code.py:2415): a
+                    # Co-turn tool visibility (old claude.py:2415): a
                     # SUCCESSFUL complete_step still feeds its flushed record's
                     # co-turn tool outcomes to the guard exactly once. Guard state
                     # is discarded on the driver's agent_result return, so this is

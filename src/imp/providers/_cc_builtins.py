@@ -11,7 +11,7 @@ imp's strict-MCP-only policy.
 The drift guard (`tests/test_cc_builtins_drift_live.py`) spawns the bundled CLI
 under the exact deny list this constant produces and reads the tool registry
 it advertises, rather than syncing against a bare CLI listing. A failure means
-a built-in is reachable from every claude_code step; add it here.
+a built-in is reachable from every claude step; add it here.
 
 Source of truth: the tool registry advertised by the CLI bundled with the
 pinned SDK — not the `claude` on PATH, which the SDK never spawns.
@@ -21,7 +21,7 @@ Pin: claude-agent-sdk>=0.2.152,<1.0
 from __future__ import annotations
 
 # Sorted alphabetically for easy diffing on SDK bumps.
-ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
+ALL_CLAUDE_BUILTIN_TOOLS: tuple[str, ...] = (
     "AskUserQuestion",
     "Bash",
     "CronCreate",
@@ -59,4 +59,4 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "Write",
 )
 
-__all__ = ["ALL_CLAUDE_CODE_BUILTIN_TOOLS"]
+__all__ = ["ALL_CLAUDE_BUILTIN_TOOLS"]

@@ -34,7 +34,7 @@ def _bare_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _persist_initial(invocation: AgentInvocation) -> None:
-    """Mimic the real providers' fresh-entry persistence (claude_code.py: the
+    """Mimic the real providers' fresh-entry persistence (claude.py: the
     empty-transcript branch appends initial_messages to transcript.jsonl AND
     emits step_context). Fake runners must do the same so a later `resume:` entry
     sees a non-empty, replayable transcript with its stored system prompt —

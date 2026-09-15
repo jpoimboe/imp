@@ -224,7 +224,7 @@ def test_events_compact_renders_context_occupancy_per_provider_shape(
                      "context_tokens": 159_842,
                      "raw": {"content": [{"type": "text", "text": "one"}]}}},
         {"type": "agent_message", "agent_id": "step:build/coder",
-         "payload": {"provider": "claude_code", "model": "claude-opus-5",
+         "payload": {"provider": "claude", "model": "claude-opus-5",
                      "stop_reason": "end_turn",
                      "usage": {"input_tokens": 10, "output_tokens": 2},
                      "context_tokens": 137_000, "context_window": 1_000_000,

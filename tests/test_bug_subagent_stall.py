@@ -2,8 +2,8 @@
 """Regression repro for spec §11: live output stalls partway through a run and
 never recovers, even though `imp log` shows the full record.
 
-Root cause (confirmed against a real claude_code run, NOT the human-gate
-mechanism originally hypothesized): claude_code emits the `task` tool_call with
+Root cause (confirmed against a real claude run, NOT the human-gate
+mechanism originally hypothesized): claude emits the `task` tool_call with
 an EMPTY `payload['id']`. `_open_subagent_fold` keys the fold under that empty
 block id; the closing `task` tool_result carries the real `toolu_...` id, so
 `_h_tool_result` can never pop the fold and `SubagentFold.running` stays True

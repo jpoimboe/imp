@@ -111,7 +111,7 @@ class _NoInterruptCoordinator(_PauseCoordinator):
 async def test_interrupted_error_pauses_with_interrupt_flag_when_pause_cleared(
     tmp_path: Path,
 ) -> None:
-    """A claude_code mid-tool Ctrl-C can surface as an `interrupted` error event
+    """A claude mid-tool Ctrl-C can surface as an `interrupted` error event
     AFTER the cooperative steer cleared should_pause. It must still pause with
     interrupt=True (not classify as a fatal `config` pause) so the resume
     continues the step. This is the gate-only path the -n4 live load exposed."""

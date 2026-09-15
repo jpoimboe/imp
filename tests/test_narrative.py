@@ -711,7 +711,7 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
 
 def test_task_result_present_canonical_close_carries_outcome_no_orphan() -> None:
     # Present+matching (the anthropic/openai/codex shape AND post-Part-1
-    # claude_code): a `task` tool_call + tool_result sharing the same non-empty
+    # claude): a `task` tool_call + tool_result sharing the same non-empty
     # block id, with parent prose AFTER the result. The fold must close via the
     # canonical _h_tool_result path carrying the outcome (is_error/glyph), NOT via
     # resume-close, and there must be NO orphan "tool" burst line.
@@ -796,23 +796,23 @@ def test_legacy_unstamped_codex_fold_salvaged_by_resume_close() -> None:
     assert act2 is None or "subagent(reviewer)" not in (act2.verb or "")
 
 
-def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
-    # claude_code emits stop_reason=None on mid-stream fragments — value-identical
-    # to codex's turn-end None. The provider gate must keep claude_code fragments
+def test_claude_midstream_fragment_does_not_salvage_close() -> None:
+    # claude emits stop_reason=None on mid-stream fragments — value-identical
+    # to codex's turn-end None. The provider gate must keep claude fragments
     # mid-turn: a fragment must NOT salvage-close an open task fold (it closes
     # later via its canonical task tool_result or the step_completed backstop).
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
-              model="m", provider="claude_code"))
+              model="m", provider="claude"))
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude",
               model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="claude_code",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="claude",
               model="m", stop_reason=None, usage={}, raw={"content": [
                   {"type": "text", "text": "still streaming"}]}))
     assert sub.running is True
@@ -843,7 +843,7 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
 
 
 def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
-    # Regression (ecui5x): a backgrounded claude_code `task` dispatch is stamped
+    # Regression (ecui5x): a backgrounded claude `task` dispatch is stamped
     # id_ns="block" on the CALL (matching its result), so awaits_result=True and
     # the fold is shielded from resume-close. The parent then runs its OWN
     # non-task tool_call (a web_search) while the subagent is still in flight —
@@ -854,12 +854,12 @@ def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
     # the gap to the parent's next action.
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
-              model="m", provider="claude_code"))
+              model="m", provider="claude"))
     b.add({**_ev("tk1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",
                  input={"subagent_name": "reviewer", "task_description": "go"},
                  id_ns="block"),
            "timestamp": "2026-06-23T16:14:14+00:00"})
-    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude",
               model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
@@ -1164,7 +1164,7 @@ def test_real_prose_flushes_the_burst() -> None:
 
 def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
     # New contract (replaces the old §11 mismatched-id heuristic, removed when
-    # Part 1 made claude_code mint a real block id matching the call+result).
+    # Part 1 made claude mint a real block id matching the call+result).
     # The task tool_call and its tool_result share the SAME non-empty block id;
     # the fold closes via _h_tool_result's block-id match, carrying the outcome.
     b = nv.NarrativeBuilder()
@@ -2575,7 +2575,7 @@ def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
     # leaving detail empty (the "Check stderr output for details" regression).
     b = nv.NarrativeBuilder()
     b.add(ev("e1", "error", category="terminated",
-             message="claude_code agent terminated with an error (cause unknown)",
+             message="claude agent terminated with an error (cause unknown)",
              detail={"stderr_tail": "Error: Session ID abc is already in use.",
                      "exit_code": 1}))
     err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
@@ -2821,7 +2821,7 @@ def test_builder_prefers_the_reported_context_tokens_over_the_billing_sum() -> N
     b.add({
         "type": "agent_message", "agent_id": None,
         "payload": {
-            "provider": "claude_code", "model": "opus-1m",
+            "provider": "claude", "model": "opus-1m",
             "stop_reason": "tool_use",
             "raw": {"content": [{"type": "tool_use", "id": "t1",
                                  "name": "bash", "input": {}}],
@@ -2841,7 +2841,7 @@ def test_subagent_agent_message_does_not_move_context_tokens_or_window() -> None
     b = nv.NarrativeBuilder()
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
-    b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="claude_code",
+    b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="claude",
              model="opus-1m", stop_reason="end_turn", usage={},
              raw={"content": []}, context_tokens=125_000,
              context_window=1_000_000))
@@ -2850,7 +2850,7 @@ def test_subagent_agent_message_does_not_move_context_tokens_or_window() -> None
     # Open a subagent fold so the sub: turn routes through a registered child.
     b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="claude_code",
+    b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="claude",
              model="opus-1m", stop_reason="end_turn", usage={},
              raw={"content": []}, context_tokens=190_000, context_window=200_000))
     assert b.latest_context_tokens == 125_000    # frozen at the parent's value
@@ -2960,13 +2960,13 @@ def test_query_result_renders_without_fallback() -> None:
     assert not any(isinstance(n, nv.FallbackLine) for n in _walk(tree.root))
 
 
-def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
-    # The coalesced claude_code llm_response now carries a real stop_reason, so
+def test_claude_turn_end_detection_uses_real_stop_reason() -> None:
+    # The coalesced claude llm_response now carries a real stop_reason, so
     # turn-end detection works through the standard frozenset path.
     assert nv._agent_message_is_turn_end(
-        {"provider": "claude_code", "stop_reason": "end_turn"}) is True
+        {"provider": "claude", "stop_reason": "end_turn"}) is True
     assert nv._agent_message_is_turn_end(
-        {"provider": "claude_code", "stop_reason": None}) is False
+        {"provider": "claude", "stop_reason": None}) is False
 
 
 def test_builder_has_no_checkpoint_threshold_capture() -> None:
@@ -3066,7 +3066,7 @@ def test_resume_restart_clears_pre_interrupt_children() -> None:
 def test_error_node_uses_last_agent_text_when_no_full_summary_or_stderr() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("e1", "error", category="terminated",
-             message="claude_code agent terminated with an error (cause unknown)",
+             message="claude agent terminated with an error (cause unknown)",
              detail={"last_agent_text": "API Error 400 — tool use concurrency"}))
     err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
     assert err.detail == "API Error 400 — tool use concurrency"

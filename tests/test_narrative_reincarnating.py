@@ -27,7 +27,7 @@ def test_reincarnating_reports_crossing_context_from_subagent_turn() -> None:
     # (as in change loko19) was a subagent's. Sourced from the last agent_message.
     b = NarrativeBuilder()
     b.add({"type": "agent_message", "agent_id": "sub:abc",
-           "payload": {"provider": "claude_code", "context_tokens": 166941,
+           "payload": {"provider": "claude", "context_tokens": 166941,
                        "context_window": 200000, "context_pct": 83,
                        "usage": {"input_tokens": 3,
                                  "cache_read_input_tokens": 164000}}})
@@ -44,7 +44,7 @@ def test_reincarnating_reports_the_handoff_limit_not_the_window() -> None:
     # crossing instead of reading as a fifth of a huge window.
     b = NarrativeBuilder()
     b.add({"type": "agent_message", "agent_id": "step:p/s",
-           "payload": {"provider": "claude_code", "model": "claude-opus-5[1m]",
+           "payload": {"provider": "claude", "model": "claude-opus-5[1m]",
                        "context_tokens": 203_000, "context_window": 1_000_000,
                        "usage": {}}})
     b.add({"type": "reincarnating", "agent_id": None,

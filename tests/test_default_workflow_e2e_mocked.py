@@ -337,12 +337,12 @@ async def test_full_default_workflow_completes_with_canned_openai(
 
 
 @pytest.mark.anyio
-async def test_full_default_workflow_completes_with_canned_claude_code(
+async def test_full_default_workflow_completes_with_canned_claude(
     tmp_path: Path,
 ) -> None:
     from typing import Any
 
-    from imp.providers.claude_code import ClaudeCodeProvider
+    from imp.providers.claude import ClaudeProvider
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,
@@ -356,7 +356,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     )
 
     quest = _seed_default_workflow(tmp_path)
-    _rewrite_config(tmp_path, ("anthropic", "claude_code"),
+    _rewrite_config(tmp_path, ("anthropic", "claude"),
                     ("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
     # The CC fake is per-step; each runner spawns a fresh client.
@@ -397,8 +397,8 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
-        "claude_code", env_check=lambda: True,
-        factory=lambda model: ClaudeCodeProvider(
+        "claude", env_check=lambda: True,
+        factory=lambda model: ClaudeProvider(
             model_name=model, client_factory=factory,
         ),
     )

@@ -214,3 +214,16 @@ def backfill_step_round(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         new["payload"] = {**payload, "round": 1}
         out.append(new)
     return out
+
+
+def rename_claude_code_provider(value: Any) -> Any:
+    """One-shot: rewrite every `provider: "claude_code"` entry at any depth. Keying on
+    the field name rather than on a list of event types cannot go stale, and after the
+    rename no `provider` field legitimately holds the old id."""
+    if isinstance(value, dict):
+        return {k: "claude" if k == "provider" and v == "claude_code"
+                else rename_claude_code_provider(v)
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [rename_claude_code_provider(v) for v in value]
+    return value

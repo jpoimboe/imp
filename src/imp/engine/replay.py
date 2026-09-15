@@ -17,7 +17,7 @@ from typing import Any
 from imp.agents.runner import Message
 from imp.providers.message_parsers import (
     _parse_anthropic_message,
-    _parse_claude_code_message,
+    _parse_claude_message,
     _parse_codex_message,
     _parse_responses_message,
 )
@@ -25,7 +25,7 @@ from imp.providers.message_parsers import (
 _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
     "anthropic": _parse_anthropic_message,
     "openai": _parse_responses_message,
-    "claude_code": _parse_claude_code_message,
+    "claude": _parse_claude_message,
     "codex": _parse_codex_message,
     "scripted": _parse_anthropic_message,
 }

@@ -1,6 +1,6 @@
 """Background-execution parity for the MCP-wrapped providers.
 
-claude_code and codex execute imp's registry tools in-process (SDK MCP
+claude and codex execute imp's registry tools in-process (SDK MCP
 wrappers / codex_mcp.dispatch_tool) — the spec's "bash never fires there"
 claim was false at the production site. This file pins the parity wiring:
 injection, the background_enabled flag, and teardown surfaces."""
@@ -16,8 +16,8 @@ import anyio
 import pytest
 
 from imp.paths import project_state_dir
-from imp.providers import claude_code as cc_mod
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers import claude as cc_mod
+from imp.providers.claude import ClaudeAgentRunner
 from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup
 from tests.test_build_tools_wait_for_user import _Inv
@@ -50,13 +50,13 @@ def test_codex_build_tools_no_bg_without_bash() -> None:
     assert "bash_output" not in tools and "bash_kill" not in tools
 
 
-def test_codex_no_claude_code_reachin() -> None:
-    """AC #4b: codex_runner no longer imports any claude_code private internal."""
+def test_codex_no_claude_reachin() -> None:
+    """AC #4b: codex_runner no longer imports any claude private internal."""
     import inspect
 
     from imp.providers import codex_runner
     src = inspect.getsource(codex_runner)
-    assert "from imp.providers.claude_code import" not in src
+    assert "from imp.providers.claude import" not in src
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
 
     from imp.cli.signals import InterruptCoordinator
     from tests.cc_fakes import CooperativeClient, assistant, result, text
-    from tests.test_claude_code_runner import _inv
+    from tests.test_claude_runner import _inv
 
     coord = InterruptCoordinator()
     after_steer = [assistant(text("done")), result()]
@@ -110,7 +110,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "carry on")
     coord.attach_runner(runner.interrupt)
@@ -147,7 +147,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
 
 def test_cc_interrupt_none_ctx_safe(tmp_path: Path) -> None:
     async def main() -> None:
-        runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+        runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
         await runner.interrupt()            # _ctx is None — must not raise
     anyio.run(main)
 
@@ -158,7 +158,7 @@ def test_cc_interrupt_none_ctx_safe(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
-    """Teardown site 2 under claude_code: aclosing run() mid-conversation
+    """Teardown site 2 under claude: aclosing run() mid-conversation
     kills the backgrounded group via the new finally (PEP 525: _run_loop's
     own finally would only GC-finalize).
 
@@ -176,7 +176,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
     This correctly pins "aclose → bg group dead via run()'s finally" without
     depending on MCP tool dispatch through the fake harness.
     """
-    from tests.test_claude_code_runner import _inv
+    from tests.test_claude_runner import _inv
 
     class _StallingClient:
         """Client whose query() stalls forever, allowing mid-drive ctx inspection."""
@@ -196,7 +196,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
         async def interrupt(self) -> None:
             pass
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda _opts: _StallingClient(),
     )
@@ -245,7 +245,7 @@ def test_codex_interrupt_tears_down_background(tmp_path: Path) -> None:
 
     CodexAgentRunner construction adaptation: CodexAgentRunner.__init__ only
     requires `model_name` (plus optional kwargs client_factory/user_input_fn);
-    no additional required kwargs vs ClaudeCodeAgentRunner. The _ctx is
+    no additional required kwargs vs ClaudeAgentRunner. The _ctx is
     injected directly as in the CC sibling — no preflight/server lifecycle
     needed for this unit test.
     """

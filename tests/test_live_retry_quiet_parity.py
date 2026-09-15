@@ -26,7 +26,7 @@ EVENTS: list[dict[str, Any]] = [
     _ev("e1", "error", category="auth", kind="http_401", message="claude CLI: 401"),
     _ev("r1", "agent_retry", category="auth", attempt=1, backoff_seconds=1.0),
     {"id": "a1", "agent_id": None, "type": "agent_message",
-     "payload": {"provider": "claude_code", "model": "m", "usage": {},
+     "payload": {"provider": "claude", "model": "m", "usage": {},
                  "stop_reason": None,
                  "raw": {"content": [{"type": "text", "text": "back to work"}]}}},
 ]

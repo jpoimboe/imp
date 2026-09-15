@@ -311,7 +311,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_claude_code_resume_entry_drain_before_first_query(
+async def test_claude_resume_entry_drain_before_first_query(
     tmp_path: Path,
 ) -> None:
     """Interjects queued before resume must appear in the FIRST client.query()
@@ -329,7 +329,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,
@@ -404,14 +404,14 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=factory,
     )
 
     inv = AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude_code",
+        provider_name="claude",
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),

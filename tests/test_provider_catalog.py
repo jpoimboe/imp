@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from imp.providers.catalog import (
     ANTHROPIC,
-    CLAUDE_CODE,
+    CLAUDE,
     DEFAULT_CHECKPOINT_CEILING,
     DEFAULT_CHECKPOINT_FRACTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -18,8 +18,8 @@ from imp.providers.catalog import (
 )
 
 
-def test_claude_code_catalog_opus_1m_entry() -> None:
-    info = model_info(CLAUDE_CODE, "claude-opus-4-8[1m]")
+def test_claude_catalog_opus_1m_entry() -> None:
+    info = model_info(CLAUDE, "claude-opus-4-8[1m]")
     assert info.window == 1_000_000
     # The bracketed alias IS the CLI model id: it requests 1M under both
     # subscription and API-key auth; no custom beta (which subscription auth
@@ -38,15 +38,15 @@ def test_anthropic_catalog_opus_1m_entry() -> None:
     assert info.betas == ("context-1m-2025-08-07",)
 
 
-def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
-    info = model_info(CLAUDE_CODE, "opus")
+def test_claude_catalog_opus_entry_is_plain_200k() -> None:
+    info = model_info(CLAUDE, "opus")
     assert info.window == 200_000
     assert info.betas == ()
     assert info.cli_model is None
 
 
 def test_unknown_alias_yields_conservative_default() -> None:
-    info = model_info(CLAUDE_CODE, "claude-sonnet-4-5")
+    info = model_info(CLAUDE, "claude-sonnet-4-5")
     assert info == ModelInfo(window=DEFAULT_WINDOW)
     assert info.betas == ()
     assert info.cli_model is None
@@ -110,7 +110,7 @@ def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
 def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
     from imp.providers.catalog import context_threshold_crossed
     # 200k of the 1M window: the 0.8 fraction would put this at 800k.
-    for provider in ("anthropic", "claude_code"):
+    for provider in ("anthropic", "claude"):
         assert context_threshold_crossed(
             {"input_tokens": 200_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
@@ -123,7 +123,7 @@ def test_sdk_crossed_fires_at_the_200k_ceiling_on_a_big_window() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
     assert sdk_context_threshold_crossed(199_999, 1_050_000) is False
     assert sdk_context_threshold_crossed(200_000, 1_050_000) is True
-    # The claude_code path on a live 1M window.
+    # The claude path on a live 1M window.
     assert sdk_context_threshold_crossed(200_000, 1_000_000) is True
     assert sdk_context_threshold_crossed(199_999, 1_000_000) is False
 
@@ -194,7 +194,7 @@ def test_model_info_defaults_to_vision_capable() -> None:
 
 def test_known_models_are_vision_capable() -> None:
     assert model_supports_vision("anthropic", "opus") is True
-    assert model_supports_vision("claude_code", "sonnet") is True
+    assert model_supports_vision("claude", "sonnet") is True
     assert model_supports_vision("openai", "gpt-5") is True
     assert model_supports_vision("codex", "gpt-5.3-codex") is True
 
@@ -212,13 +212,13 @@ def test_text_only_flag_forces_no_vision(monkeypatch) -> None:
     assert model_supports_vision("anthropic", "text-only") is False
 
 
-def test_claude_code_catalog_has_fable_entries() -> None:
+def test_claude_catalog_has_fable_entries() -> None:
     # Both aliases are present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus entries.
-    assert "claude-fable-5" in CLAUDE_CODE
-    assert "claude-fable-5[1m]" in CLAUDE_CODE
-    assert CLAUDE_CODE["claude-fable-5"] == ModelInfo(window=200_000)
-    assert CLAUDE_CODE["claude-fable-5[1m]"] == ModelInfo(window=1_000_000)
+    assert "claude-fable-5" in CLAUDE
+    assert "claude-fable-5[1m]" in CLAUDE
+    assert CLAUDE["claude-fable-5"] == ModelInfo(window=200_000)
+    assert CLAUDE["claude-fable-5[1m]"] == ModelInfo(window=1_000_000)
 
 
 def test_anthropic_catalog_has_fable_entries() -> None:
@@ -238,13 +238,13 @@ def test_anthropic_catalog_has_fable_entries() -> None:
     )
 
 
-def test_claude_code_catalog_has_opus_5_entries() -> None:
+def test_claude_catalog_has_opus_5_entries() -> None:
     # Both aliases present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus/fable entries.
-    assert "claude-opus-5" in CLAUDE_CODE
-    assert "claude-opus-5[1m]" in CLAUDE_CODE
-    assert CLAUDE_CODE["claude-opus-5"] == ModelInfo(window=200_000)
-    assert CLAUDE_CODE["claude-opus-5[1m]"] == ModelInfo(window=1_000_000)
+    assert "claude-opus-5" in CLAUDE
+    assert "claude-opus-5[1m]" in CLAUDE
+    assert CLAUDE["claude-opus-5"] == ModelInfo(window=200_000)
+    assert CLAUDE["claude-opus-5[1m]"] == ModelInfo(window=1_000_000)
 
 
 def test_anthropic_catalog_has_opus_5_entries() -> None:
@@ -267,7 +267,7 @@ def test_anthropic_catalog_has_opus_5_entries() -> None:
 def test_limits_for_covers_fable() -> None:
     # The bracketed 1M form and the plain alias are both exact catalog keys.
     one_m = limits_for("anthropic", "claude-fable-5[1m]")
-    plain = limits_for("claude_code", "claude-fable-5")
+    plain = limits_for("claude", "claude-fable-5")
     assert one_m is not None and plain is not None
     assert (one_m.window, plain.window) == (1_000_000, 200_000)
 
@@ -284,7 +284,7 @@ def test_catalog_aliases_lists_provider_table_keys() -> None:
     anthropic = catalog_aliases("anthropic")
     assert "claude-fable-5[1m]" in anthropic
     assert "claude-fable-5" in anthropic
-    assert "sonnet" in catalog_aliases("claude_code")
+    assert "sonnet" in catalog_aliases("claude")
     # codex shares the OPENAI table
     assert catalog_aliases("codex") == catalog_aliases("openai")
     assert "gpt-5" in catalog_aliases("openai")
@@ -342,12 +342,12 @@ def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
     assert anthropic_1m is not None
     assert anthropic_1m.window == 1_000_000
-    claude_code_1m = limits_for("claude_code", "claude-opus-5[1m]")
-    assert claude_code_1m is not None
-    assert claude_code_1m.window == 1_000_000
-    claude_code_opus = limits_for("claude_code", "opus")
-    assert claude_code_opus is not None
-    assert claude_code_opus.window == 200_000
+    claude_1m = limits_for("claude", "claude-opus-5[1m]")
+    assert claude_1m is not None
+    assert claude_1m.window == 1_000_000
+    claude_opus = limits_for("claude", "opus")
+    assert claude_opus is not None
+    assert claude_opus.window == 200_000
 
 
 def test_limits_for_longest_prefix_covers_dated_ids() -> None:
@@ -355,9 +355,9 @@ def test_limits_for_longest_prefix_covers_dated_ids() -> None:
     anthropic_dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert anthropic_dated is not None
     assert anthropic_dated.window == 200_000
-    claude_code_dated = limits_for("claude_code", "claude-opus-5-20260315")
-    assert claude_code_dated is not None
-    assert claude_code_dated.window == 200_000
+    claude_dated = limits_for("claude", "claude-opus-5-20260315")
+    assert claude_dated is not None
+    assert claude_dated.window == 200_000
 
 
 def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:

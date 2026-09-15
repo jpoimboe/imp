@@ -666,14 +666,14 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
 
 
 def _cc_fallback_events() -> list[dict]:
-    """A claude_code step whose query_result carries token counts but no
+    """A claude step whose query_result carries token counts but no
     `total_cost_usd` — the shape the price-table fallback prices."""
     return [
         {"type": "step_started", "timestamp": "2024-01-01T00:00:00Z",
          "payload": {"step": "reviewer", "phase": "build"}},
         {"type": "agent_message", "agent_id": "a1",
          "timestamp": "2024-01-01T00:00:01Z",
-         "payload": {"provider": "claude_code", "model": "claude-sonnet-4-6",
+         "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
                      "usage": {"input_tokens": 9999, "output_tokens": 8888}}},
         {"type": "query_result", "agent_id": "a1",
          "timestamp": "2024-01-01T00:00:02Z",
@@ -687,7 +687,7 @@ def _cc_fallback_events() -> list[dict]:
     ]
 
 
-def test_summary_markdown_prices_a_vendor_less_claude_code_row():
+def test_summary_markdown_prices_a_vendor_less_claude_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
     rows = build_summary(_cc_fallback_events())
@@ -814,7 +814,7 @@ def _quota_events() -> list[dict]:
         _tev("1", "step_started", timestamp="2024-01-01T00:00:00Z",
              step="spec", kind="agent", phase="design"),
         _tev("2", "quota_reading", timestamp="2024-01-01T00:00:30Z",
-             provider="claude_code", plan=None,
+             provider="claude", plan=None,
              windows=[{"label": "5h", "used_pct": 44.0, "resets_at": 100}],
              raw={}),
         _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
@@ -829,7 +829,7 @@ def test_summary_markdown_has_no_quota_input_and_carries_no_quota_block() -> Non
     out = render_summary_markdown(build_summary(_quota_events()),
                                   header=header)
     assert "**quota**" not in out
-    assert "claude_code" not in out
+    assert "claude" not in out
     assert "5h" not in out
     assert "| total | 1m 0s |" in out
     with pytest.raises(TypeError):

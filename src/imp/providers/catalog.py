@@ -34,7 +34,7 @@ class ModelInfo:
     supports_vision: bool = True
 
 
-CLAUDE_CODE: dict[str, ModelInfo] = {
+CLAUDE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
     "claude-haiku-4-5": ModelInfo(window=200_000),
@@ -62,7 +62,7 @@ CLAUDE_CODE: dict[str, ModelInfo] = {
 ANTHROPIC: dict[str, ModelInfo] = {
     # The raw API rejects the bracketed form, so cli_model strips it and the
     # context-1m beta header requests the 1M window instead (this provider is
-    # API-key-only, where custom betas are honored — unlike claude_code above).
+    # API-key-only, where custom betas are honored — unlike claude above).
     "claude-opus-4-8[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=64_000,
@@ -129,7 +129,7 @@ def model_info(catalog: dict[str, ModelInfo], alias: str) -> ModelInfo:
 # `codex` runs OpenAI models, so it shares OPENAI.
 _CATALOGS: dict[str, dict[str, ModelInfo]] = {
     "anthropic": ANTHROPIC,
-    "claude_code": CLAUDE_CODE,
+    "claude": CLAUDE,
     "openai": OPENAI,
     "codex": OPENAI,
 }
@@ -221,7 +221,7 @@ def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
 ) -> bool:
     """True when a provider's own reported LIVE context occupancy has reached the
-    handoff limit — claude_code's `get_context_usage()`, or codex's rollout
+    handoff limit — claude's `get_context_usage()`, or codex's rollout
     `token_count` record. Unlike context_threshold_crossed (which sums prompt
     tokens against the static catalog window), this compares the provider's live
     occupancy against `handoff_limit(context_window)`, the live window being
@@ -315,7 +315,7 @@ class BillingUsage:
 
 def web_search_request_count(usage: dict[str, Any] | None) -> int:
     """Server-side web-search requests from either Anthropic-family carrier:
-    claude_code's flat `webSearchRequests`, and the raw API's nested
+    claude's flat `webSearchRequests`, and the raw API's nested
     `server_tool_use.web_search_requests`."""
     if not usage:
         return 0

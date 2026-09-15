@@ -24,11 +24,11 @@ def test_parse_run_live_absent_returns_none():
 
 def test_parse_run_live_bare_returns_all_providers():
     assert parse_run_live(RUN_LIVE_ALL) == frozenset(KNOWN_PROVIDERS)
-    assert set(KNOWN_PROVIDERS) == {"anthropic", "openai", "claude_code", "codex"}
+    assert set(KNOWN_PROVIDERS) == {"anthropic", "openai", "claude", "codex"}
 
 
 def test_parse_run_live_subset_parses_named_providers():
-    assert parse_run_live("claude_code,openai") == frozenset({"claude_code", "openai"})
+    assert parse_run_live("claude,openai") == frozenset({"claude", "openai"})
 
 
 def test_parse_run_live_unknown_provider_raises_usage_error():
@@ -81,9 +81,9 @@ def _empty_path(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(empty_bin))
 
 
-def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp_path):
+def test_provider_available_claude_resolves_the_sdk_binary(monkeypatch, tmp_path):
     """The SDK spawns its bundled copy and never consults the PATH `claude`, so a host
-    that has the SDK and no PATH claude must still run the claude_code live lane."""
+    that has the SDK and no PATH claude must still run the claude live lane."""
     import tests._live as live
     _empty_path(monkeypatch, tmp_path)
     # A path that was never created: the check resolves the binary, it must neither
@@ -93,16 +93,16 @@ def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp
         "_find_cli",
         lambda _self: str(tmp_path / "never-created" / "claude"),
     )
-    assert live.provider_available("claude_code") is None
+    assert live.provider_available("claude") is None
 
 
-def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path):
+def test_provider_available_claude_missing_everywhere(monkeypatch, tmp_path):
     """When the SDK's own resolution comes up empty, the reason names both places it
     looked — the bundled binary and PATH."""
     import tests._live as live
     _empty_path(monkeypatch, tmp_path)
     monkeypatch.setattr(SubprocessCLITransport, "_find_cli", _raise_cli_not_found)
-    assert live.provider_available("claude_code") == (
+    assert live.provider_available("claude") == (
         "claude CLI not found (neither the SDK's bundled binary nor PATH)"
     )
 
@@ -149,7 +149,7 @@ def test_live_skip_reason_selected_but_unavailable(monkeypatch):
     import tests._live as live
     monkeypatch.setattr(live, "provider_available", lambda _p: "claude CLI not on PATH")
     assert (
-        live.live_skip_reason(frozenset({"claude_code"}), "claude_code")
+        live.live_skip_reason(frozenset({"claude"}), "claude")
         == "claude CLI not on PATH"
     )
 
@@ -215,7 +215,7 @@ def test_hook_runs_selected_available_provider(monkeypatch):
     import tests._live as live
     from tests.conftest import pytest_collection_modifyitems
     monkeypatch.setattr(live, "provider_available", lambda _p: None)
-    item = _StubItem("tests/test_x_live.py", live_provider="claude_code")
+    item = _StubItem("tests/test_x_live.py", live_provider="claude")
     pytest_collection_modifyitems(_StubConfig(_ALL), [item])
     assert _skip_reasons(item) == []
 
@@ -239,7 +239,7 @@ def test_bare_pytest_skips_converted_live_file_despite_env():
     """AC-1 (accident scenario): with IMP_LIVE_PROVIDERS exported, a bare pytest
     run (no --run-live) skips every live test in a converted module, citing the
     run-live reason. The ambient env is powerless against the flag gate."""
-    env = {**os.environ, "IMP_LIVE_PROVIDERS": "anthropic,openai,claude_code,codex"}
+    env = {**os.environ, "IMP_LIVE_PROVIDERS": "anthropic,openai,claude,codex"}
     env["PYTHONPATH"] = (
         str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
     )
@@ -292,7 +292,7 @@ def _bash_call(tool_id="b1"):
 
 def _bash_result(tool_id="b1", *, returncode, stderr, stdout="", shape="str"):
     # shape="str": the anthropic/openai in-process runner stores the bash JSON
-    # verbatim as a string. shape="list": claude_code's SDK wraps it as a list
+    # verbatim as a string. shape="list": claude's SDK wraps it as a list
     # of {"type":"text","text": <json string>} parts (see the real fixture
     # tests/fixtures/cc_tool_counter_burst.jsonl).
     inner = _json.dumps(
@@ -311,9 +311,9 @@ def test_precondition_failed_returns_exact_reason_on_overlay_mount(tmp_path):
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_failed_returns_reason_on_claude_code_list_content(tmp_path):
-    # claude_code's bash tool_result content is a LIST of text parts, not a
-    # string; the mount failure must still be detected so the two claude_code
+def test_precondition_failed_returns_reason_on_claude_list_content(tmp_path):
+    # claude's bash tool_result content is a LIST of text parts, not a
+    # string; the mount failure must still be detected so the two claude
     # targets SKIP (spec AC: all five tests SKIP on the overlay mount failure).
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
@@ -323,7 +323,7 @@ def test_precondition_failed_returns_reason_on_claude_code_list_content(tmp_path
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_returns_none_on_clean_claude_code_list_content(tmp_path):
+def test_precondition_returns_none_on_clean_claude_list_content(tmp_path):
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         _bash_call(),

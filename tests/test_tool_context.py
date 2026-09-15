@@ -802,8 +802,8 @@ def test_no_provider_still_calls_the_unsplit_pair() -> None:
     # merely avoided. That holds only while no provider reaches past the split.
     from pathlib import Path as _Path
 
-    from imp.providers import anthropic, claude_code, codex_runner, openai, scripted
-    for mod in (anthropic, openai, claude_code, codex_runner, scripted):
+    from imp.providers import anthropic, claude, codex_runner, openai, scripted
+    for mod in (anthropic, openai, claude, codex_runner, scripted):
         src = _Path(mod.__file__).read_text()
         assert "terminate_running_processes" not in src, mod.__name__
         assert "terminate_background_processes" not in src, mod.__name__
@@ -1296,8 +1296,8 @@ def test_both_providers_attach_the_driver_through_the_context() -> None:
     # provider is the exact regression: it spawns on the host, unconfined.
     from pathlib import Path as _Path
 
-    from imp.providers import claude_code, codex_runner
-    for mod in (claude_code, codex_runner):
+    from imp.providers import claude, codex_runner
+    for mod in (claude, codex_runner):
         src = _Path(mod.__file__).read_text()
         assert "attach_impty_driver(" in src, mod.__name__
         # …and with THIS step's transcript dir, which is where the pty journal lands.

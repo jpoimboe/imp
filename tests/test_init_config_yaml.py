@@ -41,7 +41,7 @@ def test_init_writes_config_yaml_without_bindings(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     root = tmp_path / "repo"
     root.mkdir()
-    _run(root, ["claude_code", "openai"])
+    _run(root, ["claude", "openai"])
 
     proj = yaml.safe_load((root / "imp" / "config.yaml").read_text())
     assert "tiers" not in proj      # bindings come from the code floor
@@ -60,10 +60,10 @@ def test_init_bootstraps_user_config(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     root = tmp_path / "repo"
     root.mkdir()
-    _run(root, ["claude_code", "openai"])
+    _run(root, ["claude", "openai"])
 
     user = yaml.safe_load((imp_home / "config.yaml").read_text())
-    assert user["providers"] == ["claude_code", "openai"]
+    assert user["providers"] == ["claude", "openai"]
     assert user["theme"] == "dark"
     assert user["editing_mode"] == "emacs"
 
@@ -105,7 +105,7 @@ def test_init_config_yaml_has_no_facts_scaffolding(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     root = tmp_path / "repo"
     root.mkdir()
-    _run(root, ["claude_code"])
+    _run(root, ["claude"])
 
     text = (root / "imp" / "config.yaml").read_text()
     assert "facts:" not in text
@@ -122,7 +122,7 @@ def test_init_scaffolds_inert_memory_files(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     root = tmp_path / "repo"
     root.mkdir()
-    _run(root, ["claude_code"])
+    _run(root, ["claude"])
 
     global_md = root / "imp" / "memory" / "all.md"
     wf_md = root / "imp" / "memory" / "default" / "all.md"
@@ -145,7 +145,7 @@ def test_init_memory_snapshot_resolves_to_nothing(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     root = tmp_path / "repo"
     root.mkdir()
-    _run(root, ["claude_code"])
+    _run(root, ["claude"])
 
     snap = load_memory_snapshot(root / "imp" / "memory")
     assert set(snap) == {"all.md", "default/all.md"}
@@ -167,5 +167,5 @@ def test_init_reinit_without_scaffolds_does_not_raise(
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     (root / "imp").mkdir()
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    _run(root, ["claude_code"])  # must NOT raise CalledProcessError
+    _run(root, ["claude"])  # must NOT raise CalledProcessError
     assert not (root / "imp" / "memory").exists()  # no scaffold on re-init

@@ -8,25 +8,25 @@ dispatch loop calls tool.async_invoke(), which reads skills/refactor.md and
 emits a skill_load event.  The tool_result content in the event log is the
 real skill body returned by the tool.
 
-For ClaudeCode the SDK/MCP path handles dispatch; the FakeClaudeSDKClient
+For Claude the SDK/MCP path handles dispatch; the FakeClaudeSDKClient
 does NOT invoke tools in-process.  We supply a scripted UserMessage carrying
 the tool_result so the transcript is balanced and the runner logs the
 tool_result event.  Because the tool body never runs in the fake, the
 skill_load event is NOT emitted via the full-runner fake harness — however
-we verify assertion 2 for ClaudeCode via the in-process wrapper test
-(test_claude_code_load_skill_via_wrap_one) which drives _wrap_one/_impl
-directly, the same mechanism used in tests/test_claude_code_wrap.py.
+we verify assertion 2 for Claude via the in-process wrapper test
+(test_claude_load_skill_via_wrap_one) which drives _wrap_one/_impl
+directly, the same mechanism used in tests/test_claude_wrap.py.
 
 Assertion layout
 ----------------
 1. tool_result content == SKILL_BODY
       Anthropic/OpenAI: real in-process invocation → real body
-      ClaudeCode (full-runner test): scripted FakeToolResultBlock content → same body
+      Claude (full-runner test): scripted FakeToolResultBlock content → same body
 
 2. Exactly ONE skill_load event with payload={"name":"refactor","source":"internal"}
    and agent_id is None.
       Anthropic/OpenAI: via full-runner fake harness.
-      ClaudeCode: via test_claude_code_load_skill_via_wrap_one (_wrap_one/_impl path).
+      Claude: via test_claude_load_skill_via_wrap_one (_wrap_one/_impl path).
 
 3. load_skill present in step_context tools_schema even though the AgentDef
    did NOT declare it (auto-injected by _build_tools in all three providers).
@@ -47,7 +47,7 @@ from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
-from imp.providers.claude_code import ClaudeCodeAgentRunner, _RunState, _wrap_one
+from imp.providers.claude import ClaudeAgentRunner, _RunState, _wrap_one
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import (
     FakeAsyncAnthropic,
@@ -251,12 +251,12 @@ async def test_openai_load_skill_parity(tmp_path: Path) -> None:
     _assert_load_skill_in_schema(events)          # assertion 3
 
 
-# ── ClaudeCode ────────────────────────────────────────────────────────────────
+# ── Claude ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.anyio
-async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
-    """ClaudeCode: tool_result logged from scripted result; schema includes load_skill.
+async def test_claude_load_skill_parity(tmp_path: Path) -> None:
+    """Claude: tool_result logged from scripted result; schema includes load_skill.
 
     NOTE: The FakeClaudeSDKClient does not invoke tools in-process (the real
     SDK/MCP dispatch path is bypassed by the fake).  Assertion 2 (skill_load
@@ -285,44 +285,44 @@ async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
-    inv = _make_invocation(tmp_path, "claude_code", "claude-sonnet-4-5")
+    inv = _make_invocation(tmp_path, "claude", "claude-sonnet-4-5")
     out = await _drain(runner, inv)
     assert out == COMPLETE_STEP_ARGS
 
     events = _read_events(inv.events_path)
     _assert_tool_result_content(events, "tu1")   # assertion 1 (scripted result)
-    # Assertion 2 (skill_load event) for ClaudeCode is verified via the
-    # in-process wrapper path in test_claude_code_load_skill_via_wrap_one
+    # Assertion 2 (skill_load event) for Claude is verified via the
+    # in-process wrapper path in test_claude_load_skill_via_wrap_one
     # below — the FakeClaudeSDKClient cannot emit it through this harness.
     _assert_load_skill_in_schema(events)          # assertion 3
 
 
-# ── ClaudeCode in-process wrapper (assertion 2 for claude_code) ──────────────
+# ── Claude in-process wrapper (assertion 2 for claude) ──────────────
 
 
 def _passthrough_decorator(name: str, description: str, schema, annotations=None):  # type: ignore[no-untyped-def]
     """Stub `claude_agent_sdk.tool` — returns the function unchanged (same as
-    test_claude_code_wrap.py's idiom)."""
+    test_claude_wrap.py's idiom)."""
     def _inner(fn):  # type: ignore[no-untyped-def]
         return fn
     return _inner
 
 
 @pytest.mark.anyio
-async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
-    """ClaudeCode: drive load_skill through _wrap_one/_impl to assert event emission.
+async def test_claude_load_skill_via_wrap_one(tmp_path: Path) -> None:
+    """Claude: drive load_skill through _wrap_one/_impl to assert event emission.
 
-    The FakeClaudeSDKClient used in test_claude_code_load_skill_parity bypasses
+    The FakeClaudeSDKClient used in test_claude_load_skill_parity bypasses
     in-process tool dispatch, so skill_load is never emitted there.  This test
     drives the real _wrap_one/_impl path directly — the same mechanism as
-    test_claude_code_wrap.py — and verifies:
+    test_claude_wrap.py — and verifies:
 
       - The wrapped response content equals SKILL_BODY (in-process dispatch works)
       - Exactly ONE skill_load event with the correct payload and agent_id=None
-        (ClaudeCode's dispatch path emits the event identically to anthropic/openai)
+        (Claude's dispatch path emits the event identically to anthropic/openai)
     """
     # Set up workflow_dir with skills/refactor.md
     workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
@@ -333,7 +333,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     events_path = tmp_path / "events.jsonl"
 
     # Build ToolContext with quest_context and a real event_log (same pattern
-    # as _ctx() in test_claude_code_wrap.py, plus event_log set explicitly).
+    # as _ctx() in test_claude_wrap.py, plus event_log set explicitly).
     ctx = ToolContext(
         project_root=tmp_path,
         events_path=events_path,
@@ -360,21 +360,21 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     )
     assert "isError" not in out
 
-    # Assertion B (== parity assertion 2 for claude_code): exactly ONE
+    # Assertion B (== parity assertion 2 for claude): exactly ONE
     # skill_load event with correct payload and agent_id=None.
     events = _read_events(events_path)
     _assert_skill_load_event(events)
 
 
 @pytest.mark.anyio
-async def test_claude_code_load_skill_flush_orders_below_narration(
+async def test_claude_load_skill_flush_orders_below_narration(
     tmp_path: Path,
 ) -> None:
-    """ClaudeCode: load_skill flushes the turn's prose (agent_message) BEFORE it
+    """Claude: load_skill flushes the turn's prose (agent_message) BEFORE it
     appends skill_load, so the event log lands narration-then-load.
 
     Drives the real _wrap_one/_impl path directly (same mechanism as
-    test_claude_code_load_skill_via_wrap_one).  state.flush_llm_group is stubbed
+    test_claude_load_skill_via_wrap_one).  state.flush_llm_group is stubbed
     with a closure that emits an agent_message event — exactly what _run's real
     closure does when a turn carries accumulated narration prose.  The fix must
     invoke that closure before load_skill's in-tool skill_load append, so the
@@ -407,7 +407,7 @@ async def test_claude_code_load_skill_flush_orders_below_narration(
         # Stand in for _run's real _flush_llm_group: commit the turn's
         # accumulated narration prose as an agent_message event.
         ctx.event_log.append_agent_message(
-            agent_id="t", provider="claude_code", model="claude-sonnet-4-5",
+            agent_id="t", provider="claude", model="claude-sonnet-4-5",
             raw={"content": [{"type": "text",
                               "text": "loading the refactor skill"}]},
             usage={}, stop_reason=None,

@@ -364,14 +364,14 @@ def test_agent_message_ctx_resolves_window_from_the_catalog() -> None:
 
 
 def test_agent_message_ctx_prefers_the_reported_window() -> None:
-    # claude_code reports its own window; it wins over the catalog's (200000,
+    # claude reports its own window; it wins over the catalog's (200000,
     # limit 160000), giving the 200000 ceiling here. Occupancy past the limit
     # reports past 100%, and the legacy percentage is ignored — 203000/200000 is
     # 101.5%, not the 79.9% the payload claims.
     ev = {
         "id": "c2", "type": "agent_message", "agent_id": "step:build/coder",
         "payload": {
-            "provider": "claude_code", "model": "claude-opus-5",
+            "provider": "claude", "model": "claude-opus-5",
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 10, "output_tokens": 2},
             "context_tokens": 203_000, "context_window": 1_000_000,
@@ -391,7 +391,7 @@ def test_agent_message_ctx_omitted_when_tokens_are_absent() -> None:
     ev = {
         "id": "c3", "type": "agent_message", "agent_id": "step:build/coder",
         "payload": {
-            "provider": "claude_code", "model": "claude-opus-5",
+            "provider": "claude", "model": "claude-opus-5",
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 10, "output_tokens": 2},
             "context_pct": 79.85263,

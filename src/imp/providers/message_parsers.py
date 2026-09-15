@@ -67,7 +67,7 @@ def _parse_responses_message(raw: dict[str, Any]) -> Message:
     return Message(role="assistant", content=tuple(blocks))
 
 
-def _parse_claude_code_message(raw: dict[str, Any]) -> Message:
+def _parse_claude_message(raw: dict[str, Any]) -> Message:
     content: list[Any] = []
     for block in raw.get("content", []):
         kind = block.get("type")

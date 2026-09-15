@@ -1,9 +1,9 @@
-"""The impty snapshot path must hand claude_code a payload its transport can carry.
+"""The impty snapshot path must hand claude a payload its transport can carry.
 
 Auto-fit rasterizes under IMAGE_MAX_DIM, so process_image passes the PNG through
 untouched — no resize, no re-encode. That resample was the inflation: it turned crisp
 terminal text into antialiased gradients PNG compresses far worse, pushing a routine
-screenshot past the CLI's per-line buffer (sized in tests/test_claude_code_line_buffer.py).
+screenshot past the CLI's per-line buffer (sized in tests/test_claude_line_buffer.py).
 This test ties the two halves together; it lives on the imp side so tests/impty/ stays
 free of imp imports.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 import pyte
 
 from imp.agents.tools.image import process_image
-from imp.providers.claude_code import _CLI_LINE_BUFFER_BYTES
+from imp.providers.claude import _CLI_LINE_BUFFER_BYTES
 from impty.render import render_screen
 from impty.screen import TerminalScreen
 

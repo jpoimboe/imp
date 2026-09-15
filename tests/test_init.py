@@ -171,27 +171,27 @@ def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
 def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
-        picker_fn=_picks("claude_code", "openai"),
+        picker_fn=_picks("claude", "openai"),
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
-    assert data["providers"] == ["claude_code", "openai"]
+    assert data["providers"] == ["claude", "openai"]
     # Bindings are NOT scaffolded — the provider-code floor owns tiers.
     proj = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert "tiers" not in proj
 
 
-def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
+def test_supports_claude_no_env_prompt(tmp_path: Path) -> None:
     def _no_input(_prompt: str = "") -> str:
         raise AssertionError(f"unexpected input prompt: {_prompt!r}")
 
     run_init(
-        project_root=tmp_path, picker_fn=_picks("claude_code"),
+        project_root=tmp_path, picker_fn=_picks("claude"),
         input_fn=_no_input, output_fn=lambda _msg: None,
     )
     data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
-    assert data["providers"] == ["claude_code"]
+    assert data["providers"] == ["claude"]
 
 
 def test_picker_sees_all_providers(tmp_path: Path) -> None:
@@ -206,7 +206,7 @@ def test_picker_sees_all_providers(tmp_path: Path) -> None:
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    assert seen == [["claude_code", "anthropic", "openai", "codex"]]
+    assert seen == [["claude", "anthropic", "openai", "codex"]]
 
 
 def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
@@ -259,13 +259,13 @@ def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.Monke
     assert "install bubblewrap" not in "\n".join(msgs).lower()
 
 
-def test_initial_selection_preselects_claude_code() -> None:
+def test_initial_selection_preselects_claude() -> None:
     from imp.cli.init import _initial_selection
-    available = ["claude_code", "anthropic", "openai", "codex"]
+    available = ["claude", "anthropic", "openai", "codex"]
     assert _initial_selection(available) == {0}
 
 
-def test_initial_selection_empty_when_claude_code_absent() -> None:
+def test_initial_selection_empty_when_claude_absent() -> None:
     from imp.cli.init import _initial_selection
     assert _initial_selection(["anthropic", "openai"]) == set()
 
@@ -349,7 +349,7 @@ def test_init_suggestion_reads_as_opening_message(tmp_path: Path) -> None:
 def test_picker_cursor_uses_render_safe_caret() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
     active = rows[1][1]
     inactive = rows[2][1]
     assert active.startswith("> ")
@@ -1185,7 +1185,7 @@ def test_already_initialized_rerun_prints_no_splash(
 def test_picker_cursor_row_is_gold_not_cyan() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
     assert rows[1][0] == "ansiyellow bold"
     assert rows[2][0] == ""
 
@@ -1193,12 +1193,12 @@ def test_picker_cursor_row_is_gold_not_cyan() -> None:
 def test_picker_block_has_a_blank_line_around_the_options() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
     text = "".join(t for _style, t in rows)
     assert text.splitlines() == [
         "Which providers do you want to enable?",
         "",
-        "> [x] claude_code",
+        "> [x] claude",
         "  [ ] anthropic",
         "",
         "↑↓ move · space toggle · enter confirm · esc cancel",
@@ -1233,7 +1233,7 @@ def test_read_user_config_refuses_a_non_mapping(tmp_path: Path) -> None:
     from imp.cli.init import _read_user_config
 
     p = tmp_path / "config.yaml"
-    p.write_text("- claude_code\n- openai\n")
+    p.write_text("- claude\n- openai\n")
     with pytest.raises(ConfigWriteError) as exc:
         _read_user_config(p)
     # Same wording as imp's own config loader (src/imp/providers/config.py:123).
@@ -1303,19 +1303,19 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
 def test_picker_confirmation_hints_every_enabled_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """claude_code gets a hint now — it used to be silently skipped for having no env var."""
+    """claude gets a hint now — it used to be silently skipped for having no env var."""
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
     msgs: list[str] = []
 
     run_init(
-        project_root=tmp_path, picker_fn=_picks("claude_code", "anthropic"),
+        project_root=tmp_path, picker_fn=_picks("claude", "anthropic"),
         input_fn=_inputs(), output_fn=msgs.append,
         detect_theme_fn=lambda: "ansi",
     )
 
-    enabled = msgs.index("Enabled: claude_code, anthropic")
-    assert msgs[enabled + 1] == "  claude_code — run `claude login`"
+    enabled = msgs.index("Enabled: claude, anthropic")
+    assert msgs[enabled + 1] == "  claude — run `claude login`"
     assert msgs[enabled + 2] == "  anthropic — set ANTHROPIC_API_KEY"
     assert not any("set this env var" in m for m in msgs)
 
@@ -1338,7 +1338,7 @@ def test_interactive_init_refuses_an_unparseable_machine_config(tmp_path: Path) 
 
     with pytest.raises(ConfigWriteError):
         run_init(
-            project_root=tmp_path, picker_fn=_picks("claude_code"),
+            project_root=tmp_path, picker_fn=_picks("claude"),
             input_fn=_inputs(), output_fn=lambda _m: None,
         )
 
@@ -1409,10 +1409,10 @@ def test_set_user_providers_replaces_an_empty_list_and_preserves_the_file(
     home.mkdir(parents=True)
     before = _seed_machine_config(home, "providers: []\n")
 
-    _set_user_providers(home / "config.yaml", ["claude_code", "openai"])
+    _set_user_providers(home / "config.yaml", ["claude", "openai"])
 
     after = (home / "config.yaml").read_text()
-    assert "providers: [claude_code, openai]" in after
+    assert "providers: [claude, openai]" in after
     assert _sans_providers(after) == _sans_providers(before)
     data = yaml.safe_load(after)
     assert data["theme"] == "dark"
@@ -1429,10 +1429,10 @@ def test_set_user_providers_inserts_an_absent_key(tmp_path: Path) -> None:
     before = _seed_machine_config(home, "")
     assert "providers" not in yaml.safe_load(before)
 
-    _set_user_providers(home / "config.yaml", ["claude_code"])
+    _set_user_providers(home / "config.yaml", ["claude"])
 
     after = (home / "config.yaml").read_text()
-    assert yaml.safe_load(after)["providers"] == ["claude_code"]
+    assert yaml.safe_load(after)["providers"] == ["claude"]
     assert _sans_providers(after) == _sans_providers(before)
 
 
@@ -1450,7 +1450,7 @@ def test_set_user_providers_refuses_a_write_that_does_not_read_back(
     monkeypatch.setattr("imp.cli.config_write.verify", lambda *_a, **_kw: False)
 
     with pytest.raises(ConfigWriteError) as exc:
-        _set_user_providers(home / "config.yaml", ["claude_code"])
+        _set_user_providers(home / "config.yaml", ["claude"])
 
     assert "would not read back as given" in str(exc.value)
     assert (home / "config.yaml").read_text() == before
@@ -1461,8 +1461,8 @@ def test_set_user_providers_refuses_a_write_that_does_not_read_back(
     [
         None,                            # key absent
         [],                              # the state init used to write
-        "claude_code",                   # hand-edited scalar: iterating yields chars
-        ["claude_code", 7],              # _parse_providers rejects a non-string entry
+        "claude",                   # hand-edited scalar: iterating yields chars
+        ["claude", 7],              # _parse_providers rejects a non-string entry
         ["codex", "codex"],              # _parse_providers rejects a duplicate entry
     ],
 )
@@ -1482,7 +1482,7 @@ def test_configured_providers_returns_a_usable_list_verbatim() -> None:
 
 @pytest.mark.parametrize(
     "seed",
-    ["providers: []\n", "", "providers: claude_code\n",
+    ["providers: []\n", "", "providers: claude\n",
      "providers: [codex, codex]\n"])
 def test_interactive_reinit_repairs_an_unusable_provider_list(
     tmp_path: Path, seed: str,
@@ -1496,16 +1496,16 @@ def test_interactive_reinit_repairs_an_unusable_provider_list(
     msgs: list[str] = []
     run_init(
         project_root=tmp_path,
-        picker_fn=_picks("claude_code", "anthropic", "openai", "codex"),
+        picker_fn=_picks("claude", "anthropic", "openai", "codex"),
         input_fn=_inputs(), output_fn=msgs.append,
     )
 
     after = (home / "config.yaml").read_text()
     assert yaml.safe_load(after)["providers"] == [
-        "claude_code", "anthropic", "openai", "codex"]
+        "claude", "anthropic", "openai", "codex"]
     assert _sans_providers(after) == _sans_providers(before)
     assert ("Set providers in your machine config: "
-            "claude_code, anthropic, openai, codex.") in msgs
+            "claude, anthropic, openai, codex.") in msgs
     assert not any("already set up" in m for m in msgs)
 
 
@@ -1545,14 +1545,14 @@ def test_fresh_interactive_init_announces_provider_repair(tmp_path: Path) -> Non
     msgs: list[str] = []
     run_init(
         project_root=tmp_path,
-        picker_fn=_picks("claude_code", "openai"),
+        picker_fn=_picks("claude", "openai"),
         input_fn=_inputs(),
         output_fn=msgs.append,
     )
 
-    assert "Set providers in your machine config: claude_code, openai." in msgs
+    assert "Set providers in your machine config: claude, openai." in msgs
     after = (home / "config.yaml").read_text()
-    assert yaml.safe_load(after)["providers"] == ["claude_code", "openai"]
+    assert yaml.safe_load(after)["providers"] == ["claude", "openai"]
     assert _sans_providers(after) == _sans_providers(before)
 
 
@@ -1577,7 +1577,7 @@ def test_fresh_interactive_init_no_repair_no_announcement(tmp_path: Path) -> Non
     assert not any("Set providers in your machine config:" in m for m in msgs)
 
 
-_DEFAULT_PROVIDERS = ["claude_code", "anthropic", "openai", "codex"]
+_DEFAULT_PROVIDERS = ["claude", "anthropic", "openai", "codex"]
 
 
 def test_use_defaults_writes_the_default_preference_order(
@@ -1601,7 +1601,7 @@ def test_use_defaults_writes_the_default_preference_order(
     branch_line = next(
         i for i, m in enumerate(msgs) if m.startswith("Integration branch: "))
     assert msgs[branch_line + 1] == (
-        "Providers: claude_code, anthropic, openai, codex "
+        "Providers: claude, anthropic, openai, codex "
         "(the first authenticated one is used)")
     # imp's own readers must accept what init wrote — `providers: []` did not.
     assert list(load_effective_config(control_root=tmp_path).config.providers) == (
@@ -1612,7 +1612,7 @@ def test_use_defaults_writes_the_default_preference_order(
 
 @pytest.mark.parametrize(
     "seed",
-    ["providers: []\n", "", "providers: claude_code\n",
+    ["providers: []\n", "", "providers: claude\n",
      "providers: [codex, codex]\n"])
 def test_use_defaults_repairs_an_existing_machine_config(
     tmp_path: Path, seed: str,
@@ -1635,7 +1635,7 @@ def test_use_defaults_repairs_an_existing_machine_config(
     assert msgs == [
         "Project already initialized (imp/config.yaml is committed).",
         "Set providers in your machine config: "
-        "claude_code, anthropic, openai, codex.",
+        "claude, anthropic, openai, codex.",
     ]
 
 
@@ -1688,7 +1688,7 @@ def test_cmd_init_reports_an_unparseable_machine_config_non_interactively(
 def test_providers_flag_parses_a_preference_order() -> None:
     from imp.cli.init import parse_providers_flag
 
-    assert parse_providers_flag("claude_code, openai") == ["claude_code", "openai"]
+    assert parse_providers_flag("claude, openai") == ["claude", "openai"]
     # order is the user's, not the display order
     assert parse_providers_flag("codex,anthropic") == ["codex", "anthropic"]
 
@@ -1698,11 +1698,11 @@ def test_providers_flag_parses_a_preference_order() -> None:
     [
         ("foo",
          "--providers: unknown provider 'foo' "
-         "(choose from: claude_code, anthropic, openai, codex)"),
+         "(choose from: claude, anthropic, openai, codex)"),
         # the `scripted` test backend is registered but not selectable here
-        ("claude_code,scripted",
+        ("claude,scripted",
          "--providers: unknown provider 'scripted' "
-         "(choose from: claude_code, anthropic, openai, codex)"),
+         "(choose from: claude, anthropic, openai, codex)"),
         ("openai,openai", "--providers: duplicate provider 'openai'"),
         ("", "--providers: name at least one provider"),
         ("  ,  ", "--providers: name at least one provider"),
@@ -1723,11 +1723,11 @@ def test_providers_override_skips_the_picker_on_a_fresh_init(tmp_path: Path) -> 
     run_init(
         project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
         output_fn=lambda _m: None,
-        providers_override=["claude_code", "openai"],
+        providers_override=["claude", "openai"],
     )
 
     user = tmp_path / "imphome" / "config.yaml"
-    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude", "openai"]
 
 
 def test_providers_override_still_detects_the_theme(
@@ -1844,8 +1844,8 @@ def test_use_defaults_providers_override_rewrites_an_existing_valid_list(
 def test_init_parser_accepts_the_providers_flag() -> None:
     from imp.cli.main import _build_parser
 
-    args = _build_parser().parse_args(["init", "--providers", "claude_code,openai"])
-    assert args.providers == "claude_code,openai"
+    args = _build_parser().parse_args(["init", "--providers", "claude,openai"])
+    assert args.providers == "claude,openai"
     assert _build_parser().parse_args(["init"]).providers is None
 
 
@@ -1858,8 +1858,8 @@ def test_cmd_init_passes_the_parsed_providers_to_both_paths(
     called: dict[str, object] = {}
     monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
                         lambda _project, **kw: called.update(kw))
-    m._cmd_init(_init_args(providers="claude_code, openai"))
-    assert called["providers_override"] == ["claude_code", "openai"]
+    m._cmd_init(_init_args(providers="claude, openai"))
+    assert called["providers_override"] == ["claude", "openai"]
 
     # Under pytest stdin is not a tty, so _select_headless would route the
     # second call headless too unless both streams are pinned open.
@@ -1875,9 +1875,9 @@ def test_cmd_init_passes_the_parsed_providers_to_both_paths(
 @pytest.mark.parametrize(
     ("raw", "line"),
     [
-        ("claude_code,foo",
+        ("claude,foo",
          "imp: --providers: unknown provider 'foo' "
-         "(choose from: claude_code, anthropic, openai, codex)"),
+         "(choose from: claude, anthropic, openai, codex)"),
         ("openai,openai", "imp: --providers: duplicate provider 'openai'"),
         (",", "imp: --providers: name at least one provider"),
     ],
@@ -1912,11 +1912,11 @@ def test_cmd_init_providers_flag_writes_exactly_that_list(
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
 
-    rc = m._cmd_init(_init_args(providers="claude_code,openai"))
+    rc = m._cmd_init(_init_args(providers="claude,openai"))
 
     assert rc == 0
     user = tmp_path / "imphome" / "config.yaml"
-    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude", "openai"]
 
 
 def test_init_help_documents_providers_and_drops_provider_free(

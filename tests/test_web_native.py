@@ -38,6 +38,14 @@ def test_capability_ok_for_anthropic_both() -> None:
     )
 
 
+def test_capability_ok_for_claude_both(caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
+        wn.check_web_capability(
+            "claude", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=True)
+        )
+    assert caplog.records == []
+
+
 def test_capability_openai_web_fetch_degrades(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
         # no raise

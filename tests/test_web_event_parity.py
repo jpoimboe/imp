@@ -8,7 +8,7 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import _emit_anthropic_web_events
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.openai import _emit_openai_web_events
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, tool_result, tool_use, user
 from tests.openai_fakes import resp_message, resp_response, resp_web_search_call
@@ -68,7 +68,7 @@ async def _cc_shape(tmp_path: Path) -> dict:
         prompt_template_source="hi", source_path=Path("a.md"), source=loc)
     el = InMemoryEventLog()
     inv = AgentInvocation(
-        agent_def=agent, provider_name="claude_code", model_name="m",
+        agent_def=agent, provider_name="claude", model_name="m",
         system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,
@@ -82,7 +82,7 @@ events_path=tmp_path / "events.jsonl",
         assistant(tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         "m", client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
     async for _ in runner.run(inv):

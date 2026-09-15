@@ -1,6 +1,6 @@
-"""Resumed claude_code step does not redo prior reads (ckx9f5 regression).
+"""Resumed claude step does not redo prior reads (ckx9f5 regression).
 
-Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. A multi-read
+Gated behind `--run-live` (claude) + the `claude` CLI on PATH. A multi-read
 step is paused mid-bash and resumed; the prior reads must be recalled faithfully
 (no '[Tool result missing…]' placeholder redo) and the resume must complete without
 re-reading either file. A mid-bash SIGINT leaves a dangling bash tool_use, which
@@ -71,11 +71,11 @@ def _seed_multiread_project(tmp_path: Path) -> None:
     # precedence) so a developer's ~/.imp/config.yaml cannot shadow them
     # and skip/fail this gated test — mirrors conftest._seed_control.
     (project_state_dir(tmp_path) / "config.yaml").write_text(textwrap.dedent("""\
-        providers: [claude_code]
+        providers: [claude]
         tiers:
-          low: {claude_code: claude-haiku-4-5-20251001}
-          medium: {claude_code: claude-haiku-4-5-20251001}
-          high: {claude_code: claude-haiku-4-5-20251001}
+          low: {claude: claude-haiku-4-5-20251001}
+          medium: {claude: claude-haiku-4-5-20251001}
+          high: {claude: claude-haiku-4-5-20251001}
     """))
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(
@@ -119,7 +119,7 @@ def _read_paths(events_path: Path) -> list[str]:
     return paths
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")

@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 """/compact core: rewrite a step's transcript.jsonl to shed tool-result bodies.
 
-Provider-agnostic core; delegates claude_code native-store cleanup to
+Provider-agnostic core; delegates claude native-store cleanup to
 ImpSessionStore. Keeps every tool_use call, all assistant/human text, and the
 tool_use<->tool_result pairing; replaces only tool-result bodies with a fixed
 placeholder and prepends a one-time engine note. Returns the count stubbed.
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from imp.agents.runner import ContentBlock, Message, TextBlock, ToolResultBlock
 from imp.agents.transcript import Transcript
-from imp.providers.claude_code_session_store import session_store_for
+from imp.providers.claude_session_store import session_store_for
 
 RESULT_PLACEHOLDER = "[tool result omitted by compaction]"
 
@@ -57,6 +57,6 @@ def compact_transcript(transcript_dir: Path) -> int:
     else:
         note = Message(role="user", content=(TextBlock(text=ENGINE_NOTE),))
         transcript.rewrite([note, *rewritten])
-    # claude_code only: drop the native store so native resume rebuilds it slim (no-op elsewhere).
+    # claude only: drop the native store so native resume rebuilds it slim (no-op elsewhere).
     session_store_for(transcript_dir).clear()
     return stubbed

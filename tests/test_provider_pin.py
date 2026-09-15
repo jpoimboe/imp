@@ -26,7 +26,7 @@ def test_the_pin_is_current_even_before_it_is_applied(tmp_path: Path) -> None:
     # so a second request naming it must read as redundant.
     quest = _quest(tmp_path, provider="codex")
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
 
     assert current_provider(quest, state) == "codex"
 
@@ -34,9 +34,9 @@ def test_the_pin_is_current_even_before_it_is_applied(tmp_path: Path) -> None:
 def test_an_unpinned_quest_is_current_on_its_resolved_map(tmp_path: Path) -> None:
     quest = _quest(tmp_path)
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
 
-    assert current_provider(quest, state) == "claude_code"
+    assert current_provider(quest, state) == "claude"
 
 
 def test_a_per_step_override_never_becomes_current(tmp_path: Path) -> None:
@@ -44,10 +44,10 @@ def test_a_per_step_override_never_becomes_current(tmp_path: Path) -> None:
     # override must not be read as current, or the same-name guard inverts.
     quest = _quest(tmp_path)
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
     state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt")}
 
-    assert current_provider(quest, state) == "claude_code"
+    assert current_provider(quest, state) == "claude"
 
 
 def test_with_no_state_current_is_what_the_config_would_pick(
@@ -76,7 +76,7 @@ def test_an_unpinned_quest_is_never_pending(tmp_path: Path) -> None:
     # wake every backoff on its first tick.
     quest = _quest(tmp_path)
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
 
     assert provider_pending(quest, state) is False
 
@@ -84,7 +84,7 @@ def test_an_unpinned_quest_is_never_pending(tmp_path: Path) -> None:
 def test_a_pin_the_map_does_not_name_is_pending(tmp_path: Path) -> None:
     quest = _quest(tmp_path, provider="codex")
     state = State.load(quest.state_dir)
-    state.resolved_tiers = _tiers("claude_code")
+    state.resolved_tiers = _tiers("claude")
 
     assert provider_pending(quest, state) is True
 
@@ -102,7 +102,7 @@ def test_a_partly_repointed_map_is_still_pending(tmp_path: Path) -> None:
     quest = _quest(tmp_path, provider="codex")
     state = State.load(quest.state_dir)
     state.resolved_tiers = _tiers("codex")
-    state.resolved_tiers["high"] = ProviderModel(provider="claude_code", model="m")
+    state.resolved_tiers["high"] = ProviderModel(provider="claude", model="m")
 
     assert provider_pending(quest, state) is True
 

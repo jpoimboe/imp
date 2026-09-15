@@ -107,7 +107,7 @@ def test_a_writable_stale_archive_still_migrates(tmp_path: Path) -> None:
 
     archive.ensure_current(tmp_path)
 
-    assert _user_version(tmp_path) == 5          # rebuilt and re-stamped current
+    assert _user_version(tmp_path) == 6          # rebuilt and re-stamped current
 
 
 def test_a_newer_read_only_archive_still_raises(

@@ -19,7 +19,7 @@ def _ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> di
 
 def _msg(eid: str, body: str, *, tagged: bool, agent_id: str | None = AID) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "provider": "claude_code", "model": "m", "usage": {}, "stop_reason": None,
+        "provider": "claude", "model": "m", "usage": {}, "stop_reason": None,
         "raw": {"content": [{"type": "text", "text": body}]}}
     if tagged:
         payload["provider_error"] = True
@@ -28,7 +28,7 @@ def _msg(eid: str, body: str, *, tagged: bool, agent_id: str | None = AID) -> di
 
 def _step(*content: dict[str, Any]) -> list[dict[str, Any]]:
     return [_ev("s1", "step_started", step="s", kind="agent", phase="p",
-                model="m", provider="claude_code"), *content]
+                model="m", provider="claude"), *content]
 
 
 def _texts(node: Any) -> list[str]:
@@ -127,7 +127,7 @@ def test_untagged_prose_survives_a_backoff_error_that_names_it() -> None:
     events = _step(
         _msg("a1", ORDINARY, tagged=False),
         _ev("e1", "error", agent_id=AID, category="network", kind="terminated",
-            message="claude_code: terminated", detail={"last_agent_text": ORDINARY}),
+            message="claude: terminated", detail={"last_agent_text": ORDINARY}),
         _ev("r1", "agent_retry", category="network", attempt=1, backoff_seconds=1.0))
     assert ORDINARY in _texts(nv.build_tree(events).root)
     assert ORDINARY in _render(events)

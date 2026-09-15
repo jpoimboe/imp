@@ -138,7 +138,7 @@ def test_web_search_bills_ten_dollars_per_thousand_requests() -> None:
     assert cost_usd("claude-sonnet-4-6", with_search) == pytest.approx(2.503)
 
 
-def test_web_search_count_reads_the_claude_code_carrier() -> None:
+def test_web_search_count_reads_the_claude_carrier() -> None:
     assert web_search_request_count(
         {"inputTokens": 10, "webSearchRequests": 7}) == 7
 
@@ -228,7 +228,7 @@ def test_web_search_is_not_surcharged() -> None:
                     prompt_tokens=310_000) == pytest.approx(3.08)
 
 
-# A claude_code `model_usage` rollup. Each `costUSD` is hand-worked from the
+# A claude `model_usage` rollup. Each `costUSD` is hand-worked from the
 # PUBLISHED per-million rates, never regenerated from MODEL_PRICES — that is
 # what makes this a drift guard rather than a restatement of the table.
 #   sonnet:  10*$3 + 52*$15 + 12812*$0.30                        = $0.0046536

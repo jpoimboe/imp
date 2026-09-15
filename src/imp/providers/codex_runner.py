@@ -271,7 +271,7 @@ class CodexSession(ObserveSession):
         runner._auth_mode = auth_mode
         runner._canonical_auth = canonical_auth
 
-        # 2. Build tools + ToolContext (mirror the claude_code runner exactly).
+        # 2. Build tools + ToolContext (mirror the claude runner exactly).
         from imp.providers.resolve import spawn_subagent_via_registry
         tools = _build_tools(invocation)
         self.tools = tools

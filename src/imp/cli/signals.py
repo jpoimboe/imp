@@ -265,7 +265,7 @@ class InterruptCoordinator:
         # callback here; `note_activity()` fires them on every shared-event-log
         # append by this agent OR any descendant. This is the ONLY liveness
         # signal that keeps flowing while a parent agent is parked in an
-        # in-process subagent dispatch (claude_code yields nothing then), and it
+        # in-process subagent dispatch (claude yields nothing then), and it
         # is why a busy subtree no longer trips the parent's watchdog. Shared
         # subtree-wide (one coordinator per run), so a child's appends push every
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
@@ -549,7 +549,7 @@ class InterruptCoordinator:
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
         callable; all three V1 runners (AnthropicAgentRunner / OpenAIAgentRunner
-        / ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None` per
+        / ClaudeAgentRunner) declare `async def interrupt(self) -> None` per
         the AgentRunner protocol (`src/imp/agents/runner.py:172`).
 
         The run-level attach API; the per-drive wrapper is `runner_attached`

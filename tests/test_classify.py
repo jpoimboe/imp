@@ -91,7 +91,7 @@ def test_resolved_complete_step_with_one_trailing_prose_is_step_completed() -> N
 
 
 def test_mcp_prefixed_complete_step_with_trailing_prose_is_step_completed() -> None:
-    # claude_code persists the imp tool MCP-namespaced as `mcp__imp__complete_step`
+    # claude persists the imp tool MCP-namespaced as `mcp__imp__complete_step`
     # (anthropic/openai use the bare name). The STEP_COMPLETED detector must
     # canonicalize the prefix; a bare `== "complete_step"` compare misclassifies
     # this as AWAITING_USER, whose resume arm drops rework feedback and parks on

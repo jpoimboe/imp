@@ -30,6 +30,7 @@ from imp.engine.event_migrations import (
     backfill_step_round,
     migrate_events,
     migrate_id_ns_event_to_block,
+    rename_claude_code_provider,
 )
 from imp.engine.state import derive_started_at
 from imp.paths import project_state_dir
@@ -208,7 +209,8 @@ def _index_is_complete(control_root: Path) -> bool:
     return all(cid in indexed_ids for cid in record_ids)
 
 
-# blob schema versions: 12 == archived Codex native resume converted;
+# blob schema versions: 13 == claude_code provider id renamed claude;
+# 12 == archived Codex native resume converted;
 # 11 == quest_meta.provider backfilled; 10 == final_state.outcome_history head stripped;
 # 9 == step_started round stamped;
 # 8 == query_result session_id backfilled;
@@ -218,7 +220,7 @@ def _index_is_complete(control_root: Path) -> bool:
 # 4 == final_state.resume_target `prompt` split; 3 == final_state.status
 # realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
-_DATA_VERSION = 12
+_DATA_VERSION = 13
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -261,6 +263,10 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     stamp `round: 1` on each step_started row written before that field existed.
     Also backfill a null `provider` pin into each record's quest_meta, so a
     rehydrated home carries the same key set as a live one.
+    Also rewrite every `provider` field naming the retired `claude_code` id as
+    `claude`, at any depth, in the events blob and in each record's `final_state`
+    and `quest_meta` — but never `quest_meta["layout_version"]`, so a rehydrated
+    home still runs the v22->v23 hop over its restored step blobs.
     Rebuilds the index once so its derived columns match, then stamps the data-version
     marker. A triad blob with no "event" id_ns folds is left untouched (both transforms
     are no-ops on it); old blobs orphan harmlessly (nothing GCs blobs)."""
@@ -284,8 +290,9 @@ def _migrate_archive_blobs(control_root: Path) -> None:
                 continue
             blob = store.get(rec["events_hash"])
             events = _parse_events(blob) if blob is not None else []
-            migrated = backfill_step_round(backfill_query_result_session_ids(
-                migrate_id_ns_event_to_block(migrate_events(events))))
+            migrated: list[dict[str, Any]] = rename_claude_code_provider(
+                backfill_step_round(backfill_query_result_session_ids(
+                    migrate_id_ns_event_to_block(migrate_events(events)))))
             dirty = False
             plan = plans.get(cid)
             if plan is not None:
@@ -299,6 +306,11 @@ def _migrate_archive_blobs(control_root: Path) -> None:
                 rec["events_hash"] = store.put(_serialize_events(migrated))
                 dirty = True
             final_state = rec.get("final_state") or {}
+            renamed_state = rename_claude_code_provider(final_state)
+            if renamed_state != final_state:
+                final_state = renamed_state
+                rec["final_state"] = final_state
+                dirty = True
             if final_state.get("started_at") is None:
                 final_state["started_at"] = derive_started_at(
                     migrated, rec.get("created_at", ""))
@@ -327,6 +339,11 @@ def _migrate_archive_blobs(control_root: Path) -> None:
                 rec["final_state"] = final_state
                 dirty = True
             quest_meta = rec.get("quest_meta") or {}
+            renamed_meta = rename_claude_code_provider(quest_meta)
+            if renamed_meta != quest_meta:
+                quest_meta = renamed_meta
+                rec["quest_meta"] = quest_meta
+                dirty = True
             if quest_meta.get("workflow") == "imp":
                 quest_meta["workflow"] = "default"
                 rec["quest_meta"] = quest_meta

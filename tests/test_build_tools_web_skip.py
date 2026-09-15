@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.providers.anthropic import _build_tools as anthropic_build
-from imp.providers.claude_code import _build_tools as cc_build
+from imp.providers.claude import _build_tools as cc_build
 from imp.providers.openai import _build_tools as openai_build
 
 
@@ -33,7 +33,7 @@ events_path=Path("/events.jsonl"))
 
 @pytest.mark.parametrize("build,provider", [
     (anthropic_build, "anthropic"),
-    (cc_build, "claude_code"),
+    (cc_build, "claude"),
     (openai_build, "openai"),
 ])
 def test_web_search_is_skipped_not_registry_looked_up(build, provider) -> None:

@@ -1,6 +1,6 @@
 """Relay-hibernation invariant, codified (u8rfr8).
 
-Gated behind `--run-live` (claude_code). Drives, over a real pty via impty's
+Gated behind `--run-live` (claude). Drives, over a real pty via impty's
 TerminalSession Python API:
 
   start → poll events.jsonl for the bash tool_call → SIGINT (the cooperative
@@ -74,11 +74,11 @@ def _seed_cc_project(root: Path) -> None:
     (root / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
-        providers: [claude_code]
+        providers: [claude]
         tiers:
-          low: {claude_code: claude-haiku-4-5-20251001}
-          medium: {claude_code: claude-haiku-4-5-20251001}
-          high: {claude_code: claude-haiku-4-5-20251001}
+          low: {claude: claude-haiku-4-5-20251001}
+          medium: {claude: claude-haiku-4-5-20251001}
+          high: {claude: claude-haiku-4-5-20251001}
     """))
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(
@@ -158,7 +158,7 @@ def _relay_skip_or_fail(
     )
 
 
-@pytest.mark.live("claude_code")
+@pytest.mark.live("claude")
 def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
     _seed_cc_project(tmp_path)
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}

@@ -92,13 +92,13 @@ async def test_an_unknown_provider_exits_two_and_names_both_groups(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = await main._async_cmd_new(_ns(provider="bogus"))
 
     assert rc == 2
     assert capsys.readouterr().err == (
-        "imp: --provider: unknown provider 'bogus' (available here: claude_code, "
+        "imp: --provider: unknown provider 'bogus' (available here: claude, "
         "codex; needs setup: anthropic, openai)\n")
     assert stub_session == []          # refused before any quest was created
 
@@ -109,14 +109,14 @@ async def test_every_vendor_available_drops_the_needs_setup_clause(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"anthropic", "openai", "claude_code", "codex"})
+    floor_availability({"anthropic", "openai", "claude", "codex"})
 
     rc = await main._async_cmd_new(_ns(provider="bogus"))
 
     assert rc == 2
     assert capsys.readouterr().err == (
         "imp: --provider: unknown provider 'bogus' (available here: anthropic, "
-        "openai, claude_code, codex)\n")
+        "openai, claude, codex)\n")
     assert stub_session == []
 
 
@@ -127,7 +127,7 @@ async def test_scripted_is_refused_like_any_unknown_name(
     # tier_defaults is None, so it must never reach resolve_run.
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     rc = await main._async_cmd_new(_ns(provider="scripted"))
 
@@ -142,7 +142,7 @@ async def test_a_selectable_but_unavailable_vendor_gets_its_auth_hint(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code"})
+    floor_availability({"claude"})
 
     rc = await main._async_cmd_new(_ns(provider="codex"))
 
@@ -158,7 +158,7 @@ async def test_new_writes_the_pin_to_the_record_before_the_run_starts(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
 
     rc = await main._async_cmd_new(_ns(provider="codex"))
@@ -210,7 +210,7 @@ async def test_chat_writes_the_pin_through_its_own_draft_path(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
 
     rc = await main._async_cmd_new(_ns(provider="codex"), leave_mode="chat")
@@ -229,7 +229,7 @@ async def test_no_flag_leaves_the_pin_null(
     # preflight, which asks about the configured order.
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"anthropic", "claude_code", "codex"})
+    floor_availability({"anthropic", "claude", "codex"})
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
 
     rc = await main._async_cmd_new(_ns())
@@ -244,7 +244,7 @@ async def test_a_backlogged_quest_keeps_the_pin_for_its_later_resume(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    floor_availability({"claude_code", "codex"})
+    floor_availability({"claude", "codex"})
 
     # non_interactive stays False: --backlog refuses to be combined with a
     # run-only flag (_backlog_run_only_flag reads --headless first).

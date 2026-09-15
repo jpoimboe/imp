@@ -100,7 +100,7 @@ def test_migrates_exact_legacy_provenance_and_reruns_stably(
         expected_owner,
         False,
         False,
-        b"12",
+        b"13",
     )
     assert all(_blob_snapshot(tmp_path)[path] == raw for path, raw in source_blobs.items())
 
@@ -249,7 +249,7 @@ def test_rejects_falsy_non_dict_step_blobs_before_publication(
 def test_rejects_missing_rollout_or_foreign_owner_without_mutation(
     tmp_path: Path, case: str,
 ) -> None:
-    rec = _seed_v11(tmp_path, owner=b"claude_code" if case == "foreign-owner" else None)
+    rec = _seed_v11(tmp_path, owner=b"claude" if case == "foreign-owner" else None)
     if case == "missing-rollout":
         rec["step_blobs"].pop(f"{_PREFIX}/codex_rollout/{_RESTORE_PATH}")
         _write_record(tmp_path, rec)
@@ -350,7 +350,7 @@ def test_rejects_invalid_step_blobs_shape(
     assert _archive_snapshot(tmp_path) == before
 
 
-@pytest.mark.parametrize("owner", [None, b"claude_code"])
+@pytest.mark.parametrize("owner", [None, b"claude"])
 def test_rejects_current_codex_state_without_codex_owner(
     tmp_path: Path, owner: bytes | None,
 ) -> None:
@@ -367,3 +367,47 @@ def test_rejects_current_codex_state_without_codex_owner(
         archive.ensure_current(tmp_path)
 
     assert _archive_snapshot(tmp_path) == before
+
+
+# A native manifest naming the retired provider id: well-formed JSON, but the id is
+# not registered any more, so parse_native_resume_state rejects it.
+_UNREGISTERED_MANIFEST = json.dumps({
+    "schema_version": 1,
+    "provider": "claude_code",
+    "state": {"session_id": "abc"},
+}).encode()
+
+
+def test_a_manifest_naming_an_unregistered_provider_is_not_codex_state() -> None:
+    blobs = {hash_content(_UNREGISTERED_MANIFEST): _UNREGISTERED_MANIFEST}
+    step_blobs = {
+        f"{_PREFIX}/resume-state.json": hash_content(_UNREGISTERED_MANIFEST),
+    }
+
+    assert plan_archive_codex_resume_state(step_blobs, blobs.get) is None
+
+
+def test_an_unreadable_manifest_with_no_staged_slot_is_not_codex_state() -> None:
+    # The tolerance is deliberately this wide: one corrupt manifest in one archived
+    # record must not raise out of ensure_current and brick `imp list` archive-wide.
+    manifest = b"{not json"
+    blobs = {hash_content(manifest): manifest}
+    step_blobs = {f"{_PREFIX}/resume-state.json": hash_content(manifest)}
+
+    assert plan_archive_codex_resume_state(step_blobs, blobs.get) is None
+
+
+def test_an_unparseable_manifest_beside_a_rollout_slot_still_rejects() -> None:
+    # The tolerance stops where there is codex content to lose: a manifest we cannot
+    # read next to a staged rollout is still a corrupt codex session.
+    blobs = {
+        hash_content(_UNREGISTERED_MANIFEST): _UNREGISTERED_MANIFEST,
+        hash_content(_ROLLOUT): _ROLLOUT,
+    }
+    step_blobs = {
+        f"{_PREFIX}/resume-state.json": hash_content(_UNREGISTERED_MANIFEST),
+        f"{_PREFIX}/{CODEX_ROLLOUT_SLOTS[0]}": hash_content(_ROLLOUT),
+    }
+
+    with pytest.raises(InvalidResumeState):
+        plan_archive_codex_resume_state(step_blobs, blobs.get)

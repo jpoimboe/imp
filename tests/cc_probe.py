@@ -5,7 +5,7 @@ whatever `claude` is on PATH), launch it with the exact --disallowedTools
 list _build_options produces, and read the `init` system message, where
 claude advertises its live tool registry. Anything advertised beyond the
 ToolSearch exemption is a built-in the agent could call from every
-claude_code step.
+claude step.
 
 Probing under the deny posture rather than bare is load-bearing: some
 built-ins only materialize once others are denied, so a baseline probe
@@ -95,7 +95,7 @@ def invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> AgentI
             source=loc),
         prompt_template_source="hi", source_path=Path("a.md"), source=loc)
     return AgentInvocation(
-        agent_def=agent, provider_name="claude_code", model_name="m",
+        agent_def=agent, provider_name="claude", model_name="m",
         system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="t", project_root=tmp_path,

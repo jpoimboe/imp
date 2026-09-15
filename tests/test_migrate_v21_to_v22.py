@@ -159,7 +159,7 @@ def test_load_migrates_active_sessions_and_preserves_native_identity(
     _assert_converted(missing_owner)
     _assert_converted(existing_owner, owner=b"codex\n")
     assert _snapshot(stash) == stash_before
-    assert _layout_version(quest_dir) == 22
+    assert _layout_version(quest_dir) == LAYOUT_VERSION
 
     codex_home = tmp_path / "restored-codex-home"
     thread_id = restore_rollout(
@@ -172,9 +172,20 @@ def test_load_migrates_active_sessions_and_preserves_native_identity(
         (codex_home.joinpath(*_RESTORE_PATH.split("/"))).read_bytes(),
     ) == (_THREAD_ID, _ROLLOUT_BYTES)
 
-    after_first = _snapshot(quest_dir)
+
+def test_a_direct_re_invocation_of_the_hop_is_a_no_op(tmp_path: Path) -> None:
+    # Seeded at v21 rather than chained through load: a home already carried to the
+    # current LAYOUT_VERSION would be re-stamped backwards by a direct hop call.
+    _seed_control(tmp_path)
+    quest_dir = _seed_v21(tmp_path, "mv22-rerun")
+    session = _seed_legacy(quest_dir, "a")
     _migrate_v21_to_v22(quest_dir)
+    after_first = _snapshot(quest_dir)
+
+    _migrate_v21_to_v22(quest_dir)
+
     assert _snapshot(quest_dir) == after_first
+    _assert_converted(session)
 
 
 def test_load_preserves_proactive_handoff_sibling(tmp_path: Path) -> None:
@@ -189,7 +200,7 @@ def test_load_preserves_proactive_handoff_sibling(tmp_path: Path) -> None:
 
     _assert_converted(session)
     assert handoff.read_bytes() == handoff_bytes
-    assert _layout_version(quest_dir) == 22
+    assert _layout_version(quest_dir) == LAYOUT_VERSION
 
 
 def test_unknown_phase_file_is_rejected_without_mutation(tmp_path: Path) -> None:
@@ -207,7 +218,7 @@ def test_unknown_phase_file_is_rejected_without_mutation(tmp_path: Path) -> None
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23
     assert quest_mod._MIGRATIONS[(21, 22)] is _migrate_v21_to_v22
 
 
@@ -215,9 +226,9 @@ def test_the_hop_is_registered_and_the_constant_moved() -> None:
     ("manifest_provider", "owner"),
     [
         pytest.param("codex", None, id="codex-missing-provider"),
-        pytest.param("codex", b"claude_code", id="codex-mismatched-provider"),
-        pytest.param("claude_code", None, id="non-codex-missing-provider"),
-        pytest.param("claude_code", b"codex", id="non-codex-mismatched-provider"),
+        pytest.param("codex", b"claude", id="codex-mismatched-provider"),
+        pytest.param("claude", None, id="non-codex-missing-provider"),
+        pytest.param("claude", b"codex", id="non-codex-mismatched-provider"),
     ],
 )
 def test_current_manifest_requires_matching_provider_without_mutation(
@@ -252,8 +263,8 @@ def test_matching_non_codex_current_state_is_untouched_and_advances(
     session = _seed_current(
         quest_dir,
         "unrelated",
-        manifest_provider="claude_code",
-        owner=b"claude_code\n",
+        manifest_provider="claude",
+        owner=b"claude\n",
     )
     before = _snapshot(session)
 
@@ -294,7 +305,7 @@ def _missing_rollout(session: Path) -> None:
 
 
 def _foreign_owner(session: Path) -> None:
-    (session / "provider").write_bytes(b"claude_code\n")
+    (session / "provider").write_bytes(b"claude\n")
 
 
 def _conflicting_slot(session: Path) -> None:
@@ -515,7 +526,7 @@ def test_every_completed_operation_is_rerunnable(
     Quest.load(tmp_path, quest_id)
 
     _assert_converted(session)
-    assert _layout_version(quest_dir) == 22
+    assert _layout_version(quest_dir) == LAYOUT_VERSION
 
 
 @pytest.mark.parametrize("first_failure", ["slot_replace", "legacy_unlink"])
@@ -574,4 +585,4 @@ def test_recovery_fsync_barrier_precedes_every_new_publication(
 
     Quest.load(tmp_path, quest_id)
     _assert_converted(session)
-    assert _layout_version(quest_dir) == 22
+    assert _layout_version(quest_dir) == LAYOUT_VERSION

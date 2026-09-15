@@ -29,8 +29,8 @@ def test_unions_catalog_and_config_tier_models(monkeypatch) -> None:
 
 
 def test_claude_cache_values_dedup(monkeypatch) -> None:
-    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude_code"])
-    tiers = {"high": {"claude_code": "claude-opus-4-8[1m]"}}
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude"])
+    tiers = {"high": {"claude": "claude-opus-4-8[1m]"}}
     # A cache value already present via the catalog must appear exactly once.
     opts = [ClaudeModelOption(value="claude-fable-5[1m]")]
     rosters = discover_roster(_config(tiers), claude_options=opts)
@@ -39,8 +39,8 @@ def test_claude_cache_values_dedup(monkeypatch) -> None:
 
 
 def test_claude_cache_adds_new_values(monkeypatch) -> None:
-    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude_code"])
-    tiers = {"high": {"claude_code": "claude-opus-4-8[1m]"}}
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude"])
+    tiers = {"high": {"claude": "claude-opus-4-8[1m]"}}
     opts = [ClaudeModelOption(value="cache-only-model")]
     rosters = discover_roster(_config(tiers), claude_options=opts)
     assert "cache-only-model" in list(rosters[0].entries)

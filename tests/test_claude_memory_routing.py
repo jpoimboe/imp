@@ -74,7 +74,7 @@ def test_memory_code_comments_present_at_sites() -> None:
     assert "no encrypted" in openai
     assert "the latter 400s" in openai
 
-    cc = pathlib.Path("src/imp/providers/claude_code.py").read_text()
+    cc = pathlib.Path("src/imp/providers/claude.py").read_text()
     assert "blocks servers sourced from .mcp.json" in cc
 
     codex = pathlib.Path("src/imp/providers/codex_mcp.py").read_text()

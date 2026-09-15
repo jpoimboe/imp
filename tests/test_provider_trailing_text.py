@@ -12,7 +12,7 @@ import pytest
 
 from imp.agents.runner import Message, TextBlock
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude_code import ClaudeCodeSession
+from imp.providers.claude import ClaudeSession
 from imp.providers.codex_runner import CodexSession
 
 
@@ -33,17 +33,17 @@ def _stale_tail() -> list[Message]:
 
 
 def test_claude_trailing_text_is_empty_when_last_message_is_not_assistant() -> None:
-    session = ClaudeCodeSession(None, None)
+    session = ClaudeSession(None, None)
     session.messages = _stale_tail()
     assert session._trailing_text() == ""
 
 
 def test_claude_trailing_text_is_empty_with_no_messages() -> None:
-    assert ClaudeCodeSession(None, None)._trailing_text() == ""
+    assert ClaudeSession(None, None)._trailing_text() == ""
 
 
 def test_claude_trailing_text_returns_the_trailing_assistant_prose() -> None:
-    session = ClaudeCodeSession(None, None)
+    session = ClaudeSession(None, None)
     session.messages = [
         *_stale_tail(),
         Message(role="assistant", content=(TextBlock(text="API Error: 429"),)),
@@ -52,7 +52,7 @@ def test_claude_trailing_text_returns_the_trailing_assistant_prose() -> None:
 
 
 def test_claude_last_text_keeps_backward_scanning_semantics() -> None:
-    session = ClaudeCodeSession(None, None)
+    session = ClaudeSession(None, None)
     session.messages = _stale_tail()
     assert session._last_text() == _STALE_PROSE
 

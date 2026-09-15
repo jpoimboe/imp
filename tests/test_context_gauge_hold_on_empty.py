@@ -8,7 +8,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 
 def _reading(eid, *, input_tokens, cache_read, context_window,
-             context_tokens=None, agent_id="step:p/s", provider="claude_code"):
+             context_tokens=None, agent_id="step:p/s", provider="claude"):
     return _ev(
         eid, "agent_message", agent_id=agent_id, provider=provider, model="m",
         stop_reason="end_turn",

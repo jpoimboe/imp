@@ -6,6 +6,7 @@ from imp.engine.event_migrations import (
     backfill_step_round,
     migrate_events,
     migrate_id_ns_event_to_block,
+    rename_claude_code_provider,
 )
 
 
@@ -582,3 +583,50 @@ def test_a_second_run_over_a_mixed_stream_yields_the_first_run():
     once = backfill_step_round(
         [_step_started(round_=3, eid="s1"), _step_started(eid="s2"), _qr(1.00)])
     assert backfill_step_round(copy.deepcopy(once)) == once
+
+
+_TIERS_RESOLVED = {
+    "type": "tiers_resolved", "agent_id": None,
+    "payload": {"tiers": {"low": {"provider": "claude_code", "model": "haiku"},
+                          "high": {"provider": "openai", "model": "gpt-5"}},
+                "steps": {"plan-writer": {"provider": "claude_code",
+                                          "model": "opus"}}},
+}
+
+
+def test_nested_tiers_resolved_providers_are_renamed_at_every_depth():
+    out = rename_claude_code_provider([_TIERS_RESOLVED])
+    payload = out[0]["payload"]
+    assert payload["tiers"]["low"]["provider"] == "claude"
+    assert payload["steps"]["plan-writer"]["provider"] == "claude"
+    assert payload["tiers"]["low"]["model"] == "haiku"
+
+
+def test_a_provider_holding_another_value_is_untouched():
+    out = rename_claude_code_provider([_TIERS_RESOLVED])
+    assert out[0]["payload"]["tiers"]["high"]["provider"] == "openai"
+
+
+def test_the_old_id_under_a_non_provider_key_is_untouched():
+    # Only the field name licenses the rewrite: prose and ids that merely spell it
+    # stay as recorded.
+    event = {"type": "step_context", "payload": {
+        "provider": "claude_code", "model": "claude_code",
+        "text": "resumed under claude_code", "module": "claude_code"}}
+    out = rename_claude_code_provider(event)
+    assert out["payload"] == {"provider": "claude", "model": "claude_code",
+                              "text": "resumed under claude_code",
+                              "module": "claude_code"}
+
+
+def test_the_input_is_not_mutated_so_callers_can_detect_change_by_equality():
+    events = [_TIERS_RESOLVED]
+    snapshot = copy.deepcopy(events)
+    out = rename_claude_code_provider(events)
+    assert events == snapshot
+    assert out != snapshot
+
+
+def test_a_second_run_yields_the_first_run():
+    once = rename_claude_code_provider([_TIERS_RESOLVED])
+    assert rename_claude_code_provider(copy.deepcopy(once)) == once

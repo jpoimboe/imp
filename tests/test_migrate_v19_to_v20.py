@@ -8,9 +8,9 @@ from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v19_to_v20
 from imp.engine.reincarnation import read_session_owner
 from tests.conftest import _seed_control
 
-_TIERS = {"low": {"provider": "claude_code", "model": "sonnet"},
-          "medium": {"provider": "claude_code", "model": "sonnet"},
-          "high": {"provider": "claude_code", "model": "opus"}}
+_TIERS = {"low": {"provider": "claude", "model": "sonnet"},
+          "medium": {"provider": "claude", "model": "sonnet"},
+          "high": {"provider": "claude", "model": "opus"}}
 
 
 def _seed_v19(control: Path, cid: str, *, steps: dict | None = None) -> Path:
@@ -71,8 +71,8 @@ def test_every_live_session_is_labelled_not_just_the_current_step(
 
     _migrate_v19_to_v20(qd)
 
-    assert read_session_owner(done) == "claude_code"
-    assert read_session_owner(live) == "claude_code"
+    assert read_session_owner(done) == "claude"
+    assert read_session_owner(live) == "claude"
 
 
 def test_a_step_override_labels_that_step_with_its_own_vendor(
@@ -87,7 +87,7 @@ def test_a_step_override_labels_that_step_with_its_own_vendor(
 
     _migrate_v19_to_v20(qd)
 
-    assert read_session_owner(plain) == "claude_code"
+    assert read_session_owner(plain) == "claude"
     assert read_session_owner(overridden) == "openai"
 
 
@@ -125,7 +125,7 @@ def test_a_home_with_no_resolved_map_is_left_unlabelled(tmp_path: Path) -> None:
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 22
+    assert LAYOUT_VERSION == 23
     assert quest_mod._MIGRATIONS[(19, 20)] is _migrate_v19_to_v20
 
 
@@ -139,4 +139,4 @@ def test_a_second_run_is_a_no_op(tmp_path: Path) -> None:
     _migrate_v19_to_v20(qd)
 
     assert _meta(qd) == after_first
-    assert read_session_owner(live) == "claude_code"
+    assert read_session_owner(live) == "claude"

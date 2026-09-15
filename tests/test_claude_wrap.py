@@ -1,0 +1,1038 @@
+"""Verify Claude Code tool wrapping behavior without driving `claude -p`.
+
+Stubs the SDK's `tool` decorator with a passthrough that just returns the
+wrapped function. The behavior under test is the *wrapper body* — captures
+complete_step args, dispatches task, surfaces errors as is_error responses.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from imp.agents.parallel import reset_parallelism_cache
+from imp.agents.runner import ImagePart, QuestContext, TextPart
+from imp.agents.subagents import make_task_tool
+from imp.agents.tools import Tool
+from imp.agents.tools.complete_step import make_complete_step_tool
+from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
+from imp.agents.transcript import captured_result_key
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
+from imp.providers.claude import _RunState, _wrap_one
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+def _ctx(tmp_path: Path) -> ToolContext:
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=tmp_path / "events.jsonl",
+    )
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
+    )
+    return ctx
+
+
+def _passthrough_decorator(name, description, schema, annotations=None):  # type: ignore[no-untyped-def]
+    """Stub `claude_agent_sdk.tool` — returns the function unchanged."""
+    def _inner(fn):  # type: ignore[no-untyped-def]
+        fn.__sdk_tool_name__ = name  # marker for assertions
+        fn.__sdk_tool_description__ = description
+        fn.__sdk_tool_schema__ = schema
+        return fn
+    return _inner
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_captures_args(tmp_path: Path) -> None:
+    state = _RunState()
+    schema = OutputSchema(
+        fields=(OutputField(
+            name="status", type="enum",
+            values=("Success", "Error"), required=True,
+        ),),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    tool = make_complete_step_tool(schema)
+
+    wrapped = _wrap_one(
+        "complete_step", tool, _ctx(tmp_path), state, _passthrough_decorator,
+    )
+
+    out = await wrapped({"status": "Success"})
+    assert state.complete_step_called is True
+    assert state.complete_step_args == {"status": "Success"}
+    assert out["content"][0]["text"] == "step complete"
+    assert "isError" not in out  # success path
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) -> None:
+    """claude assigns `args` verbatim and nothing downstream filters, so an
+    optional the agent did not send must simply be absent (regression guard)."""
+    state = _RunState()
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="spec_path", type="string", required=False),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(schema), _ctx(tmp_path), state,
+        _passthrough_decorator,
+    )
+
+    await wrapped({"status": "Success"})
+    assert state.complete_step_args == {"status": "Success"}
+
+    await wrapped({"status": "Success", "spec_path": "docs/my-spec.md"})
+    assert state.complete_step_args == {
+        "status": "Success", "spec_path": "docs/my-spec.md"}
+
+
+@pytest.mark.anyio
+async def test_wrap_regular_tool_returns_invoke_result(tmp_path: Path) -> None:
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    read = get_registry()["read_file"]
+    (tmp_path / "x.txt").write_text("hello")
+
+    wrapped = _wrap_one(
+        "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
+    )
+    out = await wrapped({"path": "x.txt"})
+    assert out["content"][0]["text"] == "     1\thello"
+    assert state.runtime_errors == []
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_raises_surfaces_as_is_error(tmp_path: Path) -> None:
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    read = get_registry()["read_file"]
+
+    wrapped = _wrap_one(
+        "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
+    )
+    out = await wrapped({"path": "nonexistent.txt"})
+    assert out.get("isError") is True
+    assert "FileNotFoundError" in out["content"][0]["text"]
+    assert state.runtime_errors  # error was recorded
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_raises_writes_no_sidecar_entry(tmp_path: Path) -> None:
+    """A tool that raises must write NO sidecar entry even with parent_transcript_dir set."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    read = get_registry()["read_file"]
+
+    wrapped = _wrap_one("read_file", read, ctx, state, _passthrough_decorator)
+    out = await wrapped({"path": "nonexistent.txt"})
+
+    assert out.get("isError") is True
+    assert not (tmp_path / "captured_tool_results.jsonl").exists()
+
+
+@pytest.mark.anyio
+async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
+    from imp.agents.subagents import make_task_tool
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": sub_def}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
+    )
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None  # no coordinator needed for this test
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    wrapped = _wrap_one(
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
+    )
+    out = await wrapped({"subagent_name": "sub", "task_description": "do"})
+    assert state.complete_step_called is False  # routed to dispatch_task, not capture
+    # dispatch_task returns the subagent's raw final text.
+    assert out["content"][0]["text"] == "done successfully"
+
+
+@pytest.mark.anyio
+async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
+    # Part 1: dispatching `task` via _impl must mint a real block id and emit
+    # EXACTLY ONE task tool_call AND EXACTLY ONE task tool_result, BOTH carrying
+    # the SAME non-empty block id (not the empty __tool_use_id__). The matching id
+    # is what lets narrative's _h_tool_result close the fold carrying the outcome.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": sub_def}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
+    )
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one(
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
+    )
+    # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert out["content"][0]["text"] == "done successfully"
+
+    events = elog._events
+    calls = [e for e in events
+             if e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"]
+    assert len(calls) == 1, "expected exactly one task tool_call"
+    call_id = calls[0]["payload"]["id"]
+    assert call_id, "minted block id must be non-empty"
+    # Exactly one tool_result keyed on the SAME minted id as the call.
+    matching = [e for e in events
+                if e["type"] == "tool_result" and e["payload"]["id"] == call_id]
+    assert len(matching) == 1, "expected exactly one task tool_result with matching id"
+    assert matching[0]["payload"]["error"] is False
+
+
+@pytest.mark.anyio
+async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
+    """_impl wrapper records signal-killed bash invocations on _RunState
+    so the receive loop can emit tool_killed events later."""
+
+    from imp.agents.tools import get_registry
+    from imp.providers.claude import _RunState, _wrap_one
+
+    state = _RunState()
+    bash_tool = get_registry()["bash"]
+
+    # Stub: the tool's fn returns a JSON string with returncode -15 (SIGTERM).
+    # We can't actually kill a real sleep here without timing flakiness, so
+    # monkey-patch the registry entry's fn to return the canonical kill shape.
+    from dataclasses import replace as dc_replace
+    killed_tool = dc_replace(
+        bash_tool,
+        fn=lambda ctx, **kw: json.dumps({
+            "stdout": "", "stderr": "", "returncode": -15,
+        }),
+    )
+
+    wrapped = _wrap_one(
+        "bash", killed_tool, _ctx(tmp_path), state, _passthrough_decorator,
+    )
+    out = await wrapped({"command": "sleep 10"})
+    # Tool returns successfully (the runner records the kill, doesn't error).
+    assert out.get("isError") is not True
+    # killed_tool_uses captured the signal.
+    assert len(state.killed_tool_uses) == 1
+    assert state.killed_tool_uses[0]["name"] == "bash"
+    assert state.killed_tool_uses[0]["signal"] == 15
+
+
+@pytest.mark.anyio
+async def test_wrapper_sweeps_bg_on_every_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 10 dispatch site, claude edition: every MCP tool dispatch
+    sweeps the background registry — module-attr call so one monkeypatch
+    covers all sites."""
+    import imp.agents.tools.bg as bg_mod
+    from imp.agents.tools import get_registry
+
+    calls = {"n": 0}
+    real = bg_mod._sweep_bg
+
+    async def counting(ctx):
+        calls["n"] += 1
+        await real(ctx)
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    ctx = _ctx(tmp_path)
+    state = _RunState()
+    (tmp_path / "f.txt").write_text("data")
+    wrapped = _wrap_one("read_file", get_registry()["read_file"], ctx, state,
+                        _passthrough_decorator)
+    out = await wrapped({"path": "f.txt"})
+    assert "data" in out["content"][0]["text"]
+    assert calls["n"] == 1
+
+
+def test_cc_task_tool_annotated_readonly_when_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: claude wraps `task` with ToolAnnotations(readOnlyHint=True) via the
+    real claude_agent_sdk.tool annotations= parameter, at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_read_only_tool_annotated_when_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: a read_only tool (read_file) wraps with readOnlyHint=True at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_read_only_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: IMP_MAX_PARALLEL_TASKS=1 drops the read-only hint (single kill switch)."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_mutating_tool_not_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: a mutating tool (write_file) is never annotated, even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "write_file", get_registry()["write_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC21 (bridge half): IMP_MAX_PARALLEL_TASKS=1 drops the readOnlyHint at the
+    claude registration site."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_derived_from_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: the annotation is DERIVED from the allowlist-mode flag, not hardcoded —
+    flip CLAUDE_ALLOWLIST_MODE off and the hint disappears even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    monkeypatch.setattr(
+        "imp.providers.claude.CLAUDE_ALLOWLIST_MODE", False)
+    try:
+        wrapped = _wrap_one(
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def _sub_def() -> AgentDef:
+    return AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1))
+
+
+@pytest.mark.anyio
+async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's canonical SUCCESS task tool_result (keyed on the
+    # minted non-empty block id) stamps id_ns="block".
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert out["content"][0]["text"] == "done successfully"
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is False
+    assert results[0]["payload"]["id_ns"] == "block"
+
+
+@pytest.mark.anyio
+async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's error-close task tool_result (dispatch raises an
+    # ordinary exception) also stamps id_ns="block" on the same minted block id.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _BoomRunner:
+        async def run(self, inv):
+            raise ValueError("kaboom")
+            yield  # pragma: no cover  (make it an async generator)
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _BoomRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert out.get("isError") is True
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["id_ns"] == "block"
+    assert "kind" not in results[0]["payload"]
+
+
+@pytest.mark.anyio
+async def test_wrap_task_suspension_marks_result_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # a subagent-origin pause cannot unwind the SDK loop, so
+    # dispatch_task's SubagentSuspended degrades to an is_error task tool_result.
+    # That degraded result must carry a structured kind="interrupted" so the
+    # renderer classifies the fold as (interrupted), not (failed).
+    import imp.providers.claude as cc_mod
+    from imp.agents.subagents import SubagentSuspended, make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.coordinator = None
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    async def _suspend(ctx2, name, desc, *, tool_call_event_id="", tier=None, **kwargs):
+        raise SubagentSuspended("subagent paused")
+
+    monkeypatch.setattr(cc_mod, "dispatch_task", _suspend)
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    with pytest.raises(SubagentSuspended):
+        await wrapped({"subagent_name": "sub", "task_description": "do",
+                       "__tool_use_id__": ""})
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
+    import imp.providers.claude as cc_mod
+    from imp.engine.state import InMemoryEventLog
+
+    seen: dict = {}
+
+    async def _fake(ctx2, name, desc, *, tool_call_event_id="", tier=None, **kwargs):
+        # **kwargs captures whatever extra kwargs the wrapper passes (old code
+        # passes abort_dispatch=; the new code must not).
+        seen["kwargs"] = kwargs
+        return '{"status": "Success"}'
+
+    ctx = _ctx(tmp_path)
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+    state = _RunState()
+    state.agent_id = "step:p/s"
+
+    monkey = cc_mod.dispatch_task
+    cc_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+        out = await wrapped({"subagent_name": "reviewer", "task_description": "go"})
+    finally:
+        cc_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert "abort_dispatch" not in seen["kwargs"]        # refusal apparatus gone
+    assert out.get("isError") is not True                # dispatched, not refused
+    assert not hasattr(state, "inflight_task_dispatches")  # counter field removed
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert results[-1]["payload"]["error"] is False      # success close is canonical
+
+
+@pytest.mark.anyio
+async def test_impl_raises_when_dispatched_off_the_runner_loop(
+        tmp_path: Path) -> None:
+    # AC34: _impl raises if it runs on a loop other than the one the runner
+    # recorded (state.runner_loop). A production check, exercised by setting a
+    # mismatched runner_loop.
+    import asyncio
+
+    from imp.agents.subagents import make_task_tool
+
+    foreign = asyncio.new_event_loop()
+    try:
+        ctx = _ctx(tmp_path)
+        ctx.subagent_defs = {"sub": _sub_def()}
+        ctx.parent_transcript_dir = tmp_path / "parent"
+        state = _RunState()
+        state.agent_id = "step:p/task-lead"
+        state.runner_loop = foreign      # not the loop this test runs on
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state,
+                            _passthrough_decorator)
+        with pytest.raises(RuntimeError, match="runner loop"):
+            await wrapped({"subagent_name": "sub", "task_description": "do",
+                          "__tool_use_id__": ""})
+    finally:
+        foreign.close()
+
+
+@pytest.mark.anyio
+async def test_wrap_brackets_regular_tool_with_tool_watchdog(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    seen = {"active": None}
+
+    def _fn(ctx, **kw):
+        seen["active"] = ctx.coordinator.tool_active
+        return "ok"
+
+    rec = Tool(name="rec", description="",
+               input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    state = _RunState()
+    wrapped = _wrap_one("rec", rec, ctx, state, _passthrough_decorator)
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "ok"
+    assert seen["active"] is True       # watchdog frozen DURING the tool call
+    assert coord.tool_active is False   # balanced after return -> window re-arms
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_captures_result_to_sidecar(tmp_path: Path) -> None:
+    """A successful plain-tool call through _impl appends one captured line recording
+    the bare tool name, the cleaned input, the REAL body, and is_error=False —
+    keyed by NAME+INPUT, needing no tool_use_id."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path            # step dir for the sidecar
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    out = await wrapped({"path": "x.txt"})          # NOTE: no __tool_use_id__ at all
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    lines = sidecar.read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["name"] == "read_file"
+    assert entry["input"] == {"path": "x.txt"}
+    assert entry["is_error"] is False
+    # The captured content is EXACTLY the real success body the SDK received — not a
+    # placeholder, and falsifiable against a synthetic "interrupted" string.
+    assert entry["content"] == out["content"][0]["text"]
+    assert "hello" in entry["content"]
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_captures_even_when_tool_use_id_empty(tmp_path: Path) -> None:
+    """The keystone fix: capture no longer depends on __tool_use_id__ (always "" for
+    in-process MCP tools). An empty id still captures, and the stored input is the
+    CLEANED input (dunder keys stripped), not the raw args."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    await wrapped({"path": "x.txt", "__tool_use_id__": ""})
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    entry = json.loads(sidecar.read_text().splitlines()[0])
+    assert entry["input"] == {"path": "x.txt"}       # dunder stripped, id gone
+    assert "hello" in entry["content"]
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_no_capture_without_transcript_dir(tmp_path: Path) -> None:
+    """No step dir (parent_transcript_dir is None) → nothing to capture into."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)                             # parent_transcript_dir defaults to None
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    await wrapped({"path": "x.txt"})
+
+    assert not (tmp_path / "captured_tool_results.jsonl").exists()
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_capture_failure_preserves_success(tmp_path: Path) -> None:
+    """Honesty guarantee: a sidecar-write failure must NEVER turn a real tool success
+    into an is_error result — the capture is best-effort telemetry."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    # Nonexistent step dir → the append raises FileNotFoundError (an OSError), which
+    # must be swallowed inside the helper rather than surfacing through _impl's except.
+    ctx.parent_transcript_dir = tmp_path / "does" / "not" / "exist"
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    out = await wrapped({"path": "x.txt"})
+
+    assert out.get("isError") is not True            # success preserved
+    assert "hello" in out["content"][0]["text"]
+    assert state.runtime_errors == []                # no error recorded
+
+
+def _image_tool() -> Tool:
+    parts = [
+        TextPart(text="shot.png — 8×8 PNG"),
+        ImagePart(media_type="image/png", data="aGVsbG8=", width=8, height=8,
+                  blob="ab12.png", nbytes=5),
+    ]
+
+    def _fn(ctx):  # type: ignore[no-untyped-def]
+        return parts
+
+    return Tool(name="read_file", description="read",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+@pytest.mark.anyio
+async def test_wrap_list_content_returns_mcp_image_content(tmp_path: Path) -> None:
+    state = _RunState()
+    wrapped = _wrap_one(
+        "read_file", _image_tool(), _ctx(tmp_path), state, _passthrough_decorator)
+    out = await wrapped({})
+    assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
+    assert out["content"][1] == {
+        "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
+    assert "isError" not in out
+
+
+def _plain_list_tool() -> Tool:
+    def _fn(ctx):  # type: ignore[no-untyped-def]
+        return [1, 2, 3]
+
+    return Tool(name="nums", description="nums",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_list_still_json_flattens(tmp_path: Path) -> None:
+    state = _RunState()
+    wrapped = _wrap_one(
+        "nums", _plain_list_tool(), _ctx(tmp_path), state, _passthrough_decorator)
+    out = await wrapped({})
+    # An ordinary list keeps the json.dumps text-response path unchanged.
+    assert out["content"] == [{"type": "text", "text": "[1, 2, 3]"}]
+
+
+@pytest.mark.anyio
+async def test_wrap_list_content_captures_caption_to_parent_transcript(tmp_path: Path) -> None:
+    """Image-result path captures the joined TextPart caption to the sidecar when
+    parent_transcript_dir is set, while still returning structured MCP image content."""
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+
+    wrapped = _wrap_one(
+        "read_file", _image_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({})
+
+    assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
+    assert out["content"][1] == {
+        "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
+    assert "isError" not in out
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    lines = sidecar.read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["name"] == "read_file"
+    assert entry["input"] == {}
+    assert entry["is_error"] is False
+    assert entry["content"] == "shot.png — 8×8 PNG"
+
+
+@pytest.mark.anyio
+async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unit contract for edit #3: _impl invokes state.flush_llm_group() BEFORE it
+    appends the sub_agent tool_call, and dispatch_task receives that tool_call's
+    EVENT id (the parent link, AC #5). This pins _impl's call ordering only; the
+    production receive-loop-vs-_impl race and the flush-lock barrier are covered
+    by the concurrent tests in test_claude_runner.py.
+    """
+    import imp.providers.claude as cc
+    from imp.engine.state import InMemoryEventLog
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": sub_def}
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
+    )
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    captured: dict[str, object] = {}
+
+    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id, tier=None):
+        captured["tool_call_event_id"] = tool_call_event_id
+        return "done"
+
+    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    flush = {"calls": 0, "sub_present_at_flush": None}
+
+    async def recording_flush(backstop_stop_reason=None):
+        flush["calls"] += 1
+        # Was the sub_agent tool_call already appended when the flush ran? It must
+        # NOT be — _impl has to flush BEFORE it appends.
+        flush["sub_present_at_flush"] = any(
+            e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"
+            for e in elog._events)
+
+    state.flush_llm_group = recording_flush
+
+    wrapped = _wrap_one(
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do"})
+    assert out["content"][0]["text"] == "done"
+
+    assert flush["calls"] == 1, "state.flush_llm_group must be called exactly once"
+    assert flush["sub_present_at_flush"] is False, (
+        "flush must run BEFORE the sub_agent tool_call is appended")
+    call_event = next(e for e in elog._events
+                      if e["type"] == "tool_call"
+                      and e["payload"]["name"] == "sub_agent")
+    assert call_event["id"], "sub_agent tool_call event id must be non-empty"
+    assert captured["tool_call_event_id"] == call_event["id"], (
+        "dispatch_task must receive the sub_agent tool_call's EVENT id (parent link)")
+
+
+@pytest.mark.anyio
+async def test_wrap_registers_the_call_in_flight_and_resolves_the_real_body(
+        tmp_path: Path) -> None:
+    """The registry IS the in-flight set: an entry keyed by captured_result_key
+    exists while the tool runs, and the wrapper resolves it with the body the tool
+    actually produced — the result an interrupt's cancellation filler would
+    otherwise displace — then removes it."""
+    state = _RunState()
+    key = captured_result_key("rec", {"path": "x.txt"})
+    seen: dict[str, Any] = {}
+    (tmp_path / "x.txt").write_text("hello")
+
+    def _fn(ctx, path):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        return (tmp_path / path).read_text().upper()
+
+    rec = Tool(name="rec", description="",
+               input_schema={"type": "object",
+                             "properties": {"path": {"type": "string"}},
+                             "required": ["path"]},
+               fn=_fn)
+    wrapped = _wrap_one("rec", rec, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({"path": "x.txt", "__tool_use_id__": ""})
+
+    assert seen["entry"].name == "rec"
+    assert seen["entry"].future.result() == ("HELLO", False)
+    assert out["content"][0]["text"] == "HELLO"
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_fatal_tool_error(
+        tmp_path: Path) -> None:
+    """A fatal tool error is a real outcome: the entry resolves with the message
+    the SDK was handed, is_error=True, and is gone — a pending entry here would
+    burn the post-interrupt bound for nothing."""
+    state = _RunState()
+    key = captured_result_key("boom", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        raise FatalToolError("gate refused")
+
+    boom = Tool(name="boom", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("boom", boom, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["isError"] is True
+    assert seen["entry"].future.result() == ("gate refused", True)
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_a_generic_exception(
+        tmp_path: Path) -> None:
+    """The generic degrade path resolves with the same text it returns to the SDK."""
+    state = _RunState()
+    key = captured_result_key("kaput", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        raise ValueError("disk gone")
+
+    kaput = Tool(name="kaput", description="",
+                 input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("kaput", kaput, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "ValueError: disk gone"
+    assert seen["entry"].future.result() == ("ValueError: disk gone", True)
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_the_parts_return(
+        tmp_path: Path) -> None:
+    """The parts-returning branch returns AHEAD of the ordinary success exit; it
+    resolves with the same caption it writes to the capture sidecar."""
+    state = _RunState()
+    key = captured_result_key("shot", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        return [TextPart(text="rendered 3 layers")]
+
+    shot = Tool(name="shot", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("shot", shot, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "rendered 3 layers"
+    assert seen["entry"].future.result() == ("rendered 3 layers", False)
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_task_over_cap_result_spills_and_records_the_wrapped_body(
+    tmp_path: Path,
+) -> None:
+    # AC 9(c)/AC 10: the claude sub_agent arm wraps its success result, so the
+    # body handed to the model and the minted tool_result recorded in the event log
+    # are byte-identical, and the full result stays recoverable on disk.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    big = "D" * 60_000
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_result", "payload": {"text": big}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+
+    body = out["content"][0]["text"]
+    assert len(body) < len(big)                            # previewed, not the 60 KB
+    assert "read with read_file offset=1" in body
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is False
+    assert results[0]["payload"]["content"] == body        # recorded == returned
+    minted = results[0]["payload"]["id"]
+    assert (tmp_path / "tool-results" / minted).read_text(encoding="utf-8") == big

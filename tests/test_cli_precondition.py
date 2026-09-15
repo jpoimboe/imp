@@ -65,7 +65,7 @@ def test_empty_providers_prints_a_clean_error_not_a_traceback(
     assert captured.err == (
         f"imp: {home / 'config.yaml'}:1\n"
         "  config.yaml 'providers:' must be a non-empty list of provider names\n"
-        "  hint: run 'imp config set providers claude_code' to fix\n"
+        "  hint: run 'imp config set providers claude' to fix\n"
     )
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out

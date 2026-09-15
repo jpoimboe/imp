@@ -250,13 +250,13 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_claude_code_delivers_interject_at_requery_boundary(
+async def test_claude_delivers_interject_at_requery_boundary(
     tmp_path: Path,
 ) -> None:
     from dataclasses import replace
 
     from imp.agents.runner import QuestContext as _CC
-    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,
@@ -285,7 +285,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
 
     inv = AgentInvocation(
         agent_def=_agent_def(tools=frozenset({"complete_step"})),
-        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        provider_name="claude", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=_CC(
@@ -307,7 +307,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
         captured["client"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=capturing_factory)
     events = [e async for e in runner.run(inv)]
 

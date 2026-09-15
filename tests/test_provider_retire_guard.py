@@ -458,7 +458,7 @@ async def test_a_same_name_pin_leaves_the_session_unstashed(
 async def test_a_pin_applied_at_entry_retires_at_the_dispatch_that_follows(
     tmp_path: Path, floor_availability,
 ) -> None:
-    # The cross-process headline (AC 13/14): a step parked on claude_code,
+    # The cross-process headline (AC 13/14): a step parked on claude,
     # switched to codex by another process, then resumed. Reconcile (a) re-points
     # the map at entry and the guard retires at the dispatch — each half is
     # proven above; this is their composition, which is what the user lives.
@@ -481,15 +481,15 @@ async def test_a_pin_applied_at_entry_retires_at_the_dispatch_that_follows(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="work from the fled vendor"),)))
-    write_session_owner(tdir, "claude_code")
+    write_session_owner(tdir, "claude")
     quest.event_log().append(
         agent_id="step:only/w", type="engine_message",
         payload={"role": "system", "subtype": "system_prompt",
                  "content": [{"type": "text", "text": "stored"}]})
     state = State.load(quest.state_dir)
     state.resolved_tiers = {
-        t: ProviderModel(provider="claude_code", model=mo)
-        for t, mo in BUILTIN_FLOOR["claude_code"].tier_defaults.items()}
+        t: ProviderModel(provider="claude", model=mo)
+        for t, mo in BUILTIN_FLOOR["claude"].tier_defaults.items()}
     state.resume_pending = state.step
     state.save(quest.state_dir)
     quest.set_provider("codex")          # e.g. /provider at a parked hold prompt
@@ -526,7 +526,7 @@ async def test_a_pin_applied_at_entry_retires_at_the_dispatch_that_follows(
         def create_runner(self, _i: AgentInvocation) -> AgentRunner:
             return _Runner(self.model)
 
-    floor_availability({"claude_code", "codex"}, factory=lambda mo: _P(mo))
+    floor_availability({"claude", "codex"}, factory=lambda mo: _P(mo))
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
 
@@ -571,12 +571,12 @@ async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_session(
     # the guard. Driven end to end through a real dirty worktree rather than by
     # calling _enforce_clean_tree directly, since the claim is about the path.
     _seed_control(tmp_path)
-    (project_state_dir(tmp_path) / "config.yaml").write_text("providers: [claude_code]\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("providers: [claude]\n")
     quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     state = State.load(quest.state_dir)
     state.resolved_tiers = {
-        t: ProviderModel(provider="claude_code", model=mo)
-        for t, mo in BUILTIN_FLOOR["claude_code"].tier_defaults.items()}
+        t: ProviderModel(provider="claude", model=mo)
+        for t, mo in BUILTIN_FLOOR["claude"].tier_defaults.items()}
     state.save(quest.state_dir)
     tdir = quest.quest_dir / "steps" / "p" / "s"
     dirt = quest.project_root / "scratch.txt"
@@ -604,7 +604,7 @@ async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_session(
                 # the bounce could replay into the wrong vendor.
                 Transcript(tdir / "transcript.jsonl").append(
                     Message(role="assistant",
-                            content=(TextBlock(text="claude_code turn"),)))
+                            content=(TextBlock(text="claude turn"),)))
                 # A real run always journals this beside the transcript, and the
                 # resume path's invariant check requires it; without it the
                 # replay dies on that instead of on the vendor mismatch.
@@ -631,7 +631,7 @@ async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_session(
         def create_runner(self, _i: AgentInvocation) -> AgentRunner:
             return _Runner(self.model)
 
-    floor_availability({"claude_code", "codex"}, factory=lambda mo: _P(mo))
+    floor_availability({"claude", "codex"}, factory=lambda mo: _P(mo))
     events: list[dict[str, Any]] = []
 
     assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
@@ -641,13 +641,13 @@ async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_session(
     assert "provider switched — codex picks up this step from the event log" in lines
     assert "provider switched — codex takes the next step" not in lines
     first, bounced = seen
-    assert first["model"] == BUILTIN_FLOOR["claude_code"].tier_defaults["medium"]
+    assert first["model"] == BUILTIN_FLOOR["claude"].tier_defaults["medium"]
     # The bounce re-dispatch runs on the new vendor, and the guard retired the
     # old one's transcript at entry: stashed rather than replayed, so `keep` and
     # `balance_on_resume` are both False and restore_rollout is unreachable.
     assert bounced["model"] == BUILTIN_FLOOR["codex"].tier_defaults["medium"]
     assert bounced["stashes"] == ["s.attempt-1"]
-    assert "claude_code turn" in bounced["stashed"]
+    assert "claude turn" in bounced["stashed"]
     assert _SWITCH_SENTENCE in bounced["first"]
     # The bounce's own feedback still reaches the reborn session — retiring the
     # transcript does not cost the step the reason it was bounced.

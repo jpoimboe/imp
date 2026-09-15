@@ -33,15 +33,15 @@ def test_render_roster_one_per_line_hides_bare_aliases() -> None:
     from imp.providers.config import ProviderModel
     from imp.providers.model_roster import ProviderRoster
 
-    current = ProviderModel("claude_code", "claude-opus-4-8[1m]")
+    current = ProviderModel("claude", "claude-opus-4-8[1m]")
     rosters = [
-        ProviderRoster("claude_code", (
+        ProviderRoster("claude", (
             "claude-opus-4-8", "opus", "claude-fable-5[1m]")),
         ProviderRoster("anthropic", ("claude-sonnet-4-6",)),
     ]
     lines = render_roster(current, rosters)
-    assert "Current: claude_code · claude-opus-4-8[1m]   (this step)" in lines
-    assert "  claude_code" in lines
+    assert "Current: claude · claude-opus-4-8[1m]   (this step)" in lines
+    assert "  claude" in lines
     assert "  anthropic" in lines
     # one model per line, bare name, 4-space indent
     assert "    claude-opus-4-8" in lines
@@ -72,7 +72,7 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
     monkeypatch.setattr("imp.engine.loader.load_workflow", lambda *a, **k: object())
     monkeypatch.setattr(
         "imp.engine.model_override.resolve_current_model",
-        lambda state, wf, cfg, step: ProviderModel("claude_code", "opus"))
+        lambda state, wf, cfg, step: ProviderModel("claude", "opus"))
     monkeypatch.setattr(
         "imp.providers.claude_model_cache.read_claude_model_options",
         lambda: ["SENTINEL-CACHE"])
@@ -81,7 +81,7 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
 
     def _discover(config, *, claude_options):
         captured["claude_options"] = claude_options
-        return [ProviderRoster("claude_code", ("claude-opus-4-8",))]
+        return [ProviderRoster("claude", ("claude-opus-4-8",))]
 
     monkeypatch.setattr("imp.providers.model_roster.discover_roster", _discover)
 
@@ -94,15 +94,15 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
     # the best-effort cache read is threaded into discovery
     assert captured["claude_options"] == ["SENTINEL-CACHE"]
     # the resolved current step's model is marked current
-    assert any("Current: claude_code · opus" in line for line in out)
-    assert any("  claude_code" in line for line in out)
+    assert any("Current: claude · opus" in line for line in out)
+    assert any("  claude" in line for line in out)
 
 
 def test_validate_model_available_rejects_unavailable_provider() -> None:
     from imp.cli.model_command import validate_model_available
 
     reason = validate_model_available(
-        "openai:gpt-5.5", available=["anthropic", "claude_code"])
+        "openai:gpt-5.5", available=["anthropic", "claude"])
     assert reason is not None
     assert "openai" in reason
     assert "not available" in reason
@@ -173,7 +173,7 @@ def test_roster_model_names_flattens_dedups_and_keeps_aliases(
 
     def _discover(config, *, claude_options):
         return [
-            ProviderRoster("claude_code", (
+            ProviderRoster("claude", (
                 "claude-opus-4-8", "opus", "claude-fable-5[1m]")),
             ProviderRoster("anthropic", ("claude-sonnet-4-6", "opus")),
         ]

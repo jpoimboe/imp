@@ -27,7 +27,7 @@ class QuotaReading:
     """Built only by a provider parser, which yields None rather than a reading
     with an empty `windows`."""
 
-    provider: Literal["codex", "claude_code"]
+    provider: Literal["codex", "claude"]
     plan: str | None
     windows: tuple[QuotaWindow, ...]
     raw: dict[str, Any]

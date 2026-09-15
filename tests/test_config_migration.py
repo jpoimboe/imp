@@ -394,6 +394,40 @@ def _by_hand(path: Path) -> str:
             f"from {display_path(path)} by hand\n")
 
 
+_CLAUDE_BODY = (
+    "# how imp picks a backend\n"
+    "providers: [claude_code, openai]\n"
+    "tiers:\n"
+    "  low: {claude_code: haiku, openai: gpt-5.6-luna}\n"
+    "  high:\n"
+    "    claude_code: opus        # the deep end\n"
+    "    openai: gpt-5.6-sol\n"
+    "provider_envs:\n"
+    "  # the operator opted into a key\n"
+    "  claude_code: {env: MY_CLAUDE_KEY}\n"
+    "test_cmd_fast: make check\n"
+)
+
+_CLAUDE_RENAMED = (
+    "# how imp picks a backend\n"
+    "providers: [claude, openai]\n"
+    "tiers:\n"
+    "  low: {claude: haiku, openai: gpt-5.6-luna}\n"
+    "  high:\n"
+    "    claude: opus             # the deep end\n"
+    "    openai: gpt-5.6-sol\n"
+    "provider_envs:\n"
+    "  # the operator opted into a key\n"
+    "  claude: {env: MY_CLAUDE_KEY}\n"
+    "test_cmd_fast: make check\n"
+)
+
+
+def _renamed(path: Path) -> str:
+    return ("imp: renamed the claude_code provider to claude in "
+            f"{display_path(path)}\n")
+
+
 def test_rewrites_both_legacy_spellings_in_one_pass(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -480,6 +514,7 @@ def test_a_clean_file_is_never_parsed_and_a_missing_file_is_not_an_error(
 
     monkeypatch.setattr("imp.cli.config_edit.apply_set", _boom)
     monkeypatch.setattr("imp.cli.config_edit.apply_unset", _boom)
+    monkeypatch.setattr("imp.cli.config_edit.apply_provider_rename", _boom)
     cfg = tmp_path / "config.yaml"
     body = 'test_cmd_fast: "make check"\npythonpath: [src]\n'
     cfg.write_text(body)
@@ -621,6 +656,7 @@ def test_a_second_run_over_a_migrated_file_is_a_silent_no_op(
     capsys.readouterr()
     monkeypatch.setattr("imp.cli.config_edit.apply_unset", _boom)
     monkeypatch.setattr("imp.cli.config_edit.apply_set", _boom)
+    monkeypatch.setattr("imp.cli.config_edit.apply_provider_rename", _boom)
     rewrite_config_file(cfg)
     assert cfg.read_text() == once
     assert capsys.readouterr().err == ""
@@ -709,6 +745,89 @@ def test_a_layer_carrying_both_defects_heals_in_one_run(
     assert capsys.readouterr().err == (
         _removed(cfg)
         + f'imp: rewrote "" to false in {display_path(cfg)} (test_cmd_fast)\n')
+
+
+def test_the_old_provider_id_is_renamed_at_every_site_and_announced(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.providers.config import Config, parse_config_layer
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CLAUDE_BODY)
+
+    rewrite_config_file(cfg)
+
+    assert cfg.read_text() == _CLAUDE_RENAMED
+    layer, _src = parse_config_layer(cfg)                        # type: ignore[misc]
+    assert layer["providers"] == ("claude", "openai")
+    assert layer["tiers"] == {"low": {"claude": "haiku", "openai": "gpt-5.6-luna"},
+                              "high": {"claude": "opus", "openai": "gpt-5.6-sol"}}
+    # An un-migrated key goes dead here: env_for would fabricate CLAUDE_API_KEY.
+    assert Config(provider_envs=layer["provider_envs"]).env_for("claude") == "MY_CLAUDE_KEY"
+    assert capsys.readouterr().err == _renamed(cfg)
+
+
+def test_renaming_the_provider_a_second_time_is_a_silent_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("a renamed file must never be parsed again")
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CLAUDE_BODY)
+    rewrite_config_file(cfg)
+    once = cfg.read_text()
+    assert "claude_code" not in once
+    capsys.readouterr()
+
+    monkeypatch.setattr("imp.cli.config_edit.apply_provider_rename", _boom)
+    rewrite_config_file(cfg)
+
+    assert cfg.read_text() == once
+    assert capsys.readouterr().err == ""
+
+
+def test_a_commented_out_provider_block_is_not_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("a file with no live claude_code must not be parsed")
+
+    monkeypatch.setattr("imp.cli.config_edit.apply_provider_rename", _boom)
+    cfg = tmp_path / "config.yaml"
+    # What `imp config unset providers` leaves behind: nothing for the rename to find.
+    for body in ("# providers:\n# - claude_code\ntheme: dark\n",
+                 "providers: [openai] # we dropped claude_code\n"):
+        cfg.write_text(body)
+        rewrite_config_file(cfg)
+        assert cfg.read_text() == body
+    assert capsys.readouterr().err == ""
+
+    monkeypatch.undo()          # the same pre-check must fire on a live occurrence
+    cfg.write_text("providers: [claude_code]\n")
+    rewrite_config_file(cfg)
+    assert cfg.read_text() == "providers: [claude]\n"
+
+
+def test_a_legacy_spelling_beside_the_old_provider_heals_in_one_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.providers.config import parse_config_layer
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text('test_cmd_fast: ""\nproviders: [claude_code, openai]\n')
+
+    rewrite_config_file(cfg)
+
+    # One landing gate: both transforms are in the candidate verify_readable parses.
+    assert cfg.read_text() == "test_cmd_fast: false\nproviders: [claude, openai]\n"
+    layer, _src = parse_config_layer(cfg)                        # type: ignore[misc]
+    assert layer == {"test_cmd_fast": False, "providers": ("claude", "openai")}
+    assert capsys.readouterr().err == (
+        f'imp: rewrote "" to false in {display_path(cfg)} (test_cmd_fast)\n'
+        + _renamed(cfg))
 
 
 def test_a_quest_worktrees_own_config_is_never_rewritten(

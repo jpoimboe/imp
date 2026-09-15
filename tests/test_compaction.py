@@ -8,8 +8,8 @@ import anyio
 from imp.agents.compaction import ENGINE_NOTE, RESULT_PLACEHOLDER, compact_transcript
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.providers.claude_code import _project_for_cli
-from imp.providers.claude_code_session_store import (
+from imp.providers.claude import _project_for_cli
+from imp.providers.claude_session_store import (
     message_to_session_records,
     session_store_for,
 )
@@ -90,7 +90,7 @@ def test_compaction_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_compaction_removes_the_native_store_when_present(tmp_path: Path) -> None:
-    # claude_code: the step has a claude_session/ store beside transcript.jsonl.
+    # claude: the step has a claude_session/ store beside transcript.jsonl.
     _seed(tmp_path)
     store = session_store_for(tmp_path)
     key = {"project_key": "/p", "session_id": "s1"}

@@ -25,8 +25,8 @@ description: Fire Ctrl-C / Ctrl-D at imp across agent states, judging clean-paus
 > "ctrl-d"`, and resume-target checks are *expected* to fail — record them as to-dos, not
 > surprises.
 >
-> **Scope: one provider per run (default `claude_code`).** Run this playbook against a single
-> provider — `claude_code` unless the operator names another (`anthropic`, `openai`, or
+> **Scope: one provider per run (default `claude`).** Run this playbook against a single
+> provider — `claude` unless the operator names another (`anthropic`, `openai`, or
 > `codex`). The feature (and so the §0 "clean classification" bar) covers all four
 > identically, so testing one provider end-to-end is a complete pass for that provider; to
 > cover another, re-run the whole playbook with that one provider forced (§4). Pick the
@@ -197,11 +197,11 @@ A correct imp does **all** of:
   the local `~/.imp/projects/<clone-name>/config.yaml` (keyed to the control root, never
   committed, highest precedence). Precedence
   (low→high): `floor < project < global < local` — operator-wins among the config layers.
-- **Provider:** exactly one per run — `claude_code` by default, or whichever single provider
+- **Provider:** exactly one per run — `claude` by default, or whichever single provider
   the operator names (`anthropic`, `openai`, or `codex`). That one provider is in scope for the
   full §0 classification bar; the others are out of scope for this run.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
-  `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
+  `OPENAI_API_KEY`. `claude` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
 - **Bug report** goes to the **main checkout** (survives clone deletion). Path in §7.
 
@@ -222,7 +222,7 @@ Provider gating (mirrors imp's `_env_check`):
 
 | Provider      | Needs |
 |---------------|-------|
-| `claude_code` | `claude` on PATH (no key) |
+| `claude`      | `claude` on PATH (no key) |
 | `anthropic`   | `ANTHROPIC_API_KEY` (from `~/.anthropic-key`) |
 | `openai`      | `OPENAI_API_KEY` (from `~/.openai-key`) |
 | `codex`       | `codex` on PATH **and** `~/.codex/auth.json` |
@@ -240,7 +240,7 @@ the skip signal and note it.
 > table), not an init problem.
 
 > **Cost & time.** `anthropic` / `openai` / `codex` make **real, billable** calls;
-> `claude_code` uses the local `claude` session. Each interrupt point needs only a few seconds
+> `claude` uses the local `claude` session. Each interrupt point needs only a few seconds
 > of real work before you interrupt — never let a step finish. If a run looks stuck/looping
 > > ~60s, interrupt it (or `stop` the session) and record it; don't let billable runs spin.
 
@@ -277,7 +277,7 @@ this project's state directory, keyed to the control root. Because `$WT` is a st
 its control root is `$WT` itself and it claims its own state directory, so this file both
 **wins** (highest precedence) and **stays isolated**.
 
-Write the single-provider override (this run targets exactly one provider — `claude_code` by
+Write the single-provider override (this run targets exactly one provider — `claude` by
 default; substitute another only if the operator named it). The `remote: {driver: null}` line
 keeps inherited channels off so a channel subprocess's stderr can't interleave with imp's
 streaming output:
@@ -286,7 +286,7 @@ cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; p
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'
-providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
+providers: [claude]        # exactly one of: claude | anthropic | openai | codex
 theme: ansi                # fixed theme so snapshots render predictably
 remote:
   driver: null             # keep inherited channels off so streaming output stays clean
@@ -395,7 +395,7 @@ not reach imp.
    grep -oE '"outcome": ?"(ok|timeout)"' "$ev" | tail      # interrupt_delivered teardown (cooperative→hard ok)
    grep -o '"category":"unknown"' "$ev" | tail             # HARD NEGATIVE: expect NONE from the interrupt
    ```
-   > NOTE (2026-07-20): the current build (claude_code) does **not** emit an `error` /
+   > NOTE (2026-07-20): the current build (claude) does **not** emit an `error` /
    > `category:"config"` / `kind:"interrupted"` classification record — it records the interrupt
    > via `interrupt_requested` + `interrupt_delivered{outcome:"ok"}` + `workflow_paused`
    > (materialized) or `conversation_saved` (phase-0). The intent of this check — *recorded as an

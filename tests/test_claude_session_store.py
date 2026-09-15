@@ -1,0 +1,361 @@
+# tests/test_claude_session_store.py
+from __future__ import annotations
+
+import tempfile
+import uuid
+from pathlib import Path
+
+import anyio
+from claude_agent_sdk.testing import run_session_store_conformance
+
+from imp.providers.claude_session_store import (
+    ImpSessionStore,
+    resume_session_id,
+    session_key,
+    session_project_key,
+    session_store_for,
+)
+
+
+def _main_key(session_id: str = "s1", project_key: str = "/home/u/proj") -> dict:
+    return {"project_key": project_key, "session_id": session_id}
+
+
+def test_append_then_load_round_trips_entries_deep_equal(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    batch1 = [{"type": "user", "uuid": "a", "message": {"role": "user"}}]
+    batch2 = [{"type": "assistant", "uuid": "b", "message": {"role": "assistant"}}]
+    anyio.run(store.append, key, batch1)
+    anyio.run(store.append, key, batch2)
+
+    loaded = anyio.run(store.load, key)
+    assert loaded == batch1 + batch2
+
+
+def test_load_unknown_key_returns_none(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    assert anyio.run(store.load, _main_key("never-written")) is None
+
+
+def test_project_key_with_slashes_stays_under_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    anyio.run(store.append, _main_key(project_key="/etc/../escape"),
+              [{"type": "user", "uuid": "a"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+
+
+def test_dot_only_project_key_cannot_escape_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    anyio.run(store.append, _main_key(project_key=".."),
+              [{"type": "user", "uuid": "a"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+    assert anyio.run(
+        store.load, _main_key(project_key="..")) == [{"type": "user", "uuid": "a"}]
+
+
+def test_append_empty_is_a_true_noop(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [])
+    # No file created → load still signals "no session" rather than empty.
+    assert anyio.run(store.load, key) is None
+    assert list(tmp_path.rglob("*.jsonl")) == []
+
+
+def test_append_dedups_entries_by_uuid(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    entry = {"type": "assistant", "uuid": "dup", "message": {"n": 1}}
+    anyio.run(store.append, key, [entry])
+    anyio.run(store.append, key, [entry])  # redelivered batch (idempotency key)
+
+    loaded = anyio.run(store.load, key)
+    assert loaded == [entry]
+
+
+def test_append_keeps_entries_without_uuid(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    no_uuid = {"type": "ai-title", "title": "x"}
+    anyio.run(store.append, key, [no_uuid])
+    anyio.run(store.append, key, [no_uuid])
+
+    loaded = anyio.run(store.load, key)
+    assert loaded == [no_uuid, no_uuid]
+
+
+def test_subpath_key_routes_to_separate_file(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub = {**main, "subpath": "subagents/agent-1"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub, [{"type": "user", "uuid": "a"}])
+
+    assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
+    assert anyio.run(store.load, sub) == [{"type": "user", "uuid": "a"}]
+
+
+def test_append_dedups_within_a_single_batch(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    entry = {"type": "assistant", "uuid": "dup", "message": {"n": 1}}
+    anyio.run(store.append, key, [entry, entry])
+
+    assert anyio.run(store.load, key) == [entry]
+
+
+def test_list_subkeys_returns_subagent_subpaths_not_main(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub_a = {**main, "subpath": "subagents/agent-1"}
+    sub_b = {**main, "subpath": "subagents/agent-2"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub_a, [{"type": "user", "uuid": "a"}])
+    anyio.run(store.append, sub_b, [{"type": "user", "uuid": "b"}])
+
+    subkeys = anyio.run(
+        store.list_subkeys, {"project_key": main["project_key"],
+                             "session_id": main["session_id"]})
+    assert sorted(subkeys) == ["subagents/agent-1", "subagents/agent-2"]
+
+
+def test_list_subkeys_empty_for_unknown_session(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    assert anyio.run(
+        store.list_subkeys,
+        {"project_key": "/home/u/proj", "session_id": "nope"}) == []
+
+
+def test_list_subkeys_includes_nested_file_named_main(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    nested = {**main, "subpath": "subagents/main"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, nested, [{"type": "user", "uuid": "n"}])
+
+    subkeys = anyio.run(
+        store.list_subkeys, {"project_key": main["project_key"],
+                             "session_id": main["session_id"]})
+    assert subkeys == ["subagents/main"]
+
+
+def test_delete_main_key_cascades_to_subagents(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub = {**main, "subpath": "subagents/agent-1"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub, [{"type": "user", "uuid": "a"}])
+
+    anyio.run(store.delete, main)
+
+    assert anyio.run(store.load, main) is None
+    assert anyio.run(store.load, sub) is None
+
+
+def test_delete_subpath_removes_only_that_entry(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub = {**main, "subpath": "subagents/agent-1"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub, [{"type": "user", "uuid": "a"}])
+
+    anyio.run(store.delete, sub)
+
+    assert anyio.run(store.load, sub) is None
+    assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
+
+
+def test_subpath_traversal_stays_under_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = {**_main_key(), "subpath": "../../escape"}
+    anyio.run(store.append, key, [{"type": "user", "uuid": "t"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+
+
+def test_subpath_leading_slash_stays_under_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = {**_main_key(), "subpath": "/escape"}
+    anyio.run(store.append, key, [{"type": "user", "uuid": "t"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+
+
+def test_passes_sdk_session_store_conformance(tmp_path: Path) -> None:
+    anyio.run(
+        run_session_store_conformance,
+        lambda: ImpSessionStore(Path(tempfile.mkdtemp(dir=tmp_path))),
+    )
+
+
+def test_resume_session_id_is_stable_and_a_valid_uuid() -> None:
+    first = resume_session_id("step:plan/plan-writer")
+    second = resume_session_id("step:plan/plan-writer")
+    assert first == second
+    # Parses as a UUID (SDK rejects a non-UUID resume id), so validity is load-bearing.
+    assert str(uuid.UUID(first)) == first
+
+
+def test_resume_session_id_distinct_per_agent() -> None:
+    assert resume_session_id("step:plan/a") != resume_session_id("step:plan/b")
+
+
+def test_session_key_uses_sdk_project_key_and_derived_id(tmp_path: Path) -> None:
+    from claude_agent_sdk import project_key_for_directory
+
+    key = session_key(tmp_path, "step:plan/plan-writer")
+    # project_key MUST equal the SDK's own derivation, or native resume never finds it.
+    assert key["project_key"] == project_key_for_directory(tmp_path)
+    assert key["session_id"] == resume_session_id("step:plan/plan-writer")
+
+
+def test_session_project_key_is_the_sdk_helper(tmp_path: Path) -> None:
+    from claude_agent_sdk import project_key_for_directory
+
+    assert session_project_key(tmp_path) == project_key_for_directory(tmp_path)
+
+
+def test_session_store_for_writes_under_claude_session_subdir(
+    tmp_path: Path,
+) -> None:
+    store = session_store_for(tmp_path)
+    assert isinstance(store, ImpSessionStore)
+    anyio.run(
+        store.append,
+        session_key(tmp_path, "step:plan/plan-writer"),
+        [{"type": "user", "uuid": "x"}],
+    )
+    written = list((tmp_path / "claude_session").rglob("*.jsonl"))
+    assert written, "append must land under <transcript_dir>/claude_session/"
+
+
+def test_message_to_session_records_chains_and_shapes() -> None:
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from imp.providers.claude_session_store import message_to_session_records
+
+    messages = [
+        Message(role="assistant", content=(
+            TextBlock(text="reading"),
+            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "spec.md"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
+    ]
+    recs = message_to_session_records(
+        messages, session_id="sid", cwd="/proj", model="claude-sonnet-4-5")
+
+    assert len(recs) == 2
+    assert recs[0]["type"] == "assistant"
+    assert recs[0]["parentUuid"] is None
+    assert recs[0]["sessionId"] == "sid"
+    assert recs[0]["cwd"] == "/proj"
+    assert recs[0]["message"]["role"] == "assistant"
+    assert recs[0]["message"]["model"] == "claude-sonnet-4-5"
+    msg_id = recs[0]["message"]["id"]
+    assert msg_id.startswith("msg_")
+    assert msg_id[4:] == recs[0]["uuid"].replace("-", "")[:24]
+    tool_use = recs[0]["message"]["content"][1]
+    assert tool_use == {"type": "tool_use", "id": "t0",
+                        "name": "mcp__imp__read_file", "input": {"path": "spec.md"}}
+    assert recs[1]["type"] == "user"
+    assert recs[1]["parentUuid"] == recs[0]["uuid"]
+    assert recs[1]["message"]["content"][0] == {
+        "type": "tool_result", "tool_use_id": "t0",
+        "content": "BODY", "is_error": False}
+
+
+def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_session_store import (
+        _record_uuid,
+        message_to_session_records,
+    )
+
+    messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
+    a = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
+    b = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
+    assert [r["uuid"] for r in a] == [r["uuid"] for r in b]
+    # Still keyed on (session_id, index), with index now the position in the projection.
+    assert [r["uuid"] for r in a] == [_record_uuid("sid", 0)]
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, a)
+    anyio.run(store.append, key, b)
+    assert len(anyio.run(store.load, key)) == 1
+
+
+def test_overwrite_replaces_existing_entries(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}},
+        {"type": "assistant", "uuid": "b", "message": {"role": "assistant"}},
+    ])
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}},
+    ])
+    # The pre-existing a/b entries are gone — overwrite truncates, unlike append.
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}}]
+
+
+def test_overwrite_with_empty_truncates(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}}])
+    anyio.run(store.overwrite, key, [])
+    assert anyio.run(store.load, key) is None
+
+
+def test_overwrite_preserves_duplicate_uuid_replacement(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "stale"}])
+    # Same uuid, new content: append's dedup would drop this; overwrite must keep it.
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}])
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}]
+
+
+def test_clear_removes_the_entire_store_tree(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path / "claude_session")
+    key = _main_key()
+    anyio.run(store.append, key, [{"type": "user", "uuid": "a"}])
+    assert (tmp_path / "claude_session").exists()
+
+    store.clear()
+
+    assert not (tmp_path / "claude_session").exists()
+    # An absent store body reads back as None; the next native resume just writes
+    # the transcript projection over it.
+    assert anyio.run(store.load, key) is None
+
+
+def test_clear_is_a_noop_when_the_store_is_absent(tmp_path: Path) -> None:
+    # The Anthropic/OpenAI providers never create claude_session/, so clear() must
+    # not raise when the directory does not exist.
+    store = ImpSessionStore(tmp_path / "claude_session")
+    assert not (tmp_path / "claude_session").exists()
+
+    store.clear()
+
+    assert not (tmp_path / "claude_session").exists()

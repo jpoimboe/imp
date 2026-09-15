@@ -150,13 +150,13 @@ def test_session_owner_lives_inside_the_dir_and_travels_with_it(
     tx = tmp_path / "steps" / "impl" / "coder"
     _seed(tx)
 
-    write_session_owner(tx, "claude_code")
+    write_session_owner(tx, "claude")
 
     assert provider_path_for(tx) == tx / "provider"
-    assert read_session_owner(tx) == "claude_code"
+    assert read_session_owner(tx) == "claude"
     dest = stash_session(tx)
     assert dest is not None
-    assert read_session_owner(dest) == "claude_code"
+    assert read_session_owner(dest) == "claude"
     assert not tx.exists()
 
 

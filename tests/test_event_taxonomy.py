@@ -18,19 +18,19 @@ def test_agent_result_event_feeds_events_namespace() -> None:
 def test_no_agent_output_control_yields_remain() -> None:
     # Guards against a MISSED yield site (each provider logs its yields verbatim,
     # so a stray `agent_output` yield is never captured by the renamed consumer
-    # and silently drops the deliverable). claude_code has THREE such yields.
+    # and silently drops the deliverable). claude has THREE such yields.
     import inspect
 
     from imp.agents import dispatch
     from imp.providers import (
         anthropic,
-        claude_code,
+        claude,
         codex_runner,
         openai,
         scripted,
     )
 
-    for mod in (dispatch, anthropic, openai, claude_code, codex_runner, scripted):
+    for mod in (dispatch, anthropic, openai, claude, codex_runner, scripted):
         assert '"type": "agent_output"' not in inspect.getsource(mod), mod.__name__
     # the consumer no longer looks for the old type
     from imp.engine import agent_run
