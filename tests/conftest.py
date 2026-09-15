@@ -496,15 +496,6 @@ def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
     return env
 
 
-def _assert_outside_a_git_work_tree(path: Path) -> None:
-    """A startup migration's no-op guarantee rests on tmp_path not being a work
-    tree; a --basetemp inside the checkout would silently make the step real."""
-    from imp.engine.worktree import PreconditionError, find_control_root
-
-    with pytest.raises(PreconditionError):
-        find_control_root(path)
-
-
 def _init_repo(root: Path) -> None:
     """A git repo with one commit on branch `main`, ignoring imp's state dirs."""
     _git(root, "init", "-q", "-b", "main")

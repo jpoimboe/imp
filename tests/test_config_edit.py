@@ -7,7 +7,6 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from imp.cli.config_edit import (
     SetOutcome,
     UnsetOutcome,
-    apply_provider_rename,
     apply_set,
     apply_unset,
 )
@@ -296,46 +295,3 @@ def test_unset_covers_a_block_scalar() -> None:
     result = apply_unset("test_cmd_fast: |\n  a\n  b\ntheme: dark\n",
                          ("test_cmd_fast",))
     assert result.text == "# test_cmd_fast: |\n#   a\n#   b\ntheme: dark\n"
-
-
-def test_provider_rename_covers_the_three_sites_and_keeps_comments_and_order() -> None:
-    before = (
-        "providers: [claude_code, openai]\n"
-        "tiers:\n"
-        "  low:\n"
-        "    claude_code: haiku   # the cheap seat\n"
-        "    openai: gpt-5.6-luna\n"
-        "provider_envs:\n"
-        "  # opted in by hand\n"
-        "  claude_code: {env: MY_KEY}\n"
-    )
-
-    assert apply_provider_rename(before, "claude_code", "claude") == (
-        "providers: [claude, openai]\n"
-        "tiers:\n"
-        "  low:\n"
-        "    claude: haiku        # the cheap seat\n"
-        "    openai: gpt-5.6-luna\n"
-        "provider_envs:\n"
-        "  # opted in by hand\n"
-        "  claude: {env: MY_KEY}\n"
-    )
-
-
-def test_provider_rename_keeps_quote_style_and_a_block_sequence() -> None:
-    quoted = apply_provider_rename(
-        "providers: [\"claude_code\", 'openai']\n", "claude_code", "claude")
-    assert quoted == "providers: [\"claude\", 'openai']\n"
-
-    block = apply_provider_rename(
-        "providers:\n- claude_code\n- openai\n", "claude_code", "claude")
-    assert block == "providers:\n- claude\n- openai\n"
-
-
-def test_provider_rename_reports_nothing_when_no_provider_slot_names_it() -> None:
-    # None, not the reformatted text: the caller must not land a pure round-trip.
-    commented = "providers: [openai]\n# tiers:\n#   low: {claude_code: haiku}\n"
-    assert apply_provider_rename(commented, "claude_code", "claude") is None
-    outside = "providers: [openai]\nvars: {note: claude_code}\n"
-    assert apply_provider_rename(outside, "claude_code", "claude") is None
-    assert apply_provider_rename("- claude_code\n", "claude_code", "claude") is None

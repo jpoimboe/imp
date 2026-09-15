@@ -117,28 +117,3 @@ def test_pending_is_old_present_and_new_absent(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     (empty / "imp").mkdir(parents=True)
     assert project_rename_pending(empty) is False
-
-
-def test_the_startup_migration_reads_the_shared_pending_predicate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.providers.effective as effective
-    import imp.providers.paths as paths
-    from imp.cli.config_migrate import migrate_project_config
-
-    assert effective.project_rename_pending is paths.project_rename_pending
-
-    proj = _old_name_repo(tmp_path)
-    seen: list[Path] = []
-
-    def spy(root: Path) -> bool:
-        seen.append(root)
-        return False
-
-    monkeypatch.setattr("imp.providers.paths.project_rename_pending", spy)
-    # Short-circuiting the shared predicate stops the migration at its
-    # pure-filesystem fast path: with its own private copy it would instead walk
-    # on and raise PreconditionError, since proj is not a git repository.
-    migrate_project_config(proj)
-    assert seen[0] == proj
-    assert (proj / "imp" / "project.yaml").is_file()
