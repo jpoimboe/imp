@@ -122,11 +122,16 @@ genuinely older checkout is the other cause — an agent working in a quest work
 whose branch predates the archive's last format change, where `pythonpath: [src]`
 resolves `imp` to that older source; there, update the checkout.
 
-Writes are deliberately unguarded. An older imp may still archive a quest into a
-newer archive; that lowers both floors (the blob `data_version` marker and the
-index's `PRAGMA user_version`), and the next current imp re-migrates the blobs and
-rebuilds the index, so the record heals itself. Refusing the write would strand a
-quest on bookkeeping after its merge had already landed.
+An older imp may still archive a quest into a newer archive; its trailing stamp
+lowers both floors (the blob `data_version` marker and the index's `PRAGMA
+user_version`). No blob migration ships in the tree, so nothing can vouch for the
+records an older install wrote: a current imp refuses that archive rather than
+stamping it current. Record and blob reads raise, `ensure_current` leaves it
+exactly as it found it, and nothing further is archived into it — which can strand
+a quest on bookkeeping after its merge has already landed. Index-only queries
+(`imp list`, `imp search`) keep answering from the stale index, which is rebuilt
+only once the blob floor is current again. The fix is to update every imp that
+writes here.
 
 **Constraint on future schema work: a new index column must be nullable.** An older
 writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
@@ -136,6 +141,17 @@ writer's `index.ingest` never supplies it, and that row stands until a rebuild; 
 value must also bump the index schema version.** Each read checks only the floor it
 touches, so a blob rewrite that changed what an index query reports would otherwise
 slip past the index-only gate on an archive this imp cannot read.
+
+**Constraint on reintroducing a blob migration: bumping `_DATA_VERSION` means
+shipping the migration and re-wiring `ensure_current` and `archive_quest` to call
+it.** With no migration in the tree, `archive_quest` refuses a below-floor archive
+and `ensure_current` declines to repair one; a bump that adds a migration must
+restore the healing path, or an older writer's record stays stranded. A bump that
+also adds an index column must ship that migration for the same reason: an archive
+below the blob floor is never reindexed, `index.connect` only issues
+`CREATE TABLE IF NOT EXISTS` and so leaves an older writer's column set alone, and
+a query naming the new column would then fail outright instead of answering from
+the stale index.
 
 ---
 
