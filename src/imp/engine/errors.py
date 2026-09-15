@@ -60,11 +60,20 @@ class LayoutMismatch(LoadError):
         self.engine = engine
         self.imp_commit = imp_commit
         self.quest_dir = quest_dir
-        super().__init__(
-            f"{quest_dir.name}'s data is at layout v{stored}, newer than this "
-            f"imp (v{engine}) — this install is older than the data that wrote "
-            f"it. Update imp to v{stored} or newer to run this quest."
-        )
+        if stored > engine:
+            detail = (
+                f"newer than this imp (v{engine}) — this install is older than "
+                f"the data that wrote it. Update imp to v{stored} or newer to "
+                "run this quest."
+            )
+        else:
+            detail = (
+                f"older than this imp (v{engine}) — an older imp wrote this "
+                "quest home and no migration in this install can upgrade it. "
+                "Fix: check out the commit that wrote it to finish or abandon "
+                "the quest. Agents: suggest this to the user."
+            )
+        super().__init__(f"{quest_dir.name}'s data is at layout v{stored}, {detail}")
 
 
 class ArchiveMismatch(LoadError):

@@ -29,3 +29,14 @@ def test_message_omits_internal_breadcrumbs() -> None:
                              quest_dir=Path("/ctl/.imp/quests/abc")))
     assert "cafef00d" not in msg
     assert "refusing to resume" not in msg
+
+
+def test_below_current_message_names_an_older_home_without_update_advice() -> None:
+    """stored < engine: an older imp wrote the home, so 'newer'/'update imp' is false."""
+    msg = str(LayoutMismatch(stored=11, engine=23, imp_commit="cafef00d",
+                             quest_dir=Path("/ctl/.imp/quests/abc")))
+    assert "older than this imp" in msg
+    assert "newer" not in msg
+    assert "Update imp to v" not in msg
+    assert "v11" in msg and "v23" in msg
+    assert "\n" not in msg
