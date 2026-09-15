@@ -1349,8 +1349,9 @@ def _h_test_lane_acquired(
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
 
 
-def _fmt_ctx_tokens(n: int) -> str:
-    """Compact token count for the reincarnating line: '167k' at/above 1k, else bare."""
+def fmt_ctx_tokens(n: int) -> str:
+    """Compact token count for the gauge tail and the reincarnating line: '167k'
+    at/above 1k, else bare."""
     return f"{round(n / 1000)}k" if n >= 1000 else str(n)
 
 
@@ -1363,7 +1364,7 @@ def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     # cumulative token counters, which read far larger than the live context.
     ctx = self._last_agent_context
     if ctx is not None and ctx[1]:
-        text += f" ({_fmt_ctx_tokens(ctx[0])}/{_fmt_ctx_tokens(ctx[1])})"
+        text += f" ({fmt_ctx_tokens(ctx[0])}/{fmt_ctx_tokens(ctx[1])})"
     self._append(LiteralTextNode(text=text, color_role="lifecycle"))
 
 

@@ -2985,6 +2985,15 @@ def test_usage_prompt_tokens_none_when_empty() -> None:
     assert nv.usage_prompt_tokens({}) is None
 
 
+def test_fmt_ctx_tokens_rounds_to_the_nearest_thousand() -> None:
+    assert nv.fmt_ctx_tokens(0) == "0"
+    assert nv.fmt_ctx_tokens(999) == "999"
+    assert nv.fmt_ctx_tokens(1000) == "1k"
+    assert nv.fmt_ctx_tokens(12_000) == "12k"
+    assert nv.fmt_ctx_tokens(108_528) == "109k"     # rounds, never truncates
+    assert nv.fmt_ctx_tokens(200_000) == "200k"
+
+
 def test_resume_continuation_preserves_pre_interrupt_children() -> None:
     # restarted=False: a continued resume keeps the pre-interrupt rendered work,
     # appends the post-resume turns, and retains the original start clock.
