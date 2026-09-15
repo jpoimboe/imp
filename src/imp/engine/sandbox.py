@@ -935,6 +935,35 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     )
 
 
+def with_scratch_slot(policy: SandboxPolicy, slot: str) -> SandboxPolicy:
+    """The policy a DISPATCHED agent runs under: both scratch trees narrowed to a
+    private `<parent leaf>/<slot>` dir, so two agents dispatched in parallel cannot
+    read, overwrite or interleave each other's files. Applying it twice nests, which
+    is what makes a subagent's subagent land under its parent's slot.
+
+    quest_tmp_mask is deliberately UNCHANGED: the tmpfs still covers the whole
+    scratch root and only this slot is re-exposed rw, so a sibling's dir is ABSENT
+    from the namespace rather than merely differently named — the same
+    tmpfs-plus-single-re-expose pattern that keeps sibling quests apart. Narrowing
+    the /var/tmp source has the same effect: it binds ONTO the namespace's /var/tmp.
+
+    Returned unchanged when there is nothing to slot — inactive (no bind, no TMPDIR)
+    or no scratch dir at all, where a join would yield the bare relative "<slot>",
+    garbage as both a bind source and a TMPDIR. Neither leaf need exist: every keeper
+    open mints both through prepare_spawn_policy."""
+    if not policy.active or not policy.quest_tmp_dir:
+        return policy
+    tmp_dir = str(Path(policy.quest_tmp_dir) / slot)
+    return replace(
+        policy,
+        quest_tmp_dir=tmp_dir,
+        quest_var_tmp_dir=(str(Path(policy.quest_var_tmp_dir) / slot)
+                           if policy.quest_var_tmp_dir else ""),
+        child_env=tuple((k, tmp_dir) if k == "TMPDIR" else (k, v)
+                        for k, v in policy.child_env),
+    )
+
+
 # Code-default secret denylist (spec B.3). Paths are home-relative; resolve_policy
 # joins them onto the home dir and keeps only those that exist. /run/user/$UID is
 # added separately (it masks live agent sockets, H2). secret_files are masked with
