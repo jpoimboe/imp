@@ -71,3 +71,9 @@ def test_task_lead_dispatches_message_file_commits_and_amend_rewords() -> None:
     assert "record an `amend!` reword" in flat
     # The trailer contract is untouched.
     assert "No `Task:` trailer, no `Quest:` trailer" in flat
+
+
+def test_reconciler_includes_the_partial_and_names_a_message_file() -> None:
+    text = (DEFAULT_AGENTS / "reconciler.md").read_text()
+    assert INCLUDE in text
+    assert "(`git add` + `git commit -F`)" in text

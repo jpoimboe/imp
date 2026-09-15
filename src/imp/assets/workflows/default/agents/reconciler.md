@@ -19,6 +19,8 @@ irreducibly ambiguous or the base has invalidated the quest.
 
 {% include "partials/action-care.md" %}
 
+{% include "partials/commit-style.md" %}
+
 ## Two entry contexts — detect which
 
 The engine enters you in exactly one. Detect it from `git status` and any injected feedback:
@@ -33,7 +35,7 @@ The engine enters you in exactly one. Detect it from `git status` and any inject
    already linear on base. The finding may be an at-head semantic-integration flag OR an
    `integration-verify` failure that `integration-review` adjudicated a genuine break —
    either way you are driven by the **finding**, never raw test output. Address it with a
-   NORMAL fix commit on top (`git add` + `git commit`). Do not start or continue a rebase.
+   NORMAL fix commit on top (`git add` + `git commit -F`). Do not start or continue a rebase.
 
 ## Understand the state
 
