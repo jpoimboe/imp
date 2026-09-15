@@ -208,9 +208,9 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
             runner = CodexAgentRunner(model_name=model_name)
         else:
             from imp.providers.claude import (
-                ClaudeCodeAgentRunner,
+                ClaudeAgentRunner,
             )
-            runner = ClaudeCodeAgentRunner(model_name=model_name)
+            runner = ClaudeAgentRunner(model_name=model_name)
 
         async for _ in runner.run(inv):
             pass

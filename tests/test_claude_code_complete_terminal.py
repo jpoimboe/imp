@@ -9,7 +9,7 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
@@ -68,7 +68,7 @@ async def test_completing_turn_is_interrupted_then_completes(tmp_path: Path) -> 
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -106,7 +106,7 @@ async def test_completing_turn_interrupt_is_unconditional(tmp_path: Path) -> Non
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]

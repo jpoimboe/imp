@@ -549,7 +549,7 @@ class InterruptCoordinator:
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
         callable; all three V1 runners (AnthropicAgentRunner / OpenAIAgentRunner
-        / ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None` per
+        / ClaudeAgentRunner) declare `async def interrupt(self) -> None` per
         the AgentRunner protocol (`src/imp/agents/runner.py:172`).
 
         The run-level attach API; the per-drive wrapper is `runner_attached`

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from imp.engine.state import JsonlEventLog
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.observe_classify import matches_error_prose
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
@@ -54,7 +54,7 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     rows = _rows(tmp_path)
@@ -81,7 +81,7 @@ async def test_claude_code_splits_the_group_at_the_error_fragment(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]
@@ -107,7 +107,7 @@ async def test_claude_code_leaves_ordinary_prose_untagged(tmp_path: Path) -> Non
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="m", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="m", client_factory=factory)
     [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]

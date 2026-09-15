@@ -8,7 +8,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude import (
-    ClaudeCodeAgentRunner,
+    ClaudeAgentRunner,
     _make_impty_sdk_tools,
 )
 from impty.driver import ImptyDriver
@@ -45,7 +45,7 @@ events_path=tmp_path / "events.jsonl")
 
 
 def test_driver_registers_in_process_impty_server_and_wildcard(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
+    runner = ClaudeAgentRunner("claude-sonnet-4-6")
     sentinel = object()
     opts = runner._build_options(
         _inv(tmp_path, frozenset({"impty"})),
@@ -58,7 +58,7 @@ def test_driver_registers_in_process_impty_server_and_wildcard(tmp_path: Path) -
 
 
 def test_no_driver_no_impty_grant(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
+    runner = ClaudeAgentRunner("claude-sonnet-4-6")
     opts = runner._build_options(
         _inv(tmp_path, frozenset()),
         mcp_server=object(), tool_names=["bash"], impty_server=None)
@@ -113,7 +113,7 @@ async def test_run_closes_the_impty_session_in_teardown(
                   tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))

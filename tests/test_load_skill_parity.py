@@ -8,12 +8,12 @@ dispatch loop calls tool.async_invoke(), which reads skills/refactor.md and
 emits a skill_load event.  The tool_result content in the event log is the
 real skill body returned by the tool.
 
-For ClaudeCode the SDK/MCP path handles dispatch; the FakeClaudeSDKClient
+For Claude the SDK/MCP path handles dispatch; the FakeClaudeSDKClient
 does NOT invoke tools in-process.  We supply a scripted UserMessage carrying
 the tool_result so the transcript is balanced and the runner logs the
 tool_result event.  Because the tool body never runs in the fake, the
 skill_load event is NOT emitted via the full-runner fake harness — however
-we verify assertion 2 for ClaudeCode via the in-process wrapper test
+we verify assertion 2 for Claude via the in-process wrapper test
 (test_claude_code_load_skill_via_wrap_one) which drives _wrap_one/_impl
 directly, the same mechanism used in tests/test_claude_code_wrap.py.
 
@@ -21,12 +21,12 @@ Assertion layout
 ----------------
 1. tool_result content == SKILL_BODY
       Anthropic/OpenAI: real in-process invocation → real body
-      ClaudeCode (full-runner test): scripted FakeToolResultBlock content → same body
+      Claude (full-runner test): scripted FakeToolResultBlock content → same body
 
 2. Exactly ONE skill_load event with payload={"name":"refactor","source":"internal"}
    and agent_id is None.
       Anthropic/OpenAI: via full-runner fake harness.
-      ClaudeCode: via test_claude_code_load_skill_via_wrap_one (_wrap_one/_impl path).
+      Claude: via test_claude_code_load_skill_via_wrap_one (_wrap_one/_impl path).
 
 3. load_skill present in step_context tools_schema even though the AgentDef
    did NOT declare it (auto-injected by _build_tools in all three providers).
@@ -47,7 +47,7 @@ from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
-from imp.providers.claude import ClaudeCodeAgentRunner, _RunState, _wrap_one
+from imp.providers.claude import ClaudeAgentRunner, _RunState, _wrap_one
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import (
     FakeAsyncAnthropic,
@@ -251,12 +251,12 @@ async def test_openai_load_skill_parity(tmp_path: Path) -> None:
     _assert_load_skill_in_schema(events)          # assertion 3
 
 
-# ── ClaudeCode ────────────────────────────────────────────────────────────────
+# ── Claude ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.anyio
 async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
-    """ClaudeCode: tool_result logged from scripted result; schema includes load_skill.
+    """Claude: tool_result logged from scripted result; schema includes load_skill.
 
     NOTE: The FakeClaudeSDKClient does not invoke tools in-process (the real
     SDK/MCP dispatch path is bypassed by the fake).  Assertion 2 (skill_load
@@ -285,7 +285,7 @@ async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = _make_invocation(tmp_path, "claude_code", "claude-sonnet-4-5")
@@ -294,13 +294,13 @@ async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
 
     events = _read_events(inv.events_path)
     _assert_tool_result_content(events, "tu1")   # assertion 1 (scripted result)
-    # Assertion 2 (skill_load event) for ClaudeCode is verified via the
+    # Assertion 2 (skill_load event) for Claude is verified via the
     # in-process wrapper path in test_claude_code_load_skill_via_wrap_one
     # below — the FakeClaudeSDKClient cannot emit it through this harness.
     _assert_load_skill_in_schema(events)          # assertion 3
 
 
-# ── ClaudeCode in-process wrapper (assertion 2 for claude_code) ──────────────
+# ── Claude in-process wrapper (assertion 2 for claude_code) ──────────────
 
 
 def _passthrough_decorator(name: str, description: str, schema, annotations=None):  # type: ignore[no-untyped-def]
@@ -313,7 +313,7 @@ def _passthrough_decorator(name: str, description: str, schema, annotations=None
 
 @pytest.mark.anyio
 async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
-    """ClaudeCode: drive load_skill through _wrap_one/_impl to assert event emission.
+    """Claude: drive load_skill through _wrap_one/_impl to assert event emission.
 
     The FakeClaudeSDKClient used in test_claude_code_load_skill_parity bypasses
     in-process tool dispatch, so skill_load is never emitted there.  This test
@@ -322,7 +322,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
 
       - The wrapped response content equals SKILL_BODY (in-process dispatch works)
       - Exactly ONE skill_load event with the correct payload and agent_id=None
-        (ClaudeCode's dispatch path emits the event identically to anthropic/openai)
+        (Claude's dispatch path emits the event identically to anthropic/openai)
     """
     # Set up workflow_dir with skills/refactor.md
     workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
@@ -370,7 +370,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
 async def test_claude_code_load_skill_flush_orders_below_narration(
     tmp_path: Path,
 ) -> None:
-    """ClaudeCode: load_skill flushes the turn's prose (agent_message) BEFORE it
+    """Claude: load_skill flushes the turn's prose (agent_message) BEFORE it
     appends skill_load, so the event log lands narration-then-load.
 
     Drives the real _wrap_one/_impl path directly (same mechanism as

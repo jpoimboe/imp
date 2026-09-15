@@ -1372,7 +1372,7 @@ async def _context_usage_fields(client: Any) -> dict[str, Any]:
 _NO_RESULT_SENTINEL = object()
 
 
-class ClaudeCodeSession(ObserveSession):
+class ClaudeSession(ObserveSession):
     """The observe `Session` claude_code's `run()` drives via `run_agent_loop`.
 
     Each hook body is a relocated region of the old `_run_loop`, delegating to
@@ -2216,7 +2216,7 @@ class ClaudeCodeSession(ObserveSession):
         self.runner._complete_requested = False
 
 
-class ClaudeCodeAgentRunner:
+class ClaudeAgentRunner:
     """Drives `claude -p` via claude_agent_sdk.
 
     Persistence: per-step transcript.jsonl, identical to the other runners.
@@ -2383,7 +2383,7 @@ class ClaudeCodeAgentRunner:
         return ClaudeSDKClient(opts)
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
-        session = ClaudeCodeSession(invocation, self)
+        session = ClaudeSession(invocation, self)
         try:
             try:
                 async with contextlib.aclosing(
@@ -2496,7 +2496,7 @@ class ClaudeCodeAgentRunner:
             await kill_process_group(process, signal.SIGKILL)
 
 
-class ClaudeCodeProvider:
+class ClaudeProvider:
     name = "claude_code"
 
     def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
@@ -2504,7 +2504,7 @@ class ClaudeCodeProvider:
         self._client_factory = client_factory
 
     def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
-        return ClaudeCodeAgentRunner(
+        return ClaudeAgentRunner(
             model_name=self.model, client_factory=self._client_factory,
             user_input_fn=invocation.user_input_fn,
         )
@@ -2515,4 +2515,4 @@ def _env_check() -> bool:
 
 
 def _factory(model: str) -> Provider:
-    return ClaudeCodeProvider(model_name=model)
+    return ClaudeProvider(model_name=model)

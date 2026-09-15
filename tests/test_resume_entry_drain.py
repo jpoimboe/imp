@@ -329,7 +329,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,
@@ -404,7 +404,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=factory,
     )

@@ -24,7 +24,7 @@ def anyio_backend():
 @pytest.mark.parametrize("provider_mod, runner_cls", [
     ("imp.providers.anthropic", "AnthropicAgentRunner"),
     ("imp.providers.openai", "OpenAIAgentRunner"),
-    ("imp.providers.claude", "ClaudeCodeAgentRunner"),
+    ("imp.providers.claude", "ClaudeAgentRunner"),
     ("imp.providers.codex_runner", "CodexAgentRunner"),
 ])
 @pytest.mark.anyio

@@ -17,7 +17,7 @@ from imp.agents.runner import (
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ class _StderrThenDieOnConnect:
 
 @pytest.mark.anyio
 async def test_startup_failure_carries_stderr_tail_and_writes_file(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: _StderrThenDieOnConnect(opts),
     )
@@ -97,7 +97,7 @@ async def test_startup_failure_carries_stderr_tail_and_writes_file(tmp_path: Pat
 async def test_build_options_registers_stderr_callback(tmp_path: Path) -> None:
     from imp.providers.stderr_sink import StderrSink
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     runner._stderr_sink = StderrSink(tmp_path / "step" / "stderr.log")
     from claude_agent_sdk import create_sdk_mcp_server
 
@@ -129,7 +129,7 @@ class _StderrWarnThenDie:
 
 @pytest.mark.anyio
 async def test_claude_bridges_stderr_warning_into_runner_warning(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: _StderrWarnThenDie(opts),
     )

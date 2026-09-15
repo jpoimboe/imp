@@ -21,7 +21,7 @@ from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude import (
     _CLI_LINE_BUFFER_BYTES,
-    ClaudeCodeAgentRunner,
+    ClaudeAgentRunner,
     _tool_response_parts,
 )
 
@@ -61,7 +61,7 @@ def _invocation(project_root: Path) -> AgentInvocation:
 def test_build_options_carries_the_line_buffer(tmp_path: Path) -> None:
     """The constant existing is not enough — it has to reach the SDK options,
     or the transport keeps its 1 MiB default."""
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )

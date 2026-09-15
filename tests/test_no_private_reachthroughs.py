@@ -6,7 +6,7 @@ runner's private state (`_client`, `_client_factory`, `_model`). Failures
 here mean someone copy-pasted a fixture that monkey-patches a private
 attribute instead of using the constructor's public kwargs.
 
-The runners are: AnthropicAgentRunner, OpenAIAgentRunner, ClaudeCodeAgentRunner,
+The runners are: AnthropicAgentRunner, OpenAIAgentRunner, ClaudeAgentRunner,
 CodexAgentRunner. Their public surface is the AgentRunner protocol (.run,
 .interrupt) plus .model (per Provider protocol). Anything else is private.
 """

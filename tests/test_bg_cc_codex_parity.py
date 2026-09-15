@@ -17,7 +17,7 @@ import pytest
 
 from imp.paths import project_state_dir
 from imp.providers import claude as cc_mod
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup
 from tests.test_build_tools_wait_for_user import _Inv
@@ -110,7 +110,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "carry on")
     coord.attach_runner(runner.interrupt)
@@ -147,7 +147,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
 
 def test_cc_interrupt_none_ctx_safe(tmp_path: Path) -> None:
     async def main() -> None:
-        runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+        runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
         await runner.interrupt()            # _ctx is None — must not raise
     anyio.run(main)
 
@@ -196,7 +196,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
         async def interrupt(self) -> None:
             pass
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda _opts: _StallingClient(),
     )
@@ -245,7 +245,7 @@ def test_codex_interrupt_tears_down_background(tmp_path: Path) -> None:
 
     CodexAgentRunner construction adaptation: CodexAgentRunner.__init__ only
     requires `model_name` (plus optional kwargs client_factory/user_input_fn);
-    no additional required kwargs vs ClaudeCodeAgentRunner. The _ctx is
+    no additional required kwargs vs ClaudeAgentRunner. The _ctx is
     injected directly as in the CC sibling — no preflight/server lifecycle
     needed for this unit test.
     """

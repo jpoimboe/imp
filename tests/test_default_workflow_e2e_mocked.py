@@ -342,7 +342,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 ) -> None:
     from typing import Any
 
-    from imp.providers.claude import ClaudeCodeProvider
+    from imp.providers.claude import ClaudeProvider
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
         assistant,
@@ -398,7 +398,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "claude_code", env_check=lambda: True,
-        factory=lambda model: ClaudeCodeProvider(
+        factory=lambda model: ClaudeProvider(
             model_name=model, client_factory=factory,
         ),
     )

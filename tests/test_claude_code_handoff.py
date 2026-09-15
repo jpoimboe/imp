@@ -17,7 +17,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude import (
-    ClaudeCodeAgentRunner,
+    ClaudeAgentRunner,
     _InFlightOutcome,
     _wrap_one,
     correction_increment,
@@ -97,7 +97,7 @@ async def test_threshold_crossing_continues_with_instruction_increment(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -156,7 +156,7 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -198,7 +198,7 @@ async def test_handoff_reported_even_when_note_missing_and_error(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -231,7 +231,7 @@ async def test_below_threshold_completing_turn_interrupts_and_completes(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -272,7 +272,7 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -306,7 +306,7 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
         return FakeClaudeSDKClient(opts, scripted_messages=scripted,
                                    context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -401,7 +401,7 @@ async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
         return DispatchingClient(opts, scripted_messages=_interrupted_script(),
                                  context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -444,7 +444,7 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
         return WedgedClient(opts, scripted_messages=_interrupted_script(),
                             context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -482,7 +482,7 @@ async def test_handoff_dangling_assistant_tail_stays_balanced(
         return FakeClaudeSDKClient(opts, scripted_messages=scripted,
                                    context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -544,7 +544,7 @@ async def test_handoff_note_is_written_from_imps_real_result(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -598,7 +598,7 @@ async def test_handoff_increment_states_uncertainty_when_the_bound_expires(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -635,7 +635,7 @@ async def test_handoff_with_nothing_in_flight_queries_the_bare_instruction(
         holder["client"] = client
         return client
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -674,7 +674,7 @@ async def test_handoff_event_log_carries_imps_real_result_not_the_filler(
         return DispatchingClient(opts, scripted_messages=_interrupted_script(),
                                  context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -724,7 +724,7 @@ async def test_a_filler_imp_cannot_account_for_stays_in_the_event_log(
         return FakeClaudeSDKClient(opts, scripted_messages=_interrupted_script(),
                                    context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -774,7 +774,7 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
         return DispatchingClient(opts, scripted_messages=scripted,
                                  context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -835,7 +835,7 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
         return FatalClient(opts, scripted_messages=_interrupted_script(),
                            context_usage=cu)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     holder["runner"] = runner
 
@@ -902,7 +902,7 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: reply)
     holder["runner"] = runner
@@ -1017,7 +1017,7 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_reply)
 

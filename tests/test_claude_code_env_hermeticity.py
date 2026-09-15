@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 
 _BLANKED_KEYS = (
     "MAX_THINKING_TOKENS",
@@ -49,7 +49,7 @@ def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:
 
 
 def test_spawn_env_blanks_inherited_thinking_and_effort_vars(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )
@@ -69,7 +69,7 @@ def test_hostile_host_env_does_not_change_spawn_posture(
     monkeypatch.setenv("MAX_THINKING_TOKENS", "99999")
     monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
     monkeypatch.setenv("USER_TYPE", "external")
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path, tier="medium"), mcp_server=object(), tool_names=["bash"]
     )
@@ -88,7 +88,7 @@ def test_spawn_env_pins_the_per_call_mcp_tool_timeout(
     # so an inherited host value would silently cap every imp tool call. imp owns
     # the budget: 24h in ms, regardless of what the host set.
     monkeypatch.setenv("MCP_TOOL_TIMEOUT", "5000")
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )

@@ -3,7 +3,7 @@
 Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. Each test
 seeds a PARTIAL session store (the turns the SDK batcher would have flushed at
 the prior `result` boundary) plus the matching transcript.jsonl tail, then drives
-ClaudeCodeAgentRunner.run against a live claude (client_factory=None). The
+ClaudeAgentRunner.run against a live claude (client_factory=None). The
 runner overwrites the store body with the projection of its own transcript and
 native-resumes; the assertions confirm real claude-p recalls the prior tool
 outputs with zero re-execution and no `400 due to tool use concurrency issues`.
@@ -30,7 +30,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers import claude
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.claude_session_store import (
     message_to_session_records,
     session_key,
@@ -191,7 +191,7 @@ async def test_send_to_llm_store_backed_native_resume(
         claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume drove a real claude turn to completion (no deadlock, no 400,
@@ -266,7 +266,7 @@ async def test_dangling_tool_use_store_backed_native_resume(
         claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # The run reached completion past the dangling call without the legacy
@@ -372,7 +372,7 @@ async def test_complete_step_handback_native_resume(
         claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume drove a real claude turn to completion (no deadlock, no 400).
@@ -455,7 +455,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
         claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    runner = ClaudeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
     assert events[-1]["type"] == "agent_result", events[-1]
@@ -531,7 +531,7 @@ async def test_midrun_interrupt_resume_continues_agent(
         claude, "_stream_history",
         lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
 
-    runner = ClaudeCodeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
+    runner = ClaudeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
     events = [ev async for ev in runner.run(inv)]
 
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE

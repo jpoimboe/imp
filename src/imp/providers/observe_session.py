@@ -7,7 +7,7 @@ claude_code runner's old `_run_loop`: the per-turn SDK-message stream, the
 tool-host-mediated `complete_step` capture surface, and the LoopGuard
 single-feed ordering. Provider specifics (transport, history/resume
 translation, isolated-home lifecycle, classify, cancellation) are the abstract
-hooks a subclass overrides — see `ClaudeCodeSession` in
+hooks a subclass overrides — see `ClaudeSession` in
 `imp.providers.claude`.
 
 The seam mirrors `PushSession` but for the pull-shaped observe providers: the

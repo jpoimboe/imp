@@ -329,7 +329,7 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
     from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from imp.providers.claude_session_store import resume_session_id
     from tests.conformance_adapters import build, drive
 
@@ -359,7 +359,7 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     driven = await drive(runner, inv)
 
     # transcript_invalid abort did NOT fire; the run completed.

@@ -8,7 +8,7 @@ import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, tool_use
 from tests.test_claude_code_runner import _inv
 
@@ -39,7 +39,7 @@ async def test_malformed_complete_step_nudged_then_recovers(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 
@@ -65,7 +65,7 @@ async def test_repeated_malformed_trips_loop_guard(tmp_path: Path) -> None:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 

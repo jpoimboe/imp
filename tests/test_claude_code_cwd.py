@@ -28,7 +28,7 @@ from imp.engine.types import (
     SourceLoc,
 )
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 
 
 def _invocation(project_root: Path) -> AgentInvocation:
@@ -62,7 +62,7 @@ def _invocation(project_root: Path) -> AgentInvocation:
 def test_build_options_pins_cwd_to_project_root(tmp_path: Path) -> None:
     """`claude` must be launched at the change's project_root so it cannot
     inherit a stale $PWD and operate on the wrong repo."""
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )
@@ -82,7 +82,7 @@ def test_build_options_blanks_external_anthropic_keys(tmp_path: Path) -> None:
     review). The SDK merges options.env OVER the inherited env, so _build_options
     must blank both to make the subprocess immune to whatever the parent exports.
     """
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )
@@ -100,7 +100,7 @@ def test_build_options_isolates_config_dir_for_fresh(tmp_path: Path) -> None:
     """A fresh start passes config_dir: _build_options must point CLAUDE_CONFIG_DIR
     at it and DROP the history-suppression flags (the isolated home makes them
     pointless, and they starve session_store of the conversation body)."""
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     cfg = tmp_path / "iso-home"
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"],
@@ -124,7 +124,7 @@ def test_build_options_drops_suppression_flags_when_no_config_dir(
     suppression flags: claude-p stays off ~/.claude via the SDK's own
     materialized temp dir, not CLAUDE_CODE_SKIP_PROMPT_HISTORY /
     --no-session-persistence. Both must be absent and extra_args must be {}."""
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )
@@ -148,7 +148,7 @@ def test_build_options_silences_claudemd_and_git_instructions(
     wants neither (the anthropic provider injects neither), so _build_options must
     set both off-switches in the same local env dict it passes to
     ClaudeAgentOptions."""
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )

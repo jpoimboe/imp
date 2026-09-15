@@ -12,7 +12,7 @@ import pytest
 from imp.agents.runner import TextBlock
 from imp.agents.transcript import Transcript
 from imp.engine.state import JsonlEventLog
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.codex_fakes import (
@@ -46,11 +46,11 @@ def _rows(tmp_path: Path) -> list[dict[str, Any]]:
     return list(JsonlEventLog(tmp_path / "e.jsonl").read())
 
 
-def _cc_runner(scripted: list[Any]) -> ClaudeCodeAgentRunner:
+def _cc_runner(scripted: list[Any]) -> ClaudeAgentRunner:
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    return ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    return ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
 
 
 def _nudging(inv: Any) -> Any:

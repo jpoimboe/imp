@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_probe import invocation, probe_advertised_tools, resolve_cli
 
 pytestmark = pytest.mark.live("claude_code")
 
 
 def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
-    opts = ClaudeCodeAgentRunner("m")._build_options(
+    opts = ClaudeAgentRunner("m")._build_options(
         invocation(tmp_path), object(), ["bash"])
     advertised, _ = probe_advertised_tools(
         resolve_cli(opts), list(opts.disallowed_tools), tmp_path)
@@ -30,7 +30,7 @@ def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
 
 
 def test_deny_posture_probe_is_live(tmp_path: Path) -> None:
-    opts = ClaudeCodeAgentRunner("m")._build_options(
+    opts = ClaudeAgentRunner("m")._build_options(
         invocation(tmp_path), object(), ["bash"])
     deny = [t for t in opts.disallowed_tools if t != "Bash"]
     advertised, stderr = probe_advertised_tools(resolve_cli(opts), deny, tmp_path)

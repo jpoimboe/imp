@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests import cc_probe
 from tests.cc_probe import (
     PROBE_ATTEMPTS,
@@ -44,7 +44,7 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
     allowlisted when an agent declares web_search/web_fetch (spec §5.2). This
     pins that intent so a future deny-all refactor fails here."""
     inv = invocation(tmp_path, frozenset({"web_search", "web_fetch"}))
-    opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
+    opts = ClaudeAgentRunner("m")._build_options(inv, object(), ["bash"])
     assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)
     assert not ({"WebSearch", "WebFetch"} & set(opts.disallowed_tools))
 

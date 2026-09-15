@@ -135,7 +135,7 @@ async def _run_claude_code_resume(
     The runner is built without a user_input_fn — the dispatch default."""
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from imp.providers.claude_session_store import session_key, session_store_for
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
@@ -158,7 +158,7 @@ async def _run_claude_code_resume(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     inv = AgentInvocation(
         agent_def=_agent_def(),
@@ -333,7 +333,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -356,7 +356,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = AgentInvocation(
@@ -410,7 +410,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -434,7 +434,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = AgentInvocation(
@@ -618,7 +618,7 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.transcript import RESUME_RETRY_NUDGE
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -632,7 +632,7 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
                   cc_tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))
@@ -680,7 +680,7 @@ async def test_claude_code_dependency_resume_journals_the_dependency_note(
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.transcript import RESUME_DEPENDENCY_NUDGE
     from imp.engine.state import InMemoryEventLog
-    from imp.providers.claude import ClaudeCodeAgentRunner
+    from imp.providers.claude import ClaudeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
     from tests.cc_fakes import text as cc_text
     from tests.cc_fakes import tool_use as cc_tool_use
@@ -694,7 +694,7 @@ async def test_claude_code_dependency_resume_journals_the_dependency_note(
                   cc_tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))

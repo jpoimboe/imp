@@ -6,7 +6,7 @@ from pathlib import Path
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 
 
 def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:
@@ -49,7 +49,7 @@ def test_sdk_options_expose_thinking_and_effort_fields() -> None:
 
 
 def test_low_tier_pins_disabled_thinking_and_no_effort(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path, tier="low"), mcp_server=object(), tool_names=["bash"]
     )
@@ -58,7 +58,7 @@ def test_low_tier_pins_disabled_thinking_and_no_effort(tmp_path: Path) -> None:
 
 
 def test_medium_tier_pins_adaptive_thinking_and_high_effort(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path, tier="medium"), mcp_server=object(), tool_names=["bash"]
     )
@@ -67,7 +67,7 @@ def test_medium_tier_pins_adaptive_thinking_and_high_effort(tmp_path: Path) -> N
 
 
 def test_high_tier_pins_adaptive_thinking_and_high_effort(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-opus-4-8")
+    runner = ClaudeAgentRunner("claude-opus-4-8")
     opts = runner._build_options(
         _invocation(tmp_path, tier="high"), mcp_server=object(), tool_names=["bash"]
     )
@@ -79,7 +79,7 @@ def test_untiered_invocation_leaves_posture_unpinned(tmp_path: Path) -> None:
     # A legacy/untiered (tier=None) invocation keeps the claude-p default: no
     # thinking pin and no effort pin. This preserves today's behavior for
     # subagents that inherit a parent provider without an explicit tier.
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path, tier=None), mcp_server=object(), tool_names=["bash"]
     )

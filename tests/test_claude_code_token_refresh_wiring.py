@@ -15,7 +15,7 @@ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers import claude
 from imp.providers import claude_token_refresh as ctr
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 
 NOW = 1_000_000_000_000
@@ -87,7 +87,7 @@ async def test_fresh_spawn_refreshes_before_config_dir_copy(
         claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -132,7 +132,7 @@ async def test_native_resume_refreshes_without_materializing(
     t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
     t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     [ev async for ev in runner.run(inv)]
 
@@ -161,7 +161,7 @@ async def test_dead_token_raises_terminal_auth_without_materializing(
         claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -203,7 +203,7 @@ def _probe_seam(
 
 def _run_scripted(tmp_path: Path, log: InMemoryEventLog,
                   scripted: list[Any]) -> Any:
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted))
     return runner.run(_inv(tmp_path, log))
@@ -351,7 +351,7 @@ async def test_fresh_spawn_records_the_post_refresh_canonical_expiry(
         claude, "materialize_fresh_config_dir", _fake_materialize)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -391,7 +391,7 @@ async def test_native_resume_records_the_canonical_expiry_too(
     t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
     t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     events = [ev async for ev in runner.run(inv)]
 
@@ -415,7 +415,7 @@ async def test_torn_canonical_file_records_none_without_derailing_the_spawn(
     _probe_seam(monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.NOT_APPLICABLE))
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -476,7 +476,7 @@ async def test_rotation_race_on_native_resume_stays_retryable(
     t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
     t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(
             o, scripted_messages=[chrome(PROSE_401), result()]))

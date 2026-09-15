@@ -676,10 +676,10 @@ def test_codex_run_state_has_no_runtime_errors_field() -> None:
     independent field of the same name that must survive."""
     from dataclasses import fields
 
-    from imp.providers.claude import _RunState as ClaudeCodeRunState
+    from imp.providers.claude import _RunState as ClaudeRunState
 
     assert "runtime_errors" not in {f.name for f in fields(RunState)}
-    assert "runtime_errors" in {f.name for f in fields(ClaudeCodeRunState)}
+    assert "runtime_errors" in {f.name for f in fields(ClaudeRunState)}
 
 
 def _image_parts() -> list:

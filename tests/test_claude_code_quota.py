@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude import ClaudeCodeAgentRunner, quota_from_rate_limit_info
+from imp.providers.claude import ClaudeAgentRunner, quota_from_rate_limit_info
 from imp.providers.quota import QuotaWindow
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
@@ -97,7 +97,7 @@ async def test_a_streamed_rate_limit_event_records_the_reading(
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 
@@ -135,7 +135,7 @@ async def test_an_event_without_unified_windows_records_nothing(
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 

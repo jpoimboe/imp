@@ -17,7 +17,7 @@ from imp.engine.state import State
 from imp.paths import project_state_dir
 from imp.providers import claude
 from imp.providers import claude_token_refresh as ctr
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.golive_fakes import GoLiveOnce, patch_policy_builder
 
@@ -145,7 +145,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
         model = "m"
 
         def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
-            return ClaudeCodeAgentRunner(
+            return ClaudeAgentRunner(
                 model_name="m", client_factory=client_factory)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
@@ -298,7 +298,7 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
         model = "m"
 
         def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
-            return ClaudeCodeAgentRunner(
+            return ClaudeAgentRunner(
                 model_name="m", client_factory=client_factory)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
@@ -361,7 +361,7 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
         model = "m"
 
         def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
-            return ClaudeCodeAgentRunner(
+            return ClaudeAgentRunner(
                 model_name="m", client_factory=client_factory)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
@@ -426,7 +426,7 @@ async def test_retry_after_go_live_rebinds_policy_to_the_worktree(
             # Dispatch-time: completion resets quest.project_root to the control root.
             roots.append(inv.quest.project_root)
             return GoLiveOnce(
-                ClaudeCodeAgentRunner(model_name="m",
+                ClaudeAgentRunner(model_name="m",
                                       client_factory=client_factory), fired)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
@@ -483,7 +483,7 @@ async def test_retry_without_go_live_passes_the_policy_through_unchanged(
 
         def create_runner(self, inv: AgentInvocation) -> AgentRunner:
             sink.append(inv)
-            return ClaudeCodeAgentRunner(
+            return ClaudeAgentRunner(
                 model_name="m", client_factory=client_factory)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())

@@ -19,7 +19,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers import claude
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
 
@@ -94,7 +94,7 @@ async def test_step_completed_rework_delivers_feedback_as_user_turn_natively(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -139,7 +139,7 @@ async def test_step_completed_bare_goto_delivers_redo_nudge_natively(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 

@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers.claude import ClaudeCodeAgentRunner, _parse_cc_web_citations
+from imp.providers.claude import ClaudeAgentRunner, _parse_cc_web_citations
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
@@ -41,7 +41,7 @@ events_path=tmp_path / "events.jsonl")
 
 
 def test_web_search_declared_enables_builtin(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
+    runner = ClaudeAgentRunner("claude-sonnet-4-6")
     opts = runner._build_options(
         _inv(tmp_path, frozenset({"complete_step", "web_search"})),
         mcp_server=object(), tool_names=["bash"])
@@ -53,7 +53,7 @@ def test_web_search_declared_enables_builtin(tmp_path: Path) -> None:
 
 
 def test_no_web_declared_keeps_builtins_disallowed(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
+    runner = ClaudeAgentRunner("claude-sonnet-4-6")
     opts = runner._build_options(
         _inv(tmp_path, frozenset({"complete_step"})),
         mcp_server=object(), tool_names=["bash"])
@@ -63,7 +63,7 @@ def test_no_web_declared_keeps_builtins_disallowed(tmp_path: Path) -> None:
 
 
 def test_toolsearch_still_exempt(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
+    runner = ClaudeAgentRunner("claude-sonnet-4-6")
     opts = runner._build_options(
         _inv(tmp_path, frozenset({"complete_step", "web_search"})),
         mcp_server=object(), tool_names=["bash"])
@@ -129,7 +129,7 @@ events_path=tmp_path / "events.jsonl",
 
 
 async def _run_cc(scripted: list, inv: AgentInvocation) -> list:
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         "claude-sonnet-4-6",
         client_factory=lambda opts: FakeClaudeSDKClient(
             opts, scripted_messages=scripted))

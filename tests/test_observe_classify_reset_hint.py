@@ -12,7 +12,7 @@ import imp.providers.claude as cc
 import imp.providers.observe_classify as ocls
 from imp.engine.state import InMemoryEventLog
 from imp.providers import errors as perr
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.codex_runner import CodexSession
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests.cc_fakes import (
@@ -170,7 +170,7 @@ async def test_a_streamed_rate_limit_event_feeds_the_retry_hint(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(
         _inv(tmp_path, event_log=InMemoryEventLog()))]

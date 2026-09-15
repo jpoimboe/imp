@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, tool_use
 from tests.test_claude_code_runner import _inv
 
@@ -35,7 +35,7 @@ async def test_folded_field_recovered_without_requery(tmp_path: Path) -> None:
         return c
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5",
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 

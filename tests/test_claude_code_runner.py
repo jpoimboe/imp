@@ -18,7 +18,7 @@ from imp.agents.runner import (
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.claude_session_store import (
     ImpSessionStore,
     resume_session_id,
@@ -114,7 +114,7 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=fake_client_factory,
     )
@@ -160,7 +160,7 @@ async def test_cancelled_no_result_yields_interrupted_not_network(
         # Dead subprocess: receive_response yields nothing, no ResultMessage.
         return FakeClaudeSDKClient(opts, scripted_messages=[])
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     await runner.interrupt()  # the SIGINT-driven cancel that already fired
@@ -197,7 +197,7 @@ async def test_terminated_process_teardown_classified_interrupted_not_unknown(
             raise CLIConnectionError(
                 "Cannot write to terminated process (exit code: 0)")
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: _DeadOnQuery(opts, scripted_messages=[]),
     )
@@ -240,7 +240,7 @@ async def test_cancel_during_continuation_skips_nudge_and_requery(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
 
@@ -298,7 +298,7 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
         c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     events = []
@@ -367,7 +367,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=parent_scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     events = []
@@ -456,7 +456,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
         observed.append(record)
         return real_observe(self, record)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     with _mock.patch.object(cc.LoopGuard, "observe", spy_observe):
@@ -524,7 +524,7 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=factory,
         user_input_fn=lambda _prompt: next(user_inputs),
@@ -571,7 +571,7 @@ async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
         queried["hit"] = True
         return FakeClaudeSDKClient(opts, scripted_messages=[result()])
 
-    runner = ClaudeCodeAgentRunner(  # no user_input_fn -> no reply channel
+    runner = ClaudeAgentRunner(  # no user_input_fn -> no reply channel
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     events = [ev async for ev in runner.run(inv)]
@@ -623,7 +623,7 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=fake_client_factory,
     )
@@ -751,7 +751,7 @@ async def test_runner_reclassifies_invalid_api_key_text_to_auth_terminal_event(
     def client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=fake_messages)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=client_factory,
     )
     inv = _inv(tmp_path)
@@ -794,7 +794,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     inv = _inv(tmp_path, event_log=log)
     inv = replace(inv, continuation_fn=lambda _last: ("please call complete_step", False))
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
     )
     events = [e async for e in runner.run(inv)]
@@ -829,7 +829,7 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
         return "nudge", False
 
     inv = replace(inv, continuation_fn=cont)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
     )
     events = [e async for e in runner.run(inv)]
@@ -882,7 +882,7 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
     inv = replace(inv,
                   continuation_fn=lambda _last: ("looks good, proceed", False))
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
     )
     events = [e async for e in runner.run(inv)]
@@ -911,7 +911,7 @@ def test_claude_code_provider_registered_and_resolves() -> None:
         WorkflowDefaults,
     )
     from imp.providers import resolve
-    from imp.providers.claude import ClaudeCodeProvider
+    from imp.providers.claude import ClaudeProvider
     from imp.providers.config import Config
 
     resolve.reset_providers_for_tests()
@@ -951,7 +951,7 @@ def test_claude_code_provider_registered_and_resolves() -> None:
     pm = resolved_tiers["medium"]
     assert pm.provider == "claude_code"
     provider = resolve.provider_from_model(pm)
-    assert isinstance(provider, ClaudeCodeProvider)
+    assert isinstance(provider, ClaudeProvider)
 
 
 @pytest.mark.anyio
@@ -967,7 +967,7 @@ async def test_runner_translates_unknown_sdk_exception_to_unknown_event(
         async def __aexit__(self, *args):
             return None
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6",
         client_factory=lambda _opts: _ExplodingClient(),
     )
@@ -997,7 +997,7 @@ async def test_runner_outer_except_reclassifies_when_cancel_is_set(
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6",
         client_factory=lambda _opts: _ExplodingClient(),
     )
@@ -1024,7 +1024,7 @@ async def test_runner_outer_except_unknown_when_cancel_unset(
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6",
         client_factory=lambda _opts: _ExplodingClient(),
     )
@@ -1064,7 +1064,7 @@ async def test_receive_loop_sweeps_bg_per_message(
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory)
     events = [e async for e in runner.run(_inv(tmp_path))]
     assert events[-1]["type"] == "agent_result"
@@ -1080,7 +1080,7 @@ async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory, user_input_fn=None)
     return [ev async for ev in runner.run(inv)]
 
@@ -1133,7 +1133,7 @@ class _StallingClient:
 @pytest.mark.anyio
 async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
     """interrupt() before run() (no client connected) must not raise."""
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     await runner.interrupt()
     await runner.interrupt()  # idempotent
     assert runner._cancel is True
@@ -1181,7 +1181,7 @@ async def test_force_kill_sigkills_transport_group_without_waiting(
         return c
 
     inv = _inv(tmp_path)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
     async def drive() -> None:
@@ -1213,7 +1213,7 @@ async def test_force_kill_without_live_client_is_safe() -> None:
     """force_kill() before run() (no client/transport) must not raise."""
     import imp.providers.claude as cc
 
-    runner = cc.ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = cc.ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     await runner.force_kill()   # no client connected; must be a safe no-op
 
 
@@ -1233,7 +1233,7 @@ async def test_force_kill_sets_cancel_so_minus9_processerror_is_interrupted(
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda _opts: _ExplodingClient(),
     )
@@ -1266,7 +1266,7 @@ async def test_result_is_error_emits_terminated_not_nudge(tmp_path: Path) -> Non
 
     inv = _inv(tmp_path)
     inv = replace(inv, continuation_fn=lambda _last: ("please call complete_step", False))
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
 
     events = [e async for e in runner.run(inv)]
     errs = [e for e in events if e.get("type") == "error"]
@@ -1292,7 +1292,7 @@ async def test_result_is_error_reports_quota_wording_independent(tmp_path: Path)
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path))]
     errs = [e for e in events if e.get("type") == "error"]
     assert len(errs) == 1
@@ -1313,7 +1313,7 @@ async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path))]
     errs = [e for e in events if e.get("type") == "error"]
     assert len(errs) == 1
@@ -1501,14 +1501,14 @@ def test_build_client_installs_session_isolation_on_real_arm(
 
     monkeypatch.setattr(sdk, "ClaudeSDKClient", _FakeSDKClient)
 
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=None)
+    runner = ClaudeAgentRunner("claude-sonnet-4-5", client_factory=None)
     client = runner._build_client("OPTS")
     assert installed == [True], "isolation must be installed on the real-construction arm"
     assert isinstance(client, _FakeSDKClient)
     assert client.opts == "OPTS"
 
     installed.clear()
-    factory_runner = ClaudeCodeAgentRunner(
+    factory_runner = ClaudeAgentRunner(
         "claude-sonnet-4-5", client_factory=lambda opts: ("factory", opts))
     result = factory_runner._build_client("OPTS2")
     assert result == ("factory", "OPTS2")
@@ -1596,7 +1596,7 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
 
 
 def test_build_options_carries_session_store_and_id(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     store = session_store_for(tmp_path)
     opts = runner._build_options(
         _inv(tmp_path), object(), ["complete_step"],
@@ -1607,7 +1607,7 @@ def test_build_options_carries_session_store_and_id(tmp_path: Path) -> None:
 
 
 def test_build_options_defaults_to_no_session_store(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
     assert opts.session_store is None
     assert opts.session_id is None
@@ -1627,7 +1627,7 @@ async def test_fresh_run_mirrors_session_into_store(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1673,7 +1673,7 @@ async def test_resume_without_stored_session_passes_native_session_state(tmp_pat
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1728,7 +1728,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1771,7 +1771,7 @@ async def test_native_resume_holds_back_plain_text_tail(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1812,7 +1812,7 @@ async def test_native_resume_folds_is_error_tool_result_tail(tmp_path: Path) -> 
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1857,7 +1857,7 @@ async def test_native_folded_tool_result_tail_gets_continuation_nudge(
 
     # resume_should_continue defaults to False → the existing continuation-nudge
     # block does NOT fire; only the new native empty-delta guard can.
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1904,7 +1904,7 @@ async def test_native_empty_delta_guard_selects_the_note_by_cause(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -1964,7 +1964,7 @@ async def test_complete_step_tail_with_feedback_native_resumes(tmp_path: Path) -
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     assert created[0].opts.resume == resume_session_id("step:p/s")
@@ -1986,7 +1986,7 @@ async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: 
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     entries = await store.load(skey)
@@ -2014,7 +2014,7 @@ async def test_complete_step_tail_handback_rides_streamed_delta(tmp_path: Path) 
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     delta = created[0].queries[0]
@@ -2043,7 +2043,7 @@ async def test_complete_step_tail_no_feedback_kicks_with_redo_nudge(tmp_path: Pa
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     assert created[0].opts.resume == resume_session_id("step:p/s")
@@ -2084,7 +2084,7 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
@@ -2132,7 +2132,7 @@ async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Pa
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
     [ev async for ev in runner.run(inv)]
@@ -2163,7 +2163,7 @@ async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Pat
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
     # It re-ran and completed — never re-parked on an empty prompt.
@@ -2214,7 +2214,7 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -2238,14 +2238,14 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
 
 
 def test_build_options_carries_resume(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(
         _inv(tmp_path), object(), ["complete_step"], resume="rid-123")
     assert opts.resume == "rid-123"
 
 
 def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
     assert opts.resume is None
 
@@ -2292,7 +2292,7 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
@@ -2345,7 +2345,7 @@ async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path)
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
@@ -2407,7 +2407,7 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -2466,7 +2466,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -2528,7 +2528,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
         assert await store.load(skey) is not None
 
         created: list[FakeClaudeSDKClient] = []
-        runner = ClaudeCodeAgentRunner(
+        runner = ClaudeAgentRunner(
             model_name="claude-sonnet-4-5", client_factory=factory_of(created))
         [ev async for ev in runner.run(inv)]
 
@@ -2590,7 +2590,7 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -2648,7 +2648,7 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -2710,7 +2710,7 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -2776,7 +2776,7 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -2829,7 +2829,7 @@ async def test_fresh_run_isolates_config_dir_and_cleans_up(
             result(),
         ])
 
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner("claude-sonnet-4-5", client_factory=factory)
     _ = [ev async for ev in runner.run(_inv(tmp_path))]
 
     assert captured["cfg"], "fresh run must set CLAUDE_CONFIG_DIR"
@@ -2853,7 +2853,7 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
         captured["cfg"] = opts.env.get("CLAUDE_CONFIG_DIR")
         return FakeClaudeSDKClient(opts, scripted_messages=[])
 
-    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner("claude-sonnet-4-5", client_factory=factory)
     await runner.interrupt()  # the SIGINT-driven cancel that already fired
     _ = [ev async for ev in runner.run(_inv(tmp_path))]
 
@@ -2862,7 +2862,7 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
 
 
 def test_build_options_requests_1m_via_model_id_for_opus_1m(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-opus-4-8[1m]")
+    runner = ClaudeAgentRunner(model_name="claude-opus-4-8[1m]")
     opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
     # No custom beta (subscription auth drops it + warns); the 1M window is
     # requested via the bracketed model-id, which both auth modes honor.
@@ -2871,7 +2871,7 @@ def test_build_options_requests_1m_via_model_id_for_opus_1m(tmp_path: Path) -> N
 
 
 def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="opus")
+    runner = ClaudeAgentRunner(model_name="opus")
     opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
     assert list(opts.betas) == []
     assert opts.model == "opus"
@@ -2905,7 +2905,7 @@ async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-opus-4-8[1m]", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -2932,7 +2932,7 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-opus-4-8[1m]", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -2987,7 +2987,7 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "go check the other file instead")
     inv = replace(_inv(tmp_path), coordinator=coord)
@@ -3062,7 +3062,7 @@ async def test_cooperative_steer_repairs_the_interrupt_marker_tail(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "actually, run the tests first")
     inv = replace(_inv(tmp_path), coordinator=coord)
@@ -3150,7 +3150,7 @@ async def test_cooperative_interrupt_headless_pauses_balanced(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     inv = replace(_inv(tmp_path), coordinator=coord)
     coord.attach_runner(runner.interrupt)
@@ -3214,7 +3214,7 @@ async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "go look elsewhere")
     inv = replace(_inv(tmp_path), coordinator=coord)
@@ -3271,7 +3271,7 @@ async def test_cooperative_steer_drive_invocation_not_paused(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "redirect here")
     inv = replace(_inv(tmp_path), coordinator=coord)
@@ -3328,7 +3328,7 @@ async def test_second_interrupt_during_steer_skips_requery(
         runner_ref["r"]._cancel = True
         return "redirect"
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_input_fn)
     runner_ref["r"] = runner
@@ -3387,7 +3387,7 @@ async def test_native_resume_rebuild_drops_a_stale_error_record(tmp_path: Path) 
     await store.append(skey, [stale_error])
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted),
         user_input_fn=lambda _prompt: "keep going")
@@ -3432,7 +3432,7 @@ async def test_native_resume_rebuilds_a_partial_store(tmp_path: Path) -> None:
         cwd=str(tmp_path), model="claude-sonnet-4-5"))
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted),
         user_input_fn=lambda _prompt: "keep going")
@@ -3473,7 +3473,7 @@ async def test_no_store_native_sets_standard_tool_mode(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -3518,7 +3518,7 @@ async def test_native_resume_sets_standard_tool_mode(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
@@ -3570,7 +3570,7 @@ async def test_complete_step_tail_native_resumes_with_store_body(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -3611,7 +3611,7 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
@@ -3669,7 +3669,7 @@ async def test_balance_on_resume_send_to_llm_tail_native_resumes(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -3719,7 +3719,7 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -3764,7 +3764,7 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -3803,7 +3803,7 @@ async def test_coalesces_one_agent_message_per_message_id(tmp_path: Path) -> Non
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log,
                tools=frozenset({"complete_step", "read_file", "grep"}))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -3861,7 +3861,7 @@ async def test_agent_message_precedes_tool_calls_for_prose_and_tool_turn(
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log,
                tools=frozenset({"complete_step", "read_file", "grep"}))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -3903,7 +3903,7 @@ async def test_none_message_id_folds_into_open_group(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -3934,7 +3934,7 @@ async def test_none_message_id_opens_group_then_adopts_real_key(tmp_path: Path) 
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -3967,7 +3967,7 @@ async def test_emits_one_query_result_with_authoritative_telemetry(
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4002,7 +4002,7 @@ async def test_query_result_carries_optional_error_fields(tmp_path: Path) -> Non
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4031,7 +4031,7 @@ async def test_every_query_result_in_one_client_lifetime_shares_a_session_id(
     log = InMemoryEventLog()
     inv = replace(_inv(tmp_path, event_log=log),
                   continuation_fn=lambda _last: ("looks good, proceed", False))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4060,7 +4060,7 @@ async def test_a_second_client_lifetime_mints_a_different_session_id(
 
     log = InMemoryEventLog()
     for _ in range(2):
-        runner = ClaudeCodeAgentRunner(
+        runner = ClaudeAgentRunner(
             model_name="claude-sonnet-4-5", client_factory=factory)
         async for _ev in runner.run(_inv(tmp_path, event_log=log)):
             pass
@@ -4091,7 +4091,7 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log,
                tools=frozenset({"complete_step", "read_file"}))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4161,7 +4161,7 @@ async def test_claude_code_tool_result_carries_recorded_duration(
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log,
                tools=frozenset({"complete_step", "read_file"}))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     captured_calls: list[Any] = []
     orig = log.append_tool_result
@@ -4208,7 +4208,7 @@ async def test_claude_code_tool_result_duration_non_none_e2e(
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log,
                tools=frozenset({"complete_step", "read_file"}))
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4221,7 +4221,7 @@ async def test_claude_code_tool_result_duration_non_none_e2e(
 
 
 def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
     assert opts.include_partial_messages is True
 
@@ -4249,7 +4249,7 @@ async def test_receive_loop_is_request_bracketed(tmp_path: Path) -> None:
     coord.add_activity_listener(lambda: snaps.append(coord.request_active))
 
     inv = replace(_inv(tmp_path), coordinator=coord)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
     )
     events = [ev async for ev in runner.run(inv)]
@@ -4286,7 +4286,7 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     yielded = [ev async for ev in runner.run(inv)]
 
@@ -4329,7 +4329,7 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     def _must_not_solicit(_prompt):
         raise AssertionError("retry-continue must not solicit the human")
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_must_not_solicit)
 
@@ -4381,7 +4381,7 @@ async def test_stream_event_usage_overrides_partial_assistant_usage(
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4423,7 +4423,7 @@ async def test_no_stream_events_falls_back_to_assistant_usage(
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4463,7 +4463,7 @@ async def test_multi_fragment_group_uses_harvested_usage(
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
@@ -4558,7 +4558,7 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
         created.append(c)
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
@@ -4629,7 +4629,7 @@ async def test_brake_holds_until_reply_submitted(tmp_path: Path) -> None:
         seen["at_prompt"] = coord.should_pause
         return "carry on"
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_input_fn)
     inv = replace(_inv(tmp_path), coordinator=coord)
@@ -4674,7 +4674,7 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
     def _input_fn(_prompt: str) -> str:
         return "carry on"
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_input_fn)
 
@@ -4718,7 +4718,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
     def _input_fn(_prompt: str) -> str:
         return "carry on"
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=_input_fn)
 
@@ -4764,7 +4764,7 @@ async def test_reclassified_auth_error_carries_last_agent_text_detail(
     def client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=fake_messages)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=client_factory,
     )
     inv = _inv(tmp_path)
@@ -4869,7 +4869,7 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
                event_log=log)
     inv = replace(inv, subagent_defs={"sub": sub_def})
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     box["runner"] = runner
 
@@ -4961,7 +4961,7 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
     inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
                event_log=log)
     inv = replace(inv, subagent_defs={"sub": sub_def})
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     box["runner"] = runner
 
@@ -5008,7 +5008,7 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
         holder["c"] = c
         return c
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "")      # empty Enter → continue
     # A backoff-retry attempt can itself be Ctrl-C'd: the steer site is reached only
@@ -5058,7 +5058,7 @@ async def test_cc_run_aclose_cascades_to_run_loop(
         finally:
             closed.append(True)
 
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     monkeypatch.setattr("imp.providers.claude.run_agent_loop",
                         lambda invocation, session: _fake_loop(invocation))
 
@@ -5140,7 +5140,7 @@ async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> No
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
                 result()]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted))
     [ev async for ev in runner.run(inv)]
@@ -5202,7 +5202,7 @@ async def test_coincidental_count_deficit_drops_the_error_turn(tmp_path: Path) -
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
                 result()]
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted),
         user_input_fn=lambda _p: "keep going")
@@ -5261,7 +5261,7 @@ async def test_vipu54_drifted_store_keeps_the_complete_step_trio(
 
     drive1 = [assistant(text("Failed to authenticate. API Error: 401")),
               result(is_error=True, api_error_status=401)]
-    runner1 = ClaudeCodeAgentRunner(
+    runner1 = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1))
     ev1 = [ev async for ev in runner1.run(inv)]
@@ -5269,7 +5269,7 @@ async def test_vipu54_drifted_store_keeps_the_complete_step_trio(
 
     drive2 = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
               result()]
-    runner2 = ClaudeCodeAgentRunner(
+    runner2 = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
     [ev async for ev in runner2.run(inv)]
@@ -5320,7 +5320,7 @@ async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
 
     drive1 = [assistant(text("Failed to authenticate. API Error: 401")),
               result(is_error=True, api_error_status=401)]
-    runner1 = ClaudeCodeAgentRunner(
+    runner1 = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1),
         user_input_fn=lambda _p: "Option A please")
@@ -5329,7 +5329,7 @@ async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
 
     drive2 = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
               result()]
-    runner2 = ClaudeCodeAgentRunner(
+    runner2 = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
     [ev async for ev in runner2.run(inv)]
@@ -5369,7 +5369,7 @@ async def test_init_auth_mode_reaches_the_agent_message(
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(_inv(tmp_path, event_log=log)):
         pass
@@ -5394,7 +5394,7 @@ async def test_no_init_message_leaves_auth_mode_off_the_agent_message(
         ])
 
     log = InMemoryEventLog()
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(_inv(tmp_path, event_log=log)):
         pass
@@ -5445,7 +5445,7 @@ async def test_mid_tool_interrupt_persists_claude_p_marker_turn(
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 

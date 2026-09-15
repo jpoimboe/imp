@@ -13,7 +13,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeCodeAgentRunner, _roll_back_error_turn
+from imp.providers.claude import ClaudeAgentRunner, _roll_back_error_turn
 from imp.providers.claude_session_store import (
     resume_session_id,
     session_key,
@@ -128,7 +128,7 @@ async def test_termination_401_rolls_back_and_keeps_llm_event(tmp_path: Path) ->
     def factory(_opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -160,7 +160,7 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
     def factory(_opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -185,7 +185,7 @@ async def test_terminal_prose_error_event_carries_the_full_text(tmp_path: Path) 
     def factory(_opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -211,7 +211,7 @@ async def test_quota_pause_still_errors_and_rollback_is_harmless(
     def factory(_opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
@@ -233,7 +233,7 @@ async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
         assistant(text("Failed to authenticate. API Error: 401")),
         result(is_error=True, api_error_status=401),
     ]
-    runner1 = ClaudeCodeAgentRunner(
+    runner1 = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1))
     ev1 = [ev async for ev in runner1.run(inv)]
@@ -249,7 +249,7 @@ async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
                   tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    runner2 = ClaudeCodeAgentRunner(  # no user_input_fn: recovery needs none
+    runner2 = ClaudeAgentRunner(  # no user_input_fn: recovery needs none
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
     ev2 = [ev async for ev in runner2.run(inv)]
@@ -318,7 +318,7 @@ async def test_bare_error_turn_keeps_history_and_labels_terminated(
 
     scripted = [result(is_error=True)]
 
-    runner = ClaudeCodeAgentRunner(
+    runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted))
     events = [ev async for ev in runner.run(inv)]
@@ -345,7 +345,7 @@ async def test_bare_error_turn_keeps_the_retry_warm(tmp_path: Path) -> None:
     store = session_store_for(inv.transcript_dir)
     skey = session_key(inv.quest_context.project_root, "step:p/s")
 
-    failing = ClaudeCodeAgentRunner(
+    failing = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(
             o, scripted_messages=[result(is_error=True)]))
@@ -362,7 +362,7 @@ async def test_bare_error_turn_keeps_the_retry_warm(tmp_path: Path) -> None:
         created.append(c)
         return c
 
-    retry = ClaudeCodeAgentRunner(
+    retry = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
     ev2 = [ev async for ev in retry.run(inv)]
 
@@ -399,7 +399,7 @@ async def test_repeated_trailing_failures_remove_only_their_own_error_turn(
     skey = session_key(inv.quest_context.project_root, "step:p/s")
 
     for lap in range(3):
-        runner = ClaudeCodeAgentRunner(
+        runner = ClaudeAgentRunner(
             model_name="claude-sonnet-4-5",
             client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=[
                 assistant(text(_TRAILING_AUTH_PROSE)),
