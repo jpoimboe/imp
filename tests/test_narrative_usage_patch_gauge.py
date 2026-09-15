@@ -50,7 +50,7 @@ def test_patch_row_names_the_context_on_the_reincarnation_line() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed (22k/258k)" in out
+    assert "reincarnating — context threshold crossed (22k/200k)" in out
 
 
 # AC 7(d)
@@ -88,4 +88,4 @@ def test_a_retired_subagents_patch_leaves_the_top_level_gauge_alone() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "(199k/258k)" in out
+    assert "(199k/200k)" in out

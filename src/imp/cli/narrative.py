@@ -549,10 +549,10 @@ class NarrativeBuilder:
         self._pause_outcome_shown: bool = False
         self._latest_context_tokens: int | None = None
         self._latest_context_window: int | None = None
-        # Occupancy (tokens, window) of the most recent agent_message from ANY
+        # Occupancy (tokens, handoff limit) of the most recent agent_message from ANY
         # agent — subagents included, unlike the gauge fields above. Feeds the
         # reincarnating line so it can report the context that actually crossed
-        # the checkpoint, which is frequently a subagent's turn (see loko19).
+        # the limit, which is frequently a subagent's turn (see loko19).
         self._last_agent_context: tuple[int, int] | None = None
         # The "sub:<event_id>" this builder represents (a dispatched subagent's own
         # turns); None on the top-level builder. Gates which agent_message readings move
@@ -966,23 +966,29 @@ class NarrativeBuilder:
                 if cwin_any is not None:
                     self._latest_context_window = cwin_any
             # Separate from the top-level gauge above (which drops subagents):
-            # remember this turn's occupancy regardless of agent, so a following
-            # reincarnating event can name the context that crossed the checkpoint.
-            if ctoks is not None and cwin_any:
-                self._last_agent_context = (ctoks, cwin_any)
+            # remember this turn's occupancy against the handoff limit, regardless
+            # of agent, so a following reincarnating event can name the context
+            # that crossed it.
+            if ctoks is not None:
+                from imp.providers.catalog import handoff_limit
+                limit = handoff_limit(cwin_any)
+                if limit is not None:
+                    self._last_agent_context = (ctoks, limit)
         elif etype == "agent_message_usage_patch":
             # codex attaches occupancy AFTER the turn, on this bookkeeping row —
             # its agent_message carries usage={}, so the branch above sees nothing.
             # Same assignments, same own-agent routing rule; pre-routing so a
             # registered subagent's crossing still reaches the reincarnating line.
+            from imp.providers.catalog import handoff_limit
             ctoks = payload.get("context_tokens")
             cwin = payload.get("context_window")
-            if ctoks is not None and cwin:
+            limit = handoff_limit(cwin)
+            if ctoks is not None and limit is not None:
                 is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
                 if not is_subagent or agent_id == self._own_agent_id:
                     self._latest_context_tokens = ctoks
                     self._latest_context_window = cwin
-                self._last_agent_context = (ctoks, cwin)
+                self._last_agent_context = (ctoks, limit)
         elif etype == "quota_reading":
             # Account-wide, so it is retained whichever agent read it — which is why
             # this sits above the subagent delegation that would otherwise hide it.
@@ -1352,11 +1358,11 @@ def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     self._flush_burst()
     reason = p.get("reason")
     text = f"reincarnating — {reason}" if reason else "reincarnating"
-    # Name the occupancy that crossed the checkpoint (tokens/window), so the line
-    # is self-explaining and the window is unambiguous — no re-deriving it from
-    # cumulative token counters, which read far larger than the live context.
+    # Name the occupancy that crossed the handoff limit (tokens/limit), so the
+    # line is self-explaining and the denominator is unambiguous — no re-deriving
+    # it from cumulative token counters, which read far larger than live context.
     ctx = self._last_agent_context
-    if ctx is not None and ctx[1]:
+    if ctx is not None:
         text += f" ({fmt_ctx_tokens(ctx[0])}/{fmt_ctx_tokens(ctx[1])})"
     self._append(LiteralTextNode(text=text, color_role="lifecycle"))
 
