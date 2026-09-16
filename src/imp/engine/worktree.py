@@ -298,7 +298,7 @@ def is_worktree(path: Path) -> bool:
 
 
 def _merge_subject(title: str, quest_id: str, body: str | None) -> str:
-    trailer = f"(imp/{quest_id})"
+    trailer = f"Quest: {quest_id}"
     if body:
         return f"Merge {title}\n\n{body.strip()}\n\n{trailer}"
     return f"Merge {title}\n\n{trailer}"

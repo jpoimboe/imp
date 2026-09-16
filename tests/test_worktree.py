@@ -138,10 +138,8 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
     assert (tmp_path / "feature.txt").read_text() == "hi"
     # REGRESSION (spec §11): control-root status is NOT a staged reversal.
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
-    # Merge subject uses the human title; id appears in the body (AC 9).
-    subject = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
-    assert "Merge My Feature" in subject
-    assert "(imp/feat)" in subject
+    message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
+    assert message == "Merge My Feature\n\nQuest: feat"
 
 
 def _seed_base_and_branch(root: Path) -> None:
@@ -239,10 +237,8 @@ def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
     body = "We chose X over Y because Z."
     result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
     assert result.status == "MERGED"
-    msg = _git(tmp_path, "log", "-1", "--format=%B", "main").stdout
-    assert "Merge My Feature" in msg
-    assert "We chose X over Y because Z." in msg
-    assert "(imp/feat)" in msg
+    message = _git(tmp_path, "log", "-1", "--format=%B", "main").stdout.strip()
+    assert message == "Merge My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
 
 
 def test_merge_detached_refuses_while_base_is_being_rebased(tmp_path: Path) -> None:
@@ -505,21 +501,22 @@ def test_merge_body_is_passed_through_verbatim(tmp_path: Path) -> None:
     body = "We chose X over Y because Z."
     result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
     assert result.status == "MERGED"
-    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
-    assert "Merge My Feature" in msg
-    assert "We chose X over Y because Z." in msg
-    assert "(imp/feat)" in msg
+    message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
+    assert message == "Merge My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
 
 
 def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "feat", "main")
-    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=None)
+    wt.create_worktree(tmp_path, "rije91", "main")
+    _commit_on_branch(tmp_path, "imp/rije91", "feature.txt", "hi")
+    result = wt.merge_to_base(tmp_path, "rije91", "main", title="My Feature", body=None)
     assert result.status == "MERGED"
-    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
-    # Minimal body: subject + the id trailer only.
-    assert msg == "Merge My Feature\n\n(imp/feat)"
+    message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
+    assert message == "Merge My Feature\n\nQuest: rije91"
+    trailer = _git(
+        tmp_path, "log", "-1", "--format=%(trailers:key=Quest,valueonly)", result.merge_commit
+    ).stdout.strip()
+    assert trailer == "rije91"
 
 
 def test_merge_to_base_is_idempotent_on_already_merged(tmp_path: Path) -> None:
