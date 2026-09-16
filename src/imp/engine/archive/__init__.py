@@ -220,7 +220,7 @@ def _write_data_version(control_root: Path, version: int) -> None:
 
 
 def check_data_floor(control_root: Path) -> None:
-    """Refuse a record/blob read whose blob-schema floor is not this install's."""
+    """Gate any blob-backed read, write or delete on the archive's blob-schema floor."""
     stored = _read_data_version(control_root)
     if stored != _DATA_VERSION:
         raise ArchiveMismatch(floor="data", stored=stored, known=_DATA_VERSION)
