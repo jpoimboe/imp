@@ -119,8 +119,7 @@ class LocalStore:
 
     def scan_homes(self) -> list[HomeDigest]:
         from imp.cli.render_helpers import conversation_prose
-        from imp.engine.quest import LAYOUT_VERSION, migrate
-        from imp.engine.state import ProjectLock, lock_is_live
+        from imp.engine.state import lock_is_live
 
         out: list[HomeDigest] = []
         for quest_id in _list_quest_homes(self.control_root):
@@ -130,14 +129,6 @@ class LocalStore:
                 meta = json.loads(quest_json)
             except (FileNotFoundError, json.JSONDecodeError):
                 continue
-            if meta.get("layout_version", 0) != LAYOUT_VERSION:
-                try:
-                    with ProjectLock(cdir / "lock").acquire(timeout=0.0):
-                        migrate(meta.get("layout_version", 0), LAYOUT_VERSION, cdir)
-                    quest_json = (cdir / "quest.json").read_bytes()
-                    meta = json.loads(quest_json)
-                except Exception:
-                    pass  # LockHeld (live) or migration error: keep raw quest.json bytes
             try:
                 state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
             except FileNotFoundError:
@@ -377,11 +368,11 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
     from imp.engine.archive import read as archive_read
-    from imp.engine.errors import LayoutMismatch, LoadError, MigrationLockHeld
+    from imp.engine.errors import LayoutMismatch, LoadError
     from imp.engine.quest import Quest
     try:
-        quest = Quest.load(control, quest_id, migrate_if_lockable=True)
-    except (LayoutMismatch, MigrationLockHeld):
+        quest = Quest.load(control, quest_id)
+    except LayoutMismatch:
         ev_path = _quest_home(control, quest_id) / "events.jsonl"
         if ev_path.exists():
             return _parse_jsonl(ev_path.read_bytes())

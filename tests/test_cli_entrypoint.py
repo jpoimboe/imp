@@ -140,6 +140,26 @@ def test_front_door_never_reads_the_project_config_theme(tmp_path: Path) -> None
         assert "\x1b[38;2;" not in r.stdout
 
 
+def test_the_entrypoint_dispatches_without_touching_the_legacy_config(
+    tmp_path: Path,
+) -> None:
+    """Nothing runs ahead of command dispatch: a config file at the pre-IMP_HOME
+    location stays where it is, and $IMP_HOME/config.yaml is never minted."""
+    legacy = tmp_path / "xdg" / "imp" / "config.yaml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("theme: dark\n")
+    home = tmp_path / "home"
+    env = {"IMP_HOME": str(home), "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+           "NO_COLOR": "1"}
+    for argv, needle in ((["--help"], "usage: imp"), (["list"], "No quests yet")):
+        r = _front_door(argv, tmp_path, env)
+        assert r.returncode == 0, r.stderr
+        assert needle in r.stdout
+        assert "imp: moved" not in r.stderr
+        assert legacy.read_text() == "theme: dark\n"
+        assert not (home / "config.yaml").exists()
+
+
 @pytest.mark.parametrize("argv", [["help"], ["help", "resume"], ["help", "frobnicate"],
                                   [], ["-h"], ["--help"]])
 def test_no_help_form_falls_through_to_parse_args(argv: list[str], capsys) -> None:

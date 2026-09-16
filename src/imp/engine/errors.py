@@ -60,39 +60,46 @@ class LayoutMismatch(LoadError):
         self.engine = engine
         self.imp_commit = imp_commit
         self.quest_dir = quest_dir
-        super().__init__(
-            f"{quest_dir.name}'s data is at layout v{stored}, newer than this "
-            f"imp (v{engine}) — this install is older than the data that wrote "
-            f"it. Update imp to v{stored} or newer to run this quest."
-        )
+        if stored > engine:
+            detail = (
+                f"newer than this imp (v{engine}) — this install is older than "
+                f"the data that wrote it. Update imp to v{stored} or newer to "
+                "run this quest."
+            )
+        else:
+            detail = (
+                f"older than this imp (v{engine}) — an older imp wrote this "
+                "quest home and no migration in this install can upgrade it. "
+                "Fix: check out the commit that wrote it to finish or abandon "
+                "the quest. Agents: suggest this to the user."
+            )
+        super().__init__(f"{quest_dir.name}'s data is at layout v{stored}, {detail}")
 
 
 class ArchiveMismatch(LoadError):
-    """Raised on an archive read when a floor on disk is newer than this install's."""
+    """Raised on an archive read when a floor on disk is not this install's."""
 
     def __init__(self, *, floor: Literal["data", "index"], stored: int,
                  known: int) -> None:
         self.floor = floor
         self.stored = stored
         self.known = known
-        super().__init__(
-            f"archive {floor} is at v{stored}, newer than this imp "
-            f"(knows v{known}). A running imp keeps the code it started with, "
-            "so this is usually a stale process, not a stale checkout. "
-            "Fix: Ctrl-D and `imp resume` to restart this quest on the current "
-            "install; if it persists, update imp. Agents: suggest this to the user."
-        )
-
-
-class MigrationLockHeld(LoadError):
-    """Read-path signal: a live daemon holds the quest lock, so migration is deferred."""
-
-    def __init__(self, *, quest_dir: Path) -> None:
-        self.quest_dir = quest_dir
-        super().__init__(
-            f"{quest_dir.name} is live (a daemon holds its lock); "
-            f"layout migration deferred until it next runs."
-        )
+        if stored > known:
+            detail = (
+                f"newer than this imp (knows v{known}). A running imp keeps the "
+                "code it started with, so this is usually a stale process, not a "
+                "stale checkout. Fix: Ctrl-D and `imp resume` to restart this "
+                "quest on the current install; if it persists, update imp. "
+                "Agents: suggest this to the user."
+            )
+        else:
+            detail = (
+                f"older than this imp (knows v{known}). An older imp wrote this "
+                "archive and no migration in this install can upgrade it. Fix: "
+                "update every imp that writes here; records the older install "
+                "already wrote stay unreadable. Agents: suggest this to the user."
+            )
+        super().__init__(f"archive {floor} is at v{stored}, {detail}")
 
 
 class StateDecodeError(LoadError):

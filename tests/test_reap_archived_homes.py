@@ -79,6 +79,16 @@ def test_live_locked_home_is_not_reaped(tmp_path: Path) -> None:
     assert not done.exists()
 
 
+def test_below_floor_archive_reaps_nothing(tmp_path: Path) -> None:
+    # archived record is unreadable below the floor, so the home is the last readable copy
+    done = _home(tmp_path, "done", "completed")
+    _archive(tmp_path, done, "done")
+    archive._write_data_version(tmp_path, archive._DATA_VERSION - 1)
+
+    assert reap_archived_homes(tmp_path) == 0
+    assert done.exists()
+
+
 def test_reap_removes_overlay_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

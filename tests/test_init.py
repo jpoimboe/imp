@@ -51,9 +51,6 @@ def _stub_screen_recording_theme(monkeypatch, seen: dict) -> None:
 @pytest.fixture(autouse=True)
 def _isolate_global_config(monkeypatch, tmp_path):
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    # This override shadows conftest's autouse fixture for the module, so it must
-    # neuter the migration's legacy source too.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
 
 
 @pytest.fixture(autouse=True)

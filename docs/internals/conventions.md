@@ -89,13 +89,11 @@ pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,
 notice `imp new` / `imp chat` print on stdout via `_emit_human`; the SIGTERM
 success line; `warmup.py`'s `imp: warmup skipped …` lines, which reach the
 foreground terminal too now that `init` / `new` / `chat` / `resume` warm the
-module graph in-process; the one-shot startup-migration notices that
-`config_migrate.py` prints on stderr (`imp: moved …`, `imp: rewrote …`,
-`imp: pruned spike evidence from …`); and daemon-subprocess-internal
-diagnostics (executor traceback, `daemon.py`, the archive progress indicator,
-`loader.py` warnings, `validate_memory_cli.py`, `daemon_connector.py`) — a raw
-Python traceback stays raw to keep its diagnostic value, reaching the user via
-the crash-banner mechanism.
+module graph in-process; and daemon-subprocess-internal diagnostics (executor
+traceback, `daemon.py`, the archive progress indicator, `loader.py` warnings,
+`validate_memory_cli.py`, `daemon_connector.py`) — a raw Python traceback stays
+raw to keep its diagnostic value, reaching the user via the crash-banner
+mechanism.
 
 ## Color in agent prose
 

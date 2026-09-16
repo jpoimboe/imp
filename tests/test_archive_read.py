@@ -115,6 +115,7 @@ def test_read_quest_json_prefers_stored_meta(tmp_path: Path) -> None:
 
 
 def test_read_quest_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
+    from imp.engine import archive
     from imp.engine.archive import record, records_root
 
     legacy_rec = {
@@ -124,6 +125,7 @@ def test_read_quest_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
         "events_hash": "abc",
     }
     record.write_record(records_root(tmp_path), legacy_rec)
+    archive._write_data_version(tmp_path, archive._DATA_VERSION)
     raw = read_quest_json(tmp_path, "old")
     assert raw is not None
     meta = json.loads(raw)

@@ -36,3 +36,13 @@ def test_message_is_one_line_and_carries_the_floors() -> None:
     # summarize_exception keeps only the first line; _pause_lines renders it as the head.
     assert len(str(exc).splitlines()) == 1
     assert (exc.floor, exc.stored, exc.known) == ("index", 6, 5)
+
+
+def test_below_floor_message_names_the_older_direction() -> None:
+    """Below the floor the above-floor copy would be false in every clause."""
+    line = str(ArchiveMismatch(floor="data", stored=6, known=13))
+    assert "older than this imp" in line
+    assert "newer" not in line
+    assert "if it persists, update imp" not in line
+    assert "v6" in line and "v13" in line
+    assert len(line.splitlines()) == 1

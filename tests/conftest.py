@@ -297,11 +297,8 @@ def _isolate_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Point IMP_HOME at an absent per-test dir so no test reads the real global
-    config. XDG_CONFIG_HOME stays set for one reason only — it is the startup
-    migration's legacy source, and a test that shells out to a real `imp`
-    inherits both."""
+    config."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / ".imp-isolated"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
 
 
 @pytest.fixture(autouse=True)
@@ -315,13 +312,6 @@ def _isolate_run_start_gate() -> None:
     # _SNAPSHOT_CAPTURED is process-global; recycled tmp_path names collide quest_dirs.
     import imp.engine.executor as _executor
     _executor._SNAPSHOT_CAPTURED.clear()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_state_dir() -> Generator[None, None, None]:
-    yield
-    # The startup migration writes os.environ directly; pop it so it can't leak forward.
-    os.environ.pop("IMP_STATE_DIR", None)
 
 
 @pytest.fixture(autouse=True)
@@ -494,15 +484,6 @@ def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
     assert started.returncode == 0, started.stderr
     assert (root / ".git" / "rebase-merge").is_dir()
     return env
-
-
-def _assert_outside_a_git_work_tree(path: Path) -> None:
-    """A startup migration's no-op guarantee rests on tmp_path not being a work
-    tree; a --basetemp inside the checkout would silently make the step real."""
-    from imp.engine.worktree import PreconditionError, find_control_root
-
-    with pytest.raises(PreconditionError):
-        find_control_root(path)
 
 
 def _init_repo(root: Path) -> None:

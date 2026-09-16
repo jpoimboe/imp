@@ -838,7 +838,7 @@ def test_cmd_log_follow_archived_only_fills_the_project_from_the_control_root(
 def test_follow_renders_rows_a_pre_upgrade_engine_appends_mid_follow(
     tmp_path: Path,
 ) -> None:
-    # The migration cannot reach a home an OLD binary is still writing to, and the
+    # Nothing repairs a home an OLD binary is still writing to, and the
     # tail reads that file directly. Un-stamped rows must render as round 1; a
     # stamped row in the same tail still shows its round.
     from imp.cli.main import _EventTail

@@ -276,7 +276,7 @@ def test_state_dir_survives_the_policy_env_bake(tmp_path: Path) -> None:
 
 def test_overlay_preserves_an_inherited_state_dir() -> None:
     # IMP_STATE_DIR must stay OUT of ENGINE_ENV_VARS: spawn.py overlays an empty
-    # dict, and membership would strip the migration's deferral pin.
+    # dict, and membership would strip a caller-pinned override (paths.py reads it).
     merged = overlay_engine_env({"IMP_STATE_DIR": "/pinned/old"}, {})
     assert merged["IMP_STATE_DIR"] == "/pinned/old"
 

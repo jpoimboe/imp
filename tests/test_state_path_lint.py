@@ -21,10 +21,9 @@ def test_no_control_imp_reference_remains() -> None:
     assert _hits(TESTS, "control_imp") == []
 
 
-# The only surviving `.imp` path literals in src/ are the imp home's own default,
-# two worktree-relative paths (the per-quest home symlink and the nav-tool
-# visible-subtree carve-out that walks it), and the startup migration's one reader of
-# the pre-migration layout it exists to move.
+# The only surviving `.imp` path literals in src/ are the imp home's own default
+# and two worktree-relative paths (the per-quest home symlink and the nav-tool
+# visible-subtree carve-out that walks it).
 _SRC_ALLOWED = {
     ('imp/paths.py',
      'base = os.environ.get("IMP_HOME") or str(Path.home() / ".imp")'),
@@ -32,8 +31,6 @@ _SRC_ALLOWED = {
      'link = worktree_path / ".imp" / "quests" / quest_dir.name'),
     ('imp/agents/tools/nav.py',
      'quests = root / ".imp" / "quests"'),
-    ('imp/cli/state_migrate.py',
-     'return control_root / ".imp"'),
 }
 
 

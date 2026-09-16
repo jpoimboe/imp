@@ -1,7 +1,8 @@
 """Every test that spawns the imp CLI as a subprocess must pass an explicit
 `cwd`. Without one the child runs at the pytest invocation dir — the maintainer's
-own checkout — where `imp.__main__:main` would stage a `git mv` of a tracked file
-mid-suite. That is a working-tree mutation no assertion would otherwise catch."""
+own checkout — and resolves its control root there, reading and writing the
+maintainer's live quest state mid-suite. That is a side effect on real data no
+assertion would otherwise catch."""
 from __future__ import annotations
 
 import ast

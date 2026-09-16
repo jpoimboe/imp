@@ -205,7 +205,6 @@ def _module_imp_home():
 def _isolate_global_config(_module_imp_home, monkeypatch):
     """Shadows conftest's per-test isolation with this module's shared home."""
     monkeypatch.setenv("IMP_HOME", str(_module_imp_home))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(_module_imp_home / "xdg"))
 
 
 @pytest.fixture(scope="module")

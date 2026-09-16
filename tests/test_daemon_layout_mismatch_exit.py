@@ -14,7 +14,8 @@ from tests.conftest import _seed_control
 
 def _seed_downgraded_home(control: Path, cid: str) -> None:
     """A home stamped one version FORWARD of this engine (stored > engine): a
-    genuine downgrade, which Quest.load's migrate() rejects with LayoutMismatch."""
+    genuine downgrade, which Quest.load's stored-version guard rejects with
+    LayoutMismatch."""
     quest_dir = project_state_dir(control) / "quests" / cid
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({

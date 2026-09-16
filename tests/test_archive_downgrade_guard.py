@@ -1,7 +1,8 @@
-"""Read-side downgrade guard: an archive floor newer than this install refuses to be read."""
+"""Read-side floor guards: an archive floor this install cannot vouch for refuses the read."""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -61,6 +62,18 @@ def _raise_index_floor(control: Path) -> int:
     return ahead
 
 
+def _stale_index_floor(control: Path) -> None:
+    """Stamp the index floor one behind: stale enough to earn a rebuild, not ahead
+    enough to refuse a read."""
+    behind = index._SCHEMA_VERSION - 1
+    conn = sqlite3.connect(archive.index_path(control))
+    try:
+        conn.execute(f"PRAGMA user_version = {behind}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # Index-only reads: they open index.db and run a query, touching no record or blob.
 _INDEX_ENTRY_POINTS: list[tuple[str, Callable[[Path], Any]]] = [
     ("completed_rows", read.completed_rows),
@@ -72,8 +85,8 @@ _INDEX_ENTRY_POINTS: list[tuple[str, Callable[[Path], Any]]] = [
 _INDEX_IDS = [name for name, _ in _INDEX_ENTRY_POINTS]
 _INDEX_CALLS = [fn for _, fn in _INDEX_ENTRY_POINTS]
 
-# Record/blob reads: _migrate_archive_blobs rewrites the records these read, so the
-# data floor is the right gate for all five.
+# Record/blob reads: all five consume record and blob bytes this install cannot
+# vouch for below the floor, so the data floor is the right gate.
 _RECORD_ENTRY_POINTS: list[tuple[str, Callable[[Path], Any]]] = [
     ("read_events", lambda c: read.read_events(c, ARCH)),
     ("read_quest_json", lambda c: read.read_quest_json(c, ARCH)),
@@ -134,16 +147,33 @@ def test_equal_floors_still_read(
     assert [row[0] for row in call(tmp_path)] == [ARCH]
 
 
-def test_lower_data_floor_migrates_instead_of_raising(tmp_path: Path) -> None:
-    """A floor *behind* this install is the ordinary migrate-up case, not a refusal."""
+def test_lower_data_floor_raises_instead_of_migrating(tmp_path: Path) -> None:
+    """A floor *behind* this install refuses too: no migration can upgrade it."""
     _seed_archived_quest(tmp_path)
     archive.data_version_path(tmp_path).write_text("1")
 
-    rows = read.completed_rows(tmp_path)
+    with pytest.raises(ArchiveMismatch) as excinfo:
+        archive.check_data_floor(tmp_path)
 
-    assert [row[0] for row in rows] == [ARCH]
-    assert (archive.data_version_path(tmp_path).read_text().strip()
-            == str(archive._DATA_VERSION))
+    exc = excinfo.value
+    assert (exc.floor, exc.stored, exc.known) == ("data", 1, archive._DATA_VERSION)
+    assert [row[0] for row in read.completed_rows(tmp_path)] == [ARCH]
+    assert archive.data_version_path(tmp_path).read_text().strip() == "1"
+
+
+def test_ensure_current_leaves_a_below_floor_archive_alone(tmp_path: Path) -> None:
+    """rebuild_index derives its columns from the blobs, so a below-floor archive is
+    never reindexed — even with a deliberately stale index, which keeps answering."""
+    _seed_archived_quest(tmp_path)
+    _stale_index_floor(tmp_path)
+    archive.data_version_path(tmp_path).write_text("1")
+    before = archive.index_path(tmp_path).read_bytes()
+    assert os.access(archive.archive_root(tmp_path), os.W_OK)
+
+    archive.ensure_current(tmp_path)
+
+    assert archive.index_path(tmp_path).read_bytes() == before
+    assert [row[0] for row in read.completed_rows(tmp_path)] == [ARCH]
 
 
 def test_both_floors_ahead_report_the_floor_each_read_touches(tmp_path: Path) -> None:
