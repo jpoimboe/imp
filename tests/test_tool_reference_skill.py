@@ -135,5 +135,5 @@ def test_tool_reference_documents_the_readonly_tmp_rule() -> None:
     # `$TMPDIR` literally. Whitespace-normalized: the sentences are hard-wrapped.
     body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
     assert ("Inside the sandbox `/tmp` is readable but read-only; write scratch "
-            "under `$TMPDIR`, a per-quest dir that is wiped when the step ends. "
-            "The file tools don't expand `$TMPDIR`.") in body
+            "under `$TMPDIR`, a dir of your own that is wiped when the step "
+            "ends. The file tools don't expand `$TMPDIR`.") in body

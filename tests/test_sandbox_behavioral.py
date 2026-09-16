@@ -59,6 +59,7 @@ from imp.engine.sandbox import (
     overlay_mode,
     resolve_policy,
     sandbox_available,
+    with_scratch_slot,
 )
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
@@ -96,6 +97,17 @@ def _scratch_parent() -> Path:
     concurrently under `-n auto` would collide in it.
     """
     return Path(tempfile.mkdtemp(prefix="imp-beh-tmp-")) / f"imp-{os.getuid()}"
+
+
+def _var_tmp_parent() -> Path:
+    """A throwaway `/var/tmp/<unique>/imp-<uid>` scratch parent, unique per test.
+
+    The /var/tmp twin of _scratch_parent: ensure_quest_tmp_dir chmods a leaf's parent
+    unconditionally, so the leaf must sit under imp's own dir — never directly under
+    the system /var/tmp, a shape production never produces.
+    """
+    return Path(
+        tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp")) / f"imp-{os.getuid()}"
 
 
 def _active_policy(worktree: Path, *, home: Path | None = None,
@@ -1912,7 +1924,8 @@ def test_var_tmp_writable_and_per_quest_isolated() -> None:
     the host's real /var/tmp root is not visible, and in-sandbox writes land in the
     per-quest source dir, not the host root."""
     root = _make_root()
-    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp"))
+    qvtmp_parent = _var_tmp_parent()
+    qvtmp = qvtmp_parent / "qvt"
     host_marker = Path("/var/tmp") / f"host-{uuid.uuid4().hex}"
     in_marker = f"beh-{uuid.uuid4().hex}"
     try:
@@ -1932,7 +1945,7 @@ def test_var_tmp_writable_and_per_quest_isolated() -> None:
         assert not (Path("/var/tmp") / in_marker).exists()
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(qvtmp, ignore_errors=True)
+        shutil.rmtree(qvtmp_parent.parent, ignore_errors=True)
         host_marker.unlink(missing_ok=True)
 
 
@@ -1942,7 +1955,8 @@ def test_var_tmp_supports_overlay_upperdir() -> None:
     the sandbox — the reason /var/tmp (a real disk fs) is bound rather than tmpfs
     /tmp, which many kernels reject as an overlay upperdir."""
     root = _make_root()
-    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-ovl-", dir="/var/tmp"))
+    qvtmp_parent = _var_tmp_parent()
+    qvtmp = qvtmp_parent / "qvt-ovl"
     try:
         pol = dataclasses.replace(_active_policy(root), quest_var_tmp_dir=str(qvtmp))
         ctx = _ctx(root, pol)
@@ -1957,7 +1971,59 @@ def test_var_tmp_supports_overlay_upperdir() -> None:
         assert "OVL_OK" in r["stdout"], r        # upperdir under /var/tmp mounted
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(qvtmp, ignore_errors=True)
+        shutil.rmtree(qvtmp_parent.parent, ignore_errors=True)
+
+
+@pytest.mark.skipif(not os.access("/var/tmp", os.W_OK), reason="requires writable /var/tmp")
+def test_var_tmp_slot_is_minted_at_spawn_and_unreachable_from_a_sibling_slot() -> None:
+    """A slotted policy's /var/tmp leaf exists nowhere before the spawn, and
+    bind_plan emits it as a --bind (not --bind-try): the spawn-time mint is what
+    keeps bwrap setup alive, and the narrowed source is what keeps a sibling slot's
+    files out of the namespace."""
+    root = _make_root()
+    scratch = _scratch_parent() / "qid"
+    qvtmp_parent = _var_tmp_parent()
+    qvtmp = qvtmp_parent / "qvt"
+    marker = f"slot-{uuid.uuid4().hex}"
+
+    def _bash_no_var_tmp_precreate(ctx: ToolContext, cmd: str) -> dict[str, object]:
+        # NOT _bash: its unconditional mkdir of quest_var_tmp_dir would create the
+        # leaf this test requires the spawn hook to mint.
+        async def _run() -> str:
+            return await get_registry()["bash"].async_invoke(ctx, {"command": cmd})
+        return json.loads(anyio.run(_run))
+
+    try:
+        base = dataclasses.replace(
+            _active_policy(root, quest_tmp_dir=str(scratch),
+                           quest_tmp_mask=str(scratch.parent)),
+            quest_var_tmp_dir=str(qvtmp))
+        pol_a = with_scratch_slot(base, "explorer-1")
+        pol_b = with_scratch_slot(base, "explorer-2")
+        leaf_a = qvtmp / "explorer-1"
+        assert not leaf_a.exists()     # nothing has created the bind source yet
+
+        r = _bash_no_var_tmp_precreate(
+            _ctx(root, pol_a), f"echo hi > /var/tmp/{marker} && echo ok")
+
+        # (a) the spawn succeeded — no "Can't find source path" bwrap abort — and the
+        # write landed in this slot's leaf on the host
+        assert r["returncode"] == 0, r
+        assert "ok" in r["stdout"], r
+        assert (leaf_a / marker).read_text().strip() == "hi"
+        # (b) the minted leaf is locked down
+        assert leaf_a.stat().st_mode & 0o777 == 0o700
+
+        # (c) a sibling slot's namespace cannot reach the marker at any path
+        sib = _bash_no_var_tmp_precreate(
+            _ctx(root, pol_b),
+            f"ls -A /var/tmp; test -e /var/tmp/{marker} && echo LEAKED; "
+            f"test -e {leaf_a / marker} && echo HOSTPATHVISIBLE; echo done")
+        assert sib["stdout"].split() == ["done"], sib
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(scratch.parent.parent, ignore_errors=True)
+        shutil.rmtree(qvtmp_parent.parent, ignore_errors=True)
 
 
 def test_worktrees_mask_sibling_survives_in_sandbox_prune() -> None:

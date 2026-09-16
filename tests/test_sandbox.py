@@ -31,6 +31,7 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
     sandbox_config_from_raw,
+    with_scratch_slot,
 )
 from imp.paths import imp_home, project_state_dir
 from imp.providers.config import parse_config_layer
@@ -2510,6 +2511,79 @@ def test_prepare_spawn_policy_recreates_the_scratch_dir_0o700(tmp_path):
     assert scratch.is_dir()
     assert scratch.stat().st_mode & 0o777 == 0o700
     assert scratch.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_prepare_spawn_policy_creates_the_var_tmp_bind_source_0o700(tmp_path):
+    # build_sandbox_spawn substitutes quest_var_tmp_dir as the --bind (not --bind-try)
+    # source for the namespace /var/tmp, and nothing else mints a per-agent slot leaf:
+    # spawn is the one hook ahead of every keeper open, so it must self-heal this too.
+    scratch = tmp_path / "t" / f"imp-{os.getuid()}" / "abc" / "explorer-1"
+    var_tmp = tmp_path / "vt" / f"imp-{os.getuid()}" / "abc" / "explorer-1"
+    pol = _policy(quest_tmp_dir=str(scratch), quest_var_tmp_dir=str(var_tmp))
+    old_umask = os.umask(0)          # a permissive umask would leave a level 0o777
+    try:
+        prepare_spawn_policy(pol)
+    finally:
+        os.umask(old_umask)
+    assert var_tmp.is_dir()
+    assert var_tmp.stat().st_mode & 0o777 == 0o700
+    assert var_tmp.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_with_scratch_slot_narrows_both_trees_and_tmpdir():
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc",
+                  quest_tmp_mask="/tmp/imp-1000",
+                  quest_var_tmp_dir="/var/tmp/imp-1000/abc")
+
+    slotted = with_scratch_slot(pol, "explorer-1")
+
+    assert slotted.quest_tmp_dir == "/tmp/imp-1000/abc/explorer-1"
+    assert dict(slotted.child_env)["TMPDIR"] == "/tmp/imp-1000/abc/explorer-1"
+    assert slotted.quest_var_tmp_dir == "/var/tmp/imp-1000/abc/explorer-1"
+    # The mask stays on the scratch ROOT: the tmpfs covers every sibling slot and
+    # only this one is re-exposed rw, so a sibling is ABSENT from the namespace
+    # rather than merely differently named.
+    assert slotted.quest_tmp_mask == pol.quest_tmp_mask == "/tmp/imp-1000"
+    assert (slotted.quest_tmp_dir, "rw") in slotted.bind_plan()
+    # nothing else in the plan moves
+    assert slotted.worktree == pol.worktree
+    assert slotted.secret_dirs == pol.secret_dirs
+    assert slotted.writable_caches == pol.writable_caches
+
+
+def test_with_scratch_slot_leaves_an_empty_var_tmp_dir_empty():
+    # "" is a representable shape meaning "no /var/tmp bind at all"; a naive join
+    # would turn it into the bare relative "explorer-1" and bind that.
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc", quest_var_tmp_dir="")
+
+    slotted = with_scratch_slot(pol, "explorer-1")
+
+    assert slotted.quest_var_tmp_dir == ""
+    assert ("/var/tmp", "rw") not in slotted.bind_plan()
+    assert slotted.quest_tmp_dir == "/tmp/imp-1000/abc/explorer-1"
+
+
+def test_with_scratch_slot_nests_on_a_second_application():
+    # Nested dispatch: a subagent's subagent slots UNDER its parent's slot.
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc",
+                  quest_var_tmp_dir="/var/tmp/imp-1000/abc")
+
+    nested = with_scratch_slot(with_scratch_slot(pol, "explorer-1"), "spiker-2")
+
+    assert nested.quest_tmp_dir == "/tmp/imp-1000/abc/explorer-1/spiker-2"
+    assert nested.quest_var_tmp_dir == "/var/tmp/imp-1000/abc/explorer-1/spiker-2"
+    assert dict(nested.child_env)["TMPDIR"] == nested.quest_tmp_dir
+
+
+def test_with_scratch_slot_is_identity_when_there_is_nothing_to_slot():
+    # An inactive policy has no bind and no child_env TMPDIR to move, and an active
+    # one carrying no scratch dir must keep threading the SAME object to the child:
+    # tests/test_subagents.py:942 pins that identity as a security property.
+    inactive = _policy(active=False)
+    assert with_scratch_slot(inactive, "explorer-1") is inactive
+
+    no_scratch = _policy(quest_tmp_dir="", child_env=(("PATH", "/usr/bin"),))
+    assert with_scratch_slot(no_scratch, "explorer-1") is no_scratch
 
 
 def test_var_tmp_source_has_no_same_path_fallback():

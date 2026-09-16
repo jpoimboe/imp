@@ -848,8 +848,12 @@ class SandboxNamespace:
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     """Ready a frozen policy for THIS spawn: re-create imp's own re-exposed ref
-    directories and the per-quest scratch dir, and drop any mask/ro-bind path that
-    has since vanished.
+    directories and BOTH scratch bind sources — the /tmp leaf and, when set, the
+    /var/tmp one — and drop any mask/ro-bind path that has since vanished. Each
+    scratch leaf is a --bind source, so one that does not exist yet (a per-agent slot
+    dir, or the quest leaf after a step wipe) would abort bwrap setup rather than
+    degrade; this hook runs ahead of every keeper open, so minting both here covers
+    every spawn.
 
     git_ref_reexpose (.git/refs/heads/imp) is created once, at policy-bake time in
     resolve_policy — but git prunes a ref directory the moment its last loose ref
@@ -901,6 +905,10 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         # covers the imp-<uid> PARENT too: mkdir(mode=) applies only to the leaf, so
         # a recreated parent would land at the umask default.
         ensure_quest_tmp_dir(Path(policy.quest_tmp_dir))
+    if policy.quest_var_tmp_dir:
+        # The bwrap SOURCE for the namespace /var/tmp, and --bind, not --bind-try: a
+        # per-agent slot leaf is created nowhere else, so its absence would abort setup.
+        ensure_quest_tmp_dir(Path(policy.quest_var_tmp_dir))
     home_layer = policy.home_layer
     if policy.overlay_root is not None:
         root = Path(policy.overlay_root.path)
@@ -924,6 +932,35 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
                            if Path(policy.session_socket_ro).exists() else ""),
         state_repo_ro=(policy.state_repo_ro
                        if Path(policy.state_repo_ro).is_file() else ""),
+    )
+
+
+def with_scratch_slot(policy: SandboxPolicy, slot: str) -> SandboxPolicy:
+    """The policy a DISPATCHED agent runs under: both scratch trees narrowed to a
+    private `<parent leaf>/<slot>` dir, so two agents dispatched in parallel cannot
+    read, overwrite or interleave each other's files. Applying it twice nests, which
+    is what makes a subagent's subagent land under its parent's slot.
+
+    quest_tmp_mask is deliberately UNCHANGED: the tmpfs still covers the whole
+    scratch root and only this slot is re-exposed rw, so a sibling's dir is ABSENT
+    from the namespace rather than merely differently named — the same
+    tmpfs-plus-single-re-expose pattern that keeps sibling quests apart. Narrowing
+    the /var/tmp source has the same effect: it binds ONTO the namespace's /var/tmp.
+
+    Returned unchanged when there is nothing to slot — inactive (no bind, no TMPDIR)
+    or no scratch dir at all, where a join would yield the bare relative "<slot>",
+    garbage as both a bind source and a TMPDIR. Neither leaf need exist: every keeper
+    open mints both through prepare_spawn_policy."""
+    if not policy.active or not policy.quest_tmp_dir:
+        return policy
+    tmp_dir = str(Path(policy.quest_tmp_dir) / slot)
+    return replace(
+        policy,
+        quest_tmp_dir=tmp_dir,
+        quest_var_tmp_dir=(str(Path(policy.quest_var_tmp_dir) / slot)
+                           if policy.quest_var_tmp_dir else ""),
+        child_env=tuple((k, tmp_dir) if k == "TMPDIR" else (k, v)
+                        for k, v in policy.child_env),
     )
 
 

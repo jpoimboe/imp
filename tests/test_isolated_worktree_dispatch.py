@@ -238,6 +238,52 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     assert list((project_state_dir(tmp_path) / "worktrees").glob("spike-*")) == []
 
 
+def test_each_dispatch_gets_its_own_scratch_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Two agents live at once under one parent must not share a scratch dir. Both
+    # dispatch branches narrow both trees to <quest leaf>/<transcript dir name>:
+    # the non-isolated one from the parent's policy, the isolated one from its own
+    # freshly built policy, which resolves the same quest-level leaf.
+    from imp.engine.sandbox import SandboxConfig, resolve_policy
+
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
+    quest = _make_quest(tmp_path)
+    invs: list = []
+    ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
+                            on_run=invs.append))
+    ctx.subagent_defs["prober"] = _isolated_agent("prober")
+    parent = resolve_policy(
+        worktree=quest.project_root, control_root=quest.control_root,
+        quest_id=quest.id, cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest.quest_dir)
+    assert parent.quest_var_tmp_dir, "setup: the per-test /var/tmp root is writable"
+    ctx.base_sandbox_policy = parent
+
+    anyio.run(dispatch_task, ctx, "rev", "review")        # non-isolated branch
+    anyio.run(dispatch_task, ctx, "prober", "measure")    # isolated branch
+
+    plain, isolated = (i.sandbox_policy for i in invs)
+    assert plain.quest_tmp_dir == f"{parent.quest_tmp_dir}/rev-1"
+    assert isolated.quest_tmp_dir == f"{parent.quest_tmp_dir}/prober-2"
+    assert plain.quest_var_tmp_dir == f"{parent.quest_var_tmp_dir}/rev-1"
+    assert isolated.quest_var_tmp_dir == f"{parent.quest_var_tmp_dir}/prober-2"
+    # distinct from each other and from the parent, on both trees
+    assert len({plain.quest_tmp_dir, isolated.quest_tmp_dir,
+                parent.quest_tmp_dir}) == 3
+    assert len({plain.quest_var_tmp_dir, isolated.quest_var_tmp_dir,
+                parent.quest_var_tmp_dir}) == 3
+    # $TMPDIR follows, so the agent's own prompt and tools see the slot
+    assert dict(plain.child_env)["TMPDIR"] == plain.quest_tmp_dir
+    assert dict(isolated.child_env)["TMPDIR"] == isolated.quest_tmp_dir
+    # the slot name IS the transcript dir name, so scratch and transcript correlate
+    for inv, pol in zip(invs, (plain, isolated), strict=True):
+        assert Path(pol.quest_tmp_dir).name == inv.transcript_dir.name
+    # the mask stays on the scratch root, so siblings are absent, not renamed
+    assert plain.quest_tmp_mask == isolated.quest_tmp_mask == parent.quest_tmp_mask
+
+
 def test_dispatch_task_forwards_ctx_pythonpath_to_invocation(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path)
     capture: dict = {}

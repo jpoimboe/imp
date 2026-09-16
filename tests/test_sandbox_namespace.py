@@ -30,6 +30,7 @@ from imp.engine.sandbox import (
     make_home_layer,
     overlay_mode,
     sandbox_available,
+    with_scratch_slot,
 )
 
 # The module timeout is the SINGLE outer backstop for a genuine hang. It has to
@@ -80,10 +81,13 @@ requires_overlay = pytest.mark.skipif(
 
 
 def _policy_for(root: Path, *, network: bool = True, home: Path | None = None,
-                secret_dirs: tuple[str, ...] = ()) -> SandboxPolicy:
+                secret_dirs: tuple[str, ...] = (),
+                quest_tmp: Path | None = None) -> SandboxPolicy:
     """A minimal real active policy whose worktree is `root`, with the host PATH so
     sh, ps, kill and readlink resolve inside the namespace. `home` defaults inside
-    the worktree; the overlay test passes a sibling, which no later bind covers."""
+    the worktree; the overlay test passes a sibling, which no later bind covers.
+    `quest_tmp` re-exposes a scratch dir rw at its real path under a tmpfs over its
+    parent — the shape resolve_policy produces — and points TMPDIR at it."""
     git = root / ".git"
     git.mkdir(exist_ok=True)
     home = home or (root / "home")
@@ -103,9 +107,12 @@ def _policy_for(root: Path, *, network: bool = True, home: Path | None = None,
                 p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
                 if "imp-shim" not in p) or "/usr/bin:/bin"),
             ("HOME", str(home)),
+            *((("TMPDIR", str(quest_tmp)),) if quest_tmp is not None else ()),
         ),
         network=network,
         note="",
+        quest_tmp_dir=str(quest_tmp) if quest_tmp is not None else "",
+        quest_tmp_mask=str(quest_tmp.parent) if quest_tmp is not None else "",
     )
 
 
@@ -724,3 +731,60 @@ def test_a_failed_allocation_strands_neither_an_fd_nor_a_node(monkeypatch) -> No
             ns.close()
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_two_scratch_slots_cannot_see_each_others_files():
+    # The isolation the slot exists for. Narrowing the RE-EXPOSE rather than handing
+    # out distinct names is what makes a collision unrepresentable: the tmpfs still
+    # covers the scratch root, so a sibling's dir is absent from the namespace.
+    # Neither slot dir exists before its open — prepare_spawn_policy mints it.
+    root = _make_root()
+    scratch_root = Path(
+        tempfile.mkdtemp(prefix="imp-ns-scratch-")) / f"imp-{os.getuid()}"
+    quest_tmp = scratch_root / "qid"
+    try:
+        base = _policy_for(root, quest_tmp=quest_tmp)
+        ns_a = SandboxNamespace.open(policy=with_scratch_slot(base, "explorer-1"),
+                                     engine_env={}, environ=os.environ)
+        try:
+            ns_b = SandboxNamespace.open(
+                policy=with_scratch_slot(base, "explorer-2"),
+                engine_env={}, environ=os.environ)
+            try:
+                wrote = _join(ns_a, 'echo A > "$TMPDIR/probe" && cat "$TMPDIR/probe"',
+                              cwd=str(root))
+                assert wrote.returncode == 0, wrote.stderr
+                assert wrote.stdout.strip() == "A"
+                assert (quest_tmp / "explorer-1" / "probe").read_text() == "A\n"
+
+                # (a) unreachable from slot B: not in its own $TMPDIR, not at A's
+                # real host path, and A's slot dir is not even a directory there.
+                probe_a = quest_tmp / "explorer-1" / "probe"
+                seen = _join(
+                    ns_b,
+                    'ls -A "$TMPDIR"; '
+                    f'test -e {probe_a} && echo LEAKED; '
+                    f'test -d {quest_tmp / "explorer-1"} && echo SLOTVISIBLE; '
+                    'echo done',
+                    cwd=str(root))
+                assert seen.stdout.split() == ["done"], seen.stdout
+
+                # (b) B still has a working scratch dir of its own, and A's is intact
+                mine = _join(ns_b, 'echo B > "$TMPDIR/probe" && echo ok',
+                             cwd=str(root))
+                assert mine.returncode == 0, mine.stderr
+                assert "ok" in mine.stdout
+                assert (quest_tmp / "explorer-2" / "probe").read_text() == "B\n"
+                assert probe_a.read_text() == "A\n"
+
+                # (c) host /tmp outside the scratch root is still the read-only floor
+                for ns in (ns_a, ns_b):
+                    denied = _join(ns, "echo x > /tmp/probe", cwd=str(root))
+                    assert denied.returncode != 0, denied.stdout
+            finally:
+                ns_b.close()
+        finally:
+            ns_a.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(scratch_root.parent, ignore_errors=True)

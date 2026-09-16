@@ -15,7 +15,7 @@ readable/writable set when active (masked secrets stay masked). For
 matches as absolute paths.
 
 Inside the sandbox `/tmp` is readable but read-only; write scratch under `$TMPDIR`,
-a per-quest dir that is wiped when the step ends. The file tools don't expand
+a dir of your own that is wiped when the step ends. The file tools don't expand
 `$TMPDIR`.
 
 Shared caps: text output is capped at 50 KB per call, and only the first 5 MB
