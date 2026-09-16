@@ -31,7 +31,8 @@ not the sync/async signature.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, cast
 
 from imp.agents.loop_guard import LoopGuard
@@ -85,57 +86,58 @@ class ObserveSession:
             pending, self._pending_terminal = self._pending_terminal, None
             yield pending
             return
-        async for raw in self._receive():
-            async for item in self._message_to_items(raw):
-                yield item
-            for info in self._drain_kills():
-                self.elog.append(agent_id=self.aid, type="tool_killed",
-                                 payload=info)
-            fatal = self._fatal_error()
-            if fatal is not None:
-                yield Error(payload=fatal)
-                return
-            if self.ctx.dependency_wait:
-                # Before _is_terminal: that is where a captured complete_step
-                # becomes the step's output, and a waiting turn has no output.
-                yield DependencyWaited(deps=tuple(self.ctx.dependency_wait))
-                return
-            if await self._is_terminal(raw):
-                # LoopGuard single-feed: a no-complete_step terminal turn is fed
-                # its tools-bearing record here EXACTLY ONCE (a complete_step turn
-                # is fed by the driver's validate_output_or_nudge instead).
-                rec = self._flush_turn_record()
-                assert self.guard is not None
-                if rec is not None and not self._complete_step_called:
-                    loop_err = self.guard.observe(rec)
-                    if loop_err is not None:
-                        yield Error(payload=cast(dict[str, Any], perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))["payload"]))
+        async with contextlib.aclosing(self._receive()) as received:
+            async for raw in received:
+                async for item in self._message_to_items(raw):
+                    yield item
+                for info in self._drain_kills():
+                    self.elog.append(agent_id=self.aid, type="tool_killed",
+                                     payload=info)
+                fatal = self._fatal_error()
+                if fatal is not None:
+                    yield Error(payload=fatal)
+                    return
+                if self.ctx.dependency_wait:
+                    # Before _is_terminal: that is where a captured complete_step
+                    # becomes the step's output, and a waiting turn has no output.
+                    yield DependencyWaited(deps=tuple(self.ctx.dependency_wait))
+                    return
+                if await self._is_terminal(raw):
+                    # LoopGuard single-feed: a no-complete_step terminal turn is fed
+                    # its tools-bearing record here EXACTLY ONCE (a complete_step turn
+                    # is fed by the driver's validate_output_or_nudge instead).
+                    rec = self._flush_turn_record()
+                    assert self.guard is not None
+                    if rec is not None and not self._complete_step_called:
+                        loop_err = self.guard.observe(rec)
+                        if loop_err is not None:
+                            yield Error(payload=cast(dict[str, Any], perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))["payload"]))
+                            return
+                    # A completed handoff turn wins over the classifier.
+                    if self._handoff_done:
+                        yield EndOfTurn(last_text=self._last_text())
                         return
-                # A completed handoff turn wins over the classifier.
-                if self._handoff_done:
+                    # complete_step / post-hoc ceiling: hand the driver an EndOfTurn;
+                    # it validates the captured complete_step or trips the ceiling.
+                    if self._complete_step_called or self.posthoc_ceiling_tripped():
+                        # Co-turn tool visibility (old claude.py:2415): a
+                        # SUCCESSFUL complete_step still feeds its flushed record's
+                        # co-turn tool outcomes to the guard exactly once. Guard state
+                        # is discarded on the driver's agent_result return, so this is
+                        # observe-only; gate on validity so a to-be-nudged malformed
+                        # complete_step is NOT fed here (the driver's validate feeds it).
+                        if (rec is not None and self._complete_step_called
+                                and self._complete_step_ok()):
+                            self.guard.observe(rec)
+                        yield EndOfTurn(last_text=self._last_text())
+                        return
+                    err = await self._terminal_error(self._trailing_text())
+                    if err is not None:
+                        yield Error(payload=err)
+                        return
                     yield EndOfTurn(last_text=self._last_text())
                     return
-                # complete_step / post-hoc ceiling: hand the driver an EndOfTurn;
-                # it validates the captured complete_step or trips the ceiling.
-                if self._complete_step_called or self.posthoc_ceiling_tripped():
-                    # Co-turn tool visibility (old claude.py:2415): a
-                    # SUCCESSFUL complete_step still feeds its flushed record's
-                    # co-turn tool outcomes to the guard exactly once. Guard state
-                    # is discarded on the driver's agent_result return, so this is
-                    # observe-only; gate on validity so a to-be-nudged malformed
-                    # complete_step is NOT fed here (the driver's validate feeds it).
-                    if (rec is not None and self._complete_step_called
-                            and self._complete_step_ok()):
-                        self.guard.observe(rec)
-                    yield EndOfTurn(last_text=self._last_text())
-                    return
-                err = await self._terminal_error(self._trailing_text())
-                if err is not None:
-                    yield Error(payload=err)
-                    return
-                yield EndOfTurn(last_text=self._last_text())
-                return
 
     # --- driver-facing terminal surface ---------------------------------
     def captured_complete_step(self) -> dict[str, Any] | None:
@@ -195,7 +197,7 @@ class ObserveSession:
 
     # --- abstract hooks a subclass MUST implement -----------------------
     async def _enter(self) -> None: raise NotImplementedError
-    def _receive(self) -> AsyncIterator[Any]: raise NotImplementedError
+    def _receive(self) -> AsyncGenerator[Any, None]: raise NotImplementedError
     def _message_to_items(self, raw: Any) -> AsyncIterator[Any]:
         raise NotImplementedError
     def _drain_kills(self) -> list[dict[str, Any]]: raise NotImplementedError

@@ -674,3 +674,46 @@ async def test_run_finally_shreds_home_even_if_rollout_persist_raises(
     events = [ev async for ev in runner.run(_build_invocation(tmp_path))]
     assert calls == ["persist", "teardown"]
     assert events[-1] == {"type": "agent_result", "payload": {"status": "Success"}}
+
+
+@pytest.mark.anyio
+async def test_turn_boundary_closes_event_stream_before_next_turn(
+    tmp_path: Path,
+) -> None:
+    """The full teardown cascade under codex: turn 0's event stream is closed
+    before turn 1's run_streamed, with no intervening event-loop tick for the
+    async-generator finalizer hook to exploit. Falsifiable in both directions —
+    reverting EITHER aclosing wrap (run_agent_loop's events(), ObserveSession's
+    _receive()) leaves the close un-recorded at the boundary."""
+    import dataclasses
+
+    _seed_auth(tmp_path)
+    elog = InMemoryEventLog()
+    order: list[str] = []
+
+    scripted = [
+        [thread_started("thr-1"),
+         agent_message("still working on it"),
+         turn_completed(input_tokens=10, output_tokens=5)],
+        [agent_message("done now"),
+         mcp_call(name="complete_step", args={"answer": "42"},
+                  result="step complete", item_id="cs-1"),
+         turn_completed(input_tokens=20, output_tokens=7)],
+    ]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(
+            scripted_turns=scripted,
+            on_turn_start=lambda: order.append("run_streamed"),
+            on_events_aclose=lambda: order.append("aclose")),
+    )
+    runner._canonical_auth_override = tmp_path / "auth.json"  # test seam
+    inv = dataclasses.replace(
+        _build_invocation(tmp_path, event_log=elog),
+        continuation_fn=lambda last: ("keep going", False))
+
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_result", events
+    assert events[-1]["payload"] == {"answer": "42"}
+    assert order == ["run_streamed", "aclose", "run_streamed", "aclose"]
