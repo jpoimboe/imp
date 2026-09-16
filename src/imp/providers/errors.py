@@ -14,6 +14,8 @@ Do NOT use this hierarchy for tool-side errors — those use
 
 from __future__ import annotations
 
+import os
+import traceback
 from typing import Literal
 
 Category = Literal[
@@ -121,13 +123,29 @@ def make_unknown_error_event(
     """Build the canonical 'unknown' error event for the runner's
     top-level fallback ``except Exception`` branch. Single source of
     truth so the wire format stays consistent. ``detail`` lets the runner
-    attach captured diagnostics (e.g. the subprocess ``stderr_tail``)."""
+    attach captured diagnostics (e.g. the subprocess ``stderr_tail``); a
+    raised exception also contributes a ``traceback_tail``, and a
+    messageless one names its crash site."""
+    out: dict[str, object] = dict(detail or {})
+    summary = str(exc)
+    tb = exc.__traceback__
+    if tb is None:
+        summary = summary or type(exc).__name__
+    else:
+        out["traceback_tail"] = "\n".join(
+            "".join(traceback.format_exception(exc)).splitlines()[-15:])
+        if not summary:
+            frame = traceback.extract_tb(tb)[-1]
+            summary = (
+                f"{type(exc).__name__} at"
+                f" {os.path.basename(frame.filename)}:{frame.lineno}"
+            )
     return {
         "type": "error",
         "payload": {
             "category": "unknown",
             "kind": type(exc).__name__,
-            "message": f"unclassified provider error: {exc}",
-            "detail": detail or {},
+            "message": f"unclassified provider error: {summary}",
+            "detail": out,
         },
     }

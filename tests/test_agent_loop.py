@@ -33,6 +33,32 @@ class TrippingGuard:
         return self._err
 
 
+class RecordingEvents:
+    """One turn's item stream as a PLAIN async iterator, not an async generator:
+    nothing closes it implicitly, so `aclose()` is recorded only when the
+    consumer closes it."""
+
+    def __init__(self, items, log, turn):
+        self._items = list(items)
+        self._pos = 0
+        self._log = log
+        self._turn = turn
+        log.append(("open", turn))
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._pos >= len(self._items):
+            raise StopAsyncIteration
+        item = self._items[self._pos]
+        self._pos += 1
+        return item
+
+    async def aclose(self):
+        self._log.append(("close", self._turn))
+
+
 class FakeSession:
     def __init__(self, turns, *, subagent_depth=0, invocation=None, elog=None,
                  guard=None, handoff_before=None, handoff_after=("none", None),
@@ -54,6 +80,7 @@ class FakeSession:
         self.sent = []            # (text, human) tuples from send()
         self.sent_results = []    # lists passed to send_tool_results()
         self.interjects = 0
+        self.stream_log = []      # ("open"|"close", turn index) in call order
         self._last_end_text = ""
         self._handoff_before = handoff_before
         self._handoff_after = handoff_after
@@ -64,13 +91,14 @@ class FakeSession:
     def cancelled(self):
         return False
 
-    async def events(self):
-        turn = self._turns[self._i]
+    def events(self):
+        turn_index = self._i
+        turn = self._turns[turn_index]
         self._i += 1
         for it in turn:
             if isinstance(it, EndOfTurn):
                 self._last_end_text = it.last_text
-            yield it
+        return RecordingEvents(turn, self.stream_log, turn_index)
 
     def send_tool_results(self, results):
         self.sent_results.append(results)
@@ -497,6 +525,26 @@ async def test_observe_seam_bare_turn_not_double_fed_by_driver():
     assert feeds == []
     assert sess.sent == [("go on", False)]  # continuation still delivered
     assert evs[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_turn_stream_closed_before_next_turn_and_on_early_return():
+    # Turn 0 ends at an EndOfTurn boundary and is continued; turn 1 short-circuits
+    # on a provider Error (an early `return` inside the loop body).
+    inv = SimpleNamespace(continuation_fn=lambda last: ("keep going", False))
+    sess = FakeSession(
+        [
+            [EndOfTurn(last_text="turn one")],
+            [Error(payload={"category": "config", "kind": "interrupted", "message": "x"})],
+        ],
+        invocation=inv,
+    )
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert evs[-1]["payload"]["kind"] == "interrupted"
+    assert sess.sent == [("keep going", False)]
+    # Turn 0's stream is closed BEFORE turn 1's events() is requested, and turn 1's
+    # stream is closed on the way out of the Error `return`.
+    assert sess.stream_log == [("open", 0), ("close", 0), ("open", 1), ("close", 1)]
 
 
 @pytest.mark.anyio

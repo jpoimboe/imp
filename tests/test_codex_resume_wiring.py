@@ -158,7 +158,8 @@ async def test_resume_without_native_state_fails_before_restore(
     assert payload["category"] == "unknown"
     assert payload["kind"] == "InvalidResumeState"
     assert isinstance(payload["message"], str)
-    assert payload["detail"] == {}
+    # A pre-subprocess failure leaks no stderr_tail.
+    assert set(payload["detail"]) == {"traceback_tail"}
     assert restore_called is False
     assert fake.start_thread_calls == []
     assert fake.resume_thread_calls == []

@@ -2,6 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import contextlib
 import inspect
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -38,28 +39,29 @@ async def run_agent_loop(
     while not session.cancelled():
         tool_reqs: list[ToolRequested] = []
         boundary: Any = None
-        async for item in session.events():
-            if isinstance(item, Error):
-                yield {"type": "error", "payload": item.payload}
-                return
-            if isinstance(item, DependencyWaited):
-                yield {"type": "dependency_wait",
-                       "payload": {"depends_on": list(item.deps)}}
-                return
-            if isinstance(item, Thinking):
-                session.elog.append(agent_id=session.aid, type="thinking",
-                                    payload={"content": item.text})
-                continue
-            if isinstance(item, Warning):
-                session.elog.append(agent_id=session.aid, type="runner_warning",
-                                    payload={"message": item.text})
-                continue
-            if isinstance(item, ToolRequested):
-                tool_reqs.append(item)
-                continue
-            if isinstance(item, (AwaitingToolResults, EndOfTurn)):
-                boundary = item
-                break
+        async with contextlib.aclosing(session.events()) as events:
+            async for item in events:
+                if isinstance(item, Error):
+                    yield {"type": "error", "payload": item.payload}
+                    return
+                if isinstance(item, DependencyWaited):
+                    yield {"type": "dependency_wait",
+                           "payload": {"depends_on": list(item.deps)}}
+                    return
+                if isinstance(item, Thinking):
+                    session.elog.append(agent_id=session.aid, type="thinking",
+                                        payload={"content": item.text})
+                    continue
+                if isinstance(item, Warning):
+                    session.elog.append(agent_id=session.aid, type="runner_warning",
+                                        payload={"message": item.text})
+                    continue
+                if isinstance(item, ToolRequested):
+                    tool_reqs.append(item)
+                    continue
+                if isinstance(item, (AwaitingToolResults, EndOfTurn)):
+                    boundary = item
+                    break
 
         if boundary is None:
             # events() ended with no boundary item -> the in-flight request was

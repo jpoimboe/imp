@@ -108,18 +108,20 @@ class FakeTurnFailedEvent:
 
 
 class FakeStreamedTurn:
-    def __init__(self, events: list[Any]) -> None:
+    def __init__(self, events: list[Any], *, on_aclose: Any = None) -> None:
         self._events = list(events)
+        self._on_aclose = on_aclose
 
     @property
     def events(self) -> _AsyncIterEvents:
-        return _AsyncIterEvents(self._events)
+        return _AsyncIterEvents(self._events, on_aclose=self._on_aclose)
 
 
 class _AsyncIterEvents:
-    def __init__(self, events: list[Any]) -> None:
+    def __init__(self, events: list[Any], *, on_aclose: Any = None) -> None:
         self._events = events
         self._pos = 0
+        self._on_aclose = on_aclose
 
     def __aiter__(self) -> _AsyncIterEvents:
         return self
@@ -131,12 +133,18 @@ class _AsyncIterEvents:
         self._pos += 1
         return ev
 
+    async def aclose(self) -> None:
+        if self._on_aclose is not None:
+            self._on_aclose()
+
 
 class FakeThread:
     def __init__(self, scripted_turns: list[list[Any]],
-                 on_turn_start: Any = None) -> None:
+                 on_turn_start: Any = None,
+                 on_events_aclose: Any = None) -> None:
         self._scripted = list(scripted_turns)
         self._on_turn_start = on_turn_start
+        self._on_events_aclose = on_events_aclose
         self.aborted = False
         self.run_calls: list[Any] = []
 
@@ -144,18 +152,19 @@ class FakeThread:
         self.run_calls.append((prompt, options))
         if self._on_turn_start is not None:
             self._on_turn_start()
-        if not self._scripted:
-            return FakeStreamedTurn([])
-        return FakeStreamedTurn(self._scripted.pop(0))
+        turn = self._scripted.pop(0) if self._scripted else []
+        return FakeStreamedTurn(turn, on_aclose=self._on_events_aclose)
 
 
 class FakeCodex:
     """Client factory injected via `client_factory=` on CodexAgentRunner."""
 
     def __init__(self, *, scripted_turns: list[list[Any]] | None = None,
-                 on_turn_start: Any = None) -> None:
+                 on_turn_start: Any = None,
+                 on_events_aclose: Any = None) -> None:
         self._scripted = scripted_turns or []
         self._on_turn_start = on_turn_start
+        self._on_events_aclose = on_events_aclose
         self.thread: FakeThread | None = None
         self.start_thread_calls: list[Any] = []
         self.resume_thread_calls: list[tuple[str, Any]] = []
@@ -164,13 +173,15 @@ class FakeCodex:
     def start_thread(self, options: Any = None) -> FakeThread:
         self.start_thread_calls.append(options)
         self.thread = FakeThread(self._scripted,
-                                 on_turn_start=self._on_turn_start)
+                                 on_turn_start=self._on_turn_start,
+                                 on_events_aclose=self._on_events_aclose)
         return self.thread
 
     def resume_thread(self, thread_id: str, options: Any = None) -> FakeThread:
         self.resume_thread_calls.append((thread_id, options))
         self.thread = FakeThread(self._scripted,
-                                 on_turn_start=self._on_turn_start)
+                                 on_turn_start=self._on_turn_start,
+                                 on_events_aclose=self._on_events_aclose)
         return self.thread
 
 
