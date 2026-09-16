@@ -102,14 +102,30 @@ floor refuses reads of an **archived** quest's own record — `imp show`, `imp l
 in full, since neither opens a record. A live quest stays reachable either way:
 its id resolves against live homes and its data sits in its own home, so
 `imp show`, `imp log`, `imp events`, `imp edit`, `imp abandon` and `imp resume`
-all work for it while the archive is unreadable. A refusal is one line on stderr,
-exit 2, no output:
+all work for it by its full id while the archive is unreadable. A refusal is one
+line on stderr, exit 2, no output:
 
 ```
 imp: archive data is at v14, newer than this imp (knows v13). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
+
+Tokened `imp resume` is the one refusal that runs to more than one line. A
+partial token matches archived conversations as well as live quests, so a token
+matching an **archived** record this install cannot read refuses and names that
+record, rather than silently resuming whatever else the token matched. The floor
+line follows indented, and any readable match is offered as a hint:
+
+```
+imp: 'lodo' matches an archived quest this imp cannot read: lodo77
+  archive data is at v14, newer than this imp (knows v13). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+  hint: readable match lodo40 — pass its full id to resume it.
+```
+
+A quest with a live home on disk always resolves by its full id; a partial token
+resolves it too, unless that token also matches an archived record this install
+cannot read.
 
 The usual cause is a stale process, not a stale checkout. A running imp keeps the
 code it started with: a session daemon warms its module graph at startup, so
