@@ -30,7 +30,7 @@ def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.Monk
     cfg = eff.config
     assert cfg.tiers["low"]["codex"] == "gpt-5.6-luna"
     assert cfg.tiers["medium"]["codex"] == "gpt-5.6-terra"
-    assert cfg.tiers["high"]["codex"] == "gpt-6-astra"
+    assert cfg.tiers["high"]["codex"] == "gpt-5.6-sol"
     assert cfg.tiers["high"]["openai"] == "gpt-5.6-sol"
     assert eff.provenance[("tiers", "high", "codex")].file == FLOOR_SRC.file
 

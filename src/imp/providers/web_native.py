@@ -35,10 +35,10 @@ _PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
     "openai": frozenset({"web_search"}),
     # codex supports web_search via its model-hosted tool, switched on by
     # codex_config.py's top-level `web_search` key. It is enabled only when an
-    # agent declares `web_search`, and runs server-side, so the command sandbox
-    # stays network_access_enabled=False. Caveat: codex's WebSearchItem exposes
-    # only the query — imp sees that a search happened but not its
-    # results/citations (no web_fetch either).
+    # agent declares `web_search`, and runs server-side, outside the read-only
+    # command sandbox. Caveat: codex's WebSearchItem exposes only the query —
+    # imp sees that a search happened but not its results/citations (no
+    # web_fetch either).
     "codex": frozenset({"web_search"}),
 }
 

@@ -4,6 +4,63 @@ import pytest
 
 from imp.providers.codex_config import render_config_toml
 
+# The full production renderings, pinned byte-for-byte. Codex's config layer
+# fails open: an unknown key inside [features] or [mcp_servers.*] is ignored with
+# exit 0 and no warning, so a typo in a hardening flag is invisible at runtime.
+_EXPECTED_IMP_ONLY = '''web_search = "disabled"
+model_auto_compact_token_limit = 100000000
+
+[mcp_servers.imp]
+url = "http://127.0.0.1:41234/mcp"
+bearer_token_env_var = "IMP_MCP_BEARER_TOKEN"
+tool_timeout_sec = 86400
+default_tools_approval_mode = "approve"
+
+[features]
+apps = false
+goals = false
+image_generation = false
+multi_agent = false
+plugins = false
+shell_tool = false
+sleep_tool = false
+tool_suggest = false
+view_image = false
+
+[features.code_mode]
+direct_only_tool_namespaces = ["mcp__imp"]
+'''
+
+_EXPECTED_WITH_IMPTY = '''web_search = "disabled"
+model_auto_compact_token_limit = 100000000
+
+[mcp_servers.imp]
+url = "http://127.0.0.1:41234/mcp"
+bearer_token_env_var = "IMP_MCP_BEARER_TOKEN"
+tool_timeout_sec = 86400
+default_tools_approval_mode = "approve"
+
+[features]
+apps = false
+goals = false
+image_generation = false
+multi_agent = false
+plugins = false
+shell_tool = false
+sleep_tool = false
+tool_suggest = false
+view_image = false
+
+[features.code_mode]
+direct_only_tool_namespaces = ["mcp__imp", "mcp__impty"]
+
+[mcp_servers.impty]
+url = "http://127.0.0.1:55001/mcp"
+bearer_token_env_var = "IMP_IMPTY_BEARER_TOKEN"
+tool_timeout_sec = 86400
+default_tools_approval_mode = "approve"
+'''
+
 
 def test_config_toml_emits_required_sections_and_disables_web_search() -> None:
     txt = render_config_toml(host="127.0.0.1", port=49152,
@@ -78,8 +135,19 @@ def test_config_toml_puts_approval_mode_inside_the_imp_server_table() -> None:
     # Parsed, not substring-matched: a key landing in the wrong table must fail.
     assert data["mcp_servers"]["imp"]["default_tools_approval_mode"] == "approve"
     assert "default_tools_approval_mode" not in data["features"]
+    # All ten parsed entries: the nine hardening booleans plus the nested
+    # code_mode sub-table. Exact equality, so a stray key fails here.
     assert data["features"] == {
-        "shell_tool": False, "plugins": False, "image_generation": False,
+        "apps": False,
+        "goals": False,
+        "image_generation": False,
+        "multi_agent": False,
+        "plugins": False,
+        "shell_tool": False,
+        "sleep_tool": False,
+        "tool_suggest": False,
+        "view_image": False,
+        "code_mode": {"direct_only_tool_namespaces": ["mcp__imp"]},
     }
 
 
@@ -126,3 +194,44 @@ def test_config_toml_emits_auto_compact_limit_before_the_first_table() -> None:
     # table instead, so the ordering is load-bearing, not cosmetic.
     assert txt.index("model_auto_compact_token_limit") < txt.index("[")
     assert txt.index('web_search = "disabled"') < txt.index("[mcp_servers.imp]")
+
+
+def test_config_toml_snapshot_pins_the_imp_only_rendering() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=41234,
+                             bearer_env_var="IMP_MCP_BEARER_TOKEN",
+                             web_search_enabled=False)
+    assert txt == _EXPECTED_IMP_ONLY
+
+
+def test_config_toml_snapshot_pins_the_impty_held_rendering() -> None:
+    txt = render_config_toml(
+        host="127.0.0.1", port=41234, bearer_env_var="IMP_MCP_BEARER_TOKEN",
+        web_search_enabled=False, impty_url="http://127.0.0.1:55001/mcp",
+        impty_bearer_env_var="IMP_IMPTY_BEARER_TOKEN")
+    assert txt == _EXPECTED_WITH_IMPTY
+
+
+def test_direct_only_namespaces_track_the_servers_actually_configured() -> None:
+    # Without impty listed, impty's tools would stay behind codex's JavaScript
+    # `exec` indirection while imp's went direct.
+    imp_only = tomllib.loads(render_config_toml(
+        host="127.0.0.1", port=1, bearer_env_var="X", web_search_enabled=False))
+    assert imp_only["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__imp"]
+    with_impty = tomllib.loads(render_config_toml(
+        host="127.0.0.1", port=1, bearer_env_var="X", web_search_enabled=False,
+        impty_url="http://127.0.0.1:55001/mcp", impty_bearer_env_var="T"))
+    assert with_impty["features"]["code_mode"]["direct_only_tool_namespaces"] == [
+        "mcp__imp", "mcp__impty"]
+
+
+def test_namespaces_carry_no_dangling_separator() -> None:
+    # `mcp__imp__` is the namespace identifier plus a dangling `__` separator:
+    # codex compares exact strings, matches nothing, and silently falls back to
+    # code mode with no error and no warning (measured, spike cells C and D).
+    imp_only = render_config_toml(host="127.0.0.1", port=1, bearer_env_var="X",
+                                  web_search_enabled=False)
+    with_impty = render_config_toml(
+        host="127.0.0.1", port=1, bearer_env_var="X", web_search_enabled=False,
+        impty_url="http://127.0.0.1:55001/mcp", impty_bearer_env_var="T")
+    assert "mcp__imp__" not in imp_only
+    assert "mcp__imp__" not in with_impty

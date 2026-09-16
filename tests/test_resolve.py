@@ -89,7 +89,7 @@ def _cfg(providers=("claude", "openai")) -> Config:
     )
 
 
-def test_codex_high_resolves_astra_from_builtin_floor(
+def test_codex_high_resolves_sol_from_builtin_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     imp_home = tmp_path / "imphome"
@@ -110,9 +110,9 @@ def test_codex_high_resolves_astra_from_builtin_floor(
 
     tiers, steps, details = resolve_run(workflow, config)
 
-    assert tiers["high"] == ProviderModel("codex", "gpt-6-astra")
+    assert tiers["high"] == ProviderModel("codex", "gpt-5.6-sol")
     assert steps == {}
-    assert details["tiers"]["high"]["model"] == "gpt-6-astra"
+    assert details["tiers"]["high"]["model"] == "gpt-5.6-sol"
 
 
 def test_tier_map_first_available_wins_with_both_envs() -> None:

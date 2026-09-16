@@ -163,7 +163,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         {
             "low": "gpt-5.6-luna",
             "medium": "gpt-5.6-terra",
-            "high": "gpt-6-astra",
+            "high": "gpt-5.6-sol",
         },
         None,
     ),

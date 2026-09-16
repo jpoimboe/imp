@@ -267,6 +267,22 @@ def test_delegate_exploration_carries_explorer_tier_discipline() -> None:
     assert idx_intro < idx_tier
 
 
+def test_delegate_exploration_names_under_exploration_as_the_failure() -> None:
+    text = (PARTIALS / "delegate-exploration.md").read_text()
+    paragraph = (
+        "Under-exploration is the common failure, not over-exploration. If you are unsure\n"
+        "whether you have read enough, you have not — dispatch another explorer. Context\n"
+        "thrift is a reason to delegate mapping, never a reason to skip it.\n"
+    )
+    assert paragraph in text
+    # Between the delegation guidance and the tier paragraph: the reader meets the
+    # warning before the advice to keep explorers cheap.
+    idx_intro = text.index("Delegate exploration; read inline only what you will edit.")
+    idx_warning = text.index(paragraph)
+    idx_tier = text.index("Leave the tier unset:")
+    assert idx_intro < idx_warning < idx_tier
+
+
 def test_brainstorm_mockup_copy_pastes_the_terminal_and_renders_the_web() -> None:
     flat = " ".join((PARTIALS / "brainstorm-dialogue.md").read_text().split())
     sentences = (

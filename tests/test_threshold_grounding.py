@@ -89,7 +89,7 @@ def test_grounding_partial_carries_memory_rule_and_names_only_hub() -> None:
     assert "imp-memory" not in text
 
 
-def test_threshold_has_lazy_orientation_cue() -> None:
+def test_threshold_orientation_cue_requires_reading_first() -> None:
     fd = FRONT_DOOR.read_text()
     assert "## Orienting before you offer" in fd
     low = fd.lower()
@@ -99,7 +99,7 @@ def test_threshold_has_lazy_orientation_cue() -> None:
     assert "greenfield" in low
     assert "open design question" in low
     assert "how does imp work" in low
-    assert "lazy" in low or "on demand" in low
+    assert "read before you speak" in low
     marker = "## Orienting before you offer"
     start = fd.index(marker)
     section = fd[start:fd.index("{% include", start)].lower()

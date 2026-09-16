@@ -158,8 +158,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         # _build_tools): run_in_background is a bash PARAMETER, so an agent
         # with bash but no read/kill tool is a trap — a backgrounded process
         # it can never see or stop. The capability set must be atomic.
-        # allowed_tools picks these up automatically (mcp__imp__ prefix is
-        # derived from this dict in _build_options).
         out["bash_output"] = reg["bash_output"]
         out["bash_kill"] = reg["bash_kill"]
     return out
@@ -967,43 +965,25 @@ class CodexAgentRunner:
         `features.web_search_request` flag (it no longer disables and emits a
         noisy `error` item every turn), so web_search is controlled via
         config.toml's top-level `web_search` key instead (see
-        `render_config_toml`). web_search is model-hosted, so
-        `network_access_enabled` stays False regardless (the command sandbox
-        cannot reach the network)."""
+        `render_config_toml`)."""
         return ThreadOptions(
             model=self.model,
             sandbox_mode="read-only",
             approval_policy=CODEX_APPROVAL_POLICY,
-            network_access_enabled=False,
             model_reasoning_effort="high" if tier in ("medium", "high") else None,
         )
 
     def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
-        """Prepend the anti-native-tool instruction (a turn-saver: the read-only
-        sandbox already refuses the call). For a subagent the completion line is
-        replaced by the deliverable note; the tool_search and
-        no-native-apply_patch lines stay (a subagent still uses the other
-        mcp__imp__* tools).
-
-        Codex DEFERS MCP tools behind its `tool_search` discovery tool: imp's
-        `mcp__imp__*` tools are NOT in the model's initial tool list — the model
-        must call `tool_search` to surface them first (codex-rs:
-        build_mcp_tool_exposure, gated on `supports_search_tool &&
-        namespace_tools`; the flags that disabled this are removed upstream, so
-        it is not configurable). Models that skip the search conclude the tool
-        "is not exposed in this session" and refuse the turn — a ~60% turn-1
-        refusal on gpt-5.4-mini. Telling the model to use `tool_search` to load
-        the tools, with the completion tool named by its exposed id, drives that
-        to ~0% (measured 30/30 first-turn vs 4/10 without)."""
+        """The wire prompt: the agent's system prompt plus the codex tool policy,
+        with the first user message folded in on fresh entry only."""
         policy = (
             "IMPORTANT — Tool policy:\n"
-            "- Your imp tools (the `mcp__imp__*` tools) are exposed via codex's\n"
-            "  `tool_search` tool, NOT in your initial tool list. If an\n"
-            "  `mcp__imp__*` tool you need is not already available, call\n"
-            "  `tool_search` to load it FIRST, then call it. These tools ARE\n"
-            "  available — do not claim otherwise.\n"
-            "- Use ONLY the `mcp__imp__*` tools. NEVER call native `apply_patch`\n"
-            "  or any other built-in tool.\n"
+            "- Your imp tools are already loaded and callable directly by name\n"
+            "  (`read_file`, `bash`, `complete_step`, …). Do not search for them,\n"
+            "  do not route them through `exec`, and do not claim they are\n"
+            "  unavailable.\n"
+            "- Use ONLY your imp tools. Never call a native built-in such as\n"
+            "  `apply_patch`.\n"
         )
         if invocation.subagent_depth > 0:
             policy += (
@@ -1013,8 +993,8 @@ class CodexAgentRunner:
             )
         else:
             policy += (
-                "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
-                "  with the structured answer.\n"
+                "- Finish the task by calling `complete_step` with the structured\n"
+                "  answer.\n"
             )
         prompt = invocation.system_prompt + "\n\n" + policy
         # Codex takes a string and never reads initial_messages: fold the task

@@ -10,8 +10,8 @@ read-only sandbox, the [features] toggles, the top-level `web_search` control,
 the `model_auto_compact_token_limit` pin that stops codex compacting its own
 history, and the auth.json seed. `web_search` lives here because codex >=0.137
 deprecated the `features.web_search_request` flag and it no longer disables (see
-`render_config_toml`). The rest (model, sandbox_mode, approval_policy,
-network_access_enabled) still goes through `codex_exec.ThreadOptions`.
+`render_config_toml`). The rest (model, sandbox_mode, approval_policy) still
+goes through `codex_exec.ThreadOptions`.
 
 Filesystem invariants:
   - CODEX_HOME dir is mode 0700 under TMPDIR, with the owner pid encoded in
@@ -70,10 +70,17 @@ def render_config_toml(
     (codex reads <= 0 as "compact on every request"): codex's auto-compaction
     would otherwise rewrite history invisibly beneath imp's own context
     checkpoint. Also top-level, so it too precedes every `[table]`.
+
+    `[features.code_mode] direct_only_tool_namespaces` lists the MCP namespaces
+    codex must declare directly to the model, not behind its `exec` indirection.
     """
     web_search = "live" if web_search_enabled else "disabled"
+    # One condition drives both, so "impty in the namespace array without an
+    # impty server block" cannot arise.
+    namespaces = '["mcp__imp"]'
     impty_block = ""
     if impty_url is not None and impty_bearer_env_var is not None:
+        namespaces = '["mcp__imp", "mcp__impty"]'
         impty_block = (
             "\n"
             "[mcp_servers.impty]\n"
@@ -93,9 +100,18 @@ def render_config_toml(
         'default_tools_approval_mode = "approve"\n'
         "\n"
         "[features]\n"
-        "shell_tool = false\n"
-        "plugins = false\n"
+        "apps = false\n"
+        "goals = false\n"
         "image_generation = false\n"
+        "multi_agent = false\n"
+        "plugins = false\n"
+        "shell_tool = false\n"
+        "sleep_tool = false\n"
+        "tool_suggest = false\n"
+        "view_image = false\n"
+        "\n"
+        "[features.code_mode]\n"
+        f"direct_only_tool_namespaces = {namespaces}\n"
         + impty_block
     )
 

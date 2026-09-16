@@ -32,7 +32,7 @@ class BuiltinFloor(NamedTuple):
     auth_hint: str
 
 
-# Pinned floors: OpenAI uses luna < terra < sol; Codex high uses gpt-6-astra.
+# Pinned floors: OpenAI and Codex both use luna < terra < sol.
 BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "anthropic": BuiltinFloor(
         module="anthropic",
@@ -69,7 +69,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
         tier_defaults={
             "low": "gpt-5.6-luna",
             "medium": "gpt-5.6-terra",
-            "high": "gpt-6-astra",
+            "high": "gpt-5.6-sol",
         },
         env_var=None,  # CLI-authenticated (codex login); no env var
         auth_hint="run `codex login`",

@@ -786,3 +786,19 @@ def test_plan_reviewer_orient_item_four_precedes_the_read_constraint(tmp_path) -
         "You may write exactly one file of record — `.imp/quests/abc/deferred.md`")
     diff_review = out.index("## Review the prescribed code like a diff (primary)")
     assert orient < provenance < item_four < constraint < deferred < diff_review
+
+
+def test_front_door_requires_a_read_before_speaking_about_the_project(tmp_path) -> None:
+    fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
+    paragraph = (
+        'A pure imp-mechanics question ("how does imp work?") needs no project-stack read.\n'
+        "Anything that touches this project does — read before you speak, and read more\n"
+        'than feels sufficient. Keep the cue invisible: honor "Speak plainly" below and\n'
+        "surface none of the internal terms."
+    )
+    assert paragraph in fd
+    # The old framing licensed skipping the read outright; it must be gone, not softened.
+    assert "Orientation is lazy" not in fd
+    assert "orient only when you are about" not in fd
+    # And the copy actually reaches the agent this partial is rendered into.
+    assert paragraph in _render_agent("threshold", tmp_path)

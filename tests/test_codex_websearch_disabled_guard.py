@@ -3,10 +3,9 @@
 imp disables model-hosted web search via config.toml's top-level `web_search`
 key and must NEVER emit the deprecated `--config features.web_search_request`
 flag — codex >=0.137 ignores it for disabling, so emitting it re-opens a web
-side channel that bypasses the `network_access_enabled=False` sandbox lock.
-imp's own ThreadOptions carries no web-search field at all, so the flag is
-structurally unemittable; this file pins that at the argv the runner's real
-options produce, resume leg included.
+side channel. imp's own ThreadOptions carries no web-search field at all, so
+the flag is structurally unemittable; this file pins that at the argv the
+runner's real options produce, resume leg included.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> N
     assert build_command_args(opts, None) == [
         "exec", "--json", "--model", "gpt-5.5", "--sandbox", "read-only",
         "--config", 'model_reasoning_effort="high"',
-        "--config", "sandbox_workspace_write.network_access=false",
         "--config", 'approval_policy="never"']
     for thread_id in (None, "thr-resume-1"):
         args = build_command_args(opts, thread_id)
@@ -31,7 +29,7 @@ def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> N
 
 @pytest.mark.parametrize(
     ("tier", "model"),
-    [("medium", "gpt-5.6-terra"), ("high", "gpt-6-astra")],
+    [("medium", "gpt-5.6-terra"), ("high", "gpt-5.6-sol")],
 )
 def test_thinking_tiers_pin_high_reasoning_effort(tier: str, model: str) -> None:
     opts = CodexAgentRunner(model_name=model)._build_thread_options(tier)
