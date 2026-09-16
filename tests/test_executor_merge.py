@@ -335,7 +335,7 @@ def test_merge_body_is_the_summary_leading_paragraph(tmp_path: Path) -> None:
     action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert not isinstance(action, Pause)
     assert _message(tmp_path, state.merge_commit) == (
-        f"Merge Uniform shape\n\n{PARA}\n\n(imp/feat)")
+        f"Merge Uniform shape\n\n{PARA}\n\nQuest: feat")
 
 
 def test_merge_body_without_a_summary_stays_minimal(tmp_path: Path) -> None:
@@ -353,7 +353,7 @@ def test_merge_body_without_a_summary_stays_minimal(tmp_path: Path) -> None:
 
     action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert not isinstance(action, Pause)
-    assert _message(tmp_path, state.merge_commit) == "Merge Uniform shape\n\n(imp/feat)"
+    assert _message(tmp_path, state.merge_commit) == "Merge Uniform shape\n\nQuest: feat"
 
 
 def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> None:
