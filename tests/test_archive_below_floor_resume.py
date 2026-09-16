@@ -42,9 +42,10 @@ def test_a_current_marker_offers_both_candidates(tmp_path: Path) -> None:
     """Control: above the floor the archived resumable candidate IS offered."""
     _live_and_shelved(tmp_path)
 
-    rows = m._resumable_match_rows(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
 
     assert {r[0] for r in rows} == {LIVE, SHELVED}
+    assert unreadable is None
 
 
 def test_below_floor_a_live_id_resolves_to_itself(
@@ -53,10 +54,11 @@ def test_below_floor_a_live_id_resolves_to_itself(
     _live_and_shelved(tmp_path)
     _lower_data_floor(tmp_path)
 
-    rows = m._resumable_match_rows(tmp_path, LIVE)
+    rows, unreadable = m._resumable_matches(tmp_path, LIVE)
     target = _resolve(tmp_path, LIVE)
 
     assert {r[0] for r in rows} == {LIVE}
+    assert unreadable is None
     assert target == LIVE
     assert capsys.readouterr().err == ""
 
@@ -67,7 +69,7 @@ def test_below_floor_a_token_matching_both_resolves_to_the_live_id(
     _live_and_shelved(tmp_path)
     _lower_data_floor(tmp_path)
 
-    rows = m._resumable_match_rows(tmp_path, "lodo")
+    rows = m._resumable_matches(tmp_path, "lodo")[0]
     target = _resolve(tmp_path, "lodo")
 
     assert {r[0] for r in rows} == {LIVE}

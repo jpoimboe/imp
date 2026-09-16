@@ -38,7 +38,7 @@ def _archive_terminal(control: Path, cid: str, status: str) -> None:
                    quest_json_path=cj, state_json_path=sj)
 
 
-# --- branch selection, isolated via monkeypatched _resumable_match_rows -------
+# --- branch selection, isolated via monkeypatched _resumable_matches ----------
 
 @pytest.mark.anyio
 async def test_blank_token_delegates_to_full_picker(monkeypatch, tmp_path: Path) -> None:
@@ -50,7 +50,7 @@ async def test_blank_token_delegates_to_full_picker(monkeypatch, tmp_path: Path)
         raise AssertionError("match rows consulted for a blank token")
 
     monkeypatch.setattr(m, "_pick_resume_target", fake_full)
-    monkeypatch.setattr(m, "_resumable_match_rows", boom_match)
+    monkeypatch.setattr(m, "_resumable_matches", boom_match)
     assert await m._resolve_resume_target(
         tmp_path, None, non_interactive=True) == "FULL"
     assert await m._resolve_resume_target(
@@ -62,7 +62,7 @@ async def test_single_match_resolves_without_resolve_id(
     monkeypatch, tmp_path: Path,
 ) -> None:
     # AC 7: exactly one resumable match resolves directly, no menu, no fall-through.
-    monkeypatch.setattr(m, "_resumable_match_rows", lambda c, t: [_row("lodo40")])
+    monkeypatch.setattr(m, "_resumable_matches", lambda c, t: ([_row("lodo40")], None))
 
     def boom(*a, **k):
         raise AssertionError("_resolve_id invoked for a single match")
@@ -77,8 +77,8 @@ async def test_two_matches_open_scoped_picker_interactive(
     monkeypatch, tmp_path: Path,
 ) -> None:
     # AC 8: two-or-more matches open the scoped picker; selection is returned.
-    monkeypatch.setattr(m, "_resumable_match_rows",
-                        lambda c, t: [_row("lodo40"), _row("lodo77")])
+    monkeypatch.setattr(m, "_resumable_matches",
+                        lambda c, t: ([_row("lodo40"), _row("lodo77")], None))
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
@@ -96,8 +96,8 @@ async def test_two_matches_non_tty_errors_pass_token(
 ) -> None:
     # AC 14: non-interactive terminal with two-or-more matches errors (no menu),
     # directing the user to pass a token.
-    monkeypatch.setattr(m, "_resumable_match_rows",
-                        lambda c, t: [_row("lodo40"), _row("lodo77")])
+    monkeypatch.setattr(m, "_resumable_matches",
+                        lambda c, t: ([_row("lodo40"), _row("lodo77")], None))
     monkeypatch.setattr(m, "_interactive", lambda: False)
 
     async def boom(*a, **k):
@@ -115,7 +115,7 @@ async def test_two_matches_non_tty_errors_pass_token(
 async def test_zero_matches_fall_through_to_resolve_id(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(m, "_resumable_match_rows", lambda c, t: [])
+    monkeypatch.setattr(m, "_resumable_matches", lambda c, t: ([], None))
     monkeypatch.setattr(m, "_resolve_id", lambda c, t: "arch99")
     assert await m._resolve_resume_target(
         tmp_path, "arch", non_interactive=True) == "arch99"
@@ -125,7 +125,7 @@ async def test_zero_matches_fall_through_to_resolve_id(
 async def test_zero_matches_resolve_id_systemexit_returns_2(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(m, "_resumable_match_rows", lambda c, t: [])
+    monkeypatch.setattr(m, "_resumable_matches", lambda c, t: ([], None))
 
     def raise_exit(c, t):
         raise SystemExit(2)
@@ -186,9 +186,10 @@ def test_archived_resumable_match_repairs_index_before_enumeration(
 
     monkeypatch.setattr(archive.read, "archived_ids", archived_ids)
 
-    rows = m._resumable_match_rows(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
 
     assert ([row[0] for row in rows], enumerated) == (["lodo40"], [["lodo40"]])
+    assert unreadable is None
 
 
 def test_archived_resumable_match_requires_current_before_record_reads(
@@ -219,12 +220,13 @@ def test_archived_resumable_match_requires_current_before_record_reads(
     monkeypatch.setattr(archive.read, "archived_ids", archived_ids)
     monkeypatch.setattr(archive.record, "read_record", read_record)
 
-    rows = m._resumable_match_rows(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
 
     assert ([row[0] for row in rows], calls) == (
         ["lodo40"],
         ["require_current", "archived_ids", "read_record", "read_record", "read_record"],
     )
+    assert unreadable is None
 
 
 @pytest.mark.anyio

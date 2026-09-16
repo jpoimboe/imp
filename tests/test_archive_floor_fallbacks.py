@@ -142,7 +142,7 @@ def test_resume_offers_the_live_candidate_and_omits_the_unreadable_one(
     assert not (project_state_dir(tmp_path) / "quests" / "lodo77").exists()
     _raise_data_floor(tmp_path)
 
-    rows = m._resumable_match_rows(tmp_path, "lodo")
+    rows = m._resumable_matches(tmp_path, "lodo")[0]
 
     async def _resolve() -> str | int:
         return await m._resolve_resume_target(

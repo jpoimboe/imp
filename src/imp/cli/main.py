@@ -2758,16 +2758,52 @@ def _abandon_rows(control: Path) -> list[_Row]:
     return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
 
 
-def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
-    """Rows for resumable quests whose id contains `token`.
+@dataclass(frozen=True)
+class _UnreadableMatches:
+    """Archived ids matching a resume token that this install cannot render,
+    paired with the floor text that blocked them — so a caller cannot read the
+    rows without confronting that the match set was cut."""
+    ids: tuple[str, ...]
+    reason: str
+
+
+def _suppressed_archived_ids(control: Path, token: str) -> list[str]:
+    """Archived resumable records matching `token` that have NO live quest home.
+
+    Record enumeration and record reads are ungated by both archive floors, and
+    the quest-home test is the one `_row_for_id` branches on — so an id here is
+    genuinely unrenderable while a floor is skewed, and one with a live home is
+    never suppressed (it subsumes the live-row exclusion: every live row comes
+    from `scan_homes`, which needs a readable `quest.json`). The degraded path
+    enumerates records rather than the index: an archive below the blob floor is
+    never reindexed, so the record files are the honest source."""
+    from imp.cli.store import _quest_home
+    from imp.engine.archive import record, records_root
+    root = records_root(control)
+    out: list[str] = []
+    for cid in record.list_record_ids(root):
+        if token not in cid or (_quest_home(control, cid) / "quest.json").exists():
+            continue
+        rec = record.read_record(root, cid)
+        if rec is not None and rec.get("resumable"):
+            out.append(cid)
+    return out
+
+
+def _resumable_matches(
+    control: Path, token: str,
+) -> tuple[list[_Row], _UnreadableMatches | None]:
+    """Rows for resumable quests whose id contains `token`, plus whatever this
+    install could not read.
 
     Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
     records — an archived id whose archive record reads `resumable=True` (a
     "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu.
-    An archived candidate this install cannot read is omitted, exactly as an
-    absent record is."""
+    An archived candidate this install cannot read is NOT omitted: it is reported
+    to the caller in the second element, which is None only when nothing was
+    suppressed."""
     from imp.cli.store import _row_for_id
     from imp.engine.archive import (
         check_index_floor,
@@ -2783,8 +2819,12 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     try:
         require_current(control)
         check_index_floor(control)
-    except ArchiveMismatch:
-        return rows
+    except ArchiveMismatch as skew:
+        skewed = _suppressed_archived_ids(control, token)
+        return rows, (_UnreadableMatches(tuple(sorted(skewed)), str(skew))
+                      if skewed else None)
+    raced: list[str] = []
+    reason: str | None = None
     for cid in archive_read.archived_ids(control):
         if token not in cid or cid in live:
             continue
@@ -2793,11 +2833,16 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
             continue
         try:
             row = _row_for_id(control, cid)
-        except ArchiveMismatch:
+        except ArchiveMismatch as race:
+            raced.append(cid)
+            if reason is None:
+                reason = str(race)
             continue
         if row is not None:
             rows.append(row)
-    return _sort_rows_newest_first(rows)
+    return _sort_rows_newest_first(rows), (
+        _UnreadableMatches(tuple(sorted(raced)), reason)
+        if reason is not None else None)
 
 
 def _abandon_match_rows(control: Path, token: str) -> list[_Row]:
@@ -2887,7 +2932,7 @@ async def _resolve_resume_target(
 ) -> str | int:
     if token is None or not token.strip():
         return await _pick_resume_target(control, non_interactive=non_interactive)
-    matches = _resumable_match_rows(control, token)
+    matches = _resumable_matches(control, token)[0]
     if len(matches) >= 2:
         return await _pick_quest_target(
             control=control,
