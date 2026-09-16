@@ -102,8 +102,9 @@ def test_commit_rule_summary_matches_the_authoritative_partial() -> None:
     for clause in ("component: imperative summary", "wrapped at 75 columns", "never `-m`"):
         assert clause in flat_doc, f"conventions.md dropped: {clause}"
         assert clause in flat_partial, f"commit-style.md no longer says: {clause}"
-    for ref in ("_merge_subject()", "src/imp/engine/worktree.py", "(imp/<id>)"):
+    for ref in ("_merge_subject()", "src/imp/engine/worktree.py", "Quest: <id>"):
         assert ref in flat_doc, f"conventions.md no longer records: {ref}"
+    assert "(imp/<id>)" not in flat_doc
 
 
 def test_index_scopes_internals_to_imp_on_imp() -> None:

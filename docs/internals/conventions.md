@@ -43,7 +43,7 @@ The merge commit is the exception: no agent writes it. The engine assembles it
 in `_merge_subject()` (`src/imp/engine/worktree.py`): the subject is literally
 `Merge <title>`, followed by the leading paragraph of the summarizer's
 `artifacts/summary/<id>.md` (extracted by `_summary_body()` in
-`src/imp/engine/executor.py`) and the `(imp/<id>)` trailer. A quest whose
+`src/imp/engine/executor.py`) and the `Quest: <id>` trailer. A quest whose
 summary artifact is missing merges with the subject and trailer alone.
 
 ## Seeing imp's own UI
