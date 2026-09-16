@@ -227,14 +227,23 @@ def test_operator_notes_document_archive_version_skew() -> None:
 
 def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
     """An older writer lowers both floors and nothing heals it any more: the page
-    must say writes refuse, reads raise, and index-only queries still answer."""
+    must say writes and the reaper refuse, reads raise, index-only queries still
+    answer, and the stranding it leaves is permanent."""
     text = Path("docs/guide/operator-notes.md").read_text()
     section = " ".join(text.split("## Archive version skew", 1)[1].split())
     assert "a current imp refuses that archive rather than stamping it current" in section
     assert "`ensure_current` leaves it exactly as it found it" in section
+    assert "`reap_archived_homes`) deletes no quest home" in section
     assert "can strand a quest on bookkeeping after its merge has already landed" in section
     assert "keep answering from the stale index" in section
-    assert "The fix is to update every imp that writes here" in section
+    # nothing in the tree raises a lowered marker back, so no rebuild ever comes
+    assert "that index is never rebuilt" in section
+    assert "the stranding is permanent" in section
+    assert "rebuilt only once the blob floor is current again" not in section
+    assert "check out that commit to finish or extract the affected quest" in section
+    assert ("prevents further below-floor writes; it repairs none of the writes "
+            "already made") in section
+    assert "The fix is to update every imp that writes here" not in section
     assert "Writes are deliberately unguarded" not in section
     # the constraint a future _DATA_VERSION bump has to honour
     assert ("bumping `_DATA_VERSION` means shipping the migration and re-wiring "

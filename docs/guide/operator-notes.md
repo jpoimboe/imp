@@ -127,11 +127,17 @@ lowers both floors (the blob `data_version` marker and the index's `PRAGMA
 user_version`). No blob migration ships in the tree, so nothing can vouch for the
 records an older install wrote: a current imp refuses that archive rather than
 stamping it current. Record and blob reads raise, `ensure_current` leaves it
-exactly as it found it, and nothing further is archived into it — which can strand
-a quest on bookkeeping after its merge has already landed. Index-only queries
-(`imp list`, `imp search`) keep answering from the stale index, which is rebuilt
-only once the blob floor is current again. The fix is to update every imp that
-writes here.
+exactly as it found it, nothing further is archived into it, and the daemon's
+startup reaper (`reap_archived_homes`) deletes no quest home — which can strand a
+quest on bookkeeping after its merge has already landed, but leaves the homes that
+are its last locally readable copy standing. Index-only queries (`imp list`,
+`imp search`) keep answering from the stale index, and that index is never
+rebuilt: no code path raises a lowered marker back to `_DATA_VERSION`, so for the
+records an older install already wrote the stranding is permanent. Recovery runs
+through the install that wrote a given record — its floors match what it stamped,
+so it can still read it: check out that commit to finish or extract the affected
+quest. Updating every imp that writes here prevents further below-floor writes; it
+repairs none of the writes already made.
 
 **Constraint on future schema work: a new index column must be nullable.** An older
 writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
