@@ -2916,6 +2916,27 @@ _RESUME_PICKER_HEADER = (
 )
 
 
+def _refuse_unreadable_matches(
+    token: str, matches: list[_Row], unreadable: _UnreadableMatches,
+) -> int:
+    """One `imp: ` message: the suppressed ids, the floor text verbatim, and any
+    readable match to pass by full id instead."""
+    head = ("matches an archived quest this imp cannot read"
+            if len(unreadable.ids) == 1
+            else "matches archived quests this imp cannot read")
+    lines = [f"{token!r} {head}: {', '.join(unreadable.ids)}",
+             f"  {unreadable.reason}"]
+    readable = sorted(r[0] for r in matches)
+    if len(readable) == 1:
+        lines.append(f"  hint: readable match {readable[0]} — "
+                     "pass its full id to resume it.")
+    elif readable:
+        lines.append(f"  hint: readable matches {', '.join(readable)} — "
+                     "pass a full id to resume one.")
+    _emit_cli_error("\n".join(lines))
+    return 2
+
+
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
     return await _pick_quest_target(
         control=control,
@@ -2932,7 +2953,9 @@ async def _resolve_resume_target(
 ) -> str | int:
     if token is None or not token.strip():
         return await _pick_resume_target(control, non_interactive=non_interactive)
-    matches = _resumable_matches(control, token)[0]
+    matches, unreadable = _resumable_matches(control, token)
+    if unreadable is not None:
+        return _refuse_unreadable_matches(token, matches, unreadable)
     if len(matches) >= 2:
         return await _pick_quest_target(
             control=control,
