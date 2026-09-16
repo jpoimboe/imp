@@ -95,3 +95,53 @@ def test_auth_terminal_error_event_kind_defaults_to_class_name() -> None:
     ev = perr.make_error_event(perr.AuthTerminalError("dead login"))
     assert ev["payload"]["category"] == "auth_terminal"
     assert ev["payload"]["kind"] == "AuthTerminalError"
+
+
+def _raise_messageless() -> None:
+    raise AssertionError
+
+
+def _ping(n: int) -> None:
+    if n == 0:
+        raise RuntimeError("deep")
+    _pong(n - 1)
+
+
+def _pong(n: int) -> None:
+    _ping(n - 1)
+
+
+def test_make_unknown_error_event_messageless_names_crash_site() -> None:
+    supplied: dict[str, object] = {"stderr_tail": "fatal: nope"}
+    try:
+        _raise_messageless()
+    except AssertionError as exc:
+        ev = perr.make_unknown_error_event(exc, detail=supplied)
+    raise_line = _raise_messageless.__code__.co_firstlineno + 1  # the `raise` line
+    p = ev["payload"]
+    assert p["category"] == "unknown"
+    assert p["kind"] == "AssertionError"
+    assert p["message"] == (
+        f"unclassified provider error: AssertionError at test_provider_errors.py:{raise_line}")
+    assert p["detail"]["stderr_tail"] == "fatal: nope"
+    assert "_raise_messageless" in str(p["detail"]["traceback_tail"])
+    assert supplied == {"stderr_tail": "fatal: nope"}
+
+
+def test_make_unknown_error_event_traceback_tail_keeps_last_15_lines() -> None:
+    try:
+        _ping(40)
+    except RuntimeError as exc:
+        ev = perr.make_unknown_error_event(exc)
+    p = ev["payload"]
+    assert p["message"] == "unclassified provider error: deep"
+    tail = str(p["detail"]["traceback_tail"]).splitlines()
+    assert len(tail) == 15
+    assert tail[-1] == "RuntimeError: deep"
+
+
+def test_make_unknown_error_event_without_traceback_names_the_type() -> None:
+    ev = perr.make_unknown_error_event(AssertionError())
+    p = ev["payload"]
+    assert p["message"] == "unclassified provider error: AssertionError"
+    assert p["detail"] == {}
