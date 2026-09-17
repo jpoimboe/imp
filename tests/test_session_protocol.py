@@ -9,6 +9,7 @@ from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
     CONTROL_SAVE,
+    END_OF_RUN,
     SIDE_EFFECT_REASONS,
     Attach,
     Control,
@@ -17,12 +18,14 @@ from imp.remote.session.protocol import (
     SkillRequest,
     encode_attach,
     encode_control,
+    encode_end,
     encode_event,
     encode_input,
     encode_set_lease,
     encode_skill_request,
     parse_client_message,
     parse_event,
+    parse_stream_frame,
 )
 
 
@@ -337,3 +340,30 @@ def test_encode_event_tightens_the_clip_until_many_strings_fit() -> None:
     decoded = parse_event(frame)
     assert list(decoded["payload"]) == [f"k{i}" for i in range(8)]
     assert all(v.endswith("… [clipped]") for v in decoded["payload"].values())
+
+
+def test_encode_end_is_a_bare_kind_tagged_frame() -> None:
+    line = encode_end()
+    assert "\n" not in line
+    assert json.loads(line) == {"kind": "end"}      # no payload beyond its kind
+
+
+def test_parse_stream_frame_recovers_the_end_marker() -> None:
+    assert parse_stream_frame(encode_end()) is END_OF_RUN
+
+
+def test_parse_stream_frame_recovers_an_inner_event() -> None:
+    inner = {"type": "step_started", "payload": {"step": "plan"}}
+    assert parse_stream_frame(encode_event(inner)) == inner
+
+
+def test_parse_stream_frame_rejects_a_frame_that_is_neither() -> None:
+    with pytest.raises(ValueError, match="expected event frame"):
+        parse_stream_frame(encode_attach("c1", "T"))
+
+
+def test_parse_event_still_rejects_the_end_frame() -> None:
+    # The old-client degradation path: a CLI that predates the `end` kind resolves
+    # the frame as a fault and takes its completed-or-lost-connection route.
+    with pytest.raises(ValueError, match="expected event frame"):
+        parse_event(encode_end())

@@ -7,7 +7,8 @@ Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
 load request), "control" (an interrupt/detach/abandon/save/archive/discard
 action), "set-lease" (toggle this attachment's keep-alive lease), or "query"
 (a read-only introspection query). Daemon -> client frames are "event"
-(wrapping one curated engine event) or "result" (the reply to a query).
+(wrapping one curated engine event), "result" (the reply to a query), or
+"end" (a bare marker: the run is over, disk and archive are authoritative).
 Encoders return a line WITHOUT a trailing newline; the caller frames it
 (matching remote/daemon/protocol.py:make_hello)."""
 from __future__ import annotations
@@ -87,6 +88,16 @@ class Query:
 
 ClientMessage = Attach | Input | Control | SetLease | SkillRequest | Query
 
+FRAME_END = "end"
+
+
+@dataclass(frozen=True, slots=True)
+class EndOfRun:
+    """The end-of-run marker: the run is over, disk and archive are authoritative."""
+
+
+END_OF_RUN = EndOfRun()
+
 
 def encode_attach(quest_id: str, title: str, lease: bool = False) -> str:
     return json.dumps(
@@ -124,6 +135,10 @@ def encode_result(value: Any) -> str:
 
 def encode_result_error(message: str) -> str:
     return json.dumps({"kind": "result", "ok": False, "error": message})
+
+
+def encode_end() -> str:
+    return json.dumps({"kind": FRAME_END})
 
 
 def _clip_strings(value: Any, limit: int) -> Any:
@@ -174,10 +189,14 @@ def parse_client_message(line: str) -> ClientMessage:
     raise ValueError(f"unknown client message kind {kind!r}")
 
 
-def parse_event(line: str) -> dict[str, Any]:
+def _as_object(line: str) -> dict[str, Any]:
     obj = json.loads(line)
     if not isinstance(obj, dict):
         raise ValueError(f"expected JSON object, got {type(obj).__name__}")
+    return obj
+
+
+def _event_of(obj: dict[str, Any]) -> dict[str, Any]:
     if obj.get("kind") != "event":
         raise ValueError(f"expected event frame, got {obj.get('kind')!r}")
     try:
@@ -187,6 +206,18 @@ def parse_event(line: str) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise ValueError(f"expected 'event' to be a JSON object, got {type(event).__name__}")
     return event
+
+
+def parse_event(line: str) -> dict[str, Any]:
+    return _event_of(_as_object(line))
+
+
+def parse_stream_frame(line: str) -> dict[str, Any] | EndOfRun:
+    """One daemon->client stream frame: the wrapped event, or the end-of-run marker."""
+    obj = _as_object(line)
+    if obj.get("kind") == FRAME_END:
+        return END_OF_RUN
+    return _event_of(obj)
 
 
 def parse_result(line: str) -> Any:
