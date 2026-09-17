@@ -24,9 +24,9 @@ written with the user; the quest is **already set up** (the worktree exists). Go
 ## Your Role
 
 Finalize the draft spec: adopt the already-grounded draft as-is, normalize it to
-imp's four-part structure, commit the final spec, then own the review (rework /
-minors) loop. You do **not** re-brainstorm — the design dialogue already happened
-at the threshold.
+imp's four-part structure, commit the final spec, then own the review rework loop.
+You do **not** re-brainstorm — the design dialogue already happened at the
+threshold.
 
 {% include "partials/spec-design-principles.md" %}
 
@@ -122,7 +122,7 @@ Shape:
 
 Each plan is a top-level numbered item (`1.`, `2.`, …); the spec gate counts them to seed the plan counter the user sees.
 
-On a rework or minors re-commit the `## Plan outline` already lives in the spec —
+On a rework re-commit the `## Plan outline` already lives in the spec —
 keep it, and refresh it only if the rework changed scope (and thus the plan count).
 
 You only write the spec file to the quest's artifact area (NOT the code branch —
@@ -151,7 +151,6 @@ resume marker. The taxonomy below carries the full feedback strings:
 |---|---|---|
 | Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written`. |
 | Reviewer rework | "Here's review feedback to address:" + `findings:` / `critical:` or `major:` above `0` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
-| Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `critical: 0` and `major: 0` | One-pass minors protocol, non-soliciting. |
 
 **Verify each finding before acting on it.** A finding can rest on a false premise —
 a misread of the spec or an untrue claim about the code. Confirm it first: re-read
@@ -194,9 +193,8 @@ reply returns as your next message, and that follow-up turn ends tool-terminal w
 `complete_step`. In a headless run an escalation pauses `AWAITING_USER` — designed
 behavior, not a failure.
 
-This policy does **not** loosen the two kept bans: the pre-commit self-review still
-fixes issues inline without soliciting, and the minors-integration pass still asks
-the user nothing.
+This policy does **not** loosen the kept ban: the pre-commit self-review still
+fixes issues inline without soliciting.
 
 ## Surfacing a decision you cannot resolve
 
@@ -220,36 +218,6 @@ Decisions summary (see **Ask vs. decide**).
 
 > **Unenumerated copy is a non-blocking case of this.** If the design adds new user-facing copy — any string a human sees, or LLM prompt text — whose exact wording the threshold interview never enumerated, do not gate landing on it. Pin a reasonable default as spec content, styled after neighbouring copy, and record the wording as one `— needs-decision:` item so it rides to the merge gate. Never write "approval-gated before it lands" or anything that stalls the headless plan phase.
 
-## Minors-integration pass (a review follows)
-
-A minors resume is recognized by its preamble — "No blocking issues — integrate
-these minor improvements; a final review follows:" — carrying `critical: 0` and
-`major: 0`, with no script-gate "was not accepted" wrapper. It is **not** a rework:
-the spec already passed review (no Critical/Major findings). This is your one pass to
-fold in the reviewer's **Minor** improvements — a fresh verification review runs
-afterward to confirm the edit introduced nothing blocking, and it will **not** ask for
-further minors, so integrate what is worthwhile now. **Trust the counts:**
-`critical: 0` with `major: 0` means the spec already passed; the Minor/Nit
-`findings:` are advisory, not a rejection.
-
-On this pass:
-
-1. **Integrate the advisory findings.** Apply any worthwhile Minor/Nit improvements,
-   re-write `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`, then finish
-   tool-terminal with `complete_step(phase="written", …)` (engine journals at the
-   step boundary; no manual commit).
-2. **If there is nothing worth integrating**, just call
-   `complete_step(phase="written", …)` without changing the file. The verification
-   review still runs on the unchanged spec and will pass it through.
-
-Re-emit the same `complexity` you sent on the `written` turn (see **Pinning
-complexity**) — do not reclassify to `trivial` here.
-
-**Non-negotiable on this pass:** emit `phase: written`,
-do **not** ask the user anything, and end the turn tool-terminal with the
-`complete_step` call. This pass exists to incorporate the reviewer's advice, not to reopen
-the brainstorm.
-
 ## Pinning complexity (required on every completion)
 
 Emit `complexity` on **every** `complete_step` call — it is a required output
@@ -260,7 +228,7 @@ it through the draft's shape: a thin **Goal + Acceptance criteria** draft means
 `trivial`; the full four-part structure (Goal, Scope, Decisions summary, Acceptance
 criteria) — see **Writing the Spec** — means `standard`. Read the committed draft
 and emit the matching value. Do not recompute the classification or flip it during a
-rework or minors pass.
+rework.
 
 **Thin spec on `trivial`.** When the draft is `trivial`, keep it thin — **Goal +
 Acceptance criteria only**; do not invent Scope or Decisions summary. On `standard`,
@@ -269,4 +237,4 @@ keep the full four-part structure.
 ## Output
 
 - `phase: written` — spec is written, committed, and ready for review (or sent
-  back through review after a rework, minors, or gate-discussion edit)
+  back through review after a rework or gate-discussion edit)

@@ -29,10 +29,8 @@ def test_spec_writer_drops_rework_solicitation_bans() -> None:
     text = _spec_writer()
     # The standalone rework-close ban is gone (replaced by the policy pointer).
     assert "Never re-solicit the user on rework" not in text
-    # …but the kept bans remain.
-    assert "do not re-solicit the user" in text          # pre-commit self-review
-    assert "do\n**not** ask the user anything" in text or \
-           "do **not** ask the user anything" in text     # minors pass
+    # …but the kept ban remains: the pre-commit self-review still fixes inline.
+    assert "do not re-solicit the user" in text
 
 
 def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
@@ -63,10 +61,8 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
     # This task rewrites the line-109 recognition paragraph, so its inline
     # solicitation ban is gone (the policy now lives in "Ask vs. decide").
     assert "Do NOT ask the user anything" not in text
-    # The taxonomy carries the full, untruncated feedback strings verbatim.
+    # The taxonomy carries the reviewer-rework feedback string verbatim.
     assert "Here's review feedback to address:" in text
-    assert ("No blocking issues — integrate these minor improvements; a final "
-            "review follows:") in text
     # The synthesized is_error rework-result frame (resume-vs-goto discriminator) is present.
     assert REWORK_RESULT_FRAME in text
 
@@ -91,9 +87,6 @@ def test_plan_writer_has_ask_vs_decide_and_decisions_section() -> None:
     assert "## Decisions" in text
     assert "yield to the human" in text
     assert "wait_for_user" not in text
-    # minors pass ban kept (the phrase wraps across a line break in the file;
-    # "do not reopen planning" is distinctive and sits on one line)
-    assert "do not reopen planning" in text
 
 
 def test_plan_reviewer_briefed_on_decisions_section() -> None:
@@ -107,7 +100,6 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
     text = _plan_writer()
     for s in (
         "Here's review feedback to address:",
-        "No blocking issues — integrate these minor improvements; a final review follows:",
         "More plans are needed for this spec. Coverage assessment:",
         "The review found the plan needs revision. Findings:",
         "The integration pass found the plan needs revision. Findings:",
@@ -115,6 +107,17 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
         REWORK_RESULT_FRAME,
     ):
         assert s in text, f"plan-writer taxonomy missing: {s!r}"
+
+
+def test_plan_writer_documents_the_spec_approval_goto_as_planning_work() -> None:
+    # A clean spec review now gotos plan-writer instead of bouncing the finalizer,
+    # so the taxonomy must name the shape AND frame it as planning, not a rework.
+    text = _plan_writer()
+    assert "| Spec approved | goto (fresh session) |" in text
+    row = next(ln for ln in text.splitlines()
+               if ln.startswith("| Spec approved |"))
+    assert "The spec is approved — no blocking issues." in row
+    assert "Planning work, not a rework" in row
 
 
 _WRITER_FILES = {

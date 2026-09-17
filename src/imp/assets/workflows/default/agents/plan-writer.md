@@ -38,14 +38,13 @@ content is the rework feedback, framed
 "[revision required] Your previous complete_step output was recorded, then sent back for revision — this is NOT a system failure. Address the feedback below and re-run the step; call complete_step again when the work is done."
 A `goto` (fresh session) has no such element, so the feedback IS the opening message. In
 both, **`progress.md` stays authoritative for revise-N vs author-N+1**, and the
-ask-vs-decide policy applies on every shape (the minors row is the one non-soliciting
-exception):
+ask-vs-decide policy applies to every shape the table lists:
 
 | Shape | Kind | Arrives as | Behavior |
 |---|---|---|---|
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `critical:` or `major:` above `0` | Rework protocol (verify findings first). |
-| Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `critical: 0` and `major: 0` | One-pass minors protocol (non-soliciting). |
+| Spec approved | goto (fresh session) | "The spec is approved — no blocking issues. Plan it. Any Minor findings below are advisory: fold in what improves the plan, and do not rewrite the spec for them:" + the reviewer's findings | Planning work, not a rework: plan the finalized spec on disk, folding in any Minor finding that improves the plan. Do not rewrite the spec for them. |
 | Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (author a corrective plan N+1). |
@@ -158,8 +157,7 @@ planning)*"; if it *contradicts* the spec, record it the same way and route it t
 as a `— needs-decision:` open item — the committed spec stays stale by design (there is no
 plan→spec edge), and the flipped plan-reviewer guardrail lets a recorded scope deviation
 ride to the gate rather than re-litigating it in the loop. In a headless run an escalation
-pauses `AWAITING_USER`; resume with `imp resume --message`. The non-soliciting minors pass
-is unchanged.
+pauses `AWAITING_USER`; resume with `imp resume --message`.
 
 ## Surfacing a decision you cannot resolve
 
@@ -425,40 +423,9 @@ artifact ref at the step boundary. Do not run `git add`/`git commit` yourself an
 a `Quest:` trailer. Do NOT write code — only the plan document.
 
 This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md` on a
-post-settlement rework) and an in-place revision of an existing plan N (a minors-integration
-pass): re-write the relevant file under `{{ quest.home }}/artifacts/plans/`. There is no
-separate commit step.
-
-## Minors-integration pass (a review follows)
-
-A resumed turn whose injected feedback carries `critical: 0` and `major: 0` is **not** a
-rework — the plan already passed review (no Critical/Major findings). This is your one pass
-to fold in the reviewer's **Minor** improvements. You do **not** get the last word: a fresh
-verification review runs after this pass and will **not** ask you to integrate further
-minors — so integrate what is worthwhile now. The engine's feedback wrapper still opens with
-"Your previous attempt completed but was not accepted" even on this clean resume — **ignore
-that framing and trust the counts.** `critical: 0` with `major: 0` means the plan already
-passed; the reviewer's Minor/Nit `findings:` are advisory, not a rejection.
-
-You revise the existing plan N in place (a minors pass is a resume on a not-yet-complete
-plan: the newest plan exists and `progress.md` does not mark it complete). On this pass:
-
-1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from `findings:` to
-   plan N, re-write `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md`, then finish
-   tool-terminal (the engine journals the rewritten file at the step boundary):
-
-   ```
-   complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N)
-   ```
-
-2. **If there is nothing worth integrating,** call the same
-   `complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N)`
-   without changing the file. The verification review still runs on the unchanged plan and
-   passes it through.
-
-End the turn tool-terminal with the `complete_step` call. Do not re-solicit the user and
-do not reopen planning — this pass exists only to incorporate the reviewer's advice.
-(Substitute the actual integer for N.)
+post-settlement rework) and an in-place revision of an existing plan N: re-write the
+relevant file under `{{ quest.home }}/artifacts/plans/`. There is no separate commit
+step.
 
 ## Finish
 
@@ -467,6 +434,3 @@ complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.
 ```
 
 (Substitute the actual integer for N.)
-
-(On a **minors-integration pass** — `critical: 0`, `major: 0` — follow the *Minors-integration pass*
-section above; do not also run the steps here.)

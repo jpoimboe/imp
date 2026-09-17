@@ -44,6 +44,12 @@ Read first, every entry:
 
 {% include "partials/delegate-exploration.md" %}
 
+{% if vars.plan_review_notes %}
+**Plan review notes.** The plan was approved with no blocking issues; the reviewer's advisory findings follow. Fold in what improves the work as you dispatch — they are not rework.
+
+{{ vars.plan_review_notes }}
+{% endif %}
+
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 feedback message, treat it as **authoritative over progress.md**: re-open and fix
 the named task even if progress.md marks it done, then reconcile progress.md. Two
@@ -121,12 +127,13 @@ unimplemented task, or the re-opened task from injected feedback):
    State only what was actually run.
 
    {% if vars.fast_path %}
-   **Fast-path: the spec waived tests.** Tell the coder in the dispatch: "the spec
-   waived **new** tests — do **not** add or modify tests; make exactly the task's
-   edits, then commit." **One reviewer:** dispatch ONLY `code-reviewer` at the **`medium` tier**:
-   `sub_agent(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
-   waived new tests, so spec-conformance is least likely to be the failure mode;
-   end-of-run spec coverage lives in the whole-diff batch-code-reviewer.)
+   **Fast-path: the spec waived speculative tests.** Tell the coder in the dispatch:
+   "add **no test the spec did not ask for** — write any test the task explicitly
+   names, make the task's edits, then commit." **One reviewer:** dispatch ONLY
+   `code-reviewer` at the **`medium` tier**:
+   `sub_agent(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs carry
+   little unplanned test surface, so spec-conformance is least likely to be the failure
+   mode; end-of-run spec coverage lives in the whole-diff batch-code-reviewer.)
    {% else %}
    Dispatch the `code-reviewer` at the **`medium` tier**:
    `sub_agent(subagent_name="code-reviewer", tier="medium", …)`.

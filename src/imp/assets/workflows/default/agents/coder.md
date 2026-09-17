@@ -13,11 +13,11 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 ## Before You Begin
 
 {% if vars.fast_path %}
-This quest was classified **trivial**: do **not** create or modify tests, and do
-**not** load a testing skill. Make exactly the task's edits, then commit. If
-your edit could plausibly affect behavior that a specific existing test covers,
-run just **that focused test** with the project's own test tooling; otherwise
-commit and let the gate verify.
+This quest was classified **trivial**: add **no test the spec did not ask for**, and do
+**not** load a testing skill. Write any test your task explicitly names, make the task's
+edits, then commit. If your edit could plausibly affect behavior that a specific
+existing test covers, run just **that focused test** with the project's own test
+tooling; otherwise commit and let the gate verify.
 {% else %}
 {% include "partials/test-first.md" %}
 {% endif %}

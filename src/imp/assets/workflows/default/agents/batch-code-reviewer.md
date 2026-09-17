@@ -38,8 +38,9 @@ Read all of these and the diff before forming your assessment:
 
 ## What to Check
 
-- **Spec alignment:** every acceptance criterion satisfied; all planned functionality
-  present; deviations are justified improvements, not problematic departures.
+- **Spec alignment:** all planned functionality present; deviations are justified
+  improvements, not problematic departures. `gap-check` has already walked the
+  acceptance criteria clause by clause — do not re-walk them.
 - **Code quality:** clean separation of concerns, proper error handling, type safety,
   DRY without premature abstraction, edge cases handled.
 - **Architecture:** sound design, reasonable scalability and performance, security,

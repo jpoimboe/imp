@@ -418,8 +418,9 @@ def test_plan_writer_has_no_deviation_revise_mode() -> None:
     assert "deviation revise mode" not in low
     assert "deviation-bounded revise" not in low
     assert "task-lead deviation" not in low
-    # The minors-integration in-place revise survives.
-    assert "minors-integration" in low
+    # The in-place revise of a not-yet-settled plan N survives: a Critical/Major
+    # rework still bounces the writer back onto the same plan file.
+    assert "revise `…-plan-N.md` in place" in text
     # Authoring the covering N+1 consumes the NEEDS-REPLAN lifecycle handle.
     assert "NEEDS-REPLAN" in text
     assert "[x]" in text
@@ -538,6 +539,40 @@ def test_severity_partial_holds_canonical_definitions() -> None:
         assert term in text, term
     assert "behavioral impact, not file type" in text
     assert "non-trivial risk" in text
+    # Minor is scoped to findings that change what gets built, so prose-only
+    # findings land in Nit instead of buying a lap.
+    assert ("- **Minor** — a real but non-blocking improvement that changes what "
+            "gets built;\n  correctness is intact.") in text
+    assert ("File by honest impact, not by the lap you want — a wrong claim about "
+            "existing code, or\na criterion that would mislead a verifier, is "
+            "**Major**; rationale prose that changes\nnothing downstream is a "
+            "**Nit**.") in text
+
+
+def test_severity_partial_makes_no_routing_claim() -> None:
+    """AC 6b. The partial is included by five reviewers and integration-reviewer
+    still grants a minors-only lap, so any claim about where a Minor *goes* would
+    be false for one of its readers. Both halves are pinned here: that the lap
+    really does still exist, and that the partial does not speak to it."""
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Goto
+
+    wf = load_workflow(bundled_workflow_dir("default"))
+    rules = {s.name: s for s in wf.flat_steps()}["integration-reviewer"].rules
+    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
+    lap = evaluate_rules(rules, vars=base,
+                         output={"status": "Success", "findings": "Minor: x",
+                                 "critical": 0, "major": 0, "minor": 2,
+                                 "tolerated": False})
+    assert isinstance(lap.action, Goto)
+    assert lap.action.target == "reconciler" and lap.action.resume is True
+
+    # The only sentence allowed to mention a lap is the calibration instruction,
+    # which speaks about filing honestly rather than about where a Minor is routed.
+    text = RUBRIC_PARTIAL.read_text().lower().replace("\n", " ")
+    linking = [s.strip() for s in text.split(".")
+               if "minor" in s and "lap" in s]
+    assert linking == [], linking
 
 
 def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
@@ -710,7 +745,8 @@ def test_authoring_agent_renders_human_decision_partial(
             quest_home=".imp/quests/abc",
             cur_base_head="X", orig_base_head="X",
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
-                  "task_total": 1, "integration_fork": "P"},
+                  "task_total": 1, "integration_fork": "P",
+                  "plan_review_notes": ""},
             ),
         workflow_dir=bundled_workflow_dir("default"))
     # Sentinel lives entirely on one partial line (the canonical sentence wraps

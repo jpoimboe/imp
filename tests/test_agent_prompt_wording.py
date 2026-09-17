@@ -159,6 +159,30 @@ def test_batch_code_reviewer_description_is_whole_diff() -> None:
     assert "whole diff" in desc
 
 
+def test_batch_code_reviewer_defers_the_ac_walk_to_gap_check() -> None:
+    """AC 12. The prompt's own preamble says gap-check owns spec coverage
+    exclusively; the Spec alignment bullet no longer contradicts it."""
+    body = _agent_prompt("batch-code-reviewer")
+    assert "every acceptance criterion satisfied" not in body
+    assert (
+        "- **Spec alignment:** all planned functionality present; deviations are "
+        "justified\n  improvements, not problematic departures. `gap-check` has "
+        "already walked the\n  acceptance criteria clause by clause — do not "
+        "re-walk them."
+    ) in body
+    # The reviewer's real charter is untouched.
+    for bullet in ("- **Code quality:**", "- **Architecture:**", "- **Testing:**",
+                   "- **Production readiness:**"):
+        assert bullet in body, bullet
+
+
+def test_gap_check_keeps_the_only_ac_walk() -> None:
+    """AC 12. gap-check is now the sole owner, so its walk section stays."""
+    body = _agent_prompt("gap-check")
+    assert "## Walk the acceptance criteria clause by clause" in body
+    assert "split each criterion into its **independently checkable clauses**" in body
+
+
 def test_events_query_references_frame_provenance_not_current_state() -> None:
     for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
@@ -354,7 +378,8 @@ def _render_agent(name: str, tmp_path) -> str:
             quest_id="abc",
             quest_home=".imp/quests/abc",
             cur_base_head="BASE",
-            vars={"fast_path": False, "task_total": 0},
+            vars={"fast_path": False, "task_total": 0,
+                  "plan_review_notes": ""},
         ),
         workflow_dir=bundled_workflow_dir("default"),
     )
@@ -562,8 +587,7 @@ def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
 _CALIBRATION_SENTENCE = (
     "An area that returns lap after lap means the design is unsettled, not the spec "
     "under-written: say so in `findings` — another Major buys another lap, not a "
-    "decision — and don't manufacture minors to justify one more pass; on such a "
-    "review `minor = 0` is the honest answer."
+    "decision."
 )
 
 
@@ -661,10 +685,10 @@ def test_spec_reviewer_output_copy_counts_findings_and_excludes_nits() -> None:
         "findings are cosmetic Nits reports `minor = 0`."
     ) in body
     assert (
-        "Any Critical or Major sends the spec back for rework. `minor` is consulted "
-        "only when `critical` and `major` are both `0`, deciding whether the writer "
-        "does one final minors-integration pass before the spec is accepted; it has "
-        "no effect otherwise. Count honestly regardless."
+        "Any Critical or Major sends the spec back for rework. With `critical` and "
+        "`major` both `0` the spec is accepted and proceeds to planning: your Minor "
+        "findings ride forward to `plan-writer` as advisory context and buy no lap "
+        "here. Count honestly regardless."
     ) in body
 
 
@@ -765,10 +789,10 @@ def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
         "findings are cosmetic Nits reports `minor = 0`."
     ) in body
     assert (
-        "Any Critical or Major sends the plan back for rework. `minor` is consulted "
-        "only when `critical` and `major` are both `0`, deciding whether the writer "
-        "does one final minors-integration pass before the plan is accepted; it has "
-        "no effect otherwise. Count honestly regardless."
+        "Any Critical or Major sends the plan back for rework. With `critical` and "
+        "`major` both `0` the plan is accepted and proceeds to implementation: your "
+        "Minor findings ride forward to `task-lead` through `plan_review_notes` as "
+        "advisory context and buy no lap here. Count honestly regardless."
     ) in body
 
 

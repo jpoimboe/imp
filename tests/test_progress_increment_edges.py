@@ -6,8 +6,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import Goto
 
 _BASE = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False,
+    "fast_path": False, "plan_review_notes": "",
     "coverage_settled": False, "plan_index": 3, "plan_total": 3, "task_total": 0,
 }
 
@@ -61,15 +60,20 @@ def test_finalize_merge_leaves_counters_alone() -> None:
 def test_resume_reworks_do_not_touch_plan_index() -> None:
     steps = _steps()
     pr = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                        output={"critical": 1, "major": 0, "minor": 0})
+                        output={"critical": 1, "major": 0, "minor": 0,
+                                "findings": "f"})
     assert pr.action.target == "plan-writer" and pr.action.resume is True
     assert "plan_index" not in pr.var_mutations
     pv = evaluate_rules(steps["plan-verify-commit"].rules, vars=_BASE,
                         output={"exit": 1, "stdout": "", "stderr": ""})
     assert pv.action.target == "plan-writer" and pv.action.resume is True
     assert "plan_index" not in pv.var_mutations
+    # A minor-only review is no longer a rework: it routes forward, and still
+    # leaves the plan counter alone.
     pr_minor = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                              output={"critical": 0, "major": 0, "minor": 2})
-    assert pr_minor.action.target == "plan-writer" and pr_minor.action.resume is True
+                              output={"critical": 0, "major": 0, "minor": 2,
+                                      "findings": "Minor: advisory"})
+    assert pr_minor.action.target == "plan-finalized"
+    assert pr_minor.action.resume is False
     assert "plan_index" not in pr_minor.var_mutations
 

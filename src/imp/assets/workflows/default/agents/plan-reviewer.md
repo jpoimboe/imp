@@ -134,9 +134,9 @@ Report `critical`, `major`, and `minor` as the number of findings you listed at 
 severity. **Nits are never counted** — a plan whose only findings are cosmetic Nits
 reports `minor = 0`.
 
-Any Critical or Major sends the plan back for rework. `minor` is consulted only when
-`critical` and `major` are both `0`, deciding whether the writer does one final
-minors-integration pass before the plan is accepted; it has no effect otherwise. Count
+Any Critical or Major sends the plan back for rework. With `critical` and `major` both
+`0` the plan is accepted and proceeds to implementation: your Minor findings ride forward
+to `task-lead` through `plan_review_notes` as advisory context and buy no lap here. Count
 honestly regardless.
 
 Finish with one of:

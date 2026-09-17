@@ -1,6 +1,6 @@
-"""§6 edge-coverage test: 6 unique findings-carrying (source, target) pairs
-(8 rule entries total) must each have a non-empty feedback preamble in the
-default workflow."""
+"""Every findings-carrying (source, target) edge in the default workflow must
+have a non-empty feedback preamble: the engine appends the reviewer's rendered
+output fields to any Goto that carries one, forward edges included."""
 from __future__ import annotations
 
 import pathlib
@@ -10,6 +10,7 @@ from imp.engine.types import Goto
 
 FINDINGS_TARGETS = {
     ("spec-reviewer", "spec-finalizer"),
+    ("spec-reviewer", "plan-writer"),
     ("plan-reviewer", "plan-writer"),
     ("finalize", "plan-writer"),
 }

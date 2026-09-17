@@ -43,10 +43,10 @@ def test_spec_finalizer_carries_unenumerated_copy_backstop() -> None:
         "that stalls the headless plan phase."
         in text
     )
-    # Placement: closes the Surfacing-a-decision section, before Minors-integration.
+    # Placement: closes the Surfacing-a-decision section, before Pinning complexity.
     idx_para = text.index("**Unenumerated copy is a non-blocking case of this.**")
     idx_section = text.index("## Surfacing a decision you cannot resolve")
-    idx_next = text.index("## Minors-integration pass")
+    idx_next = text.index("## Pinning complexity")
     assert idx_section < idx_para < idx_next
 
 

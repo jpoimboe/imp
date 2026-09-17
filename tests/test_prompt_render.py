@@ -126,15 +126,18 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
                       vars={"fast_path": False}),
         workflow_dir=bundled_workflow_dir("default"),
     )
-    # fast-path: no new tests, TDD skill NOT loaded; the focused-test carve-out
-    # survives (the full-suite prohibition now lives in the workflow persona).
-    assert "do **not** create or modify tests" in fast
+    # fast-path: no speculative tests, TDD skill NOT loaded; a test the task names
+    # is still written, and the focused-test carve-out survives (the full-suite
+    # prohibition now lives in the workflow persona).
+    assert "add **no test the spec did not ask for**" in fast
+    assert "Write any test your task explicitly names" in fast
+    assert "do **not** create or modify tests" not in fast
     assert "IMP_LINT_COMMAND" not in fast
     assert "that focused test" in fast
     assert "failing test first" not in fast
     # standard path: the test-first partial is rendered in; fast-path text absent.
     assert "No production code without a failing test first" in slow
-    assert "do **not** create or modify tests" not in slow
+    assert "add **no test the spec did not ask for**" not in slow
 
 
 def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
@@ -525,4 +528,74 @@ def test_portable_coding_guidance_reaches_writers_and_reviewers(
     assert "{% include" not in rendered
     if fast_path:
         assert "No production code without a failing test first" not in rendered
+
+
+def test_task_lead_renders_plan_review_notes_only_when_set(tmp_path: Path) -> None:
+    """The plan reviewer's advisory findings reach the lead through a var, because
+    the intervening plan-finalized script would swallow a feedback preamble."""
+    from imp.engine.loader import load_workflow
+
+    wf_dir = bundled_workflow_dir("default")
+    body = load_workflow(wf_dir).agents["task-lead"].prompt_template_source
+    log = _log(tmp_path / "events.jsonl", [])
+
+    def _render(notes: str) -> str:
+        return render_prompt(
+            body,
+            build_context(quest_title="t", event_log=log,
+                          vars={"fast_path": False, "task_total": 3,
+                                "plan_review_notes": notes}),
+            workflow_dir=wf_dir,
+        )
+
+    carried = _render("Minor: task 3's assertion restates the implementation")
+    assert "**Plan review notes.**" in carried
+    assert "Minor: task 3's assertion restates the implementation" in carried
+    assert "they are not rework" in carried
+
+    empty = _render("")
+    assert "**Plan review notes.**" not in empty
+    # The rest of the prompt is unaffected by the empty carrier.
+    assert "You are the task lead for the implement phase." in empty
+
+
+def test_task_lead_fast_path_waives_only_speculative_tests(tmp_path: Path) -> None:
+    """Express dispatches waive the tests nobody asked for, not the ones the task
+    names — and the block stays indented inside its numbered list item."""
+    from imp.engine.loader import load_workflow
+
+    wf_dir = bundled_workflow_dir("default")
+    body = load_workflow(wf_dir).agents["task-lead"].prompt_template_source
+    log = _log(tmp_path / "events.jsonl", [])
+
+    def _render(fast_path: bool) -> str:
+        rendered = render_prompt(
+            body,
+            build_context(quest_title="t", event_log=log,
+                          vars={"fast_path": fast_path, "task_total": 1,
+                                "plan_review_notes": ""}),
+            workflow_dir=wf_dir,
+        )
+        # the dispatch instruction is hard-wrapped and list-indented.
+        return " ".join(rendered.split())
+
+    fast, slow = _render(True), _render(False)
+    assert (
+        '**Fast-path: the spec waived speculative tests.** Tell the coder in the '
+        'dispatch: "add **no test the spec did not ask for** — write any test the task '
+        'explicitly names, make the task\'s edits, then commit."'
+    ) in fast
+    assert (
+        "(Trivial diffs carry little unplanned test surface, so spec-conformance is "
+        "least likely to be the failure mode; end-of-run spec coverage lives in the "
+        "whole-diff batch-code-reviewer.)"
+    ) in fast
+    assert "do **not** add or modify tests" not in body
+    # the one-reviewer dispatch the block exists for is unchanged
+    assert 'sub_agent(subagent_name="code-reviewer", tier="medium", …)' in fast
+    assert "waived speculative tests" not in slow
+    assert "Dispatch the `code-reviewer` at the **`medium` tier**" in slow
+    # flattening the list indentation would break the numbered item it sits in
+    block = body.split("{% if vars.fast_path %}\n", 1)[1].split("   {% else %}", 1)[0]
+    assert [line for line in block.splitlines() if not line.startswith("   ")] == []
 

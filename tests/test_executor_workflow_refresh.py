@@ -76,6 +76,42 @@ def test_backfill_never_overwrites_existing_value() -> None:
     assert state.vars == {"auto_merge": False}
 
 
+def test_in_flight_quest_crosses_the_minors_removal(tmp_path: Path) -> None:
+    """AC 8. A quest created before the minors lap was removed persists the two
+    retired flags and no `plan_review_notes`. Resume backfills the carrier so
+    task-lead.md's StrictUndefined reference renders, and the stale keys stay inert:
+    no workflow var declares them, so no rule can read them."""
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.state import JsonlEventLog
+
+    wf_dir = bundled_workflow_dir("default")
+    wf = load_workflow(wf_dir)
+    _state_with_vars({"fast_path": False, "task_total": 3,
+                      "spec_minors_integrated": True,
+                      "plan_minors_integrated": True}).save(tmp_path)
+
+    state = State.load(tmp_path)          # the vars blob round-trips verbatim
+    assert state.vars["spec_minors_integrated"] is True
+
+    added = _backfill_var_defaults(state, wf.vars)
+    assert "plan_review_notes" in added
+    assert state.vars["plan_review_notes"] == ""
+    assert state.vars["plan_minors_integrated"] is True
+    declared = {v.name for v in wf.vars.decls}
+    assert declared.isdisjoint({"spec_minors_integrated", "plan_minors_integrated"})
+
+    rendered = render_prompt(
+        wf.agents["task-lead"].prompt_template_source,
+        build_context(quest_title="t",
+                      event_log=JsonlEventLog(tmp_path / "events.jsonl"),
+                      quest_id="abc", quest_home=".imp/quests/abc",
+                      vars=state.vars),
+        workflow_dir=wf_dir)
+    assert "You are the task lead for the implement phase." in rendered
+    assert "**Plan review notes.**" not in rendered
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

@@ -136,7 +136,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips the whole spec phase and the `plan-reviewer` gate; everything from `implement` onward is identical.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep when there is anything to drain, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips the whole spec phase and the `plan-reviewer` gate; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -187,9 +187,10 @@ flowchart TD
 
 `spec-finalizer` adopts the threshold draft and commits the final spec, including its
 `## Plan outline`. The gate counts the outline's numbered plans to seed `plan_total`, so
-the planning label carries the real denominator. The reviewer gets the last word: the
-loop ends only on a clean review with nothing left to integrate, and the writer gets
-exactly one minors-integration pass per settled state.
+the planning label carries the real denominator. A Critical or Major finding bounces the
+spec back to the writer and is re-reviewed; a clean review sends it forward to
+`plan-writer`, carrying the reviewer's Minor findings with it as advisory context rather
+than buying another lap.
 
 ```mermaid
 flowchart TD
@@ -198,7 +199,6 @@ flowchart TD
   SVC -. "no spec / no outline" .-> SF
   SVC -->|"plan_total = N"| SR["spec-reviewer"]
   SR -->|"Critical / Major"| SF
-  SR -->|"minors: one pass"| SF
   SR -->|clean| out([→ plan-writer])
 ```
 
@@ -206,8 +206,10 @@ flowchart TD
 
 `plan-writer` is the plan-phase entry: the spec phase, the next-plan loop, a gap-check
 corrective, and a finalize rework all `goto` it directly. It writes this outline plan's
-slice, the gate verifies the artifact, `plan-reviewer` mirrors the spec minors loop, and
-`plan-finalized` counts `## Task N` headers to seed `task_total`.
+slice, the gate verifies the artifact, `plan-reviewer` routes the same way — a blocking
+finding back to the writer, a clean review forward with its Minor findings carried to
+`task-lead` in `plan_review_notes` — and `plan-finalized` counts `## Task N` headers to
+seed `task_total`.
 
 ```mermaid
 flowchart TD
@@ -217,7 +219,6 @@ flowchart TD
   PVC -->|express| PF
   PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
-  PR -->|"minors: one pass"| PW
   PR -->|clean| PF{{"plan-finalized"}}
   PF -->|"task_total = N"| out([→ task-lead])
 ```
@@ -249,9 +250,13 @@ Runs once per quest, quest-local and off-lock. `gap-check` is the sole coverage 
 a gap authors a corrective plan (the **supercycle**) beyond the outline, and a clean pass
 latches `coverage_settled` so a later rework re-enters at `quest-review` and never
 re-runs the backstop. `quest-review` is the single quest-wide code review over
-`cur_base_head..HEAD`. `deferred-sweep` drains the whole quest's deferred list once.
-`converge-verify` runs the slow gate on the quest's own base; a failure resumes the sweep
-in fix-vs-tolerate triage, and a toleration escapes forward so the gate never re-runs.
+`cur_base_head..HEAD`. `deferred-check` then guards the sweep — a script step, because a
+rule condition cannot read the filesystem: with nothing to drain it skips straight to the
+slow gate, and it fails closed, so any doubt dispatches. `deferred-sweep` therefore runs
+only when the quest's deferred list holds an open item, and drains the whole list once
+when it does. `converge-verify` runs the slow gate on the quest's own base; a failure
+resumes the sweep in fix-vs-tolerate triage — naming `deferred-sweep` directly, so triage
+jumps over the guard — and a toleration escapes forward so the gate never re-runs.
 
 ```mermaid
 flowchart TD
@@ -260,7 +265,9 @@ flowchart TD
   GC -->|clean| QR["quest-review<br/>(batch-code-reviewer)"]
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
-  QR --> DS["deferred-sweep<br/>coder + code-reviewer"]
+  QR --> DC{{"deferred-check"}}
+  DC -->|"nothing to drain"| CV
+  DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
   DS -->|"slow gate tolerated"| out([→ wait-for-head])
   DS --> CV{{"converge-verify · slow"}}
   CV -. "fail → triage" .-> DS

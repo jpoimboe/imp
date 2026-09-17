@@ -412,16 +412,13 @@ async def test_full_default_workflow_completes_with_canned_claude(
 
 
 @pytest.mark.anyio
-async def test_clean_review_with_minors_integrates_then_verifies(
+async def test_clean_review_with_minors_rides_forward_without_a_second_lap(
     tmp_path: Path,
 ) -> None:
     quest = _seed_default_workflow(tmp_path)
-    # standard change, every review clean (blocking:false) but always carrying
-    # actionable minors (has_minor_findings:true). The new cycle: the first clean
-    # review sends the writer back to integrate the minors (setting the
-    # minors-integrated flag), then owes ONE verification review. That second
-    # review is also clean, and because the flag is set it terminates and advances
-    # to the next phase -- dropping its own minors rather than looping forever.
+    # standard change, every review clean (critical/major 0) but always carrying
+    # actionable minors. Minors no longer bounce the writer: each reviewer runs
+    # ONCE and routes forward, carrying its findings along as advisory context.
     def _default_with_minors(**kwargs):
         if _prompt_carries_ir(**kwargs):
             return _canned_anthropic(verdict="ok")
@@ -451,18 +448,15 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     )
     assert result is RunResult.COMPLETED
 
-    # Exactly two reviews per phase: the initial review + the owed verification
-    # review after the writer integrates minors. The cycle does NOT loop a third
-    # time even though the verification review still reports minors.
-    assert started.count("spec-reviewer") == 2, started
-    assert started.count("plan-reviewer") == 2, started
-    # The writer ran twice per phase: the initial write + the one minors pass.
-    assert started.count("spec-finalizer") == 2, started
-    assert started.count("plan-writer") == 2, started
+    # Exactly one review per phase: the minors-only lap is gone, so a clean
+    # review with minors advances instead of bouncing the writer.
+    assert started.count("spec-reviewer") == 1, started
+    assert started.count("plan-reviewer") == 1, started
+    assert started.count("spec-finalizer") == 1, started
+    assert started.count("plan-writer") == 1, started
 
-    # Termination is the REVIEWER's goto on the verification pass (minors-integrated
-    # already set), not a separate gate: the second spec-reviewer jumps to
-    # plan-writer, the second plan-review jumps to plan-finalized.
+    # The reviewers' own gotos are what advance the run: spec-reviewer jumps to
+    # plan-writer, plan-reviewer to plan-finalized.
     assert any(
         s == "spec-reviewer"
         and a.get("verb") == "goto" and a.get("target") == "plan-writer"
