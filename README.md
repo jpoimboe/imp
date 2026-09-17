@@ -55,11 +55,14 @@ changes can often trigger a test failure.  But the agents handle that easily,
 and the tests do a great job of preventing regressions.  So the test-heavy TDD
 philosophy seems to be a perfect fit for AI-native development.
 
-Note that imp can be a bit token-intensive due to the extra thinking involved
-with detailed specs, plans, and multiple reviews.  Quality, maintainable,
-functional, well-tested code isn't cheap.  **Claude Max (or ChatGPT Pro)
-subscription recommended.** Local models are not (yet) supported.  Pull
-requests welcome :-)
+Note that the default workflow can be a bit token-intensive due to the extra
+thinking involved with detailed specs, plans, and multiple reviews.  Quality,
+maintainable, functional, well-tested code isn't cheap.  **Claude Max (or
+ChatGPT Pro) subscription recommended for the default workflow.**  Local models
+are not (yet) supported.  Pull requests welcome :-)
+
+Or if you want a more "fast and loose" approach, make your own workflow YAML
+and still get all the other imp benefits (see Engine Features below).
 
 Currently Linux only.  Mac support coming soon.
 
