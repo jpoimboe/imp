@@ -635,11 +635,20 @@ async def test_codex_live_exposes_imp_tools_directly_and_passes_images(
         assert results[read["id"]]["error"] is False, results[read["id"]]
         # (c) complete_step was captured with its structured arguments.
         assert set(result["payload"]) == {"code"}, result
-        assert _IMAGE_CODE in str(result["payload"]["code"]), result
+        # The digit VALUES are a model draw — one spike attempt OCR'd this
+        # byte-identical PNG as 712 — so a misread spends an attempt instead of
+        # failing. The structural claims above stay hard: those are regressions.
+        if _IMAGE_CODE not in str(result["payload"]["code"]):
+            notes.append(
+                f"#{attempt + 1} completed with code "
+                f"{result['payload']['code']!r}, not {_IMAGE_CODE}")
+            continue
         # (d) The image reached the MODEL, not merely the tool result: the digits
         # appear nowhere in the prompt, so the model can only have read them off
         # the picture.
-        assert _IMAGE_CODE in _agent_prose(root / "events.jsonl"), events
+        if _IMAGE_CODE not in _agent_prose(root / "events.jsonl"):
+            notes.append(f"#{attempt + 1} digits absent from the agent's prose")
+            continue
         return
 
     raise AssertionError(
