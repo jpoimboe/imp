@@ -24,7 +24,7 @@ dependencies = [
   "ruamel.yaml>=0.19.1",
   "jinja2>=3.1.6",
   "pydantic>=2.13.5",
-  "filelock>=3.32.7,<4.0",   # held below 4.0: a new major, out of scope for this quest
+  "filelock>=4.0.0",
   "anyio>=4.15.1,<5.0",   # open_process(pass_fds=…) — the namespace-join spawn needs it
   "anthropic>=1.6.0,<2.0",
   "openai>=3.14.1,<4.0",
