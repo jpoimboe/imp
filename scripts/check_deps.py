@@ -12,21 +12,30 @@ environment running the tests. Two kinds of silent drift follow:
     interpreter is simply without the package. Surfaces as a cryptic ImportError
     deep in the suite.
   * STALE — a package is installed at a version `uv.lock` does not pin, because
-    pyproject's ranges are loose (`prompt_toolkit>=3.0,<4.0` happily accepts a
-    3.0.53 the lockfile never resolved to). Surfaces as new type/lint errors or
-    behavior changes that reproduce on no other machine.
+    pyproject's ranges are loose (a `foo>=1.0,<2.0` happily accepts a 1.9 the
+    lockfile never resolved to). Surfaces as new type/lint errors or behavior
+    changes that reproduce on no other machine.
 
 Both were live: a Fedora 3.13 -> 3.14 upgrade wiped the interpreter, and the
 obvious repair (`pip install -e '.[dev]'`) reinstalled everything at *latest*,
 drifting 30+ packages off the lockfile in one command.
 
-This runs first in `make check` and turns both into one clear line: which
-package, which interpreter, and how to fix it. Stdlib only, so it still runs in
-an interpreter that hasn't been reconciled yet.
+A third class compares the declaration against the lockfile rather than the
+interpreter:
+
+  * FLOOR — a direct dependency's declared lower bound is not the version
+    `uv.lock` pins, so the range claims support for a combination nothing was
+    ever run on. `uv lock --upgrade` moves the lock and leaves pyproject
+    untouched, so this rots by default; every direct floor must equal its pin.
+
+This runs first in `make check` and turns all three into one clear line: which
+package, what is wrong with it, and how to fix it. Stdlib only, so it still runs
+in an interpreter that hasn't been reconciled yet.
 
 Set ALLOW_DEP_DRIFT=1 to downgrade STALE to a warning (for deliberately testing
-a dependency bump before running `uv lock --upgrade`). Missing packages are
-always fatal — the suite cannot run without them.
+a dependency bump before running `uv lock --upgrade`). Missing packages and floor
+mismatches are always fatal — the suite cannot run without a package, and a wrong
+floor is a wrong claim in published metadata.
 """
 
 from __future__ import annotations
@@ -42,6 +51,9 @@ from pathlib import Path
 # specifier, extras bracket, or environment marker (e.g. "anyio>=4,<5" -> "anyio").
 _NAME = re.compile(r"^[A-Za-z0-9._-]+")
 
+# The version in a requirement's `>=` lower bound (e.g. "anyio>=4.15.1,<5.0" -> "4.15.1").
+_LOWER_BOUND = re.compile(r">=\s*([^,;\s\]]+)")
+
 
 def canon(name: str) -> str:
     """PEP 503 normalization. pyproject, uv.lock, and installed metadata each
@@ -50,19 +62,23 @@ def canon(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def declared_dependencies(pyproject: Path) -> list[str]:
-    """Distribution names from [project.dependencies] + the dev extra, in order."""
+def declared_floors(pyproject: Path) -> dict[str, str | None]:
+    """Every direct dependency ([project.dependencies] + the dev extra), in declared
+    order: canonical name -> its `>=` bound, None when it declares no lower bound."""
     project = tomllib.loads(pyproject.read_text())["project"]
     reqs = list(project.get("dependencies", []))
     reqs.extend(project.get("optional-dependencies", {}).get("dev", []))
-    names: list[str] = []
-    seen: set[str] = set()
+    floors: dict[str, str | None] = {}
     for req in reqs:
-        m = _NAME.match(req.strip())
-        if m and canon(m.group(0)) not in seen:
-            seen.add(canon(m.group(0)))
-            names.append(m.group(0))
-    return names
+        # Drop the environment marker first: its own `>=` (python_version >= '3.11')
+        # would otherwise parse as the requirement's floor.
+        spec = req.strip().split(";", 1)[0]
+        m = _NAME.match(spec)
+        if m is None or canon(m.group(0)) in floors:
+            continue
+        bound = _LOWER_BOUND.search(spec, m.end())
+        floors[canon(m.group(0))] = bound.group(1) if bound else None
+    return floors
 
 
 def locked_versions(lock: Path) -> dict[str, str]:
@@ -86,11 +102,11 @@ def _installed(name: str) -> str | None:
 
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
-    declared = declared_dependencies(root / "pyproject.toml")
+    floors = declared_floors(root / "pyproject.toml")
     locked = locked_versions(root / "uv.lock")
     project = canon(tomllib.loads((root / "pyproject.toml").read_text())["project"]["name"])
 
-    missing = [name for name in declared if _installed(name) is None]
+    missing = [name for name in floors if _installed(name) is None]
 
     # Version-check every locked package that is actually installed, not just the
     # declared ones — a transitive pinned by the lockfile can drift just as far.
@@ -105,7 +121,14 @@ def main() -> int:
         if have is not None and have != want:
             stale.append((cname, have, want))
 
-    if not missing and not stale:
+    # A name uv.lock does not pin has nothing to compare against (fresh clone, no lockfile).
+    bad_floors = [
+        (name, floor, locked[name])
+        for name, floor in floors.items()
+        if name in locked and floor != locked[name]
+    ]
+
+    if not missing and not stale and not bad_floors:
         return 0
 
     if missing:
@@ -128,9 +151,29 @@ def main() -> int:
         for name, have, want in stale:
             print(f"    - {name}: installed {have}, uv.lock pins {want}", file=sys.stderr)
 
-    print(f"  interpreter: {sys.executable}", file=sys.stderr)
-    print("  reconcile with:  make sync-env", file=sys.stderr)
-    if stale and not missing and os.environ.get("ALLOW_DEP_DRIFT") == "1":
+    if missing or stale:
+        print(f"  interpreter: {sys.executable}", file=sys.stderr)
+        print("  reconcile with:  make sync-env", file=sys.stderr)
+
+    if bad_floors:
+        print(
+            f"dependency check failed: {len(bad_floors)} declared floor(s) in "
+            "pyproject.toml do not match uv.lock:",
+            file=sys.stderr,
+        )
+        for name, floor, want in bad_floors:
+            declares = f">={floor}" if floor is not None else "no lower bound"
+            print(
+                f"    - {name}: pyproject declares {declares}, uv.lock pins {want}",
+                file=sys.stderr,
+            )
+        print(
+            "  a direct dependency's lower bound must equal the version uv.lock pins",
+            file=sys.stderr,
+        )
+        print("  update pyproject.toml, then:  make sync-env", file=sys.stderr)
+
+    if stale and not missing and not bad_floors and os.environ.get("ALLOW_DEP_DRIFT") == "1":
         return 0
     return 1
 
