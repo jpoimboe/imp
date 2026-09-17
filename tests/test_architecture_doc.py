@@ -346,7 +346,6 @@ SPEC_DIAGRAM = """flowchart TD
   SVC -. "no spec / no outline" .-> SF
   SVC -->|"plan_total = N"| SR["spec-reviewer"]
   SR -->|"Critical / Major"| SF
-  SR -->|"minors: one pass"| SF
   SR -->|clean| out([→ plan-writer])"""
 
 PLAN_DIAGRAM = """flowchart TD
@@ -356,7 +355,6 @@ PLAN_DIAGRAM = """flowchart TD
   PVC -->|express| PF
   PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
-  PR -->|"minors: one pass"| PW
   PR -->|clean| PF{{"plan-finalized"}}
   PF -->|"task_total = N"| out([→ task-lead])"""
 
@@ -734,6 +732,29 @@ def test_architecture_carries_no_circled_numerals() -> None:
 
 def _phase_section(text: str, phase: str) -> str:
     return text.split(f"### Phase {phase}", 1)[1].split("\n### ", 1)[0]
+
+
+def test_architecture_documents_no_minors_pass_for_spec_or_plan_review() -> None:
+    text = ARCH.read_text()
+    assert '"minors: one pass"' not in text
+    for phase in ("spec", "plan"):
+        section = _phase_section(text, phase).lower()
+        assert "minors" not in section, phase
+        assert "one pass" not in section, phase
+    # each front phase names where a clean review's Minor findings actually go
+    spec = " ".join(_phase_section(text, "spec").split())
+    assert (
+        "a clean review sends it forward to `plan-writer`, carrying the reviewer's "
+        "Minor findings with it as advisory context rather than buying another lap."
+    ) in spec
+    plan = " ".join(_phase_section(text, "plan").split())
+    assert (
+        "`plan-reviewer` routes the same way — a blocking finding back to the writer, "
+        "a clean review forward with its Minor findings carried to `task-lead` in "
+        "`plan_review_notes`"
+    ) in plan
+    # integration-reviewer keeps its own minors lap; nothing here retires it
+    assert '  IRV -->|"critical/major / minor"| REC' in text
 
 
 def test_architecture_states_the_artifacts_means_committed_boundary() -> None:

@@ -187,9 +187,10 @@ flowchart TD
 
 `spec-finalizer` adopts the threshold draft and commits the final spec, including its
 `## Plan outline`. The gate counts the outline's numbered plans to seed `plan_total`, so
-the planning label carries the real denominator. The reviewer gets the last word: the
-loop ends only on a clean review with nothing left to integrate, and the writer gets
-exactly one minors-integration pass per settled state.
+the planning label carries the real denominator. A Critical or Major finding bounces the
+spec back to the writer and is re-reviewed; a clean review sends it forward to
+`plan-writer`, carrying the reviewer's Minor findings with it as advisory context rather
+than buying another lap.
 
 ```mermaid
 flowchart TD
@@ -198,7 +199,6 @@ flowchart TD
   SVC -. "no spec / no outline" .-> SF
   SVC -->|"plan_total = N"| SR["spec-reviewer"]
   SR -->|"Critical / Major"| SF
-  SR -->|"minors: one pass"| SF
   SR -->|clean| out([→ plan-writer])
 ```
 
@@ -206,8 +206,10 @@ flowchart TD
 
 `plan-writer` is the plan-phase entry: the spec phase, the next-plan loop, a gap-check
 corrective, and a finalize rework all `goto` it directly. It writes this outline plan's
-slice, the gate verifies the artifact, `plan-reviewer` mirrors the spec minors loop, and
-`plan-finalized` counts `## Task N` headers to seed `task_total`.
+slice, the gate verifies the artifact, `plan-reviewer` routes the same way — a blocking
+finding back to the writer, a clean review forward with its Minor findings carried to
+`task-lead` in `plan_review_notes` — and `plan-finalized` counts `## Task N` headers to
+seed `task_total`.
 
 ```mermaid
 flowchart TD
@@ -217,7 +219,6 @@ flowchart TD
   PVC -->|express| PF
   PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
-  PR -->|"minors: one pass"| PW
   PR -->|clean| PF{{"plan-finalized"}}
   PF -->|"task_total = N"| out([→ task-lead])
 ```
