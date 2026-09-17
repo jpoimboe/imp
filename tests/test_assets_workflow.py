@@ -1062,7 +1062,8 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
         return render_prompt(body, build_context(
             quest_title="t", event_log=log, quest_id="abc",
             quest_home=".imp/quests/abc",
-            vars={"task_total": task_total, "fast_path": False}),
+            vars={"task_total": task_total, "fast_path": False,
+                  "plan_review_notes": ""}),
             workflow_dir=bundled_workflow_dir("default"))
 
     # Both the default (medium) and the plan-marked (high) coder examples appear
@@ -1400,3 +1401,12 @@ def test_reviewer_descriptions_no_longer_name_the_blocking_field() -> None:
         "severity-classified findings; any Critical/Major sends it back.")
     assert wf.agents["plan-reviewer"].description.endswith(
         "severity-classified; any Critical/Major sends it back.")
+
+
+def test_plan_review_notes_var_declared_as_empty_string() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("default"))
+    # A one-hop advisory carrier: declared so an in-flight quest backfills it to
+    # "" on resume and task-lead.md's StrictUndefined render cannot fail.
+    assert wf.vars.defaults()["plan_review_notes"] == ""
+    assert wf.vars.types()["plan_review_notes"] == "string"

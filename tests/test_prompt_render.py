@@ -526,3 +526,32 @@ def test_portable_coding_guidance_reaches_writers_and_reviewers(
     if fast_path:
         assert "No production code without a failing test first" not in rendered
 
+
+def test_task_lead_renders_plan_review_notes_only_when_set(tmp_path: Path) -> None:
+    """The plan reviewer's advisory findings reach the lead through a var, because
+    the intervening plan-finalized script would swallow a feedback preamble."""
+    from imp.engine.loader import load_workflow
+
+    wf_dir = bundled_workflow_dir("default")
+    body = load_workflow(wf_dir).agents["task-lead"].prompt_template_source
+    log = _log(tmp_path / "events.jsonl", [])
+
+    def _render(notes: str) -> str:
+        return render_prompt(
+            body,
+            build_context(quest_title="t", event_log=log,
+                          vars={"fast_path": False, "task_total": 3,
+                                "plan_review_notes": notes}),
+            workflow_dir=wf_dir,
+        )
+
+    carried = _render("Minor: task 3's assertion restates the implementation")
+    assert "**Plan review notes.**" in carried
+    assert "Minor: task 3's assertion restates the implementation" in carried
+    assert "they are not rework" in carried
+
+    empty = _render("")
+    assert "**Plan review notes.**" not in empty
+    # The rest of the prompt is unaffected by the empty carrier.
+    assert "You are the task lead for the implement phase." in empty
+

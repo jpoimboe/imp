@@ -354,7 +354,8 @@ def _render_agent(name: str, tmp_path) -> str:
             quest_id="abc",
             quest_home=".imp/quests/abc",
             cur_base_head="BASE",
-            vars={"fast_path": False, "task_total": 0},
+            vars={"fast_path": False, "task_total": 0,
+                  "plan_review_notes": ""},
         ),
         workflow_dir=bundled_workflow_dir("default"),
     )

@@ -44,6 +44,12 @@ Read first, every entry:
 
 {% include "partials/delegate-exploration.md" %}
 
+{% if vars.plan_review_notes %}
+**Plan review notes.** The plan was approved with no blocking issues; the reviewer's advisory findings follow. Fold in what improves the work as you dispatch — they are not rework.
+
+{{ vars.plan_review_notes }}
+{% endif %}
+
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 feedback message, treat it as **authoritative over progress.md**: re-open and fix
 the named task even if progress.md marks it done, then reconcile progress.md. Two

@@ -23,6 +23,7 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   coverage_settled:       {type: bool, default: false}
+  plan_review_notes:      {type: string, default: ""}
   integration_fork:       {type: string, default: ""}
   slow_verify_tolerated:  {type: bool, default: false}
   plan_index:             {type: int, default: 1}
