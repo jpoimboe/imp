@@ -3284,7 +3284,7 @@ async def test_only_a_live_interrupt_delivery_start_arms_the_force_quit_offer(
 
 
 @pytest.mark.anyio
-async def test_terminal_client_reports_fault_ending_on_oversized_frame(
+async def test_terminal_client_reports_cut_ending_on_oversized_frame(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")

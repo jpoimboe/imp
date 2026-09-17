@@ -1298,8 +1298,8 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    # The daemon finished in the milliseconds after the fault (the behi75 case).
-    quest = _make_quest(tmp_path, "2026-07-04-fault-merged")
+    # The daemon finished in the milliseconds after the cut (the behi75 case).
+    quest = _make_quest(tmp_path, "2026-07-04-cut-merged")
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
     quest.event_log().append(agent_id=None, type="quest_merged", payload={})
@@ -1322,7 +1322,7 @@ async def test_cut_ending_on_a_stale_paused_quest_reports_lost_connection(
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    quest = _make_quest(tmp_path, "2026-07-04-fault-live")
+    quest = _make_quest(tmp_path, "2026-07-04-cut-stale-paused")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
