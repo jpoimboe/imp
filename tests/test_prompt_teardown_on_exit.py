@@ -212,7 +212,7 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
 
         cont = build_continuation_fn(
             user_input_fn=user_input_fn,
-            coordinator=None, event_log=None, agent_id=None)
+            coordinator=None, event_log=None, agent_id=None, has_schema=False)
         _fire_soon(exit_event)
 
         with warnings.catch_warnings():
@@ -241,7 +241,7 @@ async def test_solicit_normal_reply_unchanged() -> None:
 
         cont = build_continuation_fn(
             user_input_fn=user_input_fn,
-            coordinator=None, event_log=None, agent_id=None)
+            coordinator=None, event_log=None, agent_id=None, has_schema=False)
         pipe.send_text("do the thing\r")
         _text, _human = cont("")
         reply = await _text

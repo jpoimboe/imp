@@ -70,6 +70,7 @@ async def test_resumed_run_supports_multiple_exchanges_to_completion(
         user_input_fn=solicit,
         event_log=log,
         agent_id="step:p/s",
+        has_schema=False,
     )
     inv = AgentInvocation(
         agent_def=_agent_def(),

@@ -106,7 +106,7 @@ def test_build_continuation_fn_has_no_subagent_param() -> None:
 
 def test_top_level_no_channel_pauses_immediately() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
-    fn = build_continuation_fn()
+    fn = build_continuation_fn(has_schema=False)
     # Headless top-level NEVER nudges: the bare turn-end IS the yield, so the
     # first call pauses carrying the last text.
     with pytest.raises(AwaitingUserInput) as exc_info:
@@ -117,7 +117,7 @@ def test_top_level_no_channel_pauses_immediately() -> None:
 def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
     log = _RecordingLog()
-    fn = build_continuation_fn(event_log=log, agent_id="a1")
+    fn = build_continuation_fn(event_log=log, agent_id="a1", has_schema=False)
     # No nudge phase for headless top-level: the first bare turn-end pauses
     # carrying the last text AND emits the marker.
     with pytest.raises(AwaitingUserInput) as exc_info:
@@ -141,7 +141,7 @@ def test_pending_interject_satisfies_without_soliciting() -> None:
         return "should-not-be-used"
 
     fn = build_continuation_fn(
-        user_input_fn=reply_fn, coordinator=coord, headless=False)
+        user_input_fn=reply_fn, coordinator=coord, headless=False, has_schema=False)
     assert fn("which database?") == ("actually, stop and reconsider", True)
     assert calls["n"] == 0
 
@@ -157,7 +157,7 @@ async def test_attended_human_reply_becomes_next_message(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", headless=False)
+        event_log=log, agent_id="a1", headless=False, has_schema=False)
     text, human = fn("which database should I use?")
     assert human is True
     assert inspect.isawaitable(text)
@@ -179,7 +179,7 @@ async def test_headless_with_channel_solicits_immediately(
 
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", headless=True)
+        event_log=log, agent_id="a1", headless=True, has_schema=False)
     # Headless top-level NEVER nudges: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
     text, human = fn("still prose")
@@ -250,6 +250,11 @@ def test_build_continuation_fn_has_interactive_and_has_schema_params() -> None:
     params = inspect.signature(build_continuation_fn).parameters
     assert "interactive" in params
     assert "has_schema" in params
+    # No honest default exists: production derives it from the agent's schema, and
+    # a default is what let six codex live tests run without the nudge backstop.
+    assert params["has_schema"].default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        build_continuation_fn()
 
 
 def test_interactive_and_has_schema_do_not_change_headless_park() -> None:
@@ -511,7 +516,8 @@ def test_inline_solicit_no_channel_invokes_halt_writer() -> None:
 def test_continuation_no_channel_park_invokes_halt_writer() -> None:
     from imp.engine.completion import build_continuation_fn
     calls: list[int] = []
-    fn = build_continuation_fn(halt_writer=lambda: calls.append(1))
+    fn = build_continuation_fn(
+        has_schema=False, halt_writer=lambda: calls.append(1))
     with pytest.raises(AwaitingUserInput):
         fn("the final question")
     assert calls == [1]
@@ -562,7 +568,7 @@ async def test_continuation_fn_clears_halt_on_attended_reply(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        headless=False,
+        headless=False, has_schema=False,
         halt_clearer=lambda: cleared.__setitem__("n", cleared["n"] + 1))
     text, human = fn("which database should I use?")
     assert human is True

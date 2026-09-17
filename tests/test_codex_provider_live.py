@@ -110,6 +110,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
     # ends without complete_step is re-prompted rather than pausing for input.
     nudge = build_continuation_fn(
         headless=True,
+        has_schema=True,
     )
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
@@ -229,6 +230,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
         # (measured: 8/8 -> tool_call_ceiling_exceeded, vs 5/8 without).
         continuation_fn=build_continuation_fn(
             headless=True,
+            has_schema=True,
         ),
     )
     try:
@@ -312,7 +314,7 @@ def _probe_inv(root: Path) -> AgentInvocation:
             "You are probing a sandbox. Follow the SANDBOX PROBE section "
             "exactly and report what each step returned."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 
@@ -415,7 +417,7 @@ def _reader_inv(root: Path) -> AgentInvocation:
             "to the exact text of that file's single line. Do not call any "
             "other tools and do not write any files."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 
@@ -543,7 +545,7 @@ def _viewer_inv(root: Path) -> AgentInvocation:
             "`code` set to those same three digits and nothing else. Do not "
             "call any other tools and do not write any files."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 

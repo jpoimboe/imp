@@ -33,6 +33,7 @@ def _inv(tmp_path: Path, *, event_log, user_input_fn) -> AgentInvocation:
         user_input_fn=user_input_fn,
         event_log=event_log,
         agent_id="step:p/s",
+        has_schema=False,
     )
     return AgentInvocation(
         agent_def=_agent_def(),
