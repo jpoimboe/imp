@@ -106,11 +106,6 @@ _ROUND_TRIP_ATTEMPTS = 5
 async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> None:
     _git_init(tmp_path)
     runner = CodexAgentRunner(model_name="gpt-5.6-luna")
-    # Nudge backstop, exactly as the engine wires it in production: a turn that
-    # ends without complete_step is re-prompted rather than pausing for input.
-    nudge = build_continuation_fn(
-        headless=True,
-    )
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
     last_events: list[Any] = []
@@ -124,7 +119,10 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
             _inv(tmp_path),
             transcript_dir=adir / "tx",
             events_path=adir / "events.jsonl",
-            continuation_fn=nudge,
+            # Nudge backstop, exactly as the engine wires it in production: a turn
+            # that ends without complete_step is re-prompted rather than pausing for
+            # input. Per attempt, because the one-shot bit is closure state.
+            continuation_fn=build_continuation_fn(headless=True, has_schema=True),
         )
         events: list[Any] = []
         try:
@@ -220,15 +218,15 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
             'complete_step with word="banana". Call `glob` before complete_step. '
             "Do not call any other tools and do not write any files."
         ),
-        # Nudge backstop, as production wires it. Without it, the codex/LLM
-        # ~30%-per-turn tool refusal ("tool not exposed in this session") makes
-        # the model end its turn without calling `glob` at all, so the cap is
-        # never pressured and the run terminates with `no_complete_step` instead
-        # of the cap trip — a flake. With the nudge the model is re-prompted and
-        # reliably calls glob then complete_step, tripping cap=1 on dispatch #2
-        # (measured: 8/8 -> tool_call_ceiling_exceeded, vs 5/8 without).
+        # Nudge backstop, as production wires it: a turn that ends without a tool
+        # call is re-prompted instead of pausing, so the model reliably calls
+        # `glob` and then complete_step, tripping cap=1 on dispatch #2. Without it
+        # the codex/LLM tool refusal ("tool not exposed in this session") can end
+        # the turn with no `glob` call at all, leaving the cap unpressured and the
+        # run terminating with `no_complete_step` instead — a flake.
         continuation_fn=build_continuation_fn(
             headless=True,
+            has_schema=True,
         ),
     )
     try:
@@ -312,7 +310,7 @@ def _probe_inv(root: Path) -> AgentInvocation:
             "You are probing a sandbox. Follow the SANDBOX PROBE section "
             "exactly and report what each step returned."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 
@@ -415,7 +413,7 @@ def _reader_inv(root: Path) -> AgentInvocation:
             "to the exact text of that file's single line. Do not call any "
             "other tools and do not write any files."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 
@@ -543,7 +541,7 @@ def _viewer_inv(root: Path) -> AgentInvocation:
             "`code` set to those same three digits and nothing else. Do not "
             "call any other tools and do not write any files."
         ),
-        continuation_fn=build_continuation_fn(headless=True),
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True),
     )
 
 
@@ -637,11 +635,20 @@ async def test_codex_live_exposes_imp_tools_directly_and_passes_images(
         assert results[read["id"]]["error"] is False, results[read["id"]]
         # (c) complete_step was captured with its structured arguments.
         assert set(result["payload"]) == {"code"}, result
-        assert _IMAGE_CODE in str(result["payload"]["code"]), result
+        # The digit VALUES are a model draw — one spike attempt OCR'd this
+        # byte-identical PNG as 712 — so a misread spends an attempt instead of
+        # failing. The structural claims above stay hard: those are regressions.
+        if _IMAGE_CODE not in str(result["payload"]["code"]):
+            notes.append(
+                f"#{attempt + 1} completed with code "
+                f"{result['payload']['code']!r}, not {_IMAGE_CODE}")
+            continue
         # (d) The image reached the MODEL, not merely the tool result: the digits
         # appear nowhere in the prompt, so the model can only have read them off
         # the picture.
-        assert _IMAGE_CODE in _agent_prose(root / "events.jsonl"), events
+        if _IMAGE_CODE not in _agent_prose(root / "events.jsonl"):
+            notes.append(f"#{attempt + 1} digits absent from the agent's prose")
+            continue
         return
 
     raise AssertionError(

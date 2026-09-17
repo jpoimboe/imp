@@ -146,7 +146,7 @@ def build_continuation_fn(
     agent_id: str | None = None,
     headless: bool = False,
     interactive: bool = False,
-    has_schema: bool = False,
+    has_schema: bool,
     halt_writer: Callable[[], None] | None = None,
     halt_clearer: Callable[[], None] | None = None,
 ) -> Callable[[str], tuple[SolicitReply | Awaitable[SolicitReply], bool]]:

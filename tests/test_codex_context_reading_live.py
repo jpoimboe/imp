@@ -63,7 +63,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
         agent_id="step:t",
-        continuation_fn=build_continuation_fn(headless=True))
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True))
 
 
 def _prompt_sum(usage: dict[str, Any]) -> int:
