@@ -196,6 +196,13 @@ def test_scenes_are_builder_phrase_pairs() -> None:
         assert isinstance(phrase, str)
 
 
+def test_every_phrase_is_one_lowercase_sentence() -> None:
+    for builder, phrase in splash.SCENES:
+        assert phrase[0].islower(), f"{builder.__name__}: {phrase!r} must start lowercase"
+        assert phrase.endswith("."), f"{builder.__name__}: {phrase!r} must end with '.'"
+        assert phrase.count(".") == 1, f"{builder.__name__}: {phrase!r} is two sentences"
+
+
 def test_scene_lines_is_deterministic() -> None:
     assert splash.scene_lines(0, theme="dark", color=True) == \
         splash.scene_lines(0, theme="dark", color=True)
