@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
@@ -21,6 +23,7 @@ from imp.remote.session.protocol import (
     parse_event,
 )
 from imp.remote.session.server import SessionServer
+from imp.remote.session.socket_server import PumpItem, _Client
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
@@ -1932,3 +1935,138 @@ async def test_a_leave_control_sends_no_end_frame(
 
     # The run was cancelled, not concluded: the client renders its own leave state.
     assert endings == [StreamEnding.CUT]
+
+
+def _quest_log_server(tmp_path: Path) -> tuple[SessionServer, Path]:
+    """A server whose events_path is inside a real quest home; returns (server, home)."""
+    home = tmp_path / "quests" / "q1"
+    home.mkdir(parents=True)
+    server = SessionServer(str(tmp_path / "s.sock"), events_path=home / "events.jsonl")
+    return server, home
+
+
+def _stub_client(stream: Any, *, buffer: int) -> tuple[_Client, Any]:
+    """A client on a bounded queue, detached from a real socket; returns (client, recv)."""
+    send, recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=buffer)
+    client = _Client(stream=stream, send=send,
+                     scope=SimpleNamespace(cancel=lambda: None))
+    return client, recv
+
+
+def _records(home: Path) -> list[dict[str, Any]]:
+    return [json.loads(line)
+            for line in (home / "events.jsonl").read_text().splitlines()
+            if line.strip()]
+
+
+class _DeadStream:
+    async def send(self, _data: bytes) -> None:
+        raise anyio.BrokenResourceError
+
+
+@pytest.mark.anyio
+async def test_a_lagging_viewer_is_recorded_with_the_queue_cap_it_passed(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    client, recv = _stub_client(SimpleNamespace(), buffer=1)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "filler", "payload": {}})   # fill the queue
+    # _emit is the broadcast seam only: nothing here persists the triggering event,
+    # so the whole log is whatever the drop itself wrote.
+    server._emit({"type": "agent_result", "payload": {"text": "x"}})
+    assert client not in server._socket._clients
+    assert [(r["type"], r["payload"]) for r in _records(home)] == [
+        ("runner_warning",
+         {"message": "a viewer fell behind and was disconnected",
+          "detail": "its event queue passed 256 pending events"})]
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_the_recorded_queue_cap_is_the_one_the_socket_was_configured_with(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    server._socket._client_buffer = 4    # stands in for a non-default cap
+    client, recv = _stub_client(SimpleNamespace(), buffer=1)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "filler", "payload": {}})
+    server._emit({"type": "agent_result", "payload": {"text": "x"}})
+    assert [r["payload"]["detail"] for r in _records(home)] == [
+        "its event queue passed 4 pending events"]
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_broken_viewer_connection_is_recorded_as_a_failed_write(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    client, recv = _stub_client(_DeadStream(), buffer=2)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "agent_result", "payload": {"text": "x"}})
+    client.send.close()
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        await server._socket._pump_client(client, recv)
+    assert [(r["type"], r["payload"]) for r in _records(home)] == [
+        ("runner_warning",
+         {"message": "a viewer's connection broke and was disconnected",
+          "detail": "the socket write failed"})]
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_the_drop_warning_is_not_broadcast_to_the_remaining_viewers(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    lagging, lagging_recv = _stub_client(SimpleNamespace(), buffer=1)
+    healthy, healthy_recv = _stub_client(SimpleNamespace(), buffer=8)
+    server._socket._clients.update({lagging, healthy})
+    lagging.send.send_nowait({"type": "filler", "payload": {}})
+    server._emit({"type": "agent_result", "payload": {"text": "x"}})
+    assert lagging not in server._socket._clients
+    assert healthy in server._socket._clients
+    # The healthy viewer gets the broadcast event and nothing else: a warning appended
+    # through the broadcast-wired handle would queue here too, and would re-enter
+    # _send_one for every client on its way.
+    assert healthy_recv.receive_nowait() == {
+        "type": "agent_result", "payload": {"text": "x"}}
+    with pytest.raises(anyio.WouldBlock):
+        healthy_recv.receive_nowait()
+    assert [r["type"] for r in _records(home)] == ["runner_warning"]
+    lagging_recv.close()
+    healthy_recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_drop_after_the_quest_home_is_reaped_does_not_resurrect_it(
+    tmp_path: Path,
+) -> None:
+    # The terminal path: _complete archives the quest and rmtrees its home INSIDE
+    # run_fn, and _serve's finally then flushes the end frame, which can drop a
+    # viewer that is at its queue cap.
+    server, home = _quest_log_server(tmp_path)
+    shutil.rmtree(home)
+    client, recv = _stub_client(SimpleNamespace(), buffer=1)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "filler", "payload": {}})
+    server._emit({"type": "agent_result", "payload": {"text": "x"}})
+    assert client not in server._socket._clients   # still dropped
+    assert not home.exists()                       # but the home is NOT recreated
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_drop_with_no_quest_log_is_dropped_but_not_recorded(
+    tmp_path: Path,
+) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"))   # no events_path
+    client, recv = _stub_client(SimpleNamespace(), buffer=1)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "filler", "payload": {}})
+    server._emit({"type": "agent_result", "payload": {"text": "x"}})
+    assert client not in server._socket._clients
+    assert list(tmp_path.iterdir()) == []   # no log written where there is no quest log
+    recv.close()

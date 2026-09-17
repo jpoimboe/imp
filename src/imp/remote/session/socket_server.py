@@ -177,6 +177,10 @@ class SessionSocket:
     def leased_count(self) -> int:
         return sum(1 for c in self._clients if c.leased)
 
+    @property
+    def client_buffer(self) -> int:
+        return self._client_buffer
+
     def broadcast(self, event: dict[str, Any]) -> None:
         for client in list(self._clients):
             self._send_one(client, event)

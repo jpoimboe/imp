@@ -13,6 +13,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 
 from imp.agents.skills import SkillError
 from imp.agents.transcript import ContinuationNote, SkillReply, SolicitReply
+from imp.engine.state import JsonlEventLog
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -30,7 +31,12 @@ from imp.remote.session.protocol import (
     SIDE_EFFECT_REASONS,
     SkillRequest,
 )
-from imp.remote.session.socket_server import InputPayload, ReplaySnapshot, SessionSocket
+from imp.remote.session.socket_server import (
+    DropReason,
+    InputPayload,
+    ReplaySnapshot,
+    SessionSocket,
+)
 
 _log = logging.getLogger("imp.remote.session.server")
 
@@ -49,6 +55,16 @@ SANDBOX_ON_FROM_OFF = (
     "Processes already started while unsandboxed keep their current access.")
 # Injected into the parked solicit on `off`, so the step that asked for it resumes itself.
 SANDBOX_OFF_NOTE = "The user has disabled the sandbox."
+
+# Verbatim drop copy; {buffer} is the per-client queue cap the viewer passed.
+_DROP_COPY: dict[DropReason, tuple[str, str]] = {
+    DropReason.LAG_OVERFLOW: (
+        "a viewer fell behind and was disconnected",
+        "its event queue passed {buffer} pending events"),
+    DropReason.WRITE_FAILURE: (
+        "a viewer's connection broke and was disconnected",
+        "the socket write failed"),
+}
 
 # Startup grace: how long a hibernation gate waits for the FIRST client to attach
 # before falling back to hibernation. The spawning client (interactive or remote
@@ -81,6 +97,9 @@ class SessionServer:
         self._lock = lock
         self._hibernate = hibernate
         self._events_path = events_path
+        # Plain handle: appending through the broadcast-wired log re-enters _send_one.
+        self._drop_log: JsonlEventLog | None = (
+            JsonlEventLog(events_path) if events_path is not None else None)
         self._on_first_attach = on_first_attach
         self._first_attach_timeout = first_attach_timeout
         self._skill_loader = skill_loader
@@ -114,6 +133,7 @@ class SessionServer:
             on_control=self._enqueue_control,
             on_lease_change=self._on_lease_change,
             on_query=on_query,
+            on_drop=self._record_client_drop,
         )
         ctl_send, ctl_recv = anyio.create_memory_object_stream[tuple[str, str | None]](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
@@ -185,6 +205,16 @@ class SessionServer:
         if event.get("type") == "awaiting_user_input":
             self._last_gate_event = event
         self._socket.broadcast(event)
+
+    def _record_client_drop(self, reason: DropReason) -> None:
+        # A terminal run rmtrees the home before this can fire; mkdir would resurrect it.
+        if self._drop_log is None or not self._drop_log.path.parent.is_dir():
+            return
+        message, detail = _DROP_COPY[reason]
+        self._drop_log.append(
+            agent_id=None, type="runner_warning",
+            payload={"message": message,
+                     "detail": detail.format(buffer=self._socket.client_buffer)})
 
     async def _chat(self, _query: str) -> SolicitReply:
         self.set_pending_prompt(self._last_gate_event)
