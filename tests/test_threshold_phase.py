@@ -201,6 +201,49 @@ def test_threshold_owns_complexity_classification() -> None:
     assert "never name the internal classification" in low
 
 
+def test_threshold_classifies_by_blast_radius_not_by_conversation() -> None:
+    body = _wf().agents["threshold"].prompt_template_source
+    # the prose is hard-wrapped; compare against a whitespace-flattened copy.
+    flat = " ".join(body.split())
+    # the two retired tests: whether a conversation happened, and a bare "positive reason"
+    assert "no clarifying questions" not in body
+    assert "you have a positive reason" not in flat
+    assert (
+        "A **trivial** quest — small, localized, cheaply reversible, with every value "
+        "it changes already pinned in the conversation — gets a thin draft: "
+        "**Goal + Acceptance criteria** only."
+    ) in flat
+    assert (
+        "**Judge by blast radius, not by how much you talked.** Asking questions and "
+        "enumerating values makes a change *safer*, not bigger: a quest whose whole "
+        "diff is values you listed and the user confirmed stays trivial however long "
+        "the conversation ran. What lifts a quest out of trivial is **reach** — "
+        "behavior other code depends on, a persisted format, a public or agent-facing "
+        "interface, control flow, or anything that would break far from the lines you "
+        "touched. Fixed strings and comments nothing branches on sit at "
+        "the bottom of that scale; engine, schema, and workflow-routing changes never "
+        "reach it."
+    ) in flat
+    assert (
+        "Raise it only when the quest clears the trivial bar above on **blast radius** "
+        "— small, localized, reversible, every value pinned, nothing downstream "
+        "depending on what changes — and then only in plain language, "
+        "recommendation-anchored, never a scripted menu or the internal labels."
+    ) in flat
+    # the handed-spec carve-out and the standard-shape sentences ride through unchanged
+    assert (
+        "A spec the user handed you (named for you to read, or pasted or pointed to in "
+        "the conversation) is never such a reason: it hasn't been through imp's own "
+        "review, which is exactly what the lighter path skips — stay on the full pass "
+        "and don't raise it."
+    ) in flat
+    assert (
+        "Anything else is **standard** and gets the full four-part draft (Goal, Scope, "
+        "Decisions summary, Acceptance criteria). A large-but-precisely-specified "
+        "quest is `standard`, not trivial — low ambiguity is not low complexity."
+    ) in flat
+
+
 def test_threshold_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
