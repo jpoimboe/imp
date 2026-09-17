@@ -107,8 +107,8 @@ def test_build_continuation_fn_has_no_subagent_param() -> None:
 def test_top_level_no_channel_pauses_immediately() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
     fn = build_continuation_fn(has_schema=False)
-    # Headless top-level NEVER nudges: the bare turn-end IS the yield, so the
-    # first call pauses carrying the last text.
+    # A schema-less agent never nudges: the bare turn-end IS the yield, so with
+    # no channel the first call pauses carrying the last text.
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
@@ -118,8 +118,8 @@ def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
     log = _RecordingLog()
     fn = build_continuation_fn(event_log=log, agent_id="a1", has_schema=False)
-    # No nudge phase for headless top-level: the first bare turn-end pauses
-    # carrying the last text AND emits the marker.
+    # No nudge phase without a schema: the first bare turn-end pauses carrying
+    # the last text AND emits the marker.
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
@@ -180,7 +180,7 @@ async def test_headless_with_channel_solicits_immediately(
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
         event_log=log, agent_id="a1", headless=True, has_schema=False)
-    # Headless top-level NEVER nudges: the first bare turn-end solicits the
+    # No nudge phase without a schema: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
     text, human = fn("still prose")
     assert human is True
