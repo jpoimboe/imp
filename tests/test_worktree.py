@@ -139,7 +139,7 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
     # REGRESSION (spec §11): control-root status is NOT a staged reversal.
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
     message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
-    assert message == "Merge My Feature\n\nQuest: feat"
+    assert message == "My Feature\n\nQuest: feat"
 
 
 def _seed_base_and_branch(root: Path) -> None:
@@ -238,7 +238,7 @@ def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
     result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
     assert result.status == "MERGED"
     message = _git(tmp_path, "log", "-1", "--format=%B", "main").stdout.strip()
-    assert message == "Merge My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
+    assert message == "My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
 
 
 def test_merge_detached_refuses_while_base_is_being_rebased(tmp_path: Path) -> None:
@@ -502,7 +502,7 @@ def test_merge_body_is_passed_through_verbatim(tmp_path: Path) -> None:
     result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
     assert result.status == "MERGED"
     message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
-    assert message == "Merge My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
+    assert message == "My Feature\n\nWe chose X over Y because Z.\n\nQuest: feat"
 
 
 def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
@@ -512,11 +512,16 @@ def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
     result = wt.merge_to_base(tmp_path, "rije91", "main", title="My Feature", body=None)
     assert result.status == "MERGED"
     message = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
-    assert message == "Merge My Feature\n\nQuest: rije91"
+    assert message == "My Feature\n\nQuest: rije91"
     trailer = _git(
         tmp_path, "log", "-1", "--format=%(trailers:key=Quest,valueonly)", result.merge_commit
     ).stdout.strip()
     assert trailer == "rije91"
+    # Merge-ness is structural now that the subject doesn't say it.
+    parents = _git(
+        tmp_path, "rev-list", "-1", "--parents", result.merge_commit
+    ).stdout.split()
+    assert len(parents) == 3
 
 
 def test_merge_to_base_is_idempotent_on_already_merged(tmp_path: Path) -> None:

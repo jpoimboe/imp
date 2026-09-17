@@ -40,11 +40,13 @@ written to a file and committed with `git commit -F`, never `-m`. To change the
 rule, edit the partial; this section only says where it lives.
 
 The merge commit is the exception: no agent writes it. The engine assembles it
-in `_merge_subject()` (`src/imp/engine/worktree.py`): the subject is literally
-`Merge <title>`, followed by the leading paragraph of the summarizer's
+in `_merge_subject()` (`src/imp/engine/worktree.py`): the subject is the quest
+title verbatim — no `Merge ` prefix, since merge-ness is structural (`git log
+--merges`) and provenance is the `Quest: <id>` trailer (`git log
+--grep='^Quest:'`) — followed by the leading paragraph of the summarizer's
 `artifacts/summary/<id>.md` (extracted by `_summary_body()` in
-`src/imp/engine/executor.py`) and the `Quest: <id>` trailer. A quest whose
-summary artifact is missing merges with the subject and trailer alone.
+`src/imp/engine/executor.py`) and that trailer. A quest whose summary artifact
+is missing merges with the subject and trailer alone.
 
 ## Seeing imp's own UI
 
