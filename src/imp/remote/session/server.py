@@ -148,19 +148,34 @@ class SessionServer:
             async with anyio.create_task_group() as tg:
                 self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
-                async with anyio.create_task_group() as pump_tg:
-                    if self._coordinator is not None:
-                        self._coordinator.set_delivery_spawner(pump_tg.start_soon)
-                    pump_tg.start_soon(self._control_loop)
-                    try:
-                        result = await run_fn(
-                            on_event=self._emit, user_chat_input_fn=self._chat)
-                    finally:
+                # The run reached its own conclusion — returned, or raised. A cancelled
+                # run_fn is the control-driven leave (_serve_scope.cancel), which the
+                # client renders from its own state and must not be sent a frame.
+                concluded = False
+                try:
+                    async with anyio.create_task_group() as pump_tg:
                         if self._coordinator is not None:
-                            self._coordinator.clear_delivery_spawner()
-                        await self._control_send.aclose()
-                # Drain queued client events before the cancel tears down the pumps.
-                await self._socket.flush_pending()
+                            self._coordinator.set_delivery_spawner(pump_tg.start_soon)
+                        pump_tg.start_soon(self._control_loop)
+                        try:
+                            result = await run_fn(
+                                on_event=self._emit, user_chat_input_fn=self._chat)
+                            concluded = True
+                        except anyio.get_cancelled_exc_class():
+                            raise
+                        except BaseException:
+                            concluded = True
+                            raise
+                        finally:
+                            if self._coordinator is not None:
+                                self._coordinator.clear_delivery_spawner()
+                            await self._control_send.aclose()
+                finally:
+                    if concluded:
+                        # Queued behind every pending event, then drained by the same
+                        # flush, so it is provably the last frame each client receives.
+                        self._socket.enqueue_end()
+                        await self._socket.flush_pending()
                 tg.cancel_scope.cancel()
         finally:
             await self._socket.close()

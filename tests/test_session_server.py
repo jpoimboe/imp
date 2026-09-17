@@ -12,6 +12,7 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.agents.skills import SkillNotFound
 from imp.agents.transcript import SkillReply
+from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
     encode_attach,
     encode_control,
@@ -1811,3 +1812,123 @@ def test_server_registers_save_hook_on_coordinator(tmp_path: Path) -> None:
     coord.request_save(reason="save_and_exit")
     assert server._save_requested is True
     assert server._save_reason == "save_and_exit"
+
+
+@pytest.mark.anyio
+async def test_a_returning_run_ends_the_stream_after_every_event(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock)
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count >= 1)
+        for n in range(3):
+            on_event({"type": "agent_result", "payload": {"n": n}})
+        return "ok"
+
+    endings: list[StreamEnding] = []
+    result: dict[str, Any] = {}
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _serve() -> None:
+                result["r"] = await server.serve(run_fn)
+
+            async def _receive() -> None:
+                endings.append(await client.receive_events())
+
+            tg.start_soon(_serve)
+            await client.connect()
+            tg.start_soon(_receive)
+            await wait_until(lambda: endings and "r" in result)
+            await client.aclose()
+            tg.cancel_scope.cancel()
+
+    assert endings == [StreamEnding.ENDED]
+    assert [e["payload"]["n"] for e in received] == [0, 1, 2]   # nothing lost ahead of it
+    assert result["r"] == "ok"
+
+
+@pytest.mark.anyio
+async def test_a_raising_run_still_ends_the_stream(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock)
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count >= 1)
+        on_event({"type": "agent_result", "payload": {"n": 0}})
+        raise RuntimeError("boom")
+
+    endings: list[StreamEnding] = []
+    raised: list[str] = []
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _serve() -> None:
+                try:
+                    await server.serve(run_fn)
+                except* RuntimeError:
+                    raised.append("boom")
+
+            async def _receive() -> None:
+                endings.append(await client.receive_events())
+
+            tg.start_soon(_serve)
+            await client.connect()
+            tg.start_soon(_receive)
+            await wait_until(lambda: endings and raised)
+            await client.aclose()
+            tg.cancel_scope.cancel()
+
+    # A crashing run reached its own conclusion: the client is told, not left guessing.
+    assert endings == [StreamEnding.ENDED]
+    assert [e["payload"]["n"] for e in received] == [0]
+    assert raised == ["boom"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("action", ["abandon", "save", "archive", "discard"])
+async def test_a_leave_control_sends_no_end_frame(
+    tmp_path: Path, action: str,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    started = anyio.Event()
+    server = SessionServer(sock)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        started.set()
+        await anyio.sleep_forever()   # only the leave control can end this run
+        return "done"
+
+    endings: list[StreamEnding] = []
+    result: dict[str, Any] = {}
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _serve() -> None:
+                result["r"] = await server.serve(run_fn)
+
+            async def _receive() -> None:
+                endings.append(await client.receive_events())
+
+            tg.start_soon(_serve)
+            await client.connect()
+            tg.start_soon(_receive)
+            await wait_until(lambda: server.attached_count == 1)
+            await started.wait()
+            await client.send_control(action)
+            await wait_until(lambda: endings and "r" in result)
+            await client.aclose()
+            tg.cancel_scope.cancel()
+
+    # The run was cancelled, not concluded: the client renders its own leave state.
+    assert endings == [StreamEnding.CUT]
