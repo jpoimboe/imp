@@ -1,6 +1,7 @@
 """`_emit_lost_connection` renders the shared three-part exit block when the CLI's
-event stream faulted: the run's outcome was never observed, so the block says so
-instead of guessing a state from disk (zake22)."""
+event stream ended with no end-of-run frame: the run's outcome was never observed,
+so the block says so instead of guessing a state from disk (zake22). Its
+reachability from a CUT ending is covered in tests/test_session_run.py."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -14,19 +14,20 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
     _MAX_FRAME,
+    EndOfRun,
     encode_attach,
     encode_control,
     encode_input,
     encode_set_lease,
     encode_skill_request,
-    parse_event,
+    parse_stream_frame,
 )
 
 
 class StreamEnding(enum.Enum):
-    """How the receive loop ended: the stream closed, or a frame faulted."""
-    CLEAN = enum.auto()
-    FAULT = enum.auto()
+    """Whether the receive loop saw the daemon's end-of-run frame, or never did."""
+    ENDED = enum.auto()
+    CUT = enum.auto()
 
 
 class SessionClient:
@@ -58,20 +59,22 @@ class SessionClient:
         self._stream = stream
 
     async def receive_events(self) -> StreamEnding:
+        """ENDED means the end frame arrived; the socket stays open — the caller must close it."""
         if self._stream is None:
             raise RuntimeError("call connect() before receive_events()")
         buf = BufferedByteReceiveStream(self._stream)
         while True:
             try:
                 line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-                event = parse_event(line)
+                frame = parse_stream_frame(line)
             except (anyio.EndOfStream, anyio.IncompleteRead,
-                    anyio.ClosedResourceError, anyio.BrokenResourceError):
-                return StreamEnding.CLEAN
-            except (anyio.DelimiterNotFound, ValueError):
-                return StreamEnding.FAULT
+                    anyio.ClosedResourceError, anyio.BrokenResourceError,
+                    anyio.DelimiterNotFound, ValueError):
+                return StreamEnding.CUT
+            if isinstance(frame, EndOfRun):
+                return StreamEnding.ENDED
             # Outside the try: a renderer bug must surface as a traceback, not as EOS.
-            self._on_event(event)
+            self._on_event(frame)
 
     async def send_input(self, text: str) -> None:
         async with self._send_lock:

@@ -58,6 +58,9 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
 
 def test_unresolvable_status_routes_to_paused_summary() -> None:
     # Neither the reaped home nor the archive could answer: render, never raise.
+    # This fallback is load-bearing for a deliberate leave, which reaches this
+    # function with a non-terminal status; a CUT ending no longer routes here
+    # (see test_cut_ending_with_no_resolvable_status_reports_lost_connection).
     with patch.object(main, "_emit_paused_summary") as ps:
         rc = main._handle_terminal_outcome(
             _Change([]), SettledOutcome(status=None, events=[]), coord=None)

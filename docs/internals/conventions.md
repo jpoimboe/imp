@@ -73,11 +73,11 @@ imp routes error and diagnostic surfaces through two shared sinks — no surface
 styles its own line.
 
 - **Quest-scoped terminal failures → the exit block.** A failure that identifies
-  a quest (agent error, merge blocked, session-daemon startup failure) renders as
-  the gold three-part `_error_block` — red head + body + gold identity line — on
-  **stdout**, via `_emit_merge_blocked` / `_emit_startup_failed` /
-  `_emit_lost_connection`. The exit code
-  carries the error signal for scripts.
+  a quest (agent error, merge blocked, session-daemon startup failure, or an
+  ending the client never observed — its event stream closed with no `end` frame)
+  renders as the gold three-part `_error_block` — red head + body + gold identity
+  line — on **stdout**, via `_emit_merge_blocked` / `_emit_startup_failed` /
+  `_emit_lost_connection`. The exit code carries the error signal for scripts.
 - **Non-quest CLI usage/lookup errors → one `imp:` message.** Bad arguments, no such
   quest, unknown command, and similar usage errors emit one
   `imp: <message>` on **stderr** via `_emit_cli_error`, which centralizes the

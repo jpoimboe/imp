@@ -4,6 +4,7 @@ import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import anyio
 import pytest
@@ -24,7 +25,7 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_event,
 )
-from imp.remote.session.socket_server import SessionSocket, _Client
+from imp.remote.session.socket_server import DropReason, PumpItem, SessionSocket, _Client
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
@@ -582,3 +583,90 @@ async def test_an_oversized_event_is_clipped_on_the_wire_but_whole_on_disk(
         await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_end_marker_is_the_last_frame_after_every_queued_event(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        await wait_until(lambda: session.attached_count == 1)
+        for n in range(5):
+            session.broadcast({"type": "agent_result", "payload": {"n": n}})
+        session.enqueue_end()
+        await session.flush_pending()
+        buf = BufferedByteReceiveStream(client)
+        frames: list[dict[str, Any]] = []
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            for _ in range(6):
+                frames.append(json.loads(
+                    (await buf.receive_until(b"\n", _MAX_FRAME)).decode()))
+        assert [f["kind"] for f in frames] == ["event"] * 5 + ["end"]
+        assert [f["event"]["payload"]["n"] for f in frames[:5]] == [0, 1, 2, 3, 4]
+        await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+def test_a_lag_overflow_reports_its_drop_reason() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, _recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=1)
+    client = _Client(
+        stream=SimpleNamespace(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.send_nowait({"type": "first"})        # fill the buffer-1 stream
+    session.broadcast({"type": "overflow"})    # second event → WouldBlock → drop
+    assert client not in session._clients
+    assert reasons == [DropReason.LAG_OVERFLOW]
+    _recv.close()
+
+
+def test_a_send_to_an_already_closed_client_stream_reports_no_drop() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, _recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=1)
+    client = _Client(
+        stream=SimpleNamespace(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.close()   # ordinary teardown: flush_pending already closed the send stream
+    session.broadcast({"type": "after_close"})
+    assert client not in session._clients
+    assert reasons == []
+    _recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_failed_socket_write_reports_its_drop_reason() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=2)
+
+    class _DeadStream:
+        async def send(self, _data: bytes) -> None:
+            raise anyio.BrokenResourceError
+
+    client = _Client(
+        stream=_DeadStream(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.send_nowait({"type": "agent_result", "payload": {"text": "x"}})
+    send.close()
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        await session._pump_client(client, recv)
+    assert client not in session._clients
+    assert reasons == [DropReason.WRITE_FAILURE]
+    recv.close()

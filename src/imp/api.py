@@ -215,9 +215,6 @@ async def _pump(client: SessionClient, feed: _Feed) -> None:
     try:
         await client.receive_events()
     finally:
-        # Same task as the reader: no concurrent close races an in-progress receive().
-        with anyio.CancelScope(shield=True):
-            await client.aclose()
         feed.close()   # EOF for events(): the iterator ends instead of hanging
 
 
@@ -257,14 +254,23 @@ async def attach(
         raise
     session = Session(client, feed)
     try:
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_pump, client, feed)
-            try:
-                yield session
-            finally:
-                # No await between these: a pump wakeup in the gap would raise into the public API.
-                tg.cancel_scope.cancel()
-                feed.recv.close()   # the context owns the feed; leave no half open
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_pump, client, feed)
+                try:
+                    yield session
+                finally:
+                    # No await between these: a pump wakeup in the gap would
+                    # raise into the public API.
+                    tg.cancel_scope.cancel()
+                    feed.recv.close()   # the context owns the feed; leave no half open
+        finally:
+            # The pump has finished, so no in-flight receive races this. Closing here
+            # rather than in the pump also leaves the daemon to drop the socket first
+            # when the run merely ended: the end frame says the run is over, not that
+            # the socket is dead, and closing first strands its still-parked reader.
+            with anyio.CancelScope(shield=True):
+                await client.aclose()
     except BaseExceptionGroup as eg:
         # anyio wraps the caller's own exception; a public API hands back the original.
         if len(eg.exceptions) == 1:

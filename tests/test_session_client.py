@@ -12,6 +12,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT,
     Attach,
     SkillRequest,
+    encode_end,
     encode_event,
     encode_set_lease,
 )
@@ -64,7 +65,9 @@ async def test_client_receives_broadcast_event(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_receive_events_reports_clean_ending_on_server_close(tmp_path: Path) -> None:
+async def test_receive_events_reports_cut_when_the_server_closes_with_no_end_frame(
+    tmp_path: Path,
+) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionSocket(sock)
     received: list[dict[str, Any]] = []
@@ -84,7 +87,7 @@ async def test_receive_events_reports_clean_ending_on_server_close(tmp_path: Pat
         await wait_until(lambda: received)
         await server.close()
         await wait_until(lambda: endings)
-        assert endings == [StreamEnding.CLEAN]
+        assert endings == [StreamEnding.CUT]
         # the frame delivered before the close still reached the renderer
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
@@ -92,7 +95,7 @@ async def test_receive_events_reports_clean_ending_on_server_close(tmp_path: Pat
 
 
 @pytest.mark.anyio
-async def test_receive_events_reports_fault_on_oversized_frame(tmp_path: Path) -> None:
+async def test_receive_events_reports_cut_on_oversized_frame(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     received: list[dict[str, Any]] = []
     client = SessionClient(sock, "c1", "T", on_event=received.append)
@@ -103,7 +106,7 @@ async def test_receive_events_reports_fault_on_oversized_frame(tmp_path: Path) -
         await client.connect()
         with anyio.fail_after(HANG_BACKSTOP):
             ending = await client.receive_events()
-        assert ending is StreamEnding.FAULT
+        assert ending is StreamEnding.CUT
         # the frame that arrived before the fault still reached the renderer
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
@@ -111,7 +114,7 @@ async def test_receive_events_reports_fault_on_oversized_frame(tmp_path: Path) -
 
 
 @pytest.mark.anyio
-async def test_receive_events_reports_fault_on_unparseable_frame(tmp_path: Path) -> None:
+async def test_receive_events_reports_cut_on_unparseable_frame(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     received: list[dict[str, Any]] = []
     client = SessionClient(sock, "c1", "T", on_event=received.append)
@@ -122,7 +125,26 @@ async def test_receive_events_reports_fault_on_unparseable_frame(tmp_path: Path)
         await client.connect()
         with anyio.fail_after(HANG_BACKSTOP):
             ending = await client.receive_events()
-        assert ending is StreamEnding.FAULT
+        assert ending is StreamEnding.CUT
+        assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_receive_events_reports_ended_on_the_end_frame(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+    good = encode_event({"type": "step_started", "payload": {"step": "plan"}})
+    async with anyio.create_task_group() as tg:
+        await serve_raw_frames(
+            sock, (good + "\n" + encode_end() + "\n").encode("utf-8"), tg)
+        await client.connect()
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            ending = await client.receive_events()
+        assert ending is StreamEnding.ENDED
+        # the events ahead of the marker still reached the renderer
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
         tg.cancel_scope.cancel()

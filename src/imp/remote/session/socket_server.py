@@ -14,6 +14,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +26,15 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from imp.agents.transcript import ContinuationNote
 from imp.remote.session.protocol import (
     _MAX_FRAME,
+    END_OF_RUN,
     Attach,
     Control,
+    EndOfRun,
     Input,
     Query,
     SetLease,
     SkillRequest,
+    encode_end,
     encode_event,
     encode_result,
     encode_result_error,
@@ -40,9 +44,17 @@ from imp.remote.session.protocol import (
 # What the input channel carries: a client reply, a client skill request, or a server-injected note.
 InputPayload = str | SkillRequest | ContinuationNote
 
+PumpItem = dict[str, Any] | EndOfRun
+
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
 _FLUSH_TIMEOUT = 5.0   # teardown backstop: a dead client can't wedge the flush
 _log = logging.getLogger("imp.remote.session.socket_server")
+
+
+class DropReason(Enum):
+    """Why a client was dropped: it fell behind, or its socket write failed."""
+    LAG_OVERFLOW = "lag_overflow"
+    WRITE_FAILURE = "write_failure"
 
 
 @dataclass
@@ -82,7 +94,7 @@ class ReplaySnapshot:
 @dataclass(eq=False)  # eq=False keeps identity hash/eq so _Client is set-storable
 class _Client:
     stream: Any
-    send: MemoryObjectSendStream[dict[str, Any]]
+    send: MemoryObjectSendStream[PumpItem]
     scope: Any
     leased: bool = False
     # Set on pump exit; teardown flush awaits it. None until wired in _handle (needs a loop).
@@ -101,6 +113,7 @@ class SessionSocket:
         on_control: Callable[[str, str | None], None] | None = None,
         on_lease_change: Callable[[], None] | None = None,
         on_query: Callable[[str, dict[str, Any]], Any] | None = None,
+        on_drop: Callable[[DropReason], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
         self._path = path
@@ -109,6 +122,7 @@ class SessionSocket:
         self._on_control = on_control
         self._on_lease_change = on_lease_change
         self._on_query = on_query
+        self._on_drop = on_drop
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
@@ -163,46 +177,59 @@ class SessionSocket:
     def leased_count(self) -> int:
         return sum(1 for c in self._clients if c.leased)
 
+    @property
+    def client_buffer(self) -> int:
+        return self._client_buffer
+
     def broadcast(self, event: dict[str, Any]) -> None:
         for client in list(self._clients):
             self._send_one(client, event)
 
-    def _send_one(self, client: _Client, event: dict[str, Any]) -> None:
+    def enqueue_end(self) -> None:
+        """Queue the end-of-run marker behind every pending event, for every client."""
+        for client in list(self._clients):
+            self._send_one(client, END_OF_RUN)
+
+    def _send_one(self, client: _Client, item: PumpItem) -> None:
         try:
-            client.send.send_nowait(event)
+            client.send.send_nowait(item)
         except anyio.WouldBlock:
-            self._drop(client)
+            self._drop(client, DropReason.LAG_OVERFLOW)
         except (anyio.ClosedResourceError, anyio.BrokenResourceError):
             self._clients.discard(client)
 
-    def _drop(self, client: _Client) -> None:
+    def _drop(self, client: _Client, reason: DropReason) -> None:
         self._clients.discard(client)
         with contextlib.suppress(anyio.ClosedResourceError):
             client.send.close()
         client.scope.cancel()
+        if self._on_drop is not None:
+            self._on_drop(reason)
 
     async def _pump_client(
-        self, client: _Client, recv: MemoryObjectReceiveStream[dict[str, Any]],
+        self, client: _Client, recv: MemoryObjectReceiveStream[PumpItem],
     ) -> None:
         try:
             with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
-                async for event in recv:
-                    # Coalesce all currently-buffered events into one write: at run
+                async for first in recv:
+                    # Coalesce all currently-buffered items into one write: at run
                     # teardown the pump is cancelled right after run_fn returns, so a
-                    # per-event await would flush only the first queued event and drop
+                    # per-item await would flush only the first queued one and drop
                     # the rest. Draining synchronously into one send closes that window.
-                    batch = [event]
+                    batch: list[PumpItem] = [first]
                     while True:
                         try:
                             batch.append(recv.receive_nowait())
                         except (anyio.WouldBlock, anyio.EndOfStream):
                             break
                     line = b"".join(
-                        (encode_event(e) + "\n").encode("utf-8") for e in batch)
+                        ((encode_end() if isinstance(item, EndOfRun)
+                          else encode_event(item)) + "\n").encode("utf-8")
+                        for item in batch)
                     try:
                         await client.stream.send(line)
                     except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                        self._drop(client)
+                        self._drop(client, DropReason.WRITE_FAILURE)
                         break
         finally:
             if client.pump_done is not None:
@@ -275,7 +302,7 @@ class SessionSocket:
                 return
             if not isinstance(hello, Attach):
                 return
-            send, recv = anyio.create_memory_object_stream[dict[str, Any]](
+            send, recv = anyio.create_memory_object_stream[PumpItem](
                 max_buffer_size=self._client_buffer)
             async with anyio.create_task_group() as ctg:
                 client = _Client(

@@ -125,7 +125,7 @@ async def run_session_client(
         model=model, opening_unsandboxed=opening_unsandboxed)
     startup_failed = False
     startup_error: DaemonStartupError | None = None
-    ending = StreamEnding.CLEAN
+    ending = StreamEnding.CUT
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
@@ -164,7 +164,14 @@ async def run_session_client(
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
         return 3
-    if ending is StreamEnding.FAULT:
+    # A deliberate leave is decided first and from client-side marks only: the daemon
+    # applies the disposition after this client departs, so disk cannot answer it.
+    # /abandon sets only leave_state["intent"]; a bare interrupt-pause and the
+    # headless detach set only the escalation event.
+    deliberate_leave = bool(
+        (coord.escalation_event is not None and coord.escalation_event.is_set())
+        or leave_state.get("intent"))
+    if not deliberate_leave and ending is StreamEnding.CUT:
         from imp.cli.main import _emit_lost_connection, _handle_terminal_outcome
         outcome = resolve_settled_outcome(quest)
         if outcome.completed:
