@@ -3317,12 +3317,12 @@ async def test_terminal_client_reports_fault_ending_on_oversized_frame(
                 coord=coord, solicit=_solicit, leave_mode="new")
             tg.cancel_scope.cancel()
 
-    assert ending is StreamEnding.FAULT
+    assert ending is StreamEnding.CUT
     assert rendered == ["step_started"]   # the pre-fault frame still rendered
 
 
 @pytest.mark.anyio
-async def test_terminal_client_reports_clean_ending_when_a_leave_cancels_the_loop(
+async def test_terminal_client_reports_cut_when_a_leave_cancels_the_loop(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -3364,9 +3364,9 @@ async def test_terminal_client_reports_clean_ending_when_a_leave_cancels_the_loo
             await server.close()
             tg.cancel_scope.cancel()
 
-    # The loop was cancelled and never returned an ending: it must read as clean,
-    # never as a fault (a fault would print the lost-connection block on every detach).
-    assert endings == [StreamEnding.CLEAN]
+    # The loop was cancelled and never returned an ending: it observed no end frame,
+    # so CUT is the honest value; session_run's rule 1 keeps the leave rendering.
+    assert endings == [StreamEnding.CUT]
 
 
 @pytest.mark.anyio
@@ -3405,14 +3405,14 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
 
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
-            # One frame, then the peer closes: receive_events ends CLEAN.
+            # One frame, then the peer closes with no end frame: receive_events ends CUT.
             await serve_raw_frames(sock, good.encode("utf-8") + b"\n", tg)
             ending = await run_terminal_client(
                 attach=_attach, driver=_Driver(), coord=coord,
                 solicit=_solicit, leave_mode="new", stream=watched)
             tg.cancel_scope.cancel()
 
-    assert ending is StreamEnding.CLEAN
+    assert ending is StreamEnding.CUT
     assert rendered == ["step_started"]
     assert len(spawned) == 1              # it really was armed during the attach
     assert not any(t.is_alive() for t in spawned)
