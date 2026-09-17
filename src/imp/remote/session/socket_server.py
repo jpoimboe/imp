@@ -14,6 +14,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,12 @@ PumpItem = dict[str, Any] | EndOfRun
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
 _FLUSH_TIMEOUT = 5.0   # teardown backstop: a dead client can't wedge the flush
 _log = logging.getLogger("imp.remote.session.socket_server")
+
+
+class DropReason(Enum):
+    """Why a client was dropped: it fell behind, or its socket write failed."""
+    LAG_OVERFLOW = "lag_overflow"
+    WRITE_FAILURE = "write_failure"
 
 
 @dataclass
@@ -106,6 +113,7 @@ class SessionSocket:
         on_control: Callable[[str, str | None], None] | None = None,
         on_lease_change: Callable[[], None] | None = None,
         on_query: Callable[[str, dict[str, Any]], Any] | None = None,
+        on_drop: Callable[[DropReason], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
         self._path = path
@@ -114,6 +122,7 @@ class SessionSocket:
         self._on_control = on_control
         self._on_lease_change = on_lease_change
         self._on_query = on_query
+        self._on_drop = on_drop
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
@@ -181,15 +190,17 @@ class SessionSocket:
         try:
             client.send.send_nowait(item)
         except anyio.WouldBlock:
-            self._drop(client)
+            self._drop(client, DropReason.LAG_OVERFLOW)
         except (anyio.ClosedResourceError, anyio.BrokenResourceError):
             self._clients.discard(client)
 
-    def _drop(self, client: _Client) -> None:
+    def _drop(self, client: _Client, reason: DropReason) -> None:
         self._clients.discard(client)
         with contextlib.suppress(anyio.ClosedResourceError):
             client.send.close()
         client.scope.cancel()
+        if self._on_drop is not None:
+            self._on_drop(reason)
 
     async def _pump_client(
         self, client: _Client, recv: MemoryObjectReceiveStream[PumpItem],
@@ -214,7 +225,7 @@ class SessionSocket:
                     try:
                         await client.stream.send(line)
                     except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                        self._drop(client)
+                        self._drop(client, DropReason.WRITE_FAILURE)
                         break
         finally:
             if client.pump_done is not None:

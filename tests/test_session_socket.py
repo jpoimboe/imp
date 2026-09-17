@@ -25,7 +25,7 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_event,
 )
-from imp.remote.session.socket_server import SessionSocket, _Client
+from imp.remote.session.socket_server import DropReason, PumpItem, SessionSocket, _Client
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
@@ -611,3 +611,62 @@ async def test_end_marker_is_the_last_frame_after_every_queued_event(
         await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()
+
+
+def test_a_lag_overflow_reports_its_drop_reason() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, _recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=1)
+    client = _Client(
+        stream=SimpleNamespace(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.send_nowait({"type": "first"})        # fill the buffer-1 stream
+    session.broadcast({"type": "overflow"})    # second event → WouldBlock → drop
+    assert client not in session._clients
+    assert reasons == [DropReason.LAG_OVERFLOW]
+    _recv.close()
+
+
+def test_a_send_to_an_already_closed_client_stream_reports_no_drop() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, _recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=1)
+    client = _Client(
+        stream=SimpleNamespace(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.close()   # ordinary teardown: flush_pending already closed the send stream
+    session.broadcast({"type": "after_close"})
+    assert client not in session._clients
+    assert reasons == []
+    _recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_failed_socket_write_reports_its_drop_reason() -> None:
+    reasons: list[DropReason] = []
+    session = SessionSocket("/unused.sock", on_drop=reasons.append)
+    send, recv = anyio.create_memory_object_stream[PumpItem](max_buffer_size=2)
+
+    class _DeadStream:
+        async def send(self, _data: bytes) -> None:
+            raise anyio.BrokenResourceError
+
+    client = _Client(
+        stream=_DeadStream(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: None),
+    )
+    session._clients.add(client)
+    send.send_nowait({"type": "agent_result", "payload": {"text": "x"}})
+    send.close()
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        await session._pump_client(client, recv)
+    assert client not in session._clients
+    assert reasons == [DropReason.WRITE_FAILURE]
+    recv.close()
