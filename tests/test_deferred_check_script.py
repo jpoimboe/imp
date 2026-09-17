@@ -90,7 +90,8 @@ def test_missing_quest_dir_fails_closed(tmp_path: Path) -> None:
 
 
 def test_case_and_suffix_variant_heading_dispatches_the_sweep(tmp_path: Path) -> None:
-    # Guard must not fail open on an agent-written heading variant such as "## Deferred followups (2)".
+    # Guard must not fail open on an agent-written heading variant
+    # such as "## Deferred followups (2)".
     qd = _quest_dir(
         tmp_path,
         "## Deferred followups (2)\n\n"
