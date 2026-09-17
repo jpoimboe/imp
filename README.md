@@ -8,35 +8,167 @@
 
 ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
 
-**imp is a declarative agent workflow engine for software development.**  Each
-change (feature or bug) for a given project gets built as part of an isolated,
-resumable **quest**, which tracks the change's history from inception through
-design, planning, coding, review, testing, and integration.
+**imp is a declarative agent workflow engine for AI software development.**
+Each change (feature or bug) for a given project gets built as part of an
+isolated, resumable **quest**, which tracks the change's history from inception
+through design, planning, coding, review, testing, and integration.
 
-**Human effort is concentrated up front**, at the beginning of the quest, during
-the interview with the "threshold" agent.  Once it has picked your brain
-sufficiently, the workflow typically runs unattended all the way through merge,
-so you're free to step away.  Or, kick off another quest in parallel!
+**While imp is workflow-agnostic, it ships batteries included** with a default
+opinionated workflow, which follows AI software engineering best practices for
+producing AI written, reviewed, and tested code in a fast-moving greenfield or
+small team project.  The default workflow is defined in YAML and can be easily
+customized or replaced with a completely different workflow.
 
-imp front-loads deliberation, so expect hours of machine time, millions of
-tokens, and real subscription spend for anything non-trivial.  Most of it goes
-to thinking rather than typing: writing the spec, reviewing it, planning each
-chunk of work, reviewing those plans.  A spec is rewritten until a fresh
-reviewer clears it -- often several rounds -- and so is every plan.
+**Human effort is concentrated up front** at the beginning of the quest, during
+an interview with the "threshold" agent.  Once it has picked your brain
+sufficiently, it runs unattended from spec, plan, code, test, review, all the
+way through merge, so you're free to step away or kick off another quest in
+parallel.
 
-That is the design, not overhead.  A reviewer who never saw the author's
-reasoning catches mistakes while they are still an unbuilt paragraph, and
-planning a chunk of work often takes longer than building it.  Rewriting a plan
-is cheap; rewriting a merged feature is not.
+**Each step of the workflow runs with fresh LLM context** so each agent can
+focus on its given task.  Detailed specs, implementation plans, and progress
+files carry decisions between steps.  Tests are written before code (TDD),
+every artifact is independently reviewed in multiple rounds if needed, and the
+final code is checked against acceptance criteria before merge.
 
-Since its early bootstrap phase, imp has written all of its own code, with
-**no human code review**.  That has worked out much better than I expected,
-both in code quality and maintainability.
+All agent-made judgment calls are raised as open items to the user at the merge
+gate, where **the human can approve, send back for rework, or open a followup
+quest** for further improvements.
 
-Humans still need to be heavily involved in the up-front interview/design
-phase, and in judging whether the result actually works.  The resulting code
-quality and maintainability don't come cheap though, so for serious use I
-recommend a Claude Max or ChatGPT Pro subscription.
+Every conversation is archived, so you can easily **trace any line of code back
+to the full conversation which produced it.**
+
+**Bugs are automatically rooted out early.**  With AI development, the majority
+of bugs tend to originate early in the spec or planning phases, due to gaps,
+inconsistencies, or mistakes made by the agent.  imp prevents that by spending
+most of its tokens up front, looping on multiple rounds of adversarial
+spec/plan review until everything is fully specified and verified before it
+starts implementation.
+
+imp's default workflow agents look for cleanups, refactorings, simplifications,
+and code removals.  My experience over the last several months of using imp to
+build and improve itself is that it **produces clean, maintainable code**.  It
+also produces a *lot* of tests that might be annoying to a human: even trivial
+changes can often trigger a test failure.  But the agents handle that easily,
+and the tests do a great job of preventing regressions.  So the test-heavy TDD
+philosophy seems to be a perfect fit for AI-native development.
+
+Note that imp can be a bit token-intensive due to the extra thinking involved
+with detailed specs, plans, and multiple reviews.  Quality, maintainable,
+functional, well-tested code isn't cheap.  **Claude Max (or ChatGPT Pro)
+subscription recommended.** Local models are not (yet) supported.  Pull
+requests welcome :-)
+
+## Features
+
+### Default workflow
+
+```mermaid
+flowchart LR
+  intent([intent]) --> interview[interview]
+  interview --> spec[spec]
+  spec --> plan[plan]
+  plan --> implement[implement]
+  implement --> converge[converge]
+  converge --> integrate[integrate]
+  integrate --> merged([merged])
+  spec -. review .-> spec
+  plan -. review .-> plan
+  implement -. test or review failure .-> implement
+  implement -. next plan .-> plan
+  converge -. gap found .-> plan
+  integrate -. rework .-> plan
+```
+
+imp's "batteries included" default workflow has the following features:
+
+- **Put human judgment up front.** imp asks about decisions it cannot make from
+  the code, while changing the design is still cheap.  Once the design is
+  settled, it typically drives the rest of the quest through merge on its own.
+- **Start every step fresh.** Each step is a separate model invocation with only
+  the context it needs, to avoid entering the LLM "dumb zone".  Specs, plans,
+  and progress files carry decisions forward.  Reviewers do not inherit
+  authors' reasoning or assumptions.
+- **Spec-driven development.** A spec defines the result and its acceptance
+  criteria.  An implementation plan names the code and tests needed to get
+  there.  Both are reviewed (often multiple times) before implementation
+  starts.
+- **Adversarial review.** The agents reviewing the spec, plan, and code
+  did not write them.  They inspect the repository and verify claims instead of
+  inheriting the previous agent's assumptions.
+- **Work through big changes one plan at a time.** imp implements and fast-tests
+  each plan before starting the next, then reviews the whole quest as one change.
+- **Test-driven development.** Tests are written early and often, and must be
+  observed failing for the expected reason before implementation.
+- **Keep the code lean and maintainable.** Coders and reviewers push back on
+  speculative fallbacks, dead error handling, and compatibility shims that the
+  design did not ask for.
+- **Sweep up non-blocking review comments.** Correctness blockers loop back for
+  an immediate, re-reviewed fix.  Everything else worth considering goes through
+  a separate, once-per-quest quality sweep, which fixes low-risk improvements,
+  filters out noise, and saves genuine judgment calls for the merge gate.
+- **Save newly discovered human judgment calls for the end.** After the initial
+  interview, any discovered issues are fixed automatically, with judgment calls
+  deferred until the final merge gate for the user to approve, send back for
+  rework, or open a backlog quest.
+- **Converge on the spec.** After implementation, imp checks the whole change
+  against the acceptance criteria, runs the slow tests, and routes gaps back into
+  planning or implementation.
+- **Triage flaky tests.** Failures caused by the change are fixed and retested.
+  Flaky or environmental test failures are recorded and surfaced at the merge
+  gate where they can be tracked in a new backlog quest.
+- **Integrate and merge.** imp gets in a merge queue to coordinate with other
+  imp quest merges, rebases onto the current base, resolves conflicts, reruns
+  verification, discusses any open items with the human, and merges.
+
+### Engine features
+
+The workflow sits on top of engine features that keep quests isolated,
+resumable, and inspectable:
+
+- **Isolate each quest.** Once live, every quest gets its own git worktree and
+  sandboxed agent tools, so several can run at once without breaking your
+  system or touching your checkout, index, or stash.
+- **Pause, resume, or redirect.** Pause a quest at any time with Ctrl-D, or
+  interrupt a running agent with Ctrl-C to ask a question or send it in a
+  different direction.  The append-only event log lets the run resume without
+  throwing away the in-flight step or pretending it never happened.
+- **Get notified and steer from Telegram.** imp can alert your phone when a quest
+  needs input, pauses, fails, or finishes.  You can also directly interact with
+  quests and create new ones from Telegram.
+  See [remote-control setup](docs/guide/remote-control.md).
+- **Keep the whole history searchable.** Conversations, artifacts, and tool
+  events remain searchable after a quest finishes, and every line of code can
+  be traced back to the conversation that produced it.
+- **Inspect everything from the CLI.** See active, draft, backlog, and archived
+  quests, then drill into any quest's current state, decisions, summary, readable
+  log, or event stream.
+- **Let agents work across quests.** Agents can inspect earlier steps and search
+  or read other live and archived sibling quests.  With your approval, they can
+  link related backlog items or open new ones for work they discover.
+- **Non-committal chat.** Use `imp chat` to ask questions about imp or your
+  codebase, explore an idea, or scout existing work.  It remains just a
+  conversation -- with no branch or worktree -- unless you decide to build,
+  when it continues into the normal workflow.
+- **Keep a real backlog.** Park ideas for later, or let agents file followup
+  work they discover while building something else.
+- **LLM provider agnostic.** imp supplies its own system prompt and agent
+  tools, and disables Claude's and Codex's native equivalents.  Every backend
+  gets the same instructions, tool interface, and permission checks.
+- **Per-role LLM vendors/models.** A project or quest can use different model
+  tiers or vendors for planning, coding, and review.
+- **Carry project memory forward.** Standing, human-approved instructions in
+  `imp/memory/` carry architectural decisions, local conventions, and
+  cross-quest preferences into future quests.  See
+  [project memory](docs/guide/memory.md).
+- **Custom workflows.** Workflows, gates, model tiers, scripts, and agent
+  prompts are ordinary files in your repo.  Customize the default workflow or
+  replace it entirely.
+- **Embed it in your own application.** A supported Python API can create quests,
+  stream events, and answer the questions a workflow asks.  See the
+  [embedding guide](docs/guide/embedding.md).
+- **Not just for code.** The engine can drive other structured processes, not
+  just software development.
 
 ## Try it
 
@@ -71,124 +203,6 @@ a different direction.
 Brownfield development works too.  Run `imp init` and `imp new` from an
 existing checkout; imp reads the code before asking questions and fits the
 feature to the existing code.
-
-## Features
-
-### Default workflow
-
-```mermaid
-flowchart LR
-  intent([intent]) --> interview[interview]
-  interview --> spec[spec]
-  interview -. small change .-> plan
-  spec --> plan[plan]
-  plan --> implement[implement]
-  implement --> converge[converge]
-  converge --> integrate[integrate]
-  integrate --> merged([merged])
-  spec -. review .-> spec
-  plan -. review .-> plan
-  implement -. test or review failure .-> implement
-  implement -. next plan .-> plan
-  converge -. gap found .-> plan
-  integrate -. rework .-> plan
-```
-
-The default workflow is deliberately opinionated -- it follows best practices
-for producing high quality, TDD, fully AI-written code in a fast-moving
-greenfield solo or small team project -- and built around these rules:
-
-- **Put human judgment up front.** imp asks about decisions it cannot make from
-  the code, while changing the design is still cheap.  Once the design is
-  settled, it typically drives the rest of the quest through merge on its own.
-- **Save questions for the end.** During the unattended run, agents resolve what
-  they safely can and record genuine judgment calls instead of stopping to ask.
-  The merge gate presents the remaining decisions together before anything
-  lands.
-- **Start every step fresh.** Each step is a separate model invocation with only
-  the context it needs, to avoid entering the dreaded LLM "dumb zone".  Specs,
-  plans, and progress files carry decisions forward; reviewers do not inherit
-  the author's reasoning or assumptions.
-- **Spec-driven development.** A spec defines the result and its acceptance
-  criteria.  An implementation plan names the code and tests needed to get there.
-  On the full path, both are reviewed before implementation starts.
-- **Adversarial review.** The agents reviewing the spec, plan, and code
-  did not write them.  They inspect the repository and verify claims instead of
-  inheriting the previous agent's assumptions.
-- **Test-driven development.** New tests must be observed failing for the
-  expected reason before implementation.  A test that never proved it could fail
-  is not evidence.
-- **Converge on the spec.** After implementation, imp checks the whole change
-  against the acceptance criteria, runs the slow tests, and routes gaps back into
-  planning or implementation.
-- **Verify the integrated result.** imp takes a merge-queue slot, rebases onto
-  the current base, resolves conflicts, reruns verification, reviews the
-  integrated result, and merges it.
-- **Sweep up non-blocking review comments.** Correctness blockers loop back for
-  an immediate, re-reviewed fix.  Everything else worth considering goes through
-  a separate, once-per-quest quality sweep, which fixes low-risk improvements,
-  filters out noise, and saves genuine judgment calls for the merge gate.
-- **Triage failures instead of chasing green.** Failures caused by the change are
-  fixed and retested.  Unrelated or environmental failures are recorded and
-  surfaced at the merge gate instead of provoking an invented fix.
-- **Keep the code lean and maintainable.** Coders and reviewers push back on
-  speculative fallbacks, dead error handling, and compatibility shims that the
-  design did not ask for.
-- **Work through big changes one plan at a time.** imp implements and fast-tests
-  each plan before starting the next, then reviews the whole quest as one change.
-- **Take the short path for small changes.** The full path writes and reviews a
-  spec and each implementation plan.  Small corrective quests can skip the spec
-  and plan review while keeping implementation, convergence, and integration
-  intact.
-
-### Engine features
-
-The workflow sits on top of engine features that keep quests isolated,
-resumable, and inspectable:
-
-- **Isolate each quest.** Once live, every quest gets its own git worktree and
-  sandboxed agent tools, so several can run at once without breaking your
-  system or touching your checkout, index, or stash.
-- **Pause, resume, or redirect.** Pause a quest at any time with Ctrl-D, or
-  interrupt a running agent with Ctrl-C to ask a question or send it in a
-  different direction.  The append-only event log lets the run resume without
-  throwing away the in-flight step or pretending it never happened.
-- **Get notified and steer from Telegram.** imp can alert your phone when a quest
-  needs input, pauses, fails, or finishes.  From the same chat, you can follow
-  multiple quests, reply to them, and start or resume work.  See
-  [remote-control setup](docs/guide/remote-control.md).
-- **Keep the whole history searchable.** Conversations, artifacts, and tool
-  events remain searchable after a quest finishes, and every line of code can
-  be traced back to the conversation that produced it.
-- **Inspect everything from the CLI.** See active, draft, backlog, and archived
-  quests, then drill into any quest's current state, decisions, summary, readable
-  log, or event stream.
-- **Let agents work across quests.** Agents can inspect earlier steps and search
-  or read other live and archived sibling quests.  With your approval, they can
-  link related backlog items or open new ones for work they discover.
-- **Non-committal chat.** Use `imp chat` to ask questions about imp or your
-  codebase, explore an idea, or scout existing work.  It remains just a
-  conversation -- with no branch or worktree -- unless you decide to build,
-  when it continues into the normal workflow.
-- **Keep a real backlog.** Park ideas for later, or let agents file follow-up work
-  they discover while building something else.
-- **Choose models per role.** A project or quest can use different model tiers
-  or vendors for planning, coding, and review.
-- **Keep agents consistent across backends.** imp supplies its own system prompt
-  and agent tools, and disables Claude's and Codex's native equivalents.  Every
-  backend gets the same instructions, tool interface, and permission checks.
-- **Carry project memory forward.** Standing, human-approved instructions in
-  `imp/memory/` carry architectural decisions, local conventions, and
-  cross-quest preferences into future quests.  See
-  [project memory](docs/guide/memory.md).
-- **Change the process.** Workflows, gates, model tiers, scripts, and agent
-  prompts are ordinary files in your repo.  Customize the default workflow or
-  replace it entirely.
-- **Embed it in your own application.** A supported Python API can create quests,
-  stream events, and answer the questions a workflow asks.  See the
-  [embedding guide](docs/guide/embedding.md).
-- **Not just for code.** The engine can drive other structured processes, not
-  just software development.
 
 ## A quest leaves a trail
 
