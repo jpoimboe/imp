@@ -406,12 +406,14 @@ def _flat_prompt(agent: str) -> str:
     return " ".join(wf.agents[agent].prompt_template_source.split())
 
 
-def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
+def test_spec_finalizer_prompt_has_no_minors_protocol() -> None:
+    """AC 7a/7e. A clean spec review gotos plan-writer, so the minors resume can
+    no longer arrive — while the Critical/Major rework row is untouched."""
     body = _flat_prompt("spec-finalizer")
-    # The clean-review branch keys on the injected severity counts and integrates minors.
-    assert "`critical: 0` with `major: 0` means the spec already passed" in body
-    assert "minors" in body.lower()
-    assert "without changing the file" in body.lower()
+    assert "## Minors-integration pass" not in body
+    assert "No blocking issues — integrate these minor improvements" not in body
+    assert "`critical: 0` with `major: 0` means the spec already passed" not in body
+    assert '| Reviewer rework | "Here\'s review feedback to address:"' in body
 
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:

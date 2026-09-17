@@ -29,10 +29,8 @@ def test_spec_writer_drops_rework_solicitation_bans() -> None:
     text = _spec_writer()
     # The standalone rework-close ban is gone (replaced by the policy pointer).
     assert "Never re-solicit the user on rework" not in text
-    # …but the kept bans remain.
-    assert "do not re-solicit the user" in text          # pre-commit self-review
-    assert "do\n**not** ask the user anything" in text or \
-           "do **not** ask the user anything" in text     # minors pass
+    # …but the kept ban remains: the pre-commit self-review still fixes inline.
+    assert "do not re-solicit the user" in text
 
 
 def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
@@ -63,10 +61,8 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
     # This task rewrites the line-109 recognition paragraph, so its inline
     # solicitation ban is gone (the policy now lives in "Ask vs. decide").
     assert "Do NOT ask the user anything" not in text
-    # The taxonomy carries the full, untruncated feedback strings verbatim.
+    # The taxonomy carries the reviewer-rework feedback string verbatim.
     assert "Here's review feedback to address:" in text
-    assert ("No blocking issues — integrate these minor improvements; a final "
-            "review follows:") in text
     # The synthesized is_error rework-result frame (resume-vs-goto discriminator) is present.
     assert REWORK_RESULT_FRAME in text
 
