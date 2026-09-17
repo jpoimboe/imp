@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import yaml
 from ruamel.yaml.error import YAMLError
@@ -500,6 +500,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     init — and ansibrightblack (= our `gray`/`dim`) for the help line.
     """
     from prompt_toolkit import Application
+    from prompt_toolkit.formatted_text import AnyFormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
@@ -542,7 +543,8 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     def _cancel(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt)
 
-    control = FormattedTextControl(text=_render, focusable=True, show_cursor=False)
+    control = FormattedTextControl(
+        text=cast("AnyFormattedText", _render), focusable=True, show_cursor=False)
     # Derived from the rows themselves so the layout can't drift from the render.
     height = sum(text.count("\n") for _style, text in _render()) + 1
     body = Window(content=control, height=Dimension(min=height, max=height))
@@ -763,6 +765,7 @@ def _run_confirm_app(
     it exited with. Cancel (esc / ctrl-c) raises KeyboardInterrupt, as the
     provider picker does. `erase_when_done` keeps a re-render from stacking."""
     from prompt_toolkit import Application
+    from prompt_toolkit.formatted_text import AnyFormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
@@ -806,7 +809,8 @@ def _run_confirm_app(
     def _cancel(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt)
 
-    control = FormattedTextControl(text=_render, focusable=True, show_cursor=False)
+    control = FormattedTextControl(
+        text=cast("AnyFormattedText", _render), focusable=True, show_cursor=False)
     height = sum(text.count("\n") for _style, text in _render()) + 1
     body = Window(content=control, height=Dimension(min=height, max=height))
     app: Any = Application(
