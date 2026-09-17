@@ -4,6 +4,7 @@ import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import anyio
 import pytest
@@ -579,6 +580,34 @@ async def test_an_oversized_event_is_clipped_on_the_wire_but_whole_on_disk(
         record = json.loads(text.splitlines()[0])
         assert record["payload"]["input"]["content"] == huge
 
+        await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_end_marker_is_the_last_frame_after_every_queued_event(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        await wait_until(lambda: session.attached_count == 1)
+        for n in range(5):
+            session.broadcast({"type": "agent_result", "payload": {"n": n}})
+        session.enqueue_end()
+        await session.flush_pending()
+        buf = BufferedByteReceiveStream(client)
+        frames: list[dict[str, Any]] = []
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            for _ in range(6):
+                frames.append(json.loads(
+                    (await buf.receive_until(b"\n", _MAX_FRAME)).decode()))
+        assert [f["kind"] for f in frames] == ["event"] * 5 + ["end"]
+        assert [f["event"]["payload"]["n"] for f in frames[:5]] == [0, 1, 2, 3, 4]
         await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()
