@@ -109,11 +109,6 @@ filterwarnings = [
     # tests/impty/test_render.py) and are worth fixing at the source separately.
     "ignore::ResourceWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
-    # Third-party, not fixable here: uvicorn imports deprecated websockets.legacy,
-    # pulled in transitively by `mcp`, which imp's own MCP server runs on.
-    # Re-evaluate on an mcp / uvicorn bump.
-    "ignore:websockets.legacy is deprecated:DeprecationWarning",
-    "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
 ]
 
 [tool.ruff]
