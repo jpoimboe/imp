@@ -1322,7 +1322,7 @@ async def test_cut_ending_on_a_stale_paused_quest_reports_lost_connection(
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    quest = _make_quest(tmp_path, "2026-07-04-cut-stale-paused")
+    quest = _make_quest(tmp_path, "2026-07-04-cut-stale")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
