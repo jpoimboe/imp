@@ -162,6 +162,7 @@ def test_every_shown_step_has_its_label() -> None:
     # Quiet plumbing steps stay label-free.
     for name in ("threshold", "spec-verify-commit", "plan-verify-commit",
                  "cleanup-merge", "check-next-plan",
+                 "deferred-check",
                  "assert-stamped", "integrate-rebase", "check-cleared"):
         assert by[name].label is None, name
 

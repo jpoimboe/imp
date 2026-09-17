@@ -7,8 +7,9 @@ description: |
 # fast-verified, then check-next-plan either starts the next outline plan or
 # (last plan done) enters converge. converge runs ONCE per quest: gap-check (the
 # sole coverage backstop; latches coverage_settled) -> quest-review (the single
-# quest-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-sweep
-# (drains the whole quest's Deferred list once) -> converge-verify (slow, on the
+# quest-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-check
+# (skips the sweep when there is nothing to drain) -> deferred-sweep (drains the
+# whole quest's Deferred list once) -> converge-verify (slow, on the
 # quest's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, check-cleared re-checks tree clearance (re-gates if
@@ -172,8 +173,8 @@ phases:
           - {else: true, goto: gap-check}
 
   # ── converge: runs ONCE per quest (quest-local, NO lock). The coverage backstop,
-  # the single quest-wide code review, the once-per-quest deferred sweep, and the
-  # slow verify on the quest's own base.
+  # the single quest-wide code review, the deferred sweep when there is anything to
+  # drain, and the slow verify on the quest's own base.
   - name: converge
     label: "convergence phase"
     steps:
@@ -189,7 +190,7 @@ phases:
           - {else: true, set: {coverage_settled: true}, goto: quest-review}
 
       # The single quest-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
-      # approve -> deferred-sweep; task_gap -> task-lead rework.
+      # approve -> deferred-check (the sweep's guard); task_gap -> task-lead rework.
       - name: quest-review
         file: agents/batch-code-reviewer.md
         tier: high
@@ -201,7 +202,18 @@ phases:
              label: "addressing code review feedback",
              feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
-          - {else: true, goto: deferred-sweep}
+          - {else: true, goto: deferred-check}
+
+      # Guard: the sweep is a high-tier agent dispatch, so skip it when the quest's
+      # Deferred Followups list has nothing to drain. Fails closed — exit 1 is the
+      # only skip signal; any error exits 0 and dispatches. converge-verify's failure
+      # rule names deferred-sweep directly, so slow-gate triage jumps this guard.
+      - name: deferred-check
+        show_label: false
+        command: ./scripts/deferred-check.sh
+        rules:
+          - {if: {exit: 1}, goto: converge-verify}
+          - {else: true, continue: true}
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md

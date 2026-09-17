@@ -101,9 +101,9 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     # cross-phase plain goto (resume is False)
     assert by["quest-review"].rules[0].action.target == "task-lead"
     assert by["quest-review"].rules[0].action.resume is False
-    # else: approve -> goto deferred-sweep (forward)
+    # else: approve -> goto deferred-check (forward; the guard fronts the sweep)
     assert isinstance(by["quest-review"].rules[-1].action, Goto)
-    assert by["quest-review"].rules[-1].action.target == "deferred-sweep"
+    assert by["quest-review"].rules[-1].action.target == "deferred-check"
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "integrate"

@@ -13,6 +13,7 @@ _QUIET = {
     "assert-stamped",
     "integrate-rebase",
     "check-cleared",
+    "deferred-check",
 }
 
 

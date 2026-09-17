@@ -405,7 +405,9 @@ CONVERGE_DIAGRAM = """flowchart TD
   GC -->|clean| QR["quest-review<br/>(batch-code-reviewer)"]
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
-  QR --> DS["deferred-sweep<br/>coder + code-reviewer"]
+  QR --> DC{{"deferred-check"}}
+  DC -->|"nothing to drain"| CV
+  DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
   DS -->|"slow gate tolerated"| out([→ wait-for-head])
   DS --> CV{{"converge-verify · slow"}}
   CV -. "fail → triage" .-> DS
