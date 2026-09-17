@@ -117,6 +117,17 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
         assert s in text, f"plan-writer taxonomy missing: {s!r}"
 
 
+def test_plan_writer_documents_the_spec_approval_goto_as_planning_work() -> None:
+    # A clean spec review now gotos plan-writer instead of bouncing the finalizer,
+    # so the taxonomy must name the shape AND frame it as planning, not a rework.
+    text = _plan_writer()
+    assert "| Spec approved | goto (fresh session) |" in text
+    row = next(ln for ln in text.splitlines()
+               if ln.startswith("| Spec approved |"))
+    assert "The spec is approved — no blocking issues." in row
+    assert "Planning work, not a rework" in row
+
+
 _WRITER_FILES = {
     "spec-finalizer": AGENTS / "spec-finalizer.md",
     "plan-writer": AGENTS / "plan-writer.md",

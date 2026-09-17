@@ -170,12 +170,12 @@ def test_route_labels_assigned() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
 
-    # spec-reviewer: critical/major -> feedback rework; minors -> integrate
+    # spec-reviewer: critical/major -> rework; clean -> forward into planning
     assert by["spec-reviewer"].rules[0].label == "addressing spec review feedback"
-    assert by["spec-reviewer"].rules[1].label == "addressing spec review feedback"
-    # plan-reviewer: critical/major; minors (output.minor rule)
+    assert by["spec-reviewer"].rules[1].label == "writing plan"
+    # plan-reviewer: the critical/major rework is its only labelled edge
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
-    assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
+    assert by["plan-reviewer"].rules[1].label is None
     # batch-code-reviewer task_gap -> task-lead
     assert by["quest-review"].rules[0].label == "addressing code review feedback"
     # verify gate fallthrough resumes task-lead with the fix reason

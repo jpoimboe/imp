@@ -12,8 +12,7 @@ from imp.engine.types import Goto
 FRONT_DOOR = Path("src/imp/assets/partials/front-door.md")
 
 _BASE_VARS = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False, "review_scope": "plan",
+    "fast_path": False, "review_scope": "plan",
     "review_base": "",
     "coverage_settled": False, "integration_fork": "",
 }

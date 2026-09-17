@@ -6,8 +6,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import Goto
 
 _BASE = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False,
+    "fast_path": False,
     "coverage_settled": False, "plan_index": 2, "plan_total": 4, "task_total": 0,
 }
 

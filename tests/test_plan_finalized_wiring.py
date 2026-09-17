@@ -13,8 +13,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto
 
 _BASE = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False,
+    "fast_path": False, "plan_review_notes": "",
     "coverage_settled": False, "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
@@ -46,12 +45,14 @@ def test_fresh_plan_arrows_route_through_plan_finalized() -> None:
     fast = evaluate_rules(steps["plan-verify-commit"].rules, vars={**_BASE, "fast_path": True},
                           output={"exit": 0, "stdout": "", "stderr": ""})
     assert fast.action.target == "plan-finalized"
-    minors = evaluate_rules(steps["plan-reviewer"].rules,
-                            vars={**_BASE, "plan_minors_integrated": True},
-                            output={"critical": 0, "major": 0, "minor": 2})
+    minors = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
+                            output={"critical": 0, "major": 0, "minor": 2,
+                                    "findings": "Minor: advisory"})
     assert minors.action.target == "plan-finalized"
-    clean = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                           output={"critical": 0, "major": 0, "minor": 0})
+    clean = evaluate_rules(
+        steps["plan-reviewer"].rules, vars=_BASE,
+        output={"critical": 0, "major": 0, "minor": 0,
+                "findings": "No findings. Plan is complete and ready for implementation."})
     assert clean.action.target == "plan-finalized"
 
 

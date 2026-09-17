@@ -21,8 +21,7 @@ AGENTS = Path("src/imp/assets/workflows/default/agents")
 _TIERS = frozenset({"low", "medium", "high"})
 
 _BASE_VARS = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False,
+    "fast_path": False,
     "coverage_settled": False,
     "plan_index": 1, "plan_total": 0, "task_total": 0,
 }

@@ -19,9 +19,9 @@ def _steps(wf):
 
 # All declared workflow vars at their defaults — a realistic evaluate_rules fixture.
 _BASE_VARS = {
-    "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False,
+    "fast_path": False,
     "coverage_settled": False,
+    "plan_review_notes": "",
     "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
@@ -116,6 +116,22 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
 
 
+def test_quest_review_task_gap_clears_the_plan_review_carrier() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("default"))
+    rules = _steps(wf)["quest-review"].rules
+    # This is the one re-entry to task-lead that does NOT pass a fresh plan
+    # review, so a stale plan's advisory notes would surface under an "approved"
+    # heading during a code-review rework.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "plan_review_notes": "advice from plan 2"},
+        output={"status": "Success", "verdict": "task_gap", "findings": "x"},
+    )
+    assert isinstance(m.action, Goto) and m.action.target == "task-lead"
+    assert m.var_mutations == {"plan_review_notes": ""}
+
+
 def test_review_step_has_no_differ_from():
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
@@ -167,84 +183,44 @@ def test_fast_path_var_declared_default_false() -> None:
     assert wf.vars.defaults()["fast_path"] is False
 
 
-def test_minors_integrated_vars_declared_default_false() -> None:
+def test_minors_loop_state_is_gone_from_the_workflow() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    defaults = wf.vars.defaults()
-    assert defaults["spec_minors_integrated"] is False
-    assert defaults["plan_minors_integrated"] is False
+    body = (bundled_workflow_dir("default") / "workflow.yaml").read_text()
+    assert "spec_minors_integrated" not in body
+    assert "plan_minors_integrated" not in body
 
 
-def test_spec_reviewer_critical_reworks_and_clears_flag() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    rules = _steps(wf)["spec-reviewer"].rules
-    # Critical/Major -> rework to spec-finalizer; clear the minors-integrated flag so a
-    # real fix re-opens the one minors pass.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"critical": 1, "major": 0, "minor": 0},
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-finalizer" and m.action.resume is True
-    assert m.var_mutations["spec_minors_integrated"] is False
-    # major-only also reworks: the `+ output.major` term is load-bearing
-    major_only = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"critical": 0, "major": 1, "minor": 0},
-    )
-    assert isinstance(major_only.action, Goto)
-    assert major_only.action.target == "spec-finalizer" and major_only.action.resume is True
-    assert major_only.var_mutations["spec_minors_integrated"] is False
-
-
-def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
+def test_spec_reviewer_blocking_findings_rework_the_writer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
-    # Clean + actionable minors, not yet integrated -> resume writer to integrate and
-    # set the flag, so the next (clean) review terminates.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"critical": 0, "major": 0, "minor": 2},
-    )
-    assert m.var_mutations["spec_minors_integrated"] is True
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-finalizer" and m.action.resume is True
+    assert len(rules) == 2
+    # Critical alone, and major alone (the `+ output.major` term is load-bearing),
+    # both still bounce to the writer and are re-reviewed — even alongside minors.
+    for output in ({"critical": 1, "major": 0, "minor": 0},
+                   {"critical": 0, "major": 1, "minor": 3}):
+        m = evaluate_rules(rules, vars=_BASE_VARS, output=output)
+        assert isinstance(m.action, Goto), output
+        assert m.action.target == "spec-finalizer", output
+        assert m.action.resume is True, output
+        assert m.var_mutations == {}, output
 
 
-def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
+def test_spec_reviewer_clean_review_routes_forward_carrying_its_findings() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
-    # The owed verification review (minors already integrated): a clean review stops
-    # and advances to plan-writer even if it surfaced fresh minors (those are dropped).
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"critical": 0, "major": 0, "minor": 2},
-    )
-    assert m.var_mutations["spec_minors_integrated"] is False
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
-
-
-def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    rules = _steps(wf)["spec-reviewer"].rules
-    # Clean with nothing actionable -> advance to plan-writer, no minors pass.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"critical": 0, "major": 0, "minor": 0},
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
-    assert m.var_mutations == {"spec_minors_integrated": False}
+    # Minors buy no lap here: whether or not the review surfaced any, a clean
+    # review advances to planning and mutates nothing. The findings ride along on
+    # the goto's preamble, which the engine appends the output fields to.
+    for minor in (0, 2):
+        m = evaluate_rules(rules, vars=_BASE_VARS,
+                           output={"critical": 0, "major": 0, "minor": minor})
+        assert isinstance(m.action, Goto), minor
+        assert m.action.target == "plan-writer", minor
+        assert m.action.resume is False, minor
+        assert m.var_mutations == {}, minor
+        assert m.action.feedback and "advisory" in m.action.feedback, minor
 
 
 def test_threshold_sets_fast_path_from_ceremony() -> None:
@@ -385,60 +361,44 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         )
 
 
-def test_plan_reviewer_critical_reworks_and_clears_flag() -> None:
+def test_plan_reviewer_blocking_findings_rework_the_writer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"critical": 1, "major": 0, "minor": 0},   # critical -> rework
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is True
-    assert m.var_mutations["plan_minors_integrated"] is False
+    assert len(rules) == 2
+    for output in ({"critical": 1, "major": 0, "minor": 0, "findings": "f"},
+                   {"critical": 0, "major": 1, "minor": 3, "findings": "f"}):
+        m = evaluate_rules(rules, vars=_BASE_VARS, output=output)
+        assert isinstance(m.action, Goto), output
+        assert m.action.target == "plan-writer", output
+        assert m.action.resume is True, output
+        assert m.var_mutations == {}, output
 
 
-def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
+def test_plan_reviewer_clean_review_hands_its_findings_to_the_lead() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"critical": 0, "major": 0, "minor": 2},   # clean with minors
+    # plan-finalized is a script and would swallow a preamble, so the findings
+    # travel in plan_review_notes instead — set on the clean edge, minors or not.
+    # Both `findings` values are the ones plan-reviewer.md's own finish examples
+    # tell the reviewer to emit, so these are states the contract really produces.
+    cases = (
+        (2, "No Critical/Major findings. Minor: task 3's assertion restates the impl"),
+        (0, "No findings. Plan is complete and ready for implementation."),
     )
-    assert m.var_mutations["plan_minors_integrated"] is True
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is True
-
-
-def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    rules = _steps(wf)["plan-reviewer"].rules
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"critical": 0, "major": 0, "minor": 2},   # verification pass
-    )
-    assert m.var_mutations["plan_minors_integrated"] is False
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-finalized" and m.action.resume is False
-
-
-def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    rules = _steps(wf)["plan-reviewer"].rules
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"critical": 0, "major": 0, "minor": 0},   # clean, nothing actionable
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-finalized" and m.action.resume is False
-    assert m.var_mutations == {}
+    for minor, findings in cases:
+        m = evaluate_rules(
+            rules, vars=_BASE_VARS,
+            output={"critical": 0, "major": 0, "minor": minor,
+                    "findings": findings},
+        )
+        assert isinstance(m.action, Goto), minor
+        assert m.action.target == "plan-finalized", minor
+        assert m.action.resume is False, minor
+        # The carrier mirrors findings verbatim — the lead sees what the reviewer
+        # wrote, not a summary.
+        assert m.var_mutations == {"plan_review_notes": findings}, minor
 
 
 def _flat_prompt(agent: str) -> str:
@@ -1389,7 +1349,8 @@ def test_plain_english_blocking_survives_the_field_removal() -> None:
             in (wf_dir / "agents" / "spec-reviewer.md").read_text())
     feedback = ("No blocking issues — integrate these minor improvements; "
                 "a final review follows:")
-    assert (wf_dir / "workflow.yaml").read_text().count(feedback) == 3
+    # Only integration-reviewer still grants a minors lap.
+    assert (wf_dir / "workflow.yaml").read_text().count(feedback) == 1
 
 
 def test_reviewer_descriptions_no_longer_name_the_blocking_field() -> None:

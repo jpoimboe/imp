@@ -20,8 +20,6 @@ description: |
 vars:
   fast_path:              {type: bool, default: false}
   auto_merge:             {type: bool, default: true}
-  spec_minors_integrated: {type: bool, default: false}
-  plan_minors_integrated: {type: bool, default: false}
   coverage_settled:       {type: bool, default: false}
   plan_review_notes:      {type: string, default: ""}
   integration_fork:       {type: string, default: ""}
@@ -89,19 +87,12 @@ phases:
         tier: high
         label: reviewing spec
         read_only: ["."]
-        # The reviewer gets the last word: the loop ends only on a clean review with
-        # nothing left to integrate. spec_minors_integrated tracks whether the writer
-        # has already spent its one minors-integration pass for the current settled
-        # state — so a clean *verification* review stops and drops its own minors.
         rules:
-          # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: "output.critical + output.major > 0", set: {spec_minors_integrated: false},
-             resume: spec-finalizer, label: "addressing spec review feedback", feedback: "Here's review feedback to address:"}
-          # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
-          - {if: "var.spec_minors_integrated == false and output.minor > 0", set: {spec_minors_integrated: true},
-             resume: spec-finalizer, label: "addressing spec review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
-          - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
+          - {if: "output.critical + output.major > 0",
+             resume: spec-finalizer, label: "addressing spec review feedback",
+             feedback: "Here's review feedback to address:"}
+          - {else: true, goto: plan-writer, label: "writing plan",
+             feedback: "The spec is approved — no blocking issues. Plan it. Any Minor findings below are advisory: fold in what improves the plan, and do not rewrite the spec for them:"}
 
   - name: plan
     label: "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
@@ -130,18 +121,12 @@ phases:
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
         # engine routes its {status, findings, critical, major, minor} output
-        # through these rules. plan_minors_integrated tracks the writer's one minors-
-        # integration pass: set only on the clean-with-minors bounce-back, cleared on
-        # every rework/terminal branch. Mirrors the spec minors loop.
+        # through these rules.
         rules:
-          # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: "output.critical + output.major > 0", set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
-          # Clean, and the writer already did its minors-integration pass -> stop.
-          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: plan-finalized}
-          # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: "output.minor > 0", set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean, nothing to integrate -> stop.
-          - {else: true, goto: plan-finalized}
+          - {if: "output.critical + output.major > 0", resume: plan-writer,
+             label: "addressing plan review feedback",
+             feedback: "Here's review feedback to address:"}
+          - {else: true, set: {plan_review_notes: "output.findings"}, goto: plan-finalized}
 
       - name: plan-finalized
         label: "finalizing plan"
@@ -211,7 +196,10 @@ phases:
         label: reviewing entire diff
         read_only: ["."]
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
+          # Clear the one-hop carrier (the quoted '' is load-bearing: a set: RHS is an expression).
+          - {if: {verdict: task_gap}, set: {plan_review_notes: "''"}, goto: task-lead,
+             label: "addressing code review feedback",
+             feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, goto: deferred-sweep}
 

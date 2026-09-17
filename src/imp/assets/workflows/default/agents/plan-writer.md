@@ -46,6 +46,7 @@ exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `critical:` or `major:` above `0` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `critical: 0` and `major: 0` | One-pass minors protocol (non-soliciting). |
+| Spec approved | goto (fresh session) | "The spec is approved — no blocking issues. Plan it. Any Minor findings below are advisory: fold in what improves the plan, and do not rewrite the spec for them:" + the reviewer's findings | Planning work, not a rework: plan the finalized spec on disk, folding in any Minor finding that improves the plan. Do not rewrite the spec for them. |
 | Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (author a corrective plan N+1). |
