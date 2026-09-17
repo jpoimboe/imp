@@ -159,6 +159,30 @@ def test_batch_code_reviewer_description_is_whole_diff() -> None:
     assert "whole diff" in desc
 
 
+def test_batch_code_reviewer_defers_the_ac_walk_to_gap_check() -> None:
+    """AC 12. The prompt's own preamble says gap-check owns spec coverage
+    exclusively; the Spec alignment bullet no longer contradicts it."""
+    body = _agent_prompt("batch-code-reviewer")
+    assert "every acceptance criterion satisfied" not in body
+    assert (
+        "- **Spec alignment:** all planned functionality present; deviations are "
+        "justified\n  improvements, not problematic departures. `gap-check` has "
+        "already walked the\n  acceptance criteria clause by clause — do not "
+        "re-walk them."
+    ) in body
+    # The reviewer's real charter is untouched.
+    for bullet in ("- **Code quality:**", "- **Architecture:**", "- **Testing:**",
+                   "- **Production readiness:**"):
+        assert bullet in body, bullet
+
+
+def test_gap_check_keeps_the_only_ac_walk() -> None:
+    """AC 12. gap-check is now the sole owner, so its walk section stays."""
+    body = _agent_prompt("gap-check")
+    assert "## Walk the acceptance criteria clause by clause" in body
+    assert "split each criterion into its **independently checkable clauses**" in body
+
+
 def test_events_query_references_frame_provenance_not_current_state() -> None:
     for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
