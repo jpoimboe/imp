@@ -563,8 +563,7 @@ def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
 _CALIBRATION_SENTENCE = (
     "An area that returns lap after lap means the design is unsettled, not the spec "
     "under-written: say so in `findings` — another Major buys another lap, not a "
-    "decision — and don't manufacture minors to justify one more pass; on such a "
-    "review `minor = 0` is the honest answer."
+    "decision."
 )
 
 
@@ -662,10 +661,10 @@ def test_spec_reviewer_output_copy_counts_findings_and_excludes_nits() -> None:
         "findings are cosmetic Nits reports `minor = 0`."
     ) in body
     assert (
-        "Any Critical or Major sends the spec back for rework. `minor` is consulted "
-        "only when `critical` and `major` are both `0`, deciding whether the writer "
-        "does one final minors-integration pass before the spec is accepted; it has "
-        "no effect otherwise. Count honestly regardless."
+        "Any Critical or Major sends the spec back for rework. With `critical` and "
+        "`major` both `0` the spec is accepted and proceeds to planning: your Minor "
+        "findings ride forward to `plan-writer` as advisory context and buy no lap "
+        "here. Count honestly regardless."
     ) in body
 
 
@@ -766,10 +765,10 @@ def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
         "findings are cosmetic Nits reports `minor = 0`."
     ) in body
     assert (
-        "Any Critical or Major sends the plan back for rework. `minor` is consulted "
-        "only when `critical` and `major` are both `0`, deciding whether the writer "
-        "does one final minors-integration pass before the plan is accepted; it has "
-        "no effect otherwise. Count honestly regardless."
+        "Any Critical or Major sends the plan back for rework. With `critical` and "
+        "`major` both `0` the plan is accepted and proceeds to implementation: your "
+        "Minor findings ride forward to `task-lead` through `plan_review_notes` as "
+        "advisory context and buy no lap here. Count honestly regardless."
     ) in body
 
 
