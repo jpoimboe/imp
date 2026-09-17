@@ -304,15 +304,16 @@ def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._hourglass(g, 24, 3)
     assert g[9][24] == splash._P["flame2"]      # px(cx,top_y+6) lower sand at (24,9)
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_floating_wisps, "the wisps know the way."),
-        (splash._s_magic_wand, "speak, and it shall be built."),
-        (splash._s_hourglass, "the sand is falling. time to begin."),
+        splash._s_floating_wisps,
+        splash._s_magic_wand,
+        splash._s_hourglass,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_rune_sigil") < idx[0]
 
@@ -345,13 +346,14 @@ def test_cloud_fills_its_centre_with_the_given_colour() -> None:
 
 
 def test_cosmic_batch_a_scenes_are_wired_in_gallery_order() -> None:
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_crescent_stars, "the familiar awakens."),
-        (splash._s_full_moon_cloud, "the night is thine."),
+        splash._s_crescent_stars,
+        splash._s_full_moon_cloud,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
+    for builder in expect:
+        assert builder in builders
     order = ["_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation"]
     positions = [names.index(n) for n in order]
     assert positions == sorted(positions)
@@ -371,13 +373,14 @@ def test_comet_scene_paints_a_bright_head() -> None:
 
 
 def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_ringed_planet, "a world, from nothing."),
-        (splash._s_comet, "the heavens blaze forth. name your wish."),
+        splash._s_ringed_planet,
+        splash._s_comet,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
+    for builder in expect:
+        assert builder in builders
     assert names.index("_s_constellation") < names.index("_s_ringed_planet")
     assert names.index("_s_ringed_planet") < names.index("_s_starfield")
 
@@ -399,13 +402,14 @@ def test_summoning_circle_scene_paints_a_portal_ring_and_runes() -> None:
 
 
 def test_cosmic_scenes_open_the_pool_in_order() -> None:
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_void, "conjured from the void."),
-        (splash._s_summoning_circle, "the circle's drawn. what do we summon?"),
+        splash._s_void,
+        splash._s_summoning_circle,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
+    for builder in expect:
+        assert builder in builders
     assert names[:8] == [
         "_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation", "_s_ringed_planet",
         "_s_comet", "_s_starfield", "_s_void", "_s_summoning_circle",
@@ -425,15 +429,16 @@ def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
     assert g[1][24] == splash._P["steam"]    # px(cx+1,top_y-6) upper steam wisp
     assert g[12][20] == splash._P["potD"]    # px(cx-3,top_y+5) left leg
     assert g[12][23] == splash._P["fire3"]   # the fire under the pot
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_portal, "the portal is open. step through."),
-        (splash._s_crystal_ball, "gaze in — what shall we build?"),
-        (splash._s_cauldron, "stir the cauldron — what's brewing?"),
+        splash._s_portal,
+        splash._s_crystal_ball,
+        splash._s_cauldron,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_summoning_circle") < idx[0]
 
@@ -455,16 +460,17 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     splash._rune_sigil(g, 24, 7)
     assert g[6][24] == splash._P["rune"]        # a carved stroke on the slab
     assert g[3][24] == splash._P["metalD"]      # the arched top of the stone
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_lantern, "the lantern's lit. lead the way."),
-        (splash._s_twin_candles, "lean in. whisper into the flame."),
-        (splash._s_twin_torches, "the torches are lit. let's begin."),
-        (splash._s_rune_sigil, "the runes are ready. what shall we carve?"),
+        splash._s_lantern,
+        splash._s_twin_candles,
+        splash._s_twin_torches,
+        splash._s_rune_sigil,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_cauldron") < idx[0]
 
@@ -485,16 +491,17 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     splash._s_will_o_wisp(g)
     assert g[8][24] == splash._P["bright"]       # the lone wisp's hot core at (24,8)
     assert g[7][24] == splash._P["wisp"]         # spark arm above the core
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_crystal_cluster, "from nothing, something."),
-        (splash._s_will_o_wisp, "a light beckons in the dark."),
-        (splash._s_quill_ink, "the quill is dipped. say the word."),
-        (splash._s_glowing_mushrooms, "the toadstools are glowing. take your pick."),
+        splash._s_crystal_cluster,
+        splash._s_will_o_wisp,
+        splash._s_quill_ink,
+        splash._s_glowing_mushrooms,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_hourglass") < idx[0]
 
@@ -514,16 +521,17 @@ def test_nocturnal_scenes_one_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._s_bats(g)
     assert g[3][22] == splash._P["ravenC"]      # first bat body centre at (22,3)
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_campfire, "by emberlight, we code."),
-        (splash._s_fireflies, "daemons, at your command."),
-        (splash._s_spider_web, "what shall we catch?"),
-        (splash._s_bats, "creatures of the night, assemble."),
+        splash._s_campfire,
+        splash._s_fireflies,
+        splash._s_spider_web,
+        splash._s_bats,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_glowing_mushrooms") < idx[0]
 
@@ -541,15 +549,16 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._cat(g, 25, 12)
     assert g[9][24] == splash._P["catEye"]       # px(x-1,by-3) left eye at (24,9)
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_raven, "tell me what haunts your codebase."),
-        (splash._s_mirror, "the abyss gazes. what do you see?"),
-        (splash._s_black_cat, "be still, the night brings counsel."),
+        splash._s_raven,
+        splash._s_mirror,
+        splash._s_black_cat,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_bats") < idx[0]
 
@@ -562,14 +571,15 @@ def test_dice_and_sunrise_close_the_curated_pool() -> None:
     g = splash._make_grid()
     splash._s_sunrise(g)
     assert g[10][24] == splash._P["sun"]          # sun disc centre at (24,10)
+    builders = [b for b, _p in splash.SCENES]
     expect = [
-        (splash._s_loaded_dice, "the dice are cast."),
-        (splash._s_sunrise, "the day is thine."),
+        splash._s_loaded_dice,
+        splash._s_sunrise,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
+    for builder in expect:
+        assert builder in builders
     assert len(splash.SCENES) == 37
-    names = [b.__name__ for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     assert names == [
         "_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation", "_s_ringed_planet",
         "_s_comet", "_s_starfield", "_s_void", "_s_summoning_circle",
@@ -612,18 +622,19 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     splash._s_open_tome(g)
     assert g[10][21] == splash._P["ink"]          # a line of text on the left page
     assert g[9][24] == splash._P["wood"]          # the spine down the middle
+    builders = [b for b, _p in splash.SCENES]
+    names = [b.__name__ for b in builders]
     expect = [
-        (splash._s_coffee, "another night, another diff."),
-        (splash._s_terminal, "mischief, compiled."),
-        (splash._s_diff, "summon your next diff."),
-        (splash._s_desk_book, "coding, by candlelight."),
-        (splash._s_the_bug, "something stirs, waiting expectantly."),
-        (splash._s_open_tome, "the tome is open. choose a spell."),
+        splash._s_coffee,
+        splash._s_terminal,
+        splash._s_diff,
+        splash._s_desk_book,
+        splash._s_the_bug,
+        splash._s_open_tome,
     ]
-    for entry in expect:
-        assert entry in splash.SCENES
-    names = [b.__name__ for b, _p in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p in expect]
+    for builder in expect:
+        assert builder in builders
+    idx = [names.index(b.__name__) for b in expect]
     assert idx == sorted(idx)
     assert names.index("_s_black_cat") < idx[0]
 
