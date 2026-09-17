@@ -416,11 +416,22 @@ def test_spec_finalizer_prompt_has_no_minors_protocol() -> None:
     assert '| Reviewer rework | "Here\'s review feedback to address:"' in body
 
 
-def test_plan_writer_prompt_has_minors_integration_branch() -> None:
+def test_plan_writer_prompt_has_no_minors_protocol() -> None:
+    """AC 7a/7b/7e. The minors resume is gone; the inbound spec-approval goto and
+    the Critical/Major rework row are what the taxonomy still routes."""
     body = _flat_prompt("plan-writer")
-    assert "`critical: 0` with `major: 0` means the plan already passed" in body
-    assert "minors" in body.lower()
-    assert "without changing the file" in body.lower()
+    assert "## Minors-integration pass" not in body
+    assert "No blocking issues — integrate these minor improvements" not in body
+    assert "`critical: 0` with `major: 0` means the plan already passed" not in body
+    assert '| Reviewer rework | resume | "Here\'s review feedback to address:"' in body
+    assert "| Spec approved | goto (fresh session) |" in body
+
+
+def test_no_prompt_teaches_the_retired_minors_protocol() -> None:
+    """AC 7f. With the lap gone, no writer or reviewer prompt may still name it —
+    a grep is an exact completeness check over the four files §1b rewrites."""
+    for agent in ("spec-finalizer", "plan-writer", "spec-reviewer", "plan-reviewer"):
+        assert "minors" not in _flat_prompt(agent).lower(), agent
 
 
 def test_no_goto_spec_finalizer_edge() -> None:

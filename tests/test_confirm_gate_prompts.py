@@ -87,9 +87,6 @@ def test_plan_writer_has_ask_vs_decide_and_decisions_section() -> None:
     assert "## Decisions" in text
     assert "yield to the human" in text
     assert "wait_for_user" not in text
-    # minors pass ban kept (the phrase wraps across a line break in the file;
-    # "do not reopen planning" is distinctive and sits on one line)
-    assert "do not reopen planning" in text
 
 
 def test_plan_reviewer_briefed_on_decisions_section() -> None:
@@ -103,7 +100,6 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
     text = _plan_writer()
     for s in (
         "Here's review feedback to address:",
-        "No blocking issues — integrate these minor improvements; a final review follows:",
         "More plans are needed for this spec. Coverage assessment:",
         "The review found the plan needs revision. Findings:",
         "The integration pass found the plan needs revision. Findings:",

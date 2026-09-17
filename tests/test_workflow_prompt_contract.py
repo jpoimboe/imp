@@ -418,8 +418,9 @@ def test_plan_writer_has_no_deviation_revise_mode() -> None:
     assert "deviation revise mode" not in low
     assert "deviation-bounded revise" not in low
     assert "task-lead deviation" not in low
-    # The minors-integration in-place revise survives.
-    assert "minors-integration" in low
+    # The in-place revise of a not-yet-settled plan N survives: a Critical/Major
+    # rework still bounces the writer back onto the same plan file.
+    assert "revise `…-plan-N.md` in place" in text
     # Authoring the covering N+1 consumes the NEEDS-REPLAN lifecycle handle.
     assert "NEEDS-REPLAN" in text
     assert "[x]" in text
