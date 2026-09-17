@@ -59,6 +59,7 @@ class SessionClient:
         self._stream = stream
 
     async def receive_events(self) -> StreamEnding:
+        """ENDED means the end frame arrived; the socket stays open — the caller must close it."""
         if self._stream is None:
             raise RuntimeError("call connect() before receive_events()")
         buf = BufferedByteReceiveStream(self._stream)
