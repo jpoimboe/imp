@@ -8,6 +8,8 @@
 # path, an absent IMP_QUEST_DIR — dispatches the agent. The parse is deliberately
 # dumb: it does not re-implement deferred-sweep's tag-aware drain logic, because a
 # second parser drifting from the agent's is how items get silently dropped.
+# Heading match is case-insensitive prefix so a variant written by an agent
+# (e.g. "## Deferred followups (2)") dispatches the sweep rather than silently skipping it.
 #
 #   1 -> nothing to drain: deferred.md absent, no `## Deferred Followups` section,
 #        or that section holds no `- [ ]` items -> converge-verify
@@ -21,7 +23,7 @@ FILE="$QUEST_DIR/deferred.md"
 { [ -f "$FILE" ] && [ -r "$FILE" ]; } || { echo "cannot read $FILE; dispatching the sweep" >&2; exit 0; }
 
 ITEM=$(awk '
-  /^## / { in_section = ($0 ~ /^## Deferred Followups[[:space:]]*$/); next }
+  /^## / { in_section = (tolower($0) ~ /^## deferred followups/); next }
   in_section && /^- \[ \]/ { print "open"; exit }
 ' "$FILE") || { echo "awk failed on $FILE; dispatching the sweep" >&2; exit 0; }
 

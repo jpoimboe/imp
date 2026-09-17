@@ -87,3 +87,13 @@ def test_unreadable_deferred_path_fails_closed(tmp_path: Path) -> None:
 def test_missing_quest_dir_fails_closed(tmp_path: Path) -> None:
     assert _run(None).returncode == 0
     assert _run("").returncode == 0
+
+
+def test_case_and_suffix_variant_heading_dispatches_the_sweep(tmp_path: Path) -> None:
+    # Guard must not fail open on an agent-written heading variant such as "## Deferred followups (2)".
+    qd = _quest_dir(
+        tmp_path,
+        "## Deferred followups (2)\n\n"
+        "- [ ] DEFERRED task-lead: some open item [scope: plan]\n",
+    )
+    assert _run(qd).returncode == 0
