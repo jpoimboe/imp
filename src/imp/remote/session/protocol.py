@@ -209,6 +209,7 @@ def _event_of(obj: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_event(line: str) -> dict[str, Any]:
+    """Decoder pair for encode_event; stream readers should use parse_stream_frame instead."""
     return _event_of(_as_object(line))
 
 

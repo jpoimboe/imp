@@ -363,7 +363,6 @@ def test_parse_stream_frame_rejects_a_frame_that_is_neither() -> None:
 
 
 def test_parse_event_still_rejects_the_end_frame() -> None:
-    # The old-client degradation path: a CLI that predates the `end` kind resolves
-    # the frame as a fault and takes its completed-or-lost-connection route.
+    # parse_event is event-only; parse_stream_frame is the stream decoder that handles end frames.
     with pytest.raises(ValueError, match="expected event frame"):
         parse_event(encode_end())
