@@ -24,6 +24,14 @@ def _load() -> ModuleType:
     return mod
 
 
+def _clean_interpreter(mod: ModuleType, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Pretend every locked package is installed at exactly its pin, so a test can
+    isolate one failure class from whatever this interpreter actually has."""
+    locked = mod.locked_versions(_REPO_ROOT / "uv.lock")
+    monkeypatch.setattr(mod, "_installed", lambda name: locked.get(mod.canon(name), "1.0"))
+    return locked
+
+
 def test_make_check_runs_the_dependency_preflight() -> None:
     """depcheck must stay wired into the gate, and run BEFORE the slow targets
     so a drifted interpreter fails in seconds rather than mid-suite."""
@@ -56,9 +64,9 @@ def test_locked_versions_reads_the_real_lockfile() -> None:
 
 def test_stale_version_fails_the_gate(
         monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """A package installed at a version uv.lock does not pin is the drift that
-    a loose pyproject range lets through (`prompt_toolkit>=3.0,<4.0` accepting a
-    3.0.53 the lockfile never resolved to). It must fail, not warn."""
+    """A package installed at a version uv.lock does not pin is the drift that a
+    loose pyproject range lets through (a `foo>=1.0,<2.0` accepting a 1.9 the
+    lockfile never resolved to). It must fail, not warn."""
     mod = _load()
     monkeypatch.delenv("ALLOW_DEP_DRIFT", raising=False)
     monkeypatch.setattr(mod, "_installed", lambda name: "0.0.0-drifted")
@@ -96,6 +104,101 @@ def test_missing_package_is_fatal_even_under_allow_dep_drift(
 def test_clean_interpreter_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exact-match installs must return 0 — otherwise the gate cries wolf."""
     mod = _load()
-    locked = mod.locked_versions(_REPO_ROOT / "uv.lock")
-    monkeypatch.setattr(mod, "_installed", lambda name: locked.get(mod.canon(name), "1.0"))
+    _clean_interpreter(mod, monkeypatch)
     assert mod.main() == 0
+
+
+def test_declared_floors_parses_every_shape_pyproject_uses(tmp_path: Path) -> None:
+    # Capped range, no bound at all, dotted name, extras bracket, a dev-extra entry,
+    # and both marker directions — a `>=` marker is the shape that misparses as the
+    # floor. Miss any of them and the gate skips or misjudges the package.
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\n'
+        'name = "x"\n'
+        'dependencies = [\n'
+        '  "anyio>=4.15.1,<5.0",\n'
+        '  "pillow",\n'
+        '  "ruamel.yaml>=0.19.1",\n'
+        '  "uvicorn[standard]>=0.40.0",\n'
+        "  \"tomli>=2.0 ; python_version < '3.11'\",\n"
+        "  \"exceptiongroup ; python_version >= '3.11'\",\n"
+        ']\n'
+        '[project.optional-dependencies]\n'
+        'dev = ["types-PyYAML>=6.0.12.20260906"]\n'
+    )
+    assert _load().declared_floors(pyproject) == {
+        "anyio": "4.15.1",
+        "pillow": None,
+        "ruamel-yaml": "0.19.1",
+        "uvicorn": "0.40.0",
+        "tomli": "2.0",
+        "exceptiongroup": None,
+        "types-pyyaml": "6.0.12.20260906",
+    }
+
+
+def test_floor_that_is_not_the_locked_version_fails_the_gate(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A declared floor below the pin is a published claim about an untested
+    combination — `uv lock --upgrade` moves the lock and leaves pyproject behind."""
+    mod = _load()
+    monkeypatch.delenv("ALLOW_DEP_DRIFT", raising=False)
+    locked = _clean_interpreter(mod, monkeypatch)
+    monkeypatch.setattr(mod, "declared_floors", lambda path: {"rich": "13.0.0"})
+
+    assert mod.main() == 1
+    err = capsys.readouterr().err
+    assert "1 declared floor(s) in pyproject.toml do not match uv.lock" in err
+    assert f"    - rich: pyproject declares >=13.0.0, uv.lock pins {locked['rich']}" in err
+    assert "  a direct dependency's lower bound must equal the version uv.lock pins" in err
+    assert "  update pyproject.toml, then:  make sync-env" in err
+    # Nothing is wrong with the interpreter here, so don't point at it.
+    assert "interpreter:" not in err
+
+
+def test_direct_dependency_without_a_lower_bound_fails_the_gate(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """An unbounded requirement is the worst case, not an exempt one: it claims
+    every version ever published works."""
+    mod = _load()
+    monkeypatch.delenv("ALLOW_DEP_DRIFT", raising=False)
+    locked = _clean_interpreter(mod, monkeypatch)
+    monkeypatch.setattr(mod, "declared_floors", lambda path: {"pillow": None})
+
+    assert mod.main() == 1
+    err = capsys.readouterr().err
+    assert (
+        f"    - pillow: pyproject declares no lower bound, uv.lock pins {locked['pillow']}"
+        in err
+    )
+
+
+def test_this_repo_declares_a_floor_equal_to_every_pin(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """The invariant this class exists to hold, asserted against the real files."""
+    mod = _load()
+    floors = mod.declared_floors(_REPO_ROOT / "pyproject.toml")
+    locked = mod.locked_versions(_REPO_ROOT / "uv.lock")
+    assert floors, "no direct dependencies parsed out of pyproject.toml"
+    # Non-canonical keys would silently miss every lookup against uv.lock.
+    assert all(name == mod.canon(name) for name in floors)
+    assert {n: f for n, f in floors.items() if f != locked.get(n)} == {}
+
+    _clean_interpreter(mod, monkeypatch)
+    assert mod.main() == 0
+
+
+def test_allow_dep_drift_does_not_suppress_a_floor_mismatch(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The escape hatch is for installed-vs-locked drift only. Even with it set —
+    and with stale installs downgraded to a warning — a wrong floor is fatal."""
+    mod = _load()
+    monkeypatch.setenv("ALLOW_DEP_DRIFT", "1")
+    monkeypatch.setattr(mod, "_installed", lambda name: "0.0.0-drifted")
+    monkeypatch.setattr(mod, "declared_floors", lambda path: {"rich": "13.0.0"})
+
+    assert mod.main() == 1
+    err = capsys.readouterr().err
+    assert "warning: " in err
+    assert "do not match uv.lock" in err
