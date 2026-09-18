@@ -98,6 +98,29 @@ def test_wall_versus_wait_arithmetic():
     assert rows[0].wait_seconds == 90.0           # await → next structural event
 
 
+def test_two_human_turns_deduct_both_waits_and_not_the_work_after_the_reply():
+    rows = build_summary([
+        _started("threshold", "spec", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _reply("2026-01-01T00:02:00+00:00"),
+        _await("2026-01-01T00:03:00+00:00"),
+        _reply("2026-01-01T00:05:00+00:00"),
+        _completed("threshold", "2026-01-01T00:10:00+00:00")])
+    assert rows[0].wait_seconds == 180.0          # both turns, 60s + 120s
+    assert rows[0].work_seconds == 420.0          # the single marker gave 180s
+
+
+def test_a_step_containing_a_pause_excludes_the_gap():
+    # AC 16(b): neither event was handled at all, so the gap was charged as work.
+    rows = build_summary([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _paused("2026-01-01T00:02:00+00:00"),
+        _resumed("2026-01-01T00:09:00+00:00"),
+        _completed("verify", "2026-01-01T00:10:00+00:00")])
+    assert rows[0].wait_seconds == 420.0
+    assert rows[0].work_seconds == 180.0
+
+
 def test_open_trailing_step_has_no_wall():
     rows = build_summary([
         _started("spec-writer", "spec", "2026-01-01T00:00:00+00:00"),

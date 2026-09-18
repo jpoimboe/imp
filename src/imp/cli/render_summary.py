@@ -149,7 +149,7 @@ class StepRow:
     start_ts: str | None
     end_ts: str | None = None
     end_inferred: bool = False
-    wait_seconds: float = 0.0
+    wait_seconds: float = 0.0  # exclusion union clipped to this row's span
     errored: bool = False
     agent_id: str | None = None
     usage: RowUsage = field(default_factory=RowUsage)
@@ -170,7 +170,7 @@ class StepRow:
 
     @property
     def work_seconds(self) -> float | None:
-        """wall clock minus accrued human wait; None while the step is still open."""
+        """wall clock minus the row's exclusions; None while the step is still open."""
         wall = self.wall_seconds
         if wall is None:
             return None
@@ -188,9 +188,10 @@ def _is_nonterminal_error(p: dict[str, Any]) -> bool:
 
 
 def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
+    log = list(events)
+    exclusions = exclusion_spans(log)
     rows: list[StepRow] = []
     open_row: StepRow | None = None        # the currently-open occurrence
-    pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
     subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (usage)
     # (call was id_ns-stamped, block id) -> row. Keying on the stamping is what stops an
     # unstamped result from closing a stamped call: codex block ids repeat every turn.
@@ -199,14 +200,6 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     # and query_result rows carry none of the three and inherit all of them.
     last_msg: dict[str, tuple[str | None, str | None, str | None]] = {}
     agent_id: Any = None  # function-scope so the _credit closure reads the current event's id
-
-    def _close_wait(now_ts: str | None) -> None:
-        nonlocal pending_wait_start
-        if pending_wait_start is not None and open_row is not None:
-            delta = elapsed_seconds(pending_wait_start, now_ts)
-            if delta is not None and delta > 0:
-                open_row.wait_seconds += delta
-        pending_wait_start = None
 
     def _contain_subs(row: StepRow | None, end_ts: str | None) -> None:
         """Close off the step's list, not the table: a reused block id evicts its predecessor."""
@@ -226,7 +219,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
               and agent_id is not None and agent_id == open_row.agent_id):
             open_row.usage = open_row.usage + usage
 
-    for e in collapse_cumulative_query_results(list(events)):
+    for e in collapse_cumulative_query_results(log):
         etype = e.get("type")
         ts = e.get("timestamp")
         agent_id = e.get("agent_id")
@@ -244,7 +237,6 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         if etype == "step_started":
             step = str(p.get("step", "?"))
             phase = str(p.get("phase", "?"))
-            _close_wait(ts)
             # Resume re-entry: same step still open — fold into existing occurrence.
             if (open_row is not None and open_row.end_ts is None
                     and open_row.step == step and open_row.phase == phase):
@@ -257,13 +249,10 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             open_row = StepRow(phase=phase, step=step, start_ts=ts)
             rows.append(open_row)
         elif etype == "step_completed":
-            _close_wait(ts)
             if open_row is not None and open_row.end_ts is None:
                 open_row.end_ts = ts
             _contain_subs(open_row, ts)
             open_row = None
-        elif etype == "awaiting_user_input":
-            pending_wait_start = ts
         elif etype == "agent_message":
             if isinstance(agent_id, str):
                 last_msg[agent_id] = (p.get("provider"), p.get("model"),
@@ -322,6 +311,8 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
+    for row in rows:
+        row.wait_seconds = exclusions.overlap(row.start_ts, row.end_ts)
     return rows
 
 
