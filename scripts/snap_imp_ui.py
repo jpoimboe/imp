@@ -12,12 +12,16 @@ Run from the repo root with the project venv (it has pyte + pillow):
 
     .venv/bin/python scripts/snap_imp_ui.py stream --open
     .venv/bin/python scripts/snap_imp_ui.py stream --limit 120 --out /tmp/head.png --open
+    .venv/bin/python scripts/snap_imp_ui.py stream-live --out /tmp/hero.png --open
     .venv/bin/python scripts/snap_imp_ui.py prompt --type "rename the helper" --open
 
 Scenes:
   stream   Replay the recorded run journal (tests/fixtures/...jsonl.gz) through
            the real LiveDriver. Rendered in-process — no pty, no agent, no cost.
            --limit N ends the slice on a chosen state (small N = header).
+  stream-live  Replay the committed demo journal (docs/examples/samo71.jsonl.gz)
+           on a real pty with the live status bar drawn, then snapshot the
+           screen. Deterministic: clocks, spinner and width are all pinned.
   prompt   The real interactive input field (prompt_toolkit), driven on a pty.
            --type TEXT pre-fills the field before the snapshot.
 
@@ -39,6 +43,9 @@ import pyte  # noqa: E402  (after sys.path tweak)
 from impty.render import render_screen, show_faint  # noqa: E402
 
 _OUT_DIR = Path("/tmp/imp_ui")
+
+# 22 rows opens the hero frame on a phase breadcrumb instead of a clipped list item.
+HERO_ROWS = 22
 
 
 def _imp_theme(theme: str) -> dict:
@@ -91,6 +98,26 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
     render_screen(screen, str(out), scale=3, **th)
 
 
+def snap_stream_live(out: Path, *, limit: int, cols: int, rows: int) -> None:
+    """Drive the stream-live scene on a REAL pty and paint the resulting screen:
+    the only path that captures the live status bar, which needs a tty to draw."""
+    from impty.session import TerminalSession
+
+    argv = [sys.executable, str(_HERE / "capture_imp_ui.py"), "stream-live",
+            "--limit", str(limit), "--width", str(cols)]
+    sess = TerminalSession(argv, cols=cols, rows=rows)
+    try:
+        code = sess.run_to_completion(hard=120)
+        if code != 0:
+            raise SystemExit(f"stream-live scene exited {code}:\n"
+                             + "\n".join(sess.lines(limit=rows)))
+        th = _imp_theme("dark")   # the scene subprocess always paints the dark theme
+        th.pop("faint")           # a pty capture: pyte already resolved the SGR codes
+        render_screen(sess.screen, str(out), scale=3, **th)
+    finally:
+        sess.close()
+
+
 def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
     from impty.session import TerminalSession
 
@@ -110,12 +137,13 @@ def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Render an imp UI scene to a PNG.")
-    ap.add_argument("scene", choices=("stream", "prompt"))
+    ap.add_argument("scene", choices=("stream", "stream-live", "prompt"))
     ap.add_argument("--limit", type=int, default=None, help="stream: first N events")
     ap.add_argument("--type", dest="type_text", default="", help="prompt: pre-typed text")
     ap.add_argument("--out", type=Path, default=None, help="PNG path")
-    ap.add_argument("--cols", type=int, default=100)
-    ap.add_argument("--rows", type=int, default=None, help="stream auto-fits; prompt default 16")
+    ap.add_argument("--cols", type=int, default=None)
+    ap.add_argument("--rows", type=int, default=None,
+                    help="stream auto-fits; stream-live default 22; prompt default 16")
     ap.add_argument("--theme", choices=("dark", "light", "ansi"), default="dark",
                     help="color theme to emit (light previews on a near-white surface)")
     ap.add_argument("--open", dest="open_it", action="store_true", help="xdg-open the PNG")
@@ -125,9 +153,16 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     if a.scene == "stream":
-        snap_stream(out, limit=a.limit, cols=a.cols, rows=a.rows, theme=a.theme)
+        snap_stream(out, limit=a.limit, cols=a.cols or 100, rows=a.rows,
+                    theme=a.theme)
+    elif a.scene == "stream-live":
+        import capture_imp_ui as cap
+
+        snap_stream_live(out, limit=a.limit or cap.HERO_LIMIT,
+                         cols=a.cols or cap.HERO_WIDTH, rows=a.rows or HERO_ROWS)
     else:
-        snap_prompt(out, type_text=a.type_text, cols=a.cols, rows=a.rows or 16)
+        snap_prompt(out, type_text=a.type_text, cols=a.cols or 100,
+                    rows=a.rows or 16)
 
     print(f"wrote {out}")
     if a.open_it:

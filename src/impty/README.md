@@ -224,7 +224,9 @@ Two ready-made entry points:
 - **Replay imp's recorded run journal → image** (no live program, no cost):
   `make snap-ui` writes `/tmp/imp_ui/stream.png` from the stored journal through
   imp's real renderer. `make snap-ui SNAP_ARGS="--limit 40"` for a slice, or
-  `scripts/snap_imp_ui.py {stream,prompt} [--out PATH] [--open]` directly.
+  `scripts/snap_imp_ui.py {stream,stream-live,prompt} [--out PATH] [--open]`
+  directly; `stream-live` drives the scene on a real pty so the live status bar
+  is in the capture.
 - **Drive a live program over MCP and screenshot it:** run the stdio MCP server
   (`python -m impty.mcp`, registered in `.mcp.json`). `start` waits until it settles,
   exits, or the 3s settle deadline elapses, then returns `[full screen]` followed by
