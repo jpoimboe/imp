@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from pathlib import Path
 
-from imp.cli.quota_neighbours import neighbour_slice
+import pytest
+
+from imp.cli.quota_neighbours import neighbour_slice, scan_neighbours
+from imp.engine import archive
+from tests.conftest import _archive_with_event
 
 _START = "2026-06-01T03:30:00+00:00"
 _END = "2026-06-01T05:38:00+00:00"
@@ -50,6 +55,36 @@ def _prose(ts: str) -> dict:
     return {"id": "noise", "agent_id": "step:a", "timestamp": ts,
             "type": "tool_call",
             "payload": {"name": "bash", "input": {"cmd": "SECRETPROSE"}}}
+
+
+def _imp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "imphome"
+    (home / "projects").mkdir(parents=True)
+    monkeypatch.setenv("IMP_HOME", str(home))
+    return home
+
+
+def _project(home: Path, slug: str, repo: Path | None = None) -> Path:
+    pdir = home / "projects" / slug
+    pdir.mkdir(parents=True, exist_ok=True)
+    if repo is not None:
+        (pdir / "repo").write_text(f"{repo}\n")
+    return pdir
+
+
+def _live_home(pdir: Path, quest_id: str, events: list[dict]) -> Path:
+    home = pdir / "quests" / quest_id
+    (home / "state").mkdir(parents=True)
+    (home / "quest.json").write_text(json.dumps({
+        "id": quest_id, "title": quest_id, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00"}))
+    (home / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in events))
+    return home
+
+
+def _jsonl(events: list[dict]) -> str:
+    return "".join(json.dumps(e) + "\n" for e in events)
 
 
 # ---------------------------------------------------------------- the slice
@@ -161,3 +196,179 @@ def test_a_quest_with_no_in_span_activity_yields_no_slice() -> None:
         _reading("2026-06-01T01:00:00+00:00"),
         _qr("2026-06-01T01:05:00+00:00"),
     ], _START, _END) is None
+
+
+# ---------------------------------------------------------------- the walk
+
+
+def _subject_project(tmp_path: Path, home: Path) -> Path:
+    root = tmp_path / "subject"
+    root.mkdir()
+    _project(home, "subject", repo=root.resolve())
+    return root
+
+
+def test_neighbours_come_from_the_archive_and_live_homes_of_every_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    sdir = home / "projects" / "subject"
+    _live_home(sdir, "samo71", [_reading("2026-06-01T03:31:00+00:00"),
+                                _qr("2026-06-01T04:00:00+00:00")])
+    _live_home(sdir, "sib01", [_qr("2026-06-01T04:05:00+00:00", aid="step:s")])
+    other = tmp_path / "other"
+    other.mkdir()
+    _archive_with_event(other, "fego87", "Neighbour", _jsonl([
+        _msg("2026-06-01T03:00:00+00:00"),
+        _prose("2026-06-01T04:29:00+00:00"),
+        _qr("2026-06-01T04:30:00+00:00")]))
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert {(n.project, n.quest_id) for n in got} == {
+        ("subject", "sib01"), ("other", "fego87")}
+    # the slice, not the log: the neighbour's tool_call prose never crosses
+    assert "SECRETPROSE" not in json.dumps(
+        [dataclasses.asdict(n) for n in got])
+
+
+def test_the_subject_quest_is_not_its_own_neighbour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    events = [_qr("2026-06-01T04:00:00+00:00")]
+    _live_home(home / "projects" / "subject", "samo71", events)
+    # the same id, same log, in another project: identity is what excludes
+    _live_home(_project(home, "elsewhere"), "samo71", events)
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert [(n.project, n.quest_id) for n in got] == [("elsewhere", "samo71")]
+
+
+def test_a_quest_whose_activity_misses_the_span_is_excluded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    pdir = _project(home, "elsewhere")
+    _live_home(pdir, "inside", [_qr("2026-06-01T04:00:00+00:00")])
+    _live_home(pdir, "before", [_qr("2026-06-01T01:00:00+00:00", eid="old")])
+    _live_home(pdir, "after", [_qr("2026-06-01T09:00:00+00:00", eid="new")])
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert [n.quest_id for n in got] == ["inside"]
+
+
+def test_a_degenerate_project_directory_is_skipped_and_the_rest_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    _project(home, "bare")                                   # no quests, no archive
+    vanished = _project(home, "vanished", repo=tmp_path / "deleted-checkout")
+    _live_home(vanished, "ghost", [_qr("2026-06-01T04:00:00+00:00")])
+    garbage = _project(home, "garbage")
+    (garbage / "archive").mkdir()
+    (garbage / "archive" / "data_version").write_text(
+        f"{archive._DATA_VERSION}\n")
+    (garbage / "archive" / "index.db").write_bytes(b"not a database at all")
+    notdirs = _project(home, "notdirs")
+    (notdirs / "quests").write_text("a file where a directory belongs\n")
+    (notdirs / "archive").write_text("likewise\n")
+    dangling = _project(home, "dangling")
+    (dangling / "quests").symlink_to(tmp_path / "moved-away")
+    (dangling / "archive").symlink_to(tmp_path / "moved-away")
+    badlog = _project(home, "badlog")
+    _live_home(badlog, "unreadable", [_qr("2026-06-01T04:00:00+00:00")])
+    (badlog / "quests" / "unreadable" / "events.jsonl").unlink()
+    (badlog / "quests" / "unreadable" / "events.jsonl").mkdir()
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert [(n.project, n.quest_id) for n in got] == [("vanished", "ghost")]
+
+
+def test_an_archive_this_install_cannot_read_is_skipped_but_its_homes_are_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    other = tmp_path / "other"
+    other.mkdir()
+    _archive_with_event(other, "archq", "Archived",
+                        _jsonl([_qr("2026-06-01T04:30:00+00:00")]))
+    odir = home / "projects" / "other"
+    _live_home(odir, "liveq", [_qr("2026-06-01T04:40:00+00:00", eid="live")])
+    (odir / "archive" / "data_version").write_text("1\n")
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert [n.quest_id for n in got] == ["liveq"]
+
+
+def test_a_quest_both_live_and_archived_in_one_project_is_returned_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    other = tmp_path / "other"
+    other.mkdir()
+    events = [_qr("2026-06-01T04:00:00+00:00")]
+    # scan_homes archives a stranded terminal home and leaves it on disk, and
+    # only a daemon for that project reaps it, so both copies stay readable
+    _archive_with_event(other, "neigh1", "Both", _jsonl(events))
+    _live_home(home / "projects" / "other", "neigh1", events)
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert [(n.project, n.quest_id) for n in got] == [("other", "neigh1")]
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else b"<dir>")
+            for p in sorted(root.rglob("*"))}
+
+
+def test_the_walk_writes_nothing_in_another_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    # a REAL archive, so the walk runs past archive_is_current into the index
+    # read and the blob read -- where the ensure_current / index.connect clauses
+    # live; with no archive/ everything past that guard is unexercised
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _archive_with_event(elsewhere, "arch01", "Archived",
+                        _jsonl([_qr("2026-06-01T04:10:00+00:00", eid="arch-qr")]))
+    odir = home / "projects" / "elsewhere"
+    _live_home(odir, "neigh1", [_qr("2026-06-01T04:00:00+00:00")])
+    # a second project with no archive at all: index.connect() would create one
+    bare = _project(home, "bare-project")
+    _live_home(bare, "neigh2", [_qr("2026-06-01T04:20:00+00:00")])
+    before = _snapshot(odir)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("a write path was reached for a foreign project")
+
+    # each module binds the name at import, so every binding the walk could
+    # reach is patched separately -- patching imp.paths alone reaches none of them
+    monkeypatch.setattr("imp.paths.project_state_dir", _boom)
+    monkeypatch.setattr("imp.cli.store.project_state_dir", _boom)
+    monkeypatch.setattr("imp.engine.archive.project_state_dir", _boom)
+    monkeypatch.setattr("imp.engine.archive.read.project_state_dir", _boom)
+    monkeypatch.setattr("imp.engine.archive.maintenance.project_state_dir", _boom)
+    monkeypatch.setattr("imp.engine.archive.ensure_current", _boom)
+    monkeypatch.setattr("imp.engine.archive.index.connect", _boom)
+    monkeypatch.setattr("imp.engine.archive.archive_quest", _boom)
+    monkeypatch.setattr("imp.engine.archive.maintenance.reap_archived_homes", _boom)
+
+    got = scan_neighbours(root, "samo71", _START, _END)
+
+    assert sorted(n.quest_id for n in got) == ["arch01", "neigh1", "neigh2"]
+    assert _snapshot(odir) == before
+    assert not (bare / "archive").exists()
