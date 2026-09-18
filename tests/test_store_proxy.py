@@ -67,6 +67,54 @@ async def test_proxy_store_search_event_candidates_matches_local(tmp_path: Path)
         tg.cancel_scope.cancel()
 
 
+_QUOTA_START = "2026-06-01T03:30:00+00:00"
+_QUOTA_END = "2026-06-01T05:38:00+00:00"
+
+
+def _neighbour_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quest_id: str,
+) -> None:
+    """A live quest home in another project with one in-span query_result."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / quest_id
+    qdir.mkdir(parents=True)
+    (qdir / "quest.json").write_text(json.dumps({
+        "id": quest_id, "title": quest_id, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00"}))
+    (qdir / "events.jsonl").write_text(json.dumps({
+        "id": "qr", "agent_id": "step:a",
+        "timestamp": "2026-06-01T04:30:00+00:00", "type": "query_result",
+        "payload": {"session_id": "s1", "duration_ms": 30000, "usage": {},
+                    "model_usage": {}}}) + "\n")
+
+
+@pytest.mark.anyio
+async def test_proxy_store_quota_neighbours_matches_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _neighbour_home(tmp_path, monkeypatch, "fego87")
+    local = LocalStore(tmp_path)
+    sock = str(tmp_path / "s.sock")
+
+    async def on_query(op: str, args: dict) -> object:
+        return run_query(local, op, args)
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        proxy = ProxyStore(sock)
+
+        got = await anyio.to_thread.run_sync(
+            proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
+        assert got == local.quota_neighbours("samo71", _QUOTA_START, _QUOTA_END)
+        assert [(n.project, n.quest_id) for n in got] == [("other", "fego87")]
+        assert [u["id"] for u in got[0].usage] == ["qr"]
+
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
 @pytest.mark.anyio
 async def test_proxy_store_matches_local_store_over_the_socket(
     tmp_path: Path,

@@ -3,7 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from imp.cli.store import CompletedRow, HomeDigest, QuestCard, Readiness, SearchHit, SearchZones
+import pytest
+
+from imp.cli.store import (
+    CompletedRow,
+    HomeDigest,
+    NeighbourQuota,
+    QuestCard,
+    Readiness,
+    SearchHit,
+    SearchZones,
+)
 from imp.cli.store_proxy import (
     _card_from_wire,
     _card_to_wire,
@@ -11,6 +21,8 @@ from imp.cli.store_proxy import (
     _hit_to_wire,
     _home_from_wire,
     _home_to_wire,
+    _neighbour_from_wire,
+    _neighbour_to_wire,
     _readiness_from_wire,
     _readiness_to_wire,
     _row_from_wire,
@@ -158,6 +170,79 @@ def test_run_query_search_event_candidates_round_trips_none_last(tmp_path: Path)
     assert _json_round_trip(wire) == wire
     rebuilt = [tuple(x) for x in _json_round_trip(wire)]
     assert rebuilt == local
+
+
+def test_neighbour_quota_survives_round_trip_including_the_agent_triples() -> None:
+    n = NeighbourQuota(
+        project="imp", quest_id="fego87",
+        readings=({"id": "qk", "type": "quota_reading"},),
+        usage=({"id": "qr", "type": "query_result"},),
+        anchors=({"id": "pre", "type": "query_result"},),
+        agents={"step:a": ("claude", "claude-opus-5", None)})
+    got = _neighbour_from_wire(_json_round_trip(_neighbour_to_wire(n)))
+    assert got == n
+    assert isinstance(got.readings, tuple)
+    assert isinstance(got.agents["step:a"], tuple)
+
+
+_QUOTA_START = "2026-06-01T03:30:00+00:00"
+_QUOTA_END = "2026-06-01T05:38:00+00:00"
+
+
+def _neighbour_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quest_id: str,
+    events: list[dict],
+) -> None:
+    """A live quest home in another project, addressed by path only."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / quest_id
+    qdir.mkdir(parents=True)
+    (qdir / "quest.json").write_text(json.dumps({
+        "id": quest_id, "title": quest_id, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00"}))
+    (qdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in events))
+
+
+def test_run_query_quota_neighbours_ships_the_slice_not_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.store import LocalStore
+
+    _neighbour_home(tmp_path, monkeypatch, "fego87", [
+        {"id": "am", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:00:00+00:00", "type": "agent_message",
+         "payload": {"provider": "codex", "model": "gpt-5.6-sol",
+                     "auth_mode": "chatgpt", "usage": {"input_tokens": 7},
+                     "stop_reason": None,
+                     "raw": {"content": [{"type": "thinking",
+                                          "thinking": "SECRETPROSE"}]}}},
+        {"id": "noise", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:10:00+00:00", "type": "tool_call",
+         "payload": {"name": "bash", "input": {"cmd": "SECRETPROSE"}}},
+        {"id": "qr", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:30:00+00:00", "type": "query_result",
+         "payload": {"session_id": "s1", "duration_ms": 30000, "usage": {},
+                     "model_usage": {}}},
+    ])
+    store = LocalStore(tmp_path)
+
+    wire = run_query(store, "quota_neighbours", {
+        "quest_id": "samo71", "start_iso": _QUOTA_START,
+        "end_iso": _QUOTA_END})
+
+    assert _json_round_trip(wire) == wire
+    # neither the excluded tool_call's prose nor the shipped agent_message's
+    # own thinking text crosses the seam
+    assert "SECRETPROSE" not in json.dumps(wire)
+    assert wire[0]["quest_id"] == "fego87"
+    assert [u["id"] for u in wire[0]["usage"]] == ["am", "qr"]
+    assert wire[0]["usage"][0]["payload"] == {
+        "provider": "codex", "model": "gpt-5.6-sol", "auth_mode": "chatgpt",
+        "usage": {"input_tokens": 7}}
+    assert wire[0]["agents"] == {"step:a": ["codex", "gpt-5.6-sol", "chatgpt"]}
+    assert [_neighbour_from_wire(d) for d in wire] == store.quota_neighbours(
+        "samo71", _QUOTA_START, _QUOTA_END)
 
 
 def test_run_query_rejects_unknown_op(tmp_path: Path) -> None:
