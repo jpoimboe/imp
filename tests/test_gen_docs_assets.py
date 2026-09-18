@@ -108,3 +108,14 @@ def test_write_text_assets_replaces_the_three_named_assets_in_place(tmp_path: Pa
 
     assert sorted(first) == ["samo71-excerpt.md", "samo71-ledger.md", "samo71.md"]
     assert first == second
+
+
+def test_committed_assets_match_a_fresh_render(tmp_path: Path) -> None:
+    for fresh in gen.write_text_assets(_EVENTS, tmp_path):
+        committed = gen.DOCS / "examples" / fresh.name
+        assert committed.read_text(encoding="utf-8") == fresh.read_text(
+            encoding="utf-8"), f"{committed} is stale; run `make docs-assets`"
+
+
+def test_hero_png_is_committed() -> None:
+    assert gen.HERO_PNG.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
