@@ -6,7 +6,12 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.cli.store import LocalStore, SearchZones, make_store
+from imp.cli.store import (
+    LocalStore,
+    QuotaNeighboursUnsupported,
+    SearchZones,
+    make_store,
+)
 from imp.cli.store_proxy import ProxyStore, run_query
 from imp.engine.quest import Quest
 from imp.remote.session.socket_server import SessionSocket
@@ -110,6 +115,42 @@ async def test_proxy_store_quota_neighbours_matches_local(
         assert got == local.quota_neighbours("samo71", _QUOTA_START, _QUOTA_END)
         assert [(n.project, n.quest_id) for n in got] == [("other", "fego87")]
         assert [u["id"] for u in got[0].usage] == ["qr"]
+
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_a_daemon_that_does_not_know_the_op_is_its_own_condition(
+    tmp_path: Path,
+) -> None:
+    local = LocalStore(tmp_path)
+    sock = str(tmp_path / "s.sock")
+    failure = {"kind": "unknown"}
+
+    async def on_query(op: str, args: dict) -> object:
+        if op == "quota_neighbours":
+            if failure["kind"] == "unknown":
+                raise ValueError(f"unknown store op {op!r}")   # pre-upgrade daemon
+            raise OSError("archive unreadable")
+        return run_query(local, op, args)
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        proxy = ProxyStore(sock)
+
+        with pytest.raises(QuotaNeighboursUnsupported):
+            await anyio.to_thread.run_sync(
+                proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
+
+        failure["kind"] = "broken"
+        with pytest.raises(RuntimeError) as err:
+            await anyio.to_thread.run_sync(
+                proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
+        assert not isinstance(err.value, QuotaNeighboursUnsupported)
+        assert "archive unreadable" in str(err.value)
 
         await session.close()
         tg.cancel_scope.cancel()

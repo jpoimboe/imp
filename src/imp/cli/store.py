@@ -103,6 +103,10 @@ class NeighbourQuota:
     agents: dict[str, tuple[str | None, str | None, str | None]]
 
 
+class QuotaNeighboursUnsupported(RuntimeError):
+    """This quest's daemon predates the op, so the denominator is unknowable."""
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...

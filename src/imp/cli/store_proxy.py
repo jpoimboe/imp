@@ -18,6 +18,7 @@ from imp.cli.store import (
     HomeDigest,
     NeighbourQuota,
     QuestCard,
+    QuotaNeighboursUnsupported,
     Readiness,
     SearchHit,
     SearchZones,
@@ -209,6 +210,13 @@ class ProxyStore:
 
     def quota_neighbours(self, quest_id: str, start_iso: str,
                          end_iso: str) -> list[NeighbourQuota]:
-        rows = self._call("quota_neighbours", {
-            "quest_id": quest_id, "start_iso": start_iso, "end_iso": end_iso})
+        try:
+            rows = self._call("quota_neighbours", {
+                "quest_id": quest_id, "start_iso": start_iso, "end_iso": end_iso})
+        except RuntimeError as exc:
+            # A quest in flight across this upgrade has a pre-upgrade daemon; the
+            # text is all parse_result leaves of run_query's ValueError.
+            if "unknown store op" in str(exc):
+                raise QuotaNeighboursUnsupported(str(exc)) from exc
+            raise
         return [_neighbour_from_wire(d) for d in rows]
