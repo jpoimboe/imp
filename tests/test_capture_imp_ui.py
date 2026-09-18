@@ -39,7 +39,7 @@ def test_all_scenes_rejects_non_splash_modes() -> None:
 
 
 def test_journal_events_reads_one_dict_per_line_and_honors_the_limit() -> None:
-    events = capture_imp_ui.journal_events(capture_imp_ui._DEMO_JOURNAL, 40)
+    events = capture_imp_ui.journal_events(capture_imp_ui.DEMO_JOURNAL, 40)
 
     assert len(events) == 40
     assert [event["ordinal"] for event in events] == list(range(1, 41))
@@ -47,7 +47,7 @@ def test_journal_events_reads_one_dict_per_line_and_honors_the_limit() -> None:
 
 
 def test_shift_lands_the_last_event_on_the_pinned_instant() -> None:
-    events = capture_imp_ui.journal_events(capture_imp_ui._DEMO_JOURNAL, 40)
+    events = capture_imp_ui.journal_events(capture_imp_ui.DEMO_JOURNAL, 40)
     instant = datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
 
     moved = capture_imp_ui.shift_to_instant(events, instant)
@@ -62,7 +62,7 @@ def test_shift_lands_the_last_event_on_the_pinned_instant() -> None:
 
 
 def test_shift_moves_quota_reset_epochs_by_the_same_delta() -> None:
-    events = capture_imp_ui.journal_events(capture_imp_ui._DEMO_JOURNAL, 40)
+    events = capture_imp_ui.journal_events(capture_imp_ui.DEMO_JOURNAL, 40)
     instant = datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
     delta = int((instant - datetime.fromisoformat(
         events[-1]["timestamp"])).total_seconds())

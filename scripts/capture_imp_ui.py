@@ -45,7 +45,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _RECORDED = _REPO / "tests" / "fixtures" / "cc_open_by_asking_full.jsonl.gz"
 
 # Regenerate: imp events samo71 --all --json | jq -c '.[]' | gzip; re-redact event 256
-_DEMO_JOURNAL = _REPO / "docs" / "examples" / "samo71.jsonl.gz"
+DEMO_JOURNAL = _REPO / "docs" / "examples" / "samo71.jsonl.gz"
 
 # Hero cut point: plan 1/3 · task 1/3, with the coder subagent mid-flight.
 HERO_LIMIT = 930
@@ -140,7 +140,7 @@ def _pinned_status(stream: Any) -> Any:
     return _PinnedStatus(stream)
 
 
-def replay_live(stream: Any, *, journal: Path = _DEMO_JOURNAL,
+def replay_live(stream: Any, *, journal: Path = DEMO_JOURNAL,
                 limit: int = HERO_LIMIT, width: int = HERO_WIDTH) -> None:
     """Replay the first `limit` events to `stream` with LiveStatus active, so a
     tty keeps the transient footer on screen. Deterministic: see _pinned_clocks,
@@ -250,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("scene", nargs="?", choices=list(_SCENES))
     ap.add_argument("--list", action="store_true", help="list scenes and exit")
     ap.add_argument("--limit", type=int, default=None, help="stream: first N events")
-    ap.add_argument("--journal", type=Path, default=_DEMO_JOURNAL,
+    ap.add_argument("--journal", type=Path, default=DEMO_JOURNAL,
                     help="stream-live: journal to replay")
     ap.add_argument("--width", type=int, default=None, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
