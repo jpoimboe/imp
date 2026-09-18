@@ -36,6 +36,7 @@ from imp.cli.render_text import render_tree  # noqa: E402
 _REPO = _HERE.parent
 DOCS = _REPO / "docs"
 HERO_PNG = DOCS / "images" / "hero-run.png"
+README = _REPO / "README.md"
 
 QUEST = "samo71"
 WIDTH = 80
@@ -147,6 +148,27 @@ def write_text_assets(events: list[dict[str, Any]],
         path.write_text(text, encoding="utf-8")
         written.append(path)
     return written
+
+
+def splice_block(text: str, name: str, block: str) -> str:
+    """HTML comments do not render on GitHub."""
+    opener, closer = f"<!-- docs-assets:{name} -->\n", f"<!-- /docs-assets:{name} -->"
+    head, opened, rest = text.partition(opener)
+    _stale, closed, tail = rest.partition(closer)
+    if not (opened and closed):
+        raise SystemExit(f"README.md: no {opener.strip()} … {closer} pair to splice into")
+    return head + opener + block + closer + tail
+
+
+def splice_readme(events: list[dict[str, Any]], readme: Path = README) -> Path:
+    """Both blocks come from text_assets, so a block that failed the width guard
+    cannot reach the README."""
+    assets = text_assets(events)
+    text = readme.read_text(encoding="utf-8")
+    for name in ("excerpt", "ledger"):
+        text = splice_block(text, name, assets[f"examples/{QUEST}-{name}.md"])
+    readme.write_text(text, encoding="utf-8")
+    return readme
 
 
 def render_hero_png(out: Path = HERO_PNG) -> Path:

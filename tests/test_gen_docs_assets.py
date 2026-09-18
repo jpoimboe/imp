@@ -119,3 +119,51 @@ def test_committed_assets_match_a_fresh_render(tmp_path: Path) -> None:
 
 def test_hero_png_is_committed() -> None:
     assert gen.HERO_PNG.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+_MARKED = ("intro\n\n"
+           "<!-- docs-assets:ledger -->\n"
+           "stale\n"
+           "<!-- /docs-assets:ledger -->\n\n"
+           "outro\n")
+
+
+def test_splice_replaces_only_what_the_markers_enclose() -> None:
+    out = gen.splice_block(_MARKED, "ledger", "```console\nfresh\n```\n")
+
+    assert out == ("intro\n\n"
+                   "<!-- docs-assets:ledger -->\n"
+                   "```console\nfresh\n```\n"
+                   "<!-- /docs-assets:ledger -->\n\n"
+                   "outro\n")
+
+
+def test_splicing_the_same_block_twice_changes_nothing() -> None:
+    once = gen.splice_block(_MARKED, "ledger", "fresh\n")
+
+    assert gen.splice_block(once, "ledger", "fresh\n") == once
+
+
+def test_splice_fails_the_build_when_the_closing_marker_is_missing() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        gen.splice_block("intro\n<!-- docs-assets:ledger -->\nstale\n",
+                         "ledger", "fresh\n")
+
+    assert "docs-assets:ledger" in str(excinfo.value)
+
+
+def test_splice_readme_fills_both_blocks_from_the_journal(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    readme.write_text("# t\n\n"
+                      "<!-- docs-assets:excerpt -->\n<!-- /docs-assets:excerpt -->\n\n"
+                      "<!-- docs-assets:ledger -->\n<!-- /docs-assets:ledger -->\n",
+                      encoding="utf-8")
+
+    gen.splice_readme(_EVENTS, readme)
+
+    text = readme.read_text(encoding="utf-8")
+    assert "$ imp log samo71\n> add a --json flag to imp list" in text
+    assert "$ imp log samo71 --summary" in text
+    assert ("  total                                 2h 6m   28.0M  531.1k  [$42.20]"
+            in text)
+    assert text.count("```console") == 2
