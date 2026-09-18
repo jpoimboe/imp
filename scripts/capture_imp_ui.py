@@ -29,9 +29,13 @@ import contextlib
 import gzip
 import io
 import json
+import os
+import random
 import sys
-from datetime import datetime
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 _REPO = Path(__file__).resolve().parent.parent
 _RECORDED = _REPO / "tests" / "fixtures" / "cc_open_by_asking_full.jsonl.gz"
@@ -42,6 +46,11 @@ _DEMO_JOURNAL = _REPO / "docs" / "examples" / "samo71.jsonl.gz"
 # Hero cut point: plan 1/3 · task 1/3, with the coder subagent mid-flight.
 HERO_LIMIT = 930
 HERO_WIDTH = 124
+
+# Every clock the live footer reads is pointed at this instant (samo71's merge).
+_PINNED_INSTANT = datetime(2026, 9, 18, 5, 38, 3, tzinfo=UTC)
+_PINNED_FRAME = 0
+_PINNED_SEED = 0
 
 
 def _events() -> list[dict]:
@@ -78,6 +87,70 @@ def shift_to_instant(events: list[dict], instant: datetime) -> list[dict]:
             moved["payload"] = payload
         shifted.append(moved)
     return shifted
+
+
+@contextlib.contextmanager
+def _pinned_clocks(instant: datetime, width: int) -> Iterator[None]:
+    """Point the driver's two independent clocks at `instant`, fix the terminal
+    width, and seed the RNG: compose_status reads datetime.now(UTC), the quota
+    countdown falls through to time.time(), term_width() would read the real
+    terminal, and the rotating status phrase draws from random."""
+    from imp.cli import live_driver as ld
+
+    class _Clock:
+        @staticmethod
+        def now(tz: Any = None) -> datetime:
+            return instant
+
+    class _Epoch:
+        @staticmethod
+        def time() -> float:
+            return instant.timestamp()
+
+    saved_clock, saved_epoch = ld.datetime, ld.time
+    saved_columns = os.environ.get("COLUMNS")
+    saved_rng = random.getstate()
+    ld.datetime, ld.time = _Clock, _Epoch
+    os.environ["COLUMNS"] = str(width)
+    random.seed(_PINNED_SEED)      # narrative's rotating status phrase draws from random
+    try:
+        yield
+    finally:
+        ld.datetime, ld.time = saved_clock, saved_epoch
+        if saved_columns is None:
+            os.environ.pop("COLUMNS", None)
+        else:
+            os.environ["COLUMNS"] = saved_columns
+        random.setstate(saved_rng)
+
+
+def _pinned_status(stream: Any) -> Any:
+    """A LiveStatus whose composed frame index never moves: the scene runs no
+    tick task, so the spinner must not depend on which frame a thread reached."""
+    from imp.cli.live_status import LiveStatus
+
+    class _PinnedStatus(LiveStatus):
+        def update(self, compose: Callable[[int], list[str] | None]) -> None:
+            super().update(lambda _frame: compose(_PINNED_FRAME))
+
+    return _PinnedStatus(stream)
+
+
+def replay_live(stream: Any, *, journal: Path = _DEMO_JOURNAL,
+                limit: int = HERO_LIMIT, width: int = HERO_WIDTH) -> None:
+    """Replay the first `limit` events to `stream` with LiveStatus active, so a
+    tty keeps the transient footer on screen. Deterministic: see _pinned_clocks,
+    _pinned_status, and the seeded status-phrase RNG."""
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import LiveDriver
+
+    pal.set_theme("dark")
+    events = shift_to_instant(journal_events(journal, limit), _PINNED_INSTANT)
+    with _pinned_clocks(_PINNED_INSTANT, width):
+        driver = LiveDriver(stream=stream, color=True, width=width,
+                            status=_pinned_status(stream))
+        for event in events:
+            driver.on_event(event)
 
 
 class _Pipe(io.StringIO):

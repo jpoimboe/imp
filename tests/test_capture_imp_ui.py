@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 import pytest
 
 from imp.cli import splash
 from scripts import capture_imp_ui
+from tests._event_fixtures import _TTY
 
 
 def test_scene_splash_all_scenes_labels_and_renders_the_complete_pool(capsys) -> None:
@@ -73,3 +75,53 @@ def test_shift_moves_quota_reset_epochs_by_the_same_delta() -> None:
             == [w["resets_at"] + delta for w in source["payload"]["windows"]])
     # The caller's events are left untouched: the journal is read once per replay.
     assert source["payload"]["windows"][0]["resets_at"] == 1789714200
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+_HERO_POSITION_ROW = (
+    "samo71 · JSON output for imp list · implementation phase · "
+    "plan 1/3 · task 1/3 · claude-opus-5[1m] · ██░░░░░░░░ 43k/200k")
+_HERO_SUBAGENT_ROW = "↳ coder · 47s · claude-sonnet-4-6 · █░░░░░░░░░ 17k/160k"
+
+
+def _screen_rows(text: str) -> list[str]:
+    """Footer rows as a terminal shows them: escapes dropped, and each line cut
+    to what survives its last carriage return."""
+    return [_ANSI.sub("", line).split("\r")[-1].rstrip()
+            for line in text.split("\n")]
+
+
+def test_hero_frame_renders_the_complete_position_row() -> None:
+    out = _TTY()
+
+    capture_imp_ui.replay_live(out)
+
+    rows = [row for row in _screen_rows(out.getvalue()) if row]
+    assert rows[-2] == _HERO_POSITION_ROW
+    assert rows[-1] == _HERO_SUBAGENT_ROW
+    assert "…" not in rows[-2]
+
+
+def test_hero_frame_is_independent_of_the_wall_clock(monkeypatch) -> None:
+    from imp.cli import live_driver as ld
+
+    def frame_at(now: datetime) -> str:
+        class _Clock:
+            @staticmethod
+            def now(tz=None):
+                return now
+
+        class _Epoch:
+            @staticmethod
+            def time():
+                return now.timestamp()
+
+        monkeypatch.setattr(ld, "datetime", _Clock)
+        monkeypatch.setattr(ld, "time", _Epoch)
+        out = _TTY()
+        capture_imp_ui.replay_live(out)
+        return out.getvalue()
+
+    assert (frame_at(datetime(2026, 3, 4, 11, 7, 13, tzinfo=UTC))
+            == frame_at(datetime(2031, 11, 30, 23, 59, 1, tzinfo=UTC)))
