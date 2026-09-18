@@ -45,6 +45,8 @@ names rather than guessing them.
 - `imp list` — the board: active in-flight and draft quests, plus the backlog
   (parked items for later).
 - `imp list --all` — also includes merged and abandoned past quests.
+- `imp list --json` — the same board as a structured JSON array, one
+  object per quest tagged with its zone; composes with every filter.
 - `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
   drafts), **backlog**, and **archive** quests for `<query>` as a case-insensitive
   substring of a quest's id, title, or conversation content (a required substring;

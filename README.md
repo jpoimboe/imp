@@ -232,6 +232,7 @@ searchable.  The commit is not the only surviving explanation of the change:
 
 ```bash
 imp list                         # active work, drafts, and backlog
+imp list --json                  # the same board, structured
 imp show <id>                    # intent, status, timing, and result
 imp log <id>                     # readable story of the run
 imp events <id> --agent coder    # the coder's event stream

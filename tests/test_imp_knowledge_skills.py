@@ -85,9 +85,15 @@ def test_introspection_names_the_read_commands() -> None:
     assert "imp help" in body
     assert "imp list" in body
     assert "imp list --all" in body
+    assert "imp list --json" in body
     assert "imp search" in body
     assert "imp show <id> spec" in body
     assert "imp events <id>" in body
+    # its own bullet, not a passing mention: the guide says what the structured
+    # board is and that it composes with the filters
+    assert ("`imp list --json` — the same board as a structured JSON array, one "
+            "object per quest tagged with its zone; composes with every filter."
+            ) in " ".join(body.split())
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
