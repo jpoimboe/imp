@@ -13,7 +13,10 @@ Each change (feature or bug) for a given project gets built as part of an
 isolated, resumable **quest**, which tracks the change's history from inception
 through design, planning, coding, review, testing, and integration.
 
-**While imp is workflow-agnostic, it ships batteries included** with a default
+Every conversation is archived, so you can easily **trace any line of code back
+to the full conversation which produced it.**
+
+**imp is workflow-agnostic, but ships batteries included** with a default
 opinionated workflow, which follows AI software engineering best practices for
 producing AI written, reviewed, and tested code in a fast-moving greenfield or
 small team project.  The default workflow is defined in YAML and can be easily
@@ -27,8 +30,8 @@ the same project in parallel, as imp runs in **resumable, isolated git
 worktrees.**
 
 Imp's uses **fresh LLM context and independent reviewers** so each agent can
-focus on its given task without becoming increasingly confused in a long
-session.  Detailed specs, implementation plans, and progress files carry
+focus on its given task, avoiding long sessions where agents get increasingly
+confused.  Detailed specs, implementation plans, and progress files carry
 decisions between steps.  Tests are written before code (TDD), every artifact
 is independently reviewed in multiple rounds if needed, and the final code is
 checked against acceptance criteria before merge.
@@ -37,34 +40,31 @@ All agent-made judgment calls are raised as open items to the user at the merge
 gate, where **the human can approve, send back for rework, or open a followup
 quest** for further improvements.
 
-Every conversation is archived, so you can easily **trace any line of code back
-to the full conversation which produced it.**
-
-**Bugs are automatically rooted out early.**  With AI development, the majority
-of bugs tend to originate early in the spec or planning phases, due to gaps,
+**Bugs are rooted out early.**  Generally with AI development, most bugs tend
+to originate early during the spec or planning phase, due to gaps,
 inconsistencies, or mistakes made by the agent.  imp prevents that by spending
 most of its tokens up front, looping on multiple rounds of adversarial
-spec/plan review until everything is fully specified and verified before it
-starts implementation.
+spec/plan review until everything is fully specified and verified.
 
-imp's default workflow agents look for cleanups, refactorings, simplifications,
-and code removals.  My experience over the last several months of using imp to
-build and improve itself is that it **produces clean, maintainable code**.  It
-also produces a *lot* of tests that might be annoying to a human: even trivial
-changes can often trigger a test failure.  But the agents handle that easily,
-and the tests do a great job of preventing regressions.  So the test-heavy TDD
-philosophy seems to be a perfect fit for AI-native development.
+imp's default workflow produces **clean and maintainable code.**  The agents
+look for cleanups, refactorings, simplifications, and code removals. 
 
-Note that the default workflow can be a bit token-intensive due to the extra
-thinking involved with detailed specs, plans, and multiple reviews.  Quality,
+It uses **test-driven development (TDD)** extensively.  TDD tends to produces a
+*lot* of tests that might be considered fragile by a human, as even trivial
+changes can trigger test failures.  But LLMs have no problem dealing with that,
+so TDD seems to be a good fit for preventing regressions with AI-native
+development.
+
+The default workflow can be a bit token-intensive due to the extra thinking
+involved with detailed specs, plans, and multiple reviews.  Quality,
 maintainable, functional, well-tested code isn't cheap.  **Claude Max (or
 ChatGPT Pro) subscription recommended for the default workflow.**  Local models
 are not (yet) supported.  Pull requests welcome :-)
 
-Or if you want a more "fast and loose" approach, make your own workflow YAML
-and still get all the other imp benefits (see Engine Features below).
+For a lighter weight approach, custom workflows can be created, while still
+taking advantage of imp's useful [engine features](#engine-features).
 
-Currently Linux only.  Mac support coming soon.
+imp is currently Linux-only.  Support for macOS is planned.
 
 ## Features
 
@@ -150,9 +150,9 @@ resumable, and inspectable:
 - **Inspect everything from the CLI.** See active, draft, backlog, and archived
   quests, then drill into any quest's current state, decisions, summary, readable
   log, or event stream.
-- **Let agents work across quests.** Agents can inspect earlier steps and search
-  or read other live and archived sibling quests.  With your approval, they can
-  link related backlog items or open new ones for work they discover.
+- **Intra- and Inter-quest interaction.** Agents can inspect earlier steps and
+  search or read other live and archived sibling quests.  With your approval,
+  they can set dependencies or open new quests for work they discover.
 - **Non-committal chat.** Use `imp chat` to ask questions about imp or your
   codebase, explore an idea, or scout existing work.  It remains just a
   conversation -- with no branch or worktree -- unless you decide to build,
@@ -181,12 +181,10 @@ resumable, and inspectable:
 
 imp needs Linux, Git, Python 3.11 or newer, `uv`,
 [bubblewrap](https://github.com/containers/bubblewrap), and util-linux 2.38 or
-newer (`nsenter`, `unshare`).  For model access, either install and sign in to
-the `claude` or `codex` CLI with an existing subscription, or export
-`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.  For web work,
-add a browser: imp renders and drives real pages for mockups and browser tests,
-and an agent that finds none will spend a few minutes downloading ~115 MB of
-Chromium into `~/.cache`.
+newer (`nsenter`, `unshare`).
+
+For model access, install and sign in to the `claude` or `codex` CLI in your
+path.  To use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
 ```bash
 uv tool install git+https://github.com/jpoimboe/imp
@@ -207,14 +205,19 @@ You can pause it at any time with Ctrl-D for resuming later with `imp resume`,
 or interrupt the agent at any time with Ctrl-C to ask a question or send it in
 a different direction.
 
-Brownfield development works too.  Run `imp init` and `imp new` from an
-existing checkout; imp reads the code before asking questions and fits the
-feature to the existing code.
+After the first quest, once the master branch has code, multiple quests can be
+run in parallel in different terminal tabs.
+
+Instead of `imp new`, you can use `imp chat` to ask imp questions about itself,
+the code base, bugs or new features.
+
+Brownfield projects are also supported.  Just `imp init` and `imp new` from an
+existing checkout.
 
 ## A quest leaves a trail
 
 A quest represents a unit of work, from the opening intent to the final merge.
-Before going live, it's only a conversation: no branch or worktree.  You can
+Before going live, it's just a conversation: no branch or worktree.  You can
 build it, park it in the backlog, or discard it.
 
 Once live, the quest owns its worktree, artifacts, workflow snapshot, and
@@ -236,18 +239,15 @@ imp search "rate limit"          # live and archived conversations
 imp events search "pytest"       # tool calls, results, and agent reasoning
 ```
 
-Every non-merge commit produced by the default workflow carries a `Quest: <id>`
-trailer.  New final merge commits generated by imp carry the same trailer.  That
-makes the provenance path concrete:
+Every commit log produced by the default workflow carries a `Quest: <id>`
+trailer.  That makes it possible to associate every line of code with the
+conversation and full agent logs that created it:
 
 ```bash
 git blame path/to/file
 git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
 imp log <quest-id>
 ```
-
-Start with a line, find its commit, read the quest ID, then inspect the archived
-conversation that produced it.
 
 ## Isolation and security boundaries
 
@@ -259,7 +259,7 @@ therefore runs agent shell commands under bubblewrap, in separate user, IPC, and
 UTS namespaces.  The filesystem is read-only outside an explicit writable set;
 credentials are replaced with empty mounts; and shared Git escape paths such as
 hooks, config, the index, and refs outside the quest's namespace are remounted
-read-only.  This fails closed: no `bwrap`, no run.
+read-only.
 
 Network access is allowed by default; set `sandbox.network: false` to disable it.
 File-editing tools enforce the same path policy in-process, so the kernel-level
@@ -267,8 +267,7 @@ guarantee applies to shell commands.
 
 ## Status and contributing
 
-imp is pre-release.  The engine and default workflow are in daily use, but
-interfaces may change before the first tagged release.
+imp is pre-release.  Go forth and test.
 
 See [Architecture](docs/internals/architecture.md) for an overview of the engine
 and bundled workflows.
