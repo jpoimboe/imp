@@ -654,7 +654,7 @@ def test_a_claude_row_with_no_vendor_cost_is_priced_from_the_table():
     # wire the row is priced per model instead of being credited $0.00.
     rows = build_summary(_fallback_events(_FALLBACK_USAGE))
     assert rows[0].usage.dollars == pytest.approx(0.195)
-    assert cost_cell(rows[0].totals) == "[$0.20]"
+    assert cost_cell(rows[0].totals) == "$0.20*"
     without = build_summary(
         _fallback_events(_FALLBACK_USAGE, with_query_result=False))
     assert (summary_totals(rows, 60.0)[1].dollars
@@ -662,8 +662,8 @@ def test_a_claude_row_with_no_vendor_cost_is_priced_from_the_table():
 
 
 def test_a_metered_claude_row_priced_from_the_table_renders_a_tilde():
-    # AC 2: apikey auth is metered, so the same computed figure loses the
-    # brackets and takes the tilde.
+    # AC 2: apikey auth is metered, so the same computed figure drops the
+    # asterisk and takes the tilde.
     rows = build_summary(
         _fallback_events(_FALLBACK_USAGE, auth_mode="apikey"))
     assert cost_cell(rows[0].totals) == "~$0.20"
@@ -680,7 +680,7 @@ def test_a_vendor_zero_renders_as_the_vendors_own_zero():
         _completed("reviewer", "2026-01-01T00:01:00+00:00"),
     ])
     assert rows[0].usage.dollars == 0.0
-    assert cost_cell(rows[0].totals) == "[<$0.01]"
+    assert cost_cell(rows[0].totals) == "<$0.01*"
 
 
 def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
@@ -689,7 +689,7 @@ def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
     rows = build_summary(_fallback_events({
         **_FALLBACK_USAGE,
         "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}}))
-    assert cost_cell(rows[0].totals) == "≥[$0.20]"
+    assert cost_cell(rows[0].totals) == "≥$0.20*"
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
@@ -713,7 +713,7 @@ def test_a_vendor_less_row_of_unknown_models_renders_n_a_and_floors_the_total():
         _completed("coder", "2026-01-01T00:01:00+00:00"),
     ])
     assert cost_cell(rows[0].totals) == "n/a"
-    assert cost_cell(summary_totals(rows, 60.0)[1]) == "≥[$0.20]"
+    assert cost_cell(summary_totals(rows, 60.0)[1]) == "≥$0.20*"
 
 
 def test_a_vendor_less_row_sums_three_priced_models_without_a_floor():
@@ -725,7 +725,7 @@ def test_a_vendor_less_row_sums_three_priced_models_without_a_floor():
         "claude-opus-5": {"inputTokens": 1000, "outputTokens": 1000}}))
     assert rows[0].usage.dollars == pytest.approx(0.054)
     assert rows[0].usage.priced == 3
-    assert cost_cell(rows[0].totals) == "[$0.05]"
+    assert cost_cell(rows[0].totals) == "$0.05*"
 
 
 def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
@@ -762,7 +762,7 @@ def test_a_search_only_row_with_no_vendor_cost_is_billable_work():
                               "cacheCreationInputTokens": 0,
                               "webSearchRequests": 5}}))
     assert rows[0].usage.dollars == pytest.approx(0.05)
-    assert cost_cell(rows[0].totals) == "[$0.05]"
+    assert cost_cell(rows[0].totals) == "$0.05*"
 
 
 def test_a_model_absent_from_the_price_table_counts_as_unpriced():
@@ -840,13 +840,13 @@ def test_fmt_tokens(n, expected):
     (RowUsage(dollars=6.43, priced=1), "~$6.43"),
     (RowUsage(dollars=0.004, priced=1), "~<$0.01"),
     # Notional — subscription, or an old log with no recoverable auth mode.
-    (RowUsage(dollars=6.43, priced=1, notional=1), "[$6.43]"),
-    (RowUsage(dollars=0.004, priced=1, notional=1), "[<$0.01]"),
+    (RowUsage(dollars=6.43, priced=1, notional=1), "$6.43*"),
+    (RowUsage(dollars=0.004, priced=1, notional=1), "<$0.01*"),
     # Model work imp could not price at all.
     (RowUsage(fresh_input=900, output=90, unpriced=1), "n/a"),
     # A floor: something was priced, something else was not.
     (RowUsage(dollars=6.43, priced=1, unpriced=1), "≥~$6.43"),
-    (RowUsage(dollars=6.43, priced=2, unpriced=1, notional=1), "≥[$6.43]"),
+    (RowUsage(dollars=6.43, priced=2, unpriced=1, notional=1), "≥$6.43*"),
 ])
 def test_cost_cell_states(usage, expected):
     assert cost_cell(usage) == expected
@@ -857,9 +857,9 @@ def test_legend_lines_follow_the_cells_actually_rendered():
     assert legend_lines(["~$1.00"]) == [
         "~ estimated at API list price"]
     # Mixed auth: both lines, tilde first (spec §7 / AC 18).
-    assert legend_lines(["~$1.00", "[$2.00]", "≥[$3.00]"]) == [
+    assert legend_lines(["~$1.00", "$2.00*", "≥$3.00*"]) == [
         "~ estimated at API list price",
-        "[ ] list-price equivalent; subscription usage is not billed per token",
+        "* theoretical API list price; actual subscription usage is much lower",
         "≥ excludes steps run on a model absent from the price table"]
 
 
@@ -1458,7 +1458,7 @@ def test_metered_marker_reads_auth_mode_on_codex_and_claude():
     subscription = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00"),
                              _patch("a1", input=100_000, output=10_000,
                                     context_tokens=100_000))
-    assert cost_cell(subscription.totals) == "[$0.60]"
+    assert cost_cell(subscription.totals) == "$0.60*"
 
     old_log = _one_step(
         _cc("a1", "2026-01-01T00:00:05+00:00"),
@@ -1466,7 +1466,7 @@ def test_metered_marker_reads_auth_mode_on_codex_and_claude():
             "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 10,
                                   "cacheReadInputTokens": 0,
                                   "cacheCreationInputTokens": 0}}))
-    assert cost_cell(old_log.totals) == "[$6.43]"    # AC 16(c)
+    assert cost_cell(old_log.totals) == "$6.43*"     # AC 16(c)
 
 
 def test_an_unpriced_model_renders_n_a_and_floors_the_aggregate():
@@ -1484,7 +1484,7 @@ def test_an_unpriced_model_renders_n_a_and_floors_the_aggregate():
     assert cost_cell(total) == "≥~$2.00"
 
 
-def test_a_step_row_mixing_vendors_brackets_while_the_leaf_keeps_its_form():
+def test_a_step_row_mixing_vendors_stars_while_the_leaf_keeps_its_form():
     # AC 17(c): a metered subagent under a notional parent. The step row
     # aggregates both and is not a metered figure; the subagent row is.
     step = StepRow(phase="build", step="coder",
@@ -1498,7 +1498,7 @@ def test_a_step_row_mixing_vendors_brackets_while_the_leaf_keeps_its_form():
                        end_ts="2026-01-01T00:00:50+00:00",
                        usage=RowUsage(fresh_input=50, output=5, dollars=0.50,
                                       priced=1))])
-    assert cost_cell(step.totals) == "[$1.50]"
+    assert cost_cell(step.totals) == "$1.50*"
     assert cost_cell(step.subagents[0].usage) == "~$0.50"
 
 
@@ -1562,22 +1562,22 @@ def test_the_reference_after_state_renders_verbatim():
                         status="merged", total_seconds=3120.0)
     assert render_summary(rows, header=hdr, color=False, width=80) == [
         "default  ·  zita45  ·  merged",
-        "                                       time      in    out     cost",
+        "                                       time      in    out    cost",
         "scoping",
-        "  threshold                          12m 0s  163.0k   3.0k  [$0.27]",
+        "  threshold                          12m 0s  163.0k   3.0k  $0.27*",
         "build",
-        "  coder                              36m 0s    3.7M  64.0k  [$6.16]",
-        "    ↳ explorer (exploring codebase)   7m 0s  350.0k   4.0k  [$0.40]",
+        "  coder                              36m 0s    3.7M  64.0k  $6.16*",
+        "    ↳ explorer (exploring codebase)   7m 0s  350.0k   4.0k  $0.40*",
         "integration",
-        "  integrate                           2m 0s       —      —        —",
+        "  integrate                           2m 0s       —      —       —",
         "",
-        "  total                              52m 0s    3.9M  67.0k  [$6.43]",
-        "  [ ] list-price equivalent; subscription usage is not billed per token",
+        "  total                              52m 0s    3.9M  67.0k  $6.43*",
+        "  * theoretical API list price; actual subscription usage is much lower",
     ]
 
 
 def test_a_mixed_auth_run_shows_both_legend_lines_tilde_first():
-    # AC 18: a metered step and a notional step; the total brackets (AC 17a).
+    # AC 18: a metered step and a notional step; the total stars (AC 17a).
     rows = [
         StepRow(phase="p", step="metered",
                 start_ts="2026-01-01T00:00:00+00:00",
@@ -1594,11 +1594,11 @@ def test_a_mixed_auth_run_shows_both_legend_lines_tilde_first():
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[3].endswith("~$2.00")
-    assert out[4].endswith("[$4.00]")
-    assert out[-3].endswith("[$6.00]")          # the total brackets under a mix
+    assert out[4].endswith("$4.00*")
+    assert out[-3].endswith("$6.00*")           # the total stars under a mix
     assert out[-2:] == [
         "  ~ estimated at API list price",
-        "  [ ] list-price equivalent; subscription usage is not billed per token",
+        "  * theoretical API list price; actual subscription usage is much lower",
     ]
 
 
@@ -1641,8 +1641,8 @@ def test_the_summary_has_no_quota_input_and_renders_no_quota_output():
                            color=False, width=80)
     assert not any("quota" in ln or "5h" in ln or "7d" in ln for ln in lines)
     assert lines[-2].startswith("  total")
-    assert lines[-1] == ("  [ ] list-price equivalent; subscription usage is"
-                         " not billed per token")
+    assert lines[-1] == ("  * theoretical API list price; actual subscription"
+                         " usage is much lower")
     with pytest.raises(TypeError):
         render_summary([], header=_HDR, color=False, width=80, quota=())
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.resources as ir
 
 from imp.cli import narrative as nv
+from imp.cli.accounting import RowUsage
 from imp.cli.render_html import _md_to_fragment, render_html
-from imp.cli.render_markdown import render_markdown
+from imp.cli.render_markdown import render_markdown, render_summary_markdown
+from imp.cli.render_summary import StepRow, SummaryHeader
 
 
 def test_github_markdown_css_asset_is_bundled() -> None:
@@ -153,3 +155,26 @@ def test_agent_prose_colored_inline_span_html_export_is_plain_code() -> None:
     assert "<code>78%</code>" in out     # a real <code> element, not literal codes
     assert "[1;33m" not in out
     assert "\x1b" not in out
+
+
+def test_summary_html_export_keeps_the_notional_sigil_out_of_a_list() -> None:
+    # A legend line opening `* ` is a Markdown bullet: unescaped, markdown-it
+    # eats the very asterisk the line exists to explain.
+    rows = [
+        StepRow(phase="p", step="metered", start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:00:30+00:00",
+                usage=RowUsage(fresh_input=100, output=10, dollars=2.00,
+                               priced=1)),
+        StepRow(phase="p", step="subscription",
+                start_ts="2026-01-01T00:00:30+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
+                               priced=1, notional=1)),
+    ]
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    out = render_html(render_summary_markdown(rows, header=hdr))
+    assert "<td>$6.00*</td>" in out                     # the total's starred cell
+    assert ("<p>* theoretical API list price; actual subscription usage is"
+            " much lower</p>") in out
+    assert "<li>theoretical API list price" not in out  # never a bullet

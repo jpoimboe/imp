@@ -283,6 +283,11 @@ _MD_HEADER = "| Step | Duration | Fresh | Cache read | Cache write | Out | Cost 
 _MD_RULE = "|---|---|---|---|---|---|---|"
 
 
+def _md_legend(text: str) -> str:
+    """A leading `*` is the sigil the legend defines, not a list bullet."""
+    return f"\\{text}" if text.startswith("*") else text
+
+
 def _md_cells(u: RowUsage) -> str:
     return (f"{_fmt_tokens(u.fresh_input)} | {_fmt_tokens(u.cached_input)}"
             f" | {_fmt_tokens(u.cache_write)} | {_fmt_tokens(u.output)}"
@@ -320,5 +325,5 @@ def render_summary_markdown(summary: list[StepRow], *,
     blocks.append("\n".join([
         _MD_HEADER, _MD_RULE,
         f"| total | {_dur_text(work)} | {_md_cells(total)} |"]))
-    blocks += legend_lines(cells)
+    blocks += [_md_legend(t) for t in legend_lines(cells)]
     return "\n\n".join(blocks).strip() + "\n"
