@@ -147,19 +147,24 @@ def test_shelved_conversation_only_in_all_history(tmp_path: Path) -> None:
     _archive_completed(tmp_path, "gamma")          # merged,  last=2026-06-01
     _archive_paused(tmp_path, "delta")             # shelved, last=2026-06-03
 
+    every = {"merged", "done", "abandoned", "shelved"}
+    plain = {"merged", "done"}
+
     # AC 1: under --all, delta appears in history, sorted newest-first (before
     # the older merged gamma).
-    all_hist = m._history_by_disposition(tmp_path, dispositions={"merged", "done", "abandoned", "shelved"}, live_ids=None)
+    all_hist = m._history_by_disposition(tmp_path, dispositions=every, live_ids=None)
     assert [r[0] for r in all_hist] == ["delta", "gamma"]
     assert dict((r[0], r[1]) for r in all_hist)["delta"] == "shelved"
 
     # AC 2: plain imp show never lists the shelved conversation.
-    plain_hist = m._history_by_disposition(tmp_path, dispositions={"merged", "done"}, live_ids=None)
+    plain_hist = m._history_by_disposition(tmp_path, dispositions=plain, live_ids=None)
     assert {r[0] for r in plain_hist} == {"gamma"}
 
     # AC 3: a resumed (now live) shelved conversation is not duplicated in history.
     assert {r[0] for r in
-            m._history_by_disposition(tmp_path, dispositions={"merged", "done", "abandoned", "shelved"}, live_ids={"delta"})} == {"gamma"}
+            m._history_by_disposition(
+                tmp_path, dispositions=every, live_ids={"delta"},
+            )} == {"gamma"}
 
     # AC 6: rendered overview tags the row "shelved" under --all (never "left").
     now = datetime(2026, 6, 28, tzinfo=UTC)
