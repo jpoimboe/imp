@@ -234,6 +234,16 @@ def check_index_floor(control_root: Path) -> None:
             floor="index", stored=stored, known=index._SCHEMA_VERSION)
 
 
+def archive_is_current(archive_dir: Path) -> bool:
+    """True iff this archive's blob layout is one this install reads. Addresses
+    the directory as a path: another project's archive may be neither claimed
+    nor rebuilt, so an absent marker reads as nothing to offer."""
+    try:
+        return int((archive_dir / "data_version").read_text().strip()) == _DATA_VERSION
+    except (ValueError, OSError):
+        return False
+
+
 def ensure_current(control_root: Path) -> None:
     """Rebuild the index if its schema version is stale or it is missing a durable
     record.

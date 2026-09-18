@@ -39,6 +39,28 @@ def connect(index_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def open_readonly(db_path: Path) -> sqlite3.Connection | None:
+    """A read-only connection for another project's index: unlike `connect`, it
+    creates no parent directory, no file and no schema. None when the index is
+    absent or cannot be opened; a file that is not a database opens here and
+    raises on the caller's first statement."""
+    if not db_path.is_file():
+        return None
+    try:
+        return sqlite3.connect(
+            f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+    except sqlite3.DatabaseError:
+        return None
+
+
+def quest_spans(conn: sqlite3.Connection) -> list[tuple[str, str | None, str | None]]:
+    """(id, created_at, last_event_ts) per indexed quest: the activity window a
+    span query filters on. last_event_ts is None for a log with no timestamps."""
+    return [(cid, created, last)
+            for cid, created, last in conn.execute(
+                "SELECT id, created_at, last_event_ts FROM quests ORDER BY id")]
+
+
 def stamp_version(conn: sqlite3.Connection) -> None:
     """An older writer lowers the floor, so the next current imp rebuilds its row."""
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")

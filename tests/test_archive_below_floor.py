@@ -62,6 +62,21 @@ def test_archive_quest_into_an_empty_archive_stamps_the_marker(tmp_path: Path) -
     assert record.read_record(records_root(tmp_path), ARCH) is not None
 
 
+def test_archive_is_current_reads_the_marker_of_a_bare_directory(
+    tmp_path: Path,
+) -> None:
+    _archive_one(tmp_path, ARCH)
+    adir = archive.archive_root(tmp_path)
+    assert archive.archive_is_current(adir)
+
+    archive.data_version_path(tmp_path).write_text("1\n")
+    assert not archive.archive_is_current(adir)
+
+    archive.data_version_path(tmp_path).unlink()
+    assert not archive.archive_is_current(adir)
+    assert not archive.archive_is_current(tmp_path / "no-such-archive")
+
+
 def test_require_current_refuses_a_below_floor_archive(tmp_path: Path) -> None:
     _archive_one(tmp_path, ARCH)
     archive.data_version_path(tmp_path).write_text("1")

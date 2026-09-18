@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from imp.engine.archive import index
 
 
@@ -35,6 +37,57 @@ def test_connect_is_idempotent(tmp_path: Path) -> None:
     try:
         assert {"quests", "deps"} <= _table_names(conn)
         assert "events" not in _table_names(conn)
+    finally:
+        conn.close()
+
+
+def test_open_readonly_creates_nothing_and_refuses_writes(tmp_path: Path) -> None:
+    absent = tmp_path / "gone" / "index.db"
+    assert index.open_readonly(absent) is None
+    assert not (tmp_path / "gone").exists()   # connect() would have made it
+
+    db = tmp_path / "index.db"
+    index.connect(db).close()
+    conn = index.open_readonly(db)
+    assert conn is not None
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            conn.execute(
+                "INSERT INTO quests (id) VALUES ('x')")
+    finally:
+        conn.close()
+
+
+def test_open_readonly_defers_the_header_check_to_the_first_statement(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "index.db"
+    db.write_bytes(b"not a database at all")
+    conn = index.open_readonly(db)
+    # sqlite defers the header check to the first statement, so the caller's
+    # query is where a foreign file surfaces.
+    assert conn is not None
+    try:
+        with pytest.raises(sqlite3.DatabaseError):
+            index.quest_spans(conn)
+    finally:
+        conn.close()
+
+
+def test_quest_spans_reports_each_quests_activity_window(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO quests (id, created_at, last_event_ts)"
+            " VALUES ('alpha', '2026-06-01T00:00:00+00:00',"
+            " '2026-06-01T09:00:00+00:00')")
+        conn.execute(
+            "INSERT INTO quests (id, created_at, last_event_ts)"
+            " VALUES ('beta', '2026-06-02T00:00:00+00:00', NULL)")
+        conn.commit()
+        assert sorted(index.quest_spans(conn)) == [
+            ("alpha", "2026-06-01T00:00:00+00:00", "2026-06-01T09:00:00+00:00"),
+            ("beta", "2026-06-02T00:00:00+00:00", None)]
     finally:
         conn.close()
 
