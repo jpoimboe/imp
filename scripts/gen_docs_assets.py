@@ -174,6 +174,7 @@ def splice_readme(events: list[dict[str, Any]], readme: Path = README) -> Path:
 def render_hero_png(out: Path = HERO_PNG) -> Path:
     import snap_imp_ui as snap
 
+    # unlike text assets, these bytes depend on the host's fonts and no test pins them
     out.parent.mkdir(parents=True, exist_ok=True)
     snap.snap_stream_live(out, limit=cap.HERO_LIMIT, cols=cap.HERO_WIDTH,
                           rows=snap.HERO_ROWS)

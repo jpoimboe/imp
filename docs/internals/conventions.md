@@ -61,7 +61,10 @@ sibling — rendering and driving a page in a browser — is `imp-driving-web-ui
 README's evidence — the hero PNG and the transcript, excerpt and ledger blocks
 under `docs/examples/` — then splices the excerpt and the ledger into README.md
 between its `<!-- docs-assets:… -->` markers, so none of those blocks is ever
-hand-edited.
+hand-edited. The three text assets are machine-independent and pinned by
+`test_committed_assets_match_a_fresh_render`; the hero PNG's pixels come from
+fontconfig-resolved system fonts, so regenerating on a different machine
+rewrites it silently with nothing flagging the change.
 
 ## Trailing output spacing
 
