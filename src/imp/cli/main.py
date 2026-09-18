@@ -3351,14 +3351,6 @@ def _history_by_disposition(control: Path, *, dispositions: set[str],
     return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
 
 
-def _history_rows(control: Path, *, show_all: bool,
-                  live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: merged/done, plus abandoned/shelved rows under --all."""
-    picked = {"merged", "done"}
-    if show_all:
-        picked |= {"abandoned", "shelved"}
-    return _history_by_disposition(control, dispositions=picked, live_ids=live_ids)
-
 
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                    history: list[_Row], *, intents: dict[str, str | None],

@@ -149,17 +149,17 @@ def test_shelved_conversation_only_in_all_history(tmp_path: Path) -> None:
 
     # AC 1: under --all, delta appears in history, sorted newest-first (before
     # the older merged gamma).
-    all_hist = m._history_rows(tmp_path, show_all=True)
+    all_hist = m._history_by_disposition(tmp_path, dispositions={"merged", "done", "abandoned", "shelved"}, live_ids=None)
     assert [r[0] for r in all_hist] == ["delta", "gamma"]
     assert dict((r[0], r[1]) for r in all_hist)["delta"] == "shelved"
 
     # AC 2: plain imp show never lists the shelved conversation.
-    plain_hist = m._history_rows(tmp_path, show_all=False)
+    plain_hist = m._history_by_disposition(tmp_path, dispositions={"merged", "done"}, live_ids=None)
     assert {r[0] for r in plain_hist} == {"gamma"}
 
     # AC 3: a resumed (now live) shelved conversation is not duplicated in history.
     assert {r[0] for r in
-            m._history_rows(tmp_path, show_all=True, live_ids={"delta"})} == {"gamma"}
+            m._history_by_disposition(tmp_path, dispositions={"merged", "done", "abandoned", "shelved"}, live_ids={"delta"})} == {"gamma"}
 
     # AC 6: rendered overview tags the row "shelved" under --all (never "left").
     now = datetime(2026, 6, 28, tzinfo=UTC)
@@ -192,12 +192,6 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     rows = m._completed_rows(tmp_path)
     assert rows == [("cid", "merged", "-", "iso", "Title", "created", None, None, None)]
 
-
-def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    _archive_completed(tmp_path, "gamma")
-    assert {r[0] for r in m._history_rows(tmp_path, show_all=False)} == {"gamma"}
-    assert m._history_rows(tmp_path, show_all=False, live_ids={"gamma"}) == []
 
 
 def test_overview_lines_scans_homes_once(tmp_path: Path, monkeypatch) -> None:

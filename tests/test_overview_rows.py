@@ -113,7 +113,7 @@ def test_overview_rows_backfills_intent_for_a_titleless_archived_row(
     assert rows.intents["unn002"] == "add a retry budget to the poller"
 
 
-def test_overview_rows_history_reproduces_history_rows_for_both_boards(
+def test_overview_rows_history_selects_both_boards(
         tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
@@ -125,8 +125,6 @@ def test_overview_rows_history_reproduces_history_rows_for_both_boards(
         tmp_path, dispositions=default | {"abandoned", "shelved"}, cutoff=None)
     assert [r[0] for r in plain.history] == ["mrgd"]
     assert [r[0] for r in every.history] == ["mrgd", "abnd", "shlv"]
-    assert plain.history == m._history_rows(tmp_path, show_all=False, live_ids=set())
-    assert every.history == m._history_rows(tmp_path, show_all=True, live_ids=set())
 
 
 def test_overview_lines_routes_through_the_shared_gatherer(
