@@ -24,14 +24,16 @@ customized or replaced with a completely different workflow.
 
 **Human effort is concentrated up front** at the beginning of the quest, during
 an interview with the "threshold" agent.  Once it has picked your brain
-sufficiently, it runs unattended from spec, plan, code, test, review, all the
-way through merge, so you're free to step away from the computer.  Or kick off
-another quest for the same project in parallel, as imp runs in **resumable,
+sufficiently, with your approval it runs unattended from spec, plan, code,
+test, review, all the way through merge, so you're free to step away from the
+computer.  The quest can be paused or resumed at any time.  You can also kick
+off another quest for the same project in parallel, as imp runs in **resumable,
 isolated git worktrees.**
 
-All agent-made judgment calls are raised as open items to the user at the merge
-gate, where the human can approve, send back for rework, or open a followup
-quest for further improvements.
+For any surprises or open items discovered during the quest, imp agents make
+judgment calls which are then raised back to the user at the merge gate for
+their final approval.  They can then send it back for rework, or open a
+follow-up backlog quest for further improvements.
 
 imp uses **fresh LLM context and independent reviewers** so each agent can
 focus on its given task, avoiding long sessions where agents get increasingly
@@ -55,18 +57,9 @@ changes can trigger test failures.  But LLMs have no problem dealing with that,
 so TDD seems to be a good fit for preventing regressions with AI-native
 development.
 
-The default workflow can be a bit token-intensive due to the extra thinking
-involved with detailed specs, plans, and multiple reviews.  Quality,
-maintainable, functional, well-tested code isn't cheap.  **Claude Max (or
-ChatGPT Pro) subscription recommended for the default workflow.**  Local models
-are not (yet) supported.  Pull requests welcome :-)
-
-For a lighter weight approach, custom workflows can be created, while still
-taking advantage of imp's useful [engine features](#engine-features).
-
 imp is currently Linux-only.  Support for macOS is planned.
 
-## Example run
+## Example
 
 <p align="center">
   <img src="docs/images/hero-run.png" alt="imp mid-run: the live status bar shows the quest, phase, plan and task counters, model, and context gauge, above a coder subagent's own gauge">
@@ -75,6 +68,17 @@ imp is currently Linux-only.  Support for macOS is planned.
 <p align="center">
   <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
 </p>
+
+Note the default workflow can be a bit token-intensive due to the extra
+thinking involved with detailed specs, plans, and multiple rounds of
+independent review.  Quality, maintainable, functional, well-tested code isn't
+cheap.  **Claude Max (or ChatGPT Pro) subscription recommended for the default
+workflow.**  Local models are not (yet) supported.  Pull requests welcome :-)
+
+For a lighter weight approach, custom workflows can be created, while still
+taking advantage of imp's useful [engine features](#engine-features).
+
+Here's an example run, adding a --json flag to `imp list`:
 
 <!-- docs-assets:excerpt -->
 ```console
@@ -85,7 +89,7 @@ samo71 · new
 
 > add a --json flag to imp list
 
-  … 279 events elided (human interview) …
+  … 279 events elided (brief human interview) …
 
 • Settled, then. To read it back in one piece before I set it up:
 
@@ -115,7 +119,7 @@ samo71 · new
 
 > ok
 
-  … 2,397 events elided (spec, plan, implementation) …
+  … 2,397 events elided (spec+review, plan+review, implementation+review, testing) …
 
 • I walked all twelve acceptance criteria clause by clause against the committed
   code across the eight commits. Coverage is complete — every clause lands on a
@@ -207,7 +211,19 @@ Merged samo71 into master.
 ```
 <!-- /docs-assets:excerpt -->
 
-And here is what that one confirmation bought:
+Full summary:
+
+- 3 human prompts ("add a --json flag to imp list", "ok, "ok) during the
+  interview phase
+- full generated specification file (with 2 rounds of independent review)
+- 3 implementation plans (each with 1-2 rounds of independent review)
+- 10 code commits (reviewed)
+- 26 new tests
+- full diff code review
+- full test suite pass
+- 0 open items at the merge gate
+- ~$1.00 (0.5%) of monthly total Claude Max $200 subscription quota (or $42.40
+  of theoretical API spend)
 
 <!-- docs-assets:ledger -->
 ```console
@@ -260,9 +276,7 @@ integrate
 ```
 <!-- /docs-assets:ledger -->
 
-Two rounds of spec review before a line of code existed, then three plans —
-every one of them reviewed by an agent that did not write it. Full run:
-[`docs/examples/samo71.md`](docs/examples/samo71.md).
+Full run: [`docs/examples/samo71.md`](docs/examples/samo71.md).
 
 ## A quest leaves a trail
 
