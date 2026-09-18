@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.runner import Message, TextBlock
 from imp.engine.reincarnation import (
     handoff_instruction,
     handoff_path_for,
+    last_user_message,
     provider_path_for,
     read_session_owner,
     reincarnation_seed,
@@ -17,6 +19,7 @@ from imp.engine.resume_state import (
     NativeResumeState,
     encode_native_resume_state,
 )
+from imp.engine.state import InMemoryEventLog
 
 
 def _seed(transcript_dir: Path, body: str = '{"k": 1}\n') -> None:
@@ -240,3 +243,73 @@ def test_malformed_manifest_prevents_session_stash(tmp_path: Path) -> None:
     }
     assert after == before
     assert not (session.parent / "coder.attempt-1").exists()
+
+
+def _user(log: InMemoryEventLog, *texts: str, subtype: str = "reply") -> None:
+    log.append_user_message(
+        agent_id="step:design/spec",
+        message=Message(role="user",
+                        content=tuple(TextBlock(text=t) for t in texts)),
+        subtype=subtype)
+
+
+def _step_started(log: InMemoryEventLog, step: str) -> None:
+    log.append(agent_id=None, type="step_started",
+               payload={"step": step, "kind": "agent", "phase": "design"})
+
+
+def test_the_most_recent_reply_is_the_one_carried() -> None:
+    log = InMemoryEventLog()
+    _user(log, "what does the daemon retry?")
+    _user(log, "and where does it log?")
+    assert last_user_message(log, step_name="spec") == "and where does it log?"
+
+
+def test_a_trailing_interject_is_carried_like_a_reply() -> None:
+    # A steering interjection lost to a handoff is the same failure as a lost reply.
+    log = InMemoryEventLog()
+    _user(log, "and where does it log?")
+    _user(log, "stop and reconsider", subtype="interject")
+    assert last_user_message(log, step_name="spec") == "stop and reconsider"
+
+
+def test_the_quest_opening_intent_is_never_carried() -> None:
+    # The reborn agent's template already renders run.opening; quoting the intent
+    # back would duplicate it. An empty log has nothing to carry either.
+    log = InMemoryEventLog()
+    _user(log, "build me a parser", subtype="intent")
+    assert last_user_message(log, step_name="spec") is None
+    assert last_user_message(InMemoryEventLog(), step_name="spec") is None
+
+
+def test_a_different_steps_start_ends_the_engagement() -> None:
+    # A stale threshold reply must not leak into an unrelated later step's seed.
+    log = InMemoryEventLog()
+    _user(log, "and where does it log?")
+    _step_started(log, "plan")
+    assert last_user_message(log, step_name="spec") is None
+
+
+def test_the_same_steps_re_entry_keeps_the_message() -> None:
+    # Exactly the reincarnation re-entry the message must span.
+    log = InMemoryEventLog()
+    _user(log, "and where does it log?")
+    _step_started(log, "spec")
+    assert last_user_message(log, step_name="spec") == "and where does it log?"
+
+
+def test_a_whitespace_only_message_carries_nothing() -> None:
+    log = InMemoryEventLog()
+    _user(log, "and where does it log?")
+    _user(log, "   \n\t ")
+    assert last_user_message(log, step_name="spec") is None
+    _user(log, "")
+    assert last_user_message(log, step_name="spec") is None
+    _user(log)
+    assert last_user_message(log, step_name="spec") is None
+
+
+def test_the_text_blocks_of_one_message_join_in_order() -> None:
+    log = InMemoryEventLog()
+    _user(log, "first line\n", "second line")
+    assert last_user_message(log, step_name="spec") == "first line\nsecond line"

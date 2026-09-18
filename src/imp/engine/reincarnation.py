@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from imp.engine.state import EventLog
 
 
 def session_has_resume_state(session_dir: Path) -> bool:
@@ -27,6 +30,31 @@ def stash_session(session_dir: Path) -> Path | None:
         n += 1
     session_dir.rename(dest)
     return dest
+
+
+_CARRIED_USER_SUBTYPES = frozenset({"reply", "interject"})
+
+
+def last_user_message(log: EventLog, *, step_name: str) -> str | None:
+    """The user's most recent reply or interjection inside this step's engagement.
+
+    A step_started naming a DIFFERENT step ends the engagement and drops the
+    candidate; the same step's step_started is the reincarnation re-entry the
+    message must span, so it keeps it. An allowlist, not `!= "intent"`: a future
+    synthetic user-role subtype must not be quotable back as the user's own words.
+    """
+    found: str | None = None
+    for e in log.read():
+        payload = e.get("payload") or {}
+        if e.get("type") == "step_started":
+            if payload.get("step") != step_name:
+                found = None
+        elif (e.get("type") == "user_message"
+                and payload.get("subtype") in _CARRIED_USER_SUBTYPES):
+            found = "".join(
+                b.get("text", "") for b in (payload.get("content") or [])
+                if isinstance(b, dict) and b.get("type") == "text")
+    return (found or "").strip() or None
 
 
 _SEED_OPENINGS = {
