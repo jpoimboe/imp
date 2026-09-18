@@ -25,6 +25,12 @@ sys.path.insert(0, str(_HERE))  # import the sibling scene modules by name
 import capture_imp_ui as cap  # noqa: E402
 
 from imp.cli import narrative as nv  # noqa: E402
+from imp.cli.render_summary import (  # noqa: E402
+    SummaryHeader,
+    build_summary,
+    render_summary,
+    summary_total,
+)
 from imp.cli.render_text import render_tree  # noqa: E402
 
 _REPO = _HERE.parent
@@ -37,6 +43,15 @@ WIDTH = 80
 # intent, imp's read-back of the design, the human's confirmation, the
 # twelve-criteria walk, finalize's close, and the merge.
 EXCERPT_RANGES = ((1, 3), (283, 286), (2684, 2684), (3144, 3156))
+
+# What this run's own `imp log --summary` header printed; the journal carries neither.
+WORKFLOW = "default"
+STATUS = "merged"
+
+# Line ranges over the 85-line ledger render: the threshold block, the spec
+# block's two review rounds, one whole plan+implement cycle, the converge and
+# integrate tail, and the total.
+LEDGER_RANGES = ((0, 3), (8, 29), (63, 67), (73, 83))
 
 
 def demo_events() -> list[dict[str, Any]]:
@@ -72,6 +87,29 @@ def excerpt_text(events: list[dict[str, Any]]) -> str:
         lines += narrative_lines(events, (first, last))
         previous = last
     return _fenced(f"imp log {QUEST}", lines)
+
+
+def ledger_lines(events: list[dict[str, Any]]) -> list[str]:
+    header = SummaryHeader(workflow=WORKFLOW, quest_id=QUEST, status=STATUS,
+                           total_seconds=summary_total(events))
+    return render_summary(build_summary(events), header=header,
+                          color=False, width=WIDTH)
+
+
+def ledger_text(events: list[dict[str, Any]]) -> str:
+    """An elided cut of the RENDERED ledger. Dropping StepRows before the render
+    would recompute the total off the survivors and understate the run's cost;
+    it would also drop the trailing list-price legend, which sits after the
+    total row that closes this block."""
+    full = ledger_lines(events)
+    lines: list[str] = []
+    previous = -1
+    for first, last in LEDGER_RANGES:
+        if previous >= 0:
+            lines.append(_elision(first - previous - 1, "rows"))
+        lines += full[first:last + 1]
+        previous = last
+    return _fenced(f"imp log {QUEST} --summary", lines)
 
 
 def transcript_text(events: list[dict[str, Any]]) -> str:
