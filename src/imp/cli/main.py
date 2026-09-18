@@ -3315,16 +3315,21 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     return picked
 
 
+def _history_by_disposition(control: Path, *, dispositions: set[str],
+                            live_ids: set[str] | None) -> list[_Row]:
+    """Archive-zone rows for the requested dispositions, newest-first."""
+    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
+    rows = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
+    return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
+
+
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: merged/done/abandoned, plus shelved rows under --all."""
-    rows = [r for r in _completed_rows(control, live_ids)
-            if r[1] in {"merged", "done", "abandoned", "shelved"}]
+    """History-block rows: merged/done, plus abandoned/shelved rows under --all."""
+    picked = {"merged", "done"}
     if show_all:
-        rows += _shelved_rows(control, live_ids)
-    else:
-        rows = [r for r in rows if r[1] in {"merged", "done"}]
-    return _sort_rows_newest_first(rows)
+        picked |= {"abandoned", "shelved"}
+    return _history_by_disposition(control, dispositions=picked, live_ids=live_ids)
 
 
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
