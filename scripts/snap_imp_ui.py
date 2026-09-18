@@ -98,37 +98,40 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
     render_screen(screen, str(out), scale=3, **th)
 
 
-def snap_stream_live(out: Path, *, limit: int, cols: int, rows: int) -> None:
+def snap_stream_live(out: Path, *, limit: int, cols: int, rows: int,
+                     theme: str = "dark") -> None:
     """Drive the stream-live scene on a REAL pty and paint the resulting screen:
     the only path that captures the live status bar, which needs a tty to draw."""
     from impty.session import TerminalSession
 
     argv = [sys.executable, str(_HERE / "capture_imp_ui.py"), "stream-live",
-            "--limit", str(limit), "--width", str(cols)]
+            "--limit", str(limit), "--width", str(cols), "--theme", theme]
     sess = TerminalSession(argv, cols=cols, rows=rows)
     try:
         code = sess.run_to_completion(hard=120)
         if code != 0:
             raise SystemExit(f"stream-live scene exited {code}:\n"
                              + "\n".join(sess.lines(limit=rows)))
-        th = _imp_theme("dark")   # the scene subprocess always paints the dark theme
+        th = _imp_theme(theme)
         th.pop("faint")           # a pty capture: pyte already resolved the SGR codes
         render_screen(sess.screen, str(out), scale=3, **th)
     finally:
         sess.close()
 
 
-def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
+def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int,
+                theme: str = "dark") -> None:
     from impty.session import TerminalSession
 
-    argv = [sys.executable, str(_HERE / "capture_imp_ui.py"), "prompt"]
+    argv = [sys.executable, str(_HERE / "capture_imp_ui.py"), "prompt",
+            "--theme", theme]
     sess = TerminalSession(argv, cols=cols, rows=rows)
     try:
         sess.wait_idle(idle=0.6, hard=15)
         if type_text:
             sess.send(type_text)
             sess.wait_idle(idle=0.5, hard=8)
-        th = _imp_theme("dark")          # the prompt scene runs the dark theme
+        th = _imp_theme(theme)
         th.pop("faint")                  # live capture, no SGR-2 rewrite needed
         render_screen(sess._screen, str(out), scale=3, **th)
     finally:
@@ -159,10 +162,11 @@ def main(argv: list[str] | None = None) -> int:
         import capture_imp_ui as cap
 
         snap_stream_live(out, limit=a.limit or cap.HERO_LIMIT,
-                         cols=a.cols or cap.HERO_WIDTH, rows=a.rows or HERO_ROWS)
+                         cols=a.cols or cap.HERO_WIDTH, rows=a.rows or HERO_ROWS,
+                         theme=a.theme)
     else:
         snap_prompt(out, type_text=a.type_text, cols=a.cols or 100,
-                    rows=a.rows or 16)
+                    rows=a.rows or 16, theme=a.theme)
 
     print(f"wrote {out}")
     if a.open_it:

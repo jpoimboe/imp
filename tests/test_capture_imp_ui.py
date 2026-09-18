@@ -127,6 +127,18 @@ def test_hero_frame_is_independent_of_the_wall_clock(monkeypatch) -> None:
             == frame_at(datetime(2031, 11, 30, 23, 59, 1, tzinfo=UTC)))
 
 
+def test_scene_stream_live_honors_theme(capsys) -> None:
+    from imp.cli import palette as pal
+
+    prior = pal.active_theme()
+    try:
+        capture_imp_ui.scene_stream_live(
+            journal=capture_imp_ui.DEMO_JOURNAL, limit=5, width=80, theme="light")
+        assert pal.active_theme() == "light"
+    finally:
+        pal.set_theme(prior)
+
+
 def test_stream_live_defaults_to_the_committed_journal(capsys) -> None:
     assert capture_imp_ui.main(["stream-live", "--limit", "40", "--width", "124"]) == 0
 

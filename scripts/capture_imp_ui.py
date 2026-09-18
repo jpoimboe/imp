@@ -141,14 +141,15 @@ def _pinned_status(stream: Any) -> Any:
 
 
 def replay_live(stream: Any, *, journal: Path = DEMO_JOURNAL,
-                limit: int = HERO_LIMIT, width: int = HERO_WIDTH) -> None:
+                limit: int = HERO_LIMIT, width: int = HERO_WIDTH,
+                theme: str = "dark") -> None:
     """Replay the first `limit` events to `stream` with LiveStatus active, so a
     tty keeps the transient footer on screen. Deterministic: see _pinned_clocks,
     _pinned_status, and the seeded status-phrase RNG."""
     from imp.cli import palette as pal
     from imp.cli.live_driver import LiveDriver
 
-    pal.set_theme("dark")
+    pal.set_theme(theme)
     events = shift_to_instant(journal_events(journal, limit), _PINNED_INSTANT)
     with _pinned_clocks(_PINNED_INSTANT, width):
         driver = LiveDriver(stream=stream, color=True, width=width,
@@ -188,20 +189,22 @@ def stream_text(*, color: bool, width: int, limit: int | None,
     return buf.getvalue()
 
 
-def scene_stream(*, color: bool, width: int, limit: int | None) -> None:
+def scene_stream(*, color: bool, width: int, limit: int | None,
+                 theme: str) -> None:
     """Replay the recorded journal through the real LiveDriver to stdout."""
-    sys.stdout.write(stream_text(color=color, width=width, limit=limit))
+    sys.stdout.write(stream_text(color=color, width=width, limit=limit, theme=theme))
     sys.stdout.flush()
 
 
-def scene_stream_live(*, journal: Path, limit: int, width: int) -> None:
+def scene_stream_live(*, journal: Path, limit: int, width: int,
+                      theme: str) -> None:
     """Replay a journal to REAL stdout, so a pty keeps the live status bar on
     screen — the frame the non-tty `stream` scene cannot produce."""
-    replay_live(sys.stdout, journal=journal, limit=limit, width=width)
+    replay_live(sys.stdout, journal=journal, limit=limit, width=width, theme=theme)
     sys.stdout.flush()
 
 
-def scene_prompt(*, color: bool) -> None:
+def scene_prompt(*, color: bool, theme: str) -> None:
     """Show the real interactive input field (the current blue-bg `> ` prompt).
 
     Blocks on prompt_toolkit input so a driver can snapshot the empty field,
@@ -209,7 +212,7 @@ def scene_prompt(*, color: bool) -> None:
     from imp.cli import palette as pal
     from imp.cli.prompt import Prompt
 
-    pal.set_theme("dark")   # mockup showcases the dark truecolor theme
+    pal.set_theme(theme)
 
     # Print a couple of lines of faux prior output so the prompt's separation
     # from preceding content is visible in the capture (matches real use, where
@@ -254,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="stream-live: journal to replay")
     ap.add_argument("--width", type=int, default=None, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
-    ap.add_argument("--theme", default="dark", help="splash: theme (dark/light/ansi)")
+    ap.add_argument("--theme", choices=("dark", "light", "ansi"), default="dark",
+                    help="color theme for all scenes")
     splash_choice = ap.add_mutually_exclusive_group()
     splash_choice.add_argument("--scene-index", type=int, default=0,
                                help="splash: index into splash.SCENES")
@@ -270,13 +274,14 @@ def main(argv: list[str] | None = None) -> int:
     if a.all_scenes and a.scene != "splash":
         ap.error("--all-scenes requires the splash scene")
     if a.scene == "stream":
-        scene_stream(color=a.color, width=a.width or 100, limit=a.limit)
+        scene_stream(color=a.color, width=a.width or 100, limit=a.limit,
+                     theme=a.theme)
     elif a.scene == "stream-live":
         scene_stream_live(journal=a.journal,
                           limit=a.limit if a.limit is not None else HERO_LIMIT,
-                          width=a.width or HERO_WIDTH)
+                          width=a.width or HERO_WIDTH, theme=a.theme)
     elif a.scene == "prompt":
-        scene_prompt(color=a.color)
+        scene_prompt(color=a.color, theme=a.theme)
     elif a.scene == "splash":
         scene_splash(color=a.color, width=a.width or 100, theme=a.theme,
                      index=a.scene_index, all_scenes=a.all_scenes)
