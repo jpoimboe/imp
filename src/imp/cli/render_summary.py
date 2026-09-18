@@ -250,7 +250,7 @@ def _fmt_tokens(total: int) -> str:
 
 
 LEGEND_METERED = "~ estimated at API list price"
-LEGEND_NOTIONAL = "[ ] list-price equivalent; subscription usage is not billed per token"
+LEGEND_NOTIONAL = "* theoretical API list price; actual subscription usage is much lower"
 LEGEND_FLOOR = "≥ excludes steps run on a model absent from the price table"
 
 
@@ -261,7 +261,7 @@ def cost_cell(u: RowUsage) -> str:
     if u.priced == 0:
         return "n/a"
     body = "<$0.01" if u.dollars < 0.01 else f"${u.dollars:.2f}"
-    marked = f"[{body}]" if u.notional else f"~{body}"
+    marked = f"{body}*" if u.notional else f"~{body}"
     return f"≥{marked}" if u.unpriced else marked
 
 
@@ -271,7 +271,7 @@ def legend_lines(cells: list[str]) -> list[str]:
     lines: list[str] = []
     if any(b.startswith("~") for b in bodies):
         lines.append(LEGEND_METERED)
-    if any(b.startswith("[") for b in bodies):
+    if any(b.endswith("*") for b in bodies):
         lines.append(LEGEND_NOTIONAL)
     if any(c.startswith("≥") for c in cells):
         lines.append(LEGEND_FLOOR)

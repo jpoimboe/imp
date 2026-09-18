@@ -657,11 +657,11 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     tilde = "~ estimated at API list price"
-    bracket = ("[ ] list-price equivalent;"
-               " subscription usage is not billed per token")
+    star = ("\\* theoretical API list price;"
+            " actual subscription usage is much lower")
     floor = "≥ excludes steps run on a model absent from the price table"
-    assert tilde in out and bracket in out
-    assert out.index(tilde) < out.index(bracket)
+    assert tilde in out and star in out
+    assert out.index(tilde) < out.index(star)
     assert floor not in out                      # no unpriced model here
 
 
@@ -697,10 +697,12 @@ def test_summary_markdown_prices_a_vendor_less_claude_row():
     lines = out.split("\n")
     step_line = next(ln for ln in lines if ln.startswith("| reviewer |"))
     total_line = next(ln for ln in lines if ln.startswith("| total |"))
-    assert step_line.endswith("| [$0.20] |")
-    assert total_line.endswith("| [$0.20] |")
-    assert ("[ ] list-price equivalent; subscription usage is not billed"
-            " per token") in out
+    assert step_line.endswith("| $0.20* |")
+    assert total_line.endswith("| $0.20* |")
+    legend = ("\\* theoretical API list price; actual subscription usage is"
+              " much lower")
+    assert out.rstrip("\n").endswith(legend)
+    assert lines.index(total_line) < lines.index(legend)
 
 
 def test_summary_markdown_with_no_steps_keeps_the_time_and_drops_the_legend():

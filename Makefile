@@ -163,10 +163,6 @@ snap-ui: require-venv ## Render the full run-journal fixture to a PNG and open i
 snap-ui-light: require-venv ## Same as snap-ui but the light theme on a near-white surface.
 	$(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
 
-.PHONY: docs-assets
-docs-assets: require-venv ## Regenerate the README's run evidence from docs/examples/samo71.jsonl.gz.
-	$(PYTHON) scripts/gen_docs_assets.py
-
 # ── private helpers ─────────────────────────────────────────────────────────
 
 # Inline shell snippet: ensure ANTHROPIC_API_KEY is set in the current
