@@ -9,17 +9,21 @@ the input field. A driver (scripts/snap_imp_ui.py or impty) spawns this, lets
 it settle, and snapshots the rendered screen with impty.render.
 
 No agent, no billing, no repo mutation: streaming scenes replay a *recorded*
-event journal (tests/fixtures/cc_open_by_asking_full.jsonl.gz). This exists to
-iterate on imp's *look*, not its behavior.
+event journal (`stream` replays tests/fixtures/cc_open_by_asking_full.jsonl.gz;
+`stream-live` replays docs/examples/samo71.jsonl.gz). This exists to iterate on
+imp's *look*, not its behavior.
 
 Usage (run from repo root):
     python scripts/capture_imp_ui.py prompt              # interactive input field
     python scripts/capture_imp_ui.py stream [--limit N]  # replay first N events
+    python scripts/capture_imp_ui.py stream-live --limit 930 --width 124
     python scripts/capture_imp_ui.py splash --all-scenes # render the splash pool
     python scripts/capture_imp_ui.py --list
 
 Scenes that wait for input (prompt) block until driven; replay scenes print and
-exit. `--color/--no-color` toggles ANSI (default: on).
+exit. `--color/--no-color` toggles ANSI (default: on). `stream-live` replays
+docs/examples/samo71.jsonl.gz on a tty with the status bar live, always in color
+(`--no-color` does not apply to it), and leaves the final footer on screen.
 """
 
 from __future__ import annotations
@@ -190,6 +194,13 @@ def scene_stream(*, color: bool, width: int, limit: int | None) -> None:
     sys.stdout.flush()
 
 
+def scene_stream_live(*, journal: Path, limit: int, width: int) -> None:
+    """Replay a journal to REAL stdout, so a pty keeps the live status bar on
+    screen — the frame the non-tty `stream` scene cannot produce."""
+    replay_live(sys.stdout, journal=journal, limit=limit, width=width)
+    sys.stdout.flush()
+
+
 def scene_prompt(*, color: bool) -> None:
     """Show the real interactive input field (the current blue-bg `> ` prompt).
 
@@ -228,7 +239,9 @@ def scene_splash(*, color: bool, width: int, theme: str = "dark",
     sys.stdout.flush()
 
 
-_SCENES = {"stream": "replay recorded journal", "prompt": "interactive input field",
+_SCENES = {"stream": "replay recorded journal",
+           "stream-live": "replay the demo journal on a pty, status bar live",
+           "prompt": "interactive input field",
            "splash": "startup splash scene"}
 
 
@@ -237,7 +250,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("scene", nargs="?", choices=list(_SCENES))
     ap.add_argument("--list", action="store_true", help="list scenes and exit")
     ap.add_argument("--limit", type=int, default=None, help="stream: first N events")
-    ap.add_argument("--width", type=int, default=100, help="render width (cols)")
+    ap.add_argument("--journal", type=Path, default=_DEMO_JOURNAL,
+                    help="stream-live: journal to replay")
+    ap.add_argument("--width", type=int, default=None, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
     ap.add_argument("--theme", default="dark", help="splash: theme (dark/light/ansi)")
     splash_choice = ap.add_mutually_exclusive_group()
@@ -250,16 +265,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.list or not a.scene:
         for name, desc in _SCENES.items():
-            print(f"  {name:8s} {desc}")
+            print(f"  {name:11s} {desc}")
         return 0
     if a.all_scenes and a.scene != "splash":
         ap.error("--all-scenes requires the splash scene")
     if a.scene == "stream":
-        scene_stream(color=a.color, width=a.width, limit=a.limit)
+        scene_stream(color=a.color, width=a.width or 100, limit=a.limit)
+    elif a.scene == "stream-live":
+        scene_stream_live(journal=a.journal,
+                          limit=a.limit if a.limit is not None else HERO_LIMIT,
+                          width=a.width or HERO_WIDTH)
     elif a.scene == "prompt":
         scene_prompt(color=a.color)
     elif a.scene == "splash":
-        scene_splash(color=a.color, width=a.width, theme=a.theme,
+        scene_splash(color=a.color, width=a.width or 100, theme=a.theme,
                      index=a.scene_index, all_scenes=a.all_scenes)
     return 0
 

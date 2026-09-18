@@ -125,3 +125,11 @@ def test_hero_frame_is_independent_of_the_wall_clock(monkeypatch) -> None:
 
     assert (frame_at(datetime(2026, 3, 4, 11, 7, 13, tzinfo=UTC))
             == frame_at(datetime(2031, 11, 30, 23, 59, 1, tzinfo=UTC)))
+
+
+def test_stream_live_defaults_to_the_committed_journal(capsys) -> None:
+    assert capture_imp_ui.main(["stream-live", "--limit", "40", "--width", "124"]) == 0
+
+    out = capsys.readouterr().out
+    assert "add a --json flag to imp list" in out
+    assert "loading skill imp-knowledge" in out
