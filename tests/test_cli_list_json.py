@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import io
 import json
+import sys
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import imp.cli.main as m
+from imp.cli.main import _build_parser, _cmd_list, main
 from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
@@ -175,3 +181,160 @@ def test_board_json_unnamed_archived_entry_carries_its_intent_and_omits_step(
                   "then wire it through the config so a restart keeps the tally",
         "status": "abandoned", "created": "2026-06-01T00:00:00+00:00",
         "last_activity": "2026-06-07T00:00:00+00:00"}]
+
+
+def _seed_board(control: Path) -> None:
+    """One in-flight quest, one backlog item, one quest per archive disposition."""
+    _seed_inflight(control, "live01", created="2026-06-01T00:00:00+00:00",
+                   started="2026-06-01T00:00:00+00:00")
+    Quest.create_draft(control, title="Add OAuth", quest_id="idea03",
+                       base_branch="main", origin="idea",
+                       seed_opening="Add OAuth\nwire it up")
+    _archive_status(control, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(control, "abnd06", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
+    _archive_status(control, "shlv07", "shelved", last_ts="2026-06-08T00:00:00+00:00")
+
+
+def _run(control: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str:
+    """Run `imp <argv>` against `control` as the control root; return stdout."""
+    monkeypatch.setattr(m, "_control_root", lambda: control)
+    monkeypatch.setenv("NO_COLOR", "1")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert main(argv) == 0
+    return buf.getvalue()
+
+
+def _text_ids(out: str) -> set[str]:
+    """Quest ids on the printed board: the `ID` header and zone labels aside."""
+    ids: set[str] = set()
+    for ln in out.splitlines():
+        if not ln or not ln[0].isalnum():
+            continue
+        head = ln.split()[0]
+        if head == "ID" or head.endswith(":"):
+            continue
+        ids.add(head)
+    return ids
+
+
+def test_list_json_flag_parses_and_help_names_it(
+        capsys: pytest.CaptureFixture[str]) -> None:
+    assert _build_parser().parse_args(["list", "--json"]).json is True
+    assert _build_parser().parse_args(["list"]).json is False
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["list", "--help"])
+    # argparse reflows help to the terminal width; normalize whitespace so the
+    # assertion does not depend on where it wraps.
+    flat = " ".join(capsys.readouterr().out.split())
+    assert "Emit the quest board as a structured JSON array." in flat
+
+
+def test_list_json_emits_the_board_in_display_order(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    data = json.loads(_run(tmp_path, monkeypatch, ["list", "--json"]))
+    assert [(e["id"], e["zone"]) for e in data] == [
+        ("live01", "active"), ("idea03", "backlog"), ("mrgd05", "archive")]
+
+
+def test_list_json_backlog_filter_matches_the_text_board(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    data = json.loads(_run(tmp_path, monkeypatch, ["list", "--json", "--backlog"]))
+    text = _run(tmp_path, monkeypatch, ["list", "--backlog"])
+    assert {e["zone"] for e in data} == {"backlog"}
+    assert {e["id"] for e in data} == _text_ids(text) == {"idea03"}
+
+
+def test_list_json_all_adds_abandoned_and_shelved(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    every = json.loads(_run(tmp_path, monkeypatch, ["list", "--json", "--all"]))
+    plain = json.loads(_run(tmp_path, monkeypatch, ["list", "--json"]))
+    text = _run(tmp_path, monkeypatch, ["list", "--all"])
+    assert {e["id"] for e in every} == _text_ids(text)
+    assert {e["id"] for e in every} - {e["id"] for e in plain} == {"abnd06", "shlv07"}
+    assert [e["status"] for e in every if e["id"] == "abnd06"] == ["abandoned"]
+
+
+def test_list_json_since_drops_rows_older_than_the_cutoff(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only the backlog draft is created during this run; every archived row and
+    # the in-flight home are stamped 2026-06, always more than a day old.
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    data = json.loads(_run(tmp_path, monkeypatch, ["list", "--json", "--since", "1d"]))
+    text = _run(tmp_path, monkeypatch, ["list", "--since", "1d"])
+    assert {e["id"] for e in data} == _text_ids(text) == {"idea03"}
+
+
+def test_list_json_emits_an_empty_array_for_an_empty_board(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    assert _run(tmp_path, monkeypatch, ["list", "--json"]) == "[]\n"
+    assert _run(tmp_path, monkeypatch, ["list"]) == m._NO_QUESTS_MESSAGE + "\n"
+
+
+def test_list_json_emits_an_empty_array_when_no_row_matches(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    assert _run(tmp_path, monkeypatch, ["list", "--json", "--abandoned"]) == "[]\n"
+    assert _run(tmp_path, monkeypatch, ["list", "--abandoned"]) == \
+        m._NO_FILTER_MATCH_MESSAGE + "\n"
+
+
+def test_list_json_bad_since_keeps_the_usage_error_and_exit_two(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        _cmd_list(_build_parser().parse_args(
+            ["list", "--json", "--since", "banana"]))
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "imp: --since expects 'today' or a number with a unit — "
+        "h/d/w/m/y (e.g. 2d, 1w, 3m).\n")
+
+
+def test_list_json_carries_no_ansi_escape_when_color_is_on(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *_: True)
+    data = _run(tmp_path, monkeypatch, ["list", "--json"])
+    assert "\x1b[" not in data
+    assert json.loads(data)[0]["id"] == "live01"
+    assert "\x1b[" in _run(tmp_path, monkeypatch, ["list"])  # text board does colorize
+
+
+def test_list_json_emits_the_array_with_and_without_no_pager(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    piped = _run(tmp_path, monkeypatch, ["list", "--json"])
+    unpaged = _run(tmp_path, monkeypatch, ["list", "--json", "--no-pager"])
+    assert json.loads(piped) == json.loads(unpaged)
+    assert piped.startswith("[\n") and piped.endswith("]\n")
+
+
+def test_list_json_adds_no_trailing_blank_line_on_a_tty(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert main(["list", "--json", "--no-pager"]) == 0
+    out = capsys.readouterr().out
+    assert out.endswith("]\n")
+    assert not out.endswith("\n\n")
+    assert "\x1b[" not in out

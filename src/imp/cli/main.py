@@ -2094,6 +2094,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
     color = should_use_color(sys.stdout)
     dispositions = _selected_list_dispositions(args)
     if not dispositions and args.since is None:
+        if args.json:
+            _page_or_print(
+                json.dumps(_board_json(
+                    control, dispositions=_board_dispositions(show_all=args.all),
+                    cutoff=None), indent=2).splitlines(),
+                no_pager=args.no_pager)
+            return 0
         lines = _overview_lines(control, show_all=args.all, now=now, color=color,
                                 name_cap=quest_row.NAME_CAP)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -2104,6 +2111,12 @@ def _cmd_list(args: argparse.Namespace) -> int:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
     selected = dispositions or set(_DEFAULT_LIST_DISPOSITIONS)
+    if args.json:
+        _page_or_print(
+            json.dumps(_board_json(control, dispositions=selected, cutoff=cutoff),
+                       indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -3300,6 +3313,14 @@ def _since_cutoff(spec: str, now: datetime) -> datetime:
 _DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "merged", "done"})
 
 
+def _board_dispositions(*, show_all: bool) -> set[str]:
+    """The unfiltered board's zones: the defaults, plus abandoned/shelved under --all."""
+    picked = set(_DEFAULT_LIST_DISPOSITIONS)
+    if show_all:
+        picked |= {"abandoned", "shelved"}
+    return picked
+
+
 def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     """Union of the disposition tokens selected by the `imp list` flags."""
     picked: set[str] = set()
@@ -3391,10 +3412,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    dispositions = set(_DEFAULT_LIST_DISPOSITIONS)
-    if show_all:
-        dispositions |= {"abandoned", "shelved"}
-    rows = _overview_rows(control, dispositions=dispositions, cutoff=None)
+    rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
+                          cutoff=None)
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
@@ -4388,6 +4407,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--since", metavar="SPEC", default=None,
         help="Show only quests active since SPEC — today, yesterday, this-week, "
              "this-month, or a number + unit h/d/w/m/y (e.g. 2d, 1w).")
+    p_list.add_argument(
+        "--json", action="store_true",
+        help="Emit the quest board as a structured JSON array.")
     p_list.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
