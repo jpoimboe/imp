@@ -25,9 +25,13 @@ customized or replaced with a completely different workflow.
 **Human effort is concentrated up front** at the beginning of the quest, during
 an interview with the "threshold" agent.  Once it has picked your brain
 sufficiently, it runs unattended from spec, plan, code, test, review, all the
-way through merge, so you're free to step away.  Or kick off another quest for
-the same project in parallel, as imp runs in **resumable, isolated git
-worktrees.**
+way through merge, so you're free to step away from the computer.  Or kick off
+another quest for the same project in parallel, as imp runs in **resumable,
+isolated git worktrees.**
+
+All agent-made judgment calls are raised as open items to the user at the merge
+gate, where the human can approve, send back for rework, or open a followup
+quest for further improvements.
 
 Imp's uses **fresh LLM context and independent reviewers** so each agent can
 focus on its given task, avoiding long sessions where agents get increasingly
@@ -35,10 +39,6 @@ confused.  Detailed specs, implementation plans, and progress files carry
 decisions between steps.  Tests are written before code (TDD), every artifact
 is independently reviewed in multiple rounds if needed, and the final code is
 checked against acceptance criteria before merge.
-
-All agent-made judgment calls are raised as open items to the user at the merge
-gate, where **the human can approve, send back for rework, or open a followup
-quest** for further improvements.
 
 **Bugs are rooted out early.**  Generally with AI development, most bugs tend
 to originate early during the spec or planning phase, due to gaps,
