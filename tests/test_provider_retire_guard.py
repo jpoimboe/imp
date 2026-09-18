@@ -30,6 +30,12 @@ def anyio_backend() -> str:
 
 _SWITCH_SENTENCE = "was switched at the user's request"
 
+_LAST_REPLY = "Two questions: does the daemon retry, and where does it log?"
+
+_USER_OPEN = "--- THE USER'S MOST RECENT MESSAGE (verbatim) ---"
+
+_USER_CLOSE = "--- END OF THE USER'S MOST RECENT MESSAGE ---"
+
 
 def _tdir(quest: Quest) -> Path:
     return quest.quest_dir / "steps" / "only" / "w"
@@ -149,6 +155,29 @@ async def test_a_foreign_session_a_resume_would_replay_is_retired(
     # AC 12(c): the seed is built and delivered in memory — State gains no slot
     # that could be left set and re-seed a later step.
     assert _SWITCH_SENTENCE not in snap["state_json"]
+
+
+@pytest.mark.anyio
+async def test_the_retirement_seed_quotes_the_users_last_reply(
+    tmp_path: Path, provider_registry,
+) -> None:
+    # AC 8: the retirement seed carries no note, so without the user's words the
+    # reborn session inherits nothing but a pointer to `imp events`.
+    quest = _seed_single_agent(tmp_path)
+    _seed_transcript(quest, "codex", body="from the other vendor")
+    quest.event_log().append_user_message(
+        agent_id="step:only/w",
+        message=Message(role="user", content=(TextBlock(text=_LAST_REPLY),)),
+        subtype="reply")
+    _arm_resume(quest)
+    seen: list[dict[str, Any]] = []
+    _register(provider_registry, quest, seen)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    first = seen[0]["first_message"]
+    assert _SWITCH_SENTENCE in first
+    assert f"{_USER_OPEN}\n\n{_LAST_REPLY}\n\n{_USER_CLOSE}" in first
 
 
 @pytest.mark.anyio

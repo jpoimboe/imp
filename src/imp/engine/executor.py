@@ -77,6 +77,7 @@ from imp.engine.provider_pin import provider_pending
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import (
     handoff_path_for,
+    last_user_message,
     read_session_owner,
     reincarnation_seed,
     session_has_resume_state,
@@ -1637,6 +1638,7 @@ def _retire_foreign_session(
         return None
     seed = reincarnation_seed(
         handoff_text=None, quest_id=quest.id, step_name=step.name,
+        last_user_text=last_user_message(log, step_name=step.name),
         cause="provider_switch")
     stash = stash_session(session_dir)
     assert stash is not None      # both limbs require resume state
@@ -1921,7 +1923,8 @@ async def _route_agent(
             _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
             seed = reincarnation_seed(
                 handoff_text=handoff_text, quest_id=quest.id,
-                step_name=step.name)
+                step_name=step.name,
+                last_user_text=last_user_message(log, step_name=step.name))
             _reconcile_provider(quest, state, workflow, on_event)
             return await _route_agent(
                 step, workflow, quest, state, log,
@@ -1952,8 +1955,9 @@ async def _route_agent(
         stash_session(session_dir)
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
-        seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
-                                  step_name=step.name)
+        seed = reincarnation_seed(
+            handoff_text=None, quest_id=quest.id, step_name=step.name,
+            last_user_text=last_user_message(log, step_name=step.name))
         _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(
             step, workflow, quest, state, log,
