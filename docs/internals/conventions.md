@@ -56,6 +56,15 @@ appearance without a live run (its human companion is `scripts/snap_imp_ui.py`).
 This is the imp-specific home for that knowledge; the project-agnostic manual for
 driving *any* terminal program is the `imp-driving-terminal-uis` skill. Its web
 sibling — rendering and driving a page in a browser — is `imp-driving-web-uis`.
+`make docs-assets` replays the committed demo journal
+(`docs/examples/samo71.jsonl.gz`) through those same renderers to regenerate the
+README's evidence — the hero PNG and the transcript, excerpt and ledger blocks
+under `docs/examples/` — then splices the excerpt and the ledger into README.md
+between its `<!-- docs-assets:… -->` markers, so none of those blocks is ever
+hand-edited. The three text assets are machine-independent and pinned by
+`test_committed_assets_match_a_fresh_render`; the hero PNG's pixels come from
+fontconfig-resolved system fonts, so regenerating on a different machine
+rewrites it silently with nothing flagging the change.
 
 ## Trailing output spacing
 

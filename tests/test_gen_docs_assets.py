@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from scripts import capture_imp_ui
+from scripts import gen_docs_assets as gen
+from tests._event_fixtures import _TTY
+
+_EVENTS = gen.demo_events()
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _readme() -> str:
+    return gen.README.read_text(encoding="utf-8")
+
+
+def test_excerpt_carries_the_run_s_beats_in_order() -> None:
+    text = gen.excerpt_text(_EVENTS)
+
+    beats = [
+        "$ imp log samo71",
+        "> add a --json flag to imp list",
+        "  … 279 events elided …",
+        "• Settled, then. To read it back in one piece before I set it up:",
+        "> ok",
+        "  … 2,397 events elided …",
+        "• I walked all twelve acceptance criteria clause by clause against the committed",
+        "  … 459 events elided …",
+        "  Open items. None. All three recorded followups were resolved during the run",
+        "Merged samo71 into master.",
+    ]
+    positions = [text.index(beat) for beat in beats]
+
+    assert positions == sorted(positions)
+
+
+def test_excerpt_selection_excludes_the_two_width_independent_wide_rows() -> None:
+    lines = gen.excerpt_text(_EVENTS).splitlines()
+
+    assert max(len(line) for line in lines) <= 80
+    # Both 81-column rows are plan 2's review steps, inside the elided stretch.
+    assert not [line for line in lines if "reviewing plan · complete" in line]
+
+
+def test_transcript_is_the_whole_run_and_keeps_its_two_wide_rows() -> None:
+    body = (gen.transcript_text(_EVENTS)
+            .split("```console\n")[1].removesuffix("```\n").splitlines())
+
+    assert body[0] == "$ imp log samo71"
+    assert body[1] == "> add a --json flag to imp list"
+    assert body[-1] == "Merged samo71 into master."
+    assert len(body) == 1553          # the command line plus 1552 rendered lines
+    # A linked docs file, not a README block: the 80-column rule does not apply.
+    assert len([line for line in body if len(line) > 80]) == 2
+
+
+def test_ledger_cut_elides_the_middle_and_ends_on_the_run_s_real_total() -> None:
+    lines = gen.ledger_text(_EVENTS).splitlines()
+    body = lines[2:-1]                      # inside the fence, past the command line
+
+    assert lines[1] == "$ imp log samo71 --summary"
+    assert len(body) <= 45                  # the full render is 85 rows
+    assert body[0] == "default  ·  samo71  ·  merged"
+    assert "  … 33 rows elided …" in body
+    # The total is the WHOLE run's, not the surviving rows': 2h 6m / 28.0M / $42.20.
+    assert body[-1] == (
+        "  total                                 2h 6m   28.0M  531.1k  [$42.20]")
+    assert max(len(line) for line in body) <= 80
+
+
+def test_ledger_cut_keeps_the_first_cycle_s_coder_reviewer_pairs() -> None:
+    body = gen.ledger_text(_EVENTS).splitlines()
+
+    assert sum(1 for line in body if "↳ coder (writing code)" in line) == 3
+    assert sum(1 for line in body if "↳ code-reviewer (reviewing code)" in line) == 3
+    # The hero frame's `↳ coder · 47s` is this row's own timing (AC 7b).
+    assert ("    ↳ coder (writing code)                47s  149.6k    2.9k   [$0.19]"
+            in body)
+
+
+def test_width_guard_fails_the_build_on_an_over_wide_block() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        gen.check_width("probe.md", "fits\n" + "x" * 81 + "\n")
+
+    assert excinfo.value.code
+    assert "81" in str(excinfo.value)
+
+
+def test_generated_assets_are_plain_terminal_text() -> None:
+    blob = "".join(gen.text_assets(_EVENTS).values())
+
+    assert "\x1b" not in blob
+    assert "<details>" not in blob
+    assert "quota_reading" not in blob
+    assert "token_refresh" not in blob
+    assert not [line for line in blob.splitlines()
+                if re.fullmatch(r"\s*\|.*\|\s*", line)]
+
+
+def test_no_elapsed_reading_exceeds_the_run_s_work_time() -> None:
+    blob = "".join(gen.text_assets(_EVENTS).values())
+
+    readings = [(int(h), int(m)) for h, m in re.findall(r"\b(\d+)h (\d+)m\b", blob)]
+
+    assert readings                                  # the total row reads 2h 6m
+    assert all(hours * 60 + minutes <= 126 for hours, minutes in readings)
+
+
+def test_write_text_assets_replaces_the_three_named_assets_in_place(tmp_path: Path) -> None:
+    first = {p.name: p.read_bytes() for p in gen.write_text_assets(_EVENTS, tmp_path)}
+    second = {p.name: p.read_bytes() for p in gen.write_text_assets(_EVENTS, tmp_path)}
+
+    assert sorted(first) == ["samo71-excerpt.md", "samo71-ledger.md", "samo71.md"]
+    assert first == second
+
+
+def test_committed_assets_match_a_fresh_render(tmp_path: Path) -> None:
+    for fresh in gen.write_text_assets(_EVENTS, tmp_path):
+        committed = gen.DOCS / "examples" / fresh.name
+        assert committed.read_text(encoding="utf-8") == fresh.read_text(
+            encoding="utf-8"), f"{committed} is stale; run `make docs-assets`"
+
+
+def test_hero_png_is_committed() -> None:
+    assert gen.HERO_PNG.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+_MARKED = ("intro\n\n"
+           "<!-- docs-assets:ledger -->\n"
+           "stale\n"
+           "<!-- /docs-assets:ledger -->\n\n"
+           "outro\n")
+
+
+def test_splice_replaces_only_what_the_markers_enclose() -> None:
+    out = gen.splice_block(_MARKED, "ledger", "```console\nfresh\n```\n")
+
+    assert out == ("intro\n\n"
+                   "<!-- docs-assets:ledger -->\n"
+                   "```console\nfresh\n```\n"
+                   "<!-- /docs-assets:ledger -->\n\n"
+                   "outro\n")
+
+
+def test_splicing_the_same_block_twice_changes_nothing() -> None:
+    once = gen.splice_block(_MARKED, "ledger", "fresh\n")
+
+    assert gen.splice_block(once, "ledger", "fresh\n") == once
+
+
+def test_splice_fails_the_build_when_the_closing_marker_is_missing() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        gen.splice_block("intro\n<!-- docs-assets:ledger -->\nstale\n",
+                         "ledger", "fresh\n")
+
+    assert "docs-assets:ledger" in str(excinfo.value)
+
+
+def test_splice_readme_fills_both_blocks_from_the_journal(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    readme.write_text("# t\n\n"
+                      "<!-- docs-assets:excerpt -->\n<!-- /docs-assets:excerpt -->\n\n"
+                      "<!-- docs-assets:ledger -->\n<!-- /docs-assets:ledger -->\n",
+                      encoding="utf-8")
+
+    gen.splice_readme(_EVENTS, readme)
+
+    text = readme.read_text(encoding="utf-8")
+    assert "$ imp log samo71\n> add a --json flag to imp list" in text
+    assert "$ imp log samo71 --summary" in text
+    assert ("  total                                 2h 6m   28.0M  531.1k  [$42.20]"
+            in text)
+    assert text.count("```console") == 2
+
+
+def test_readme_leads_with_the_hero_frame_then_the_evidence() -> None:
+    lines = _readme().splitlines()
+
+    order = [next(i for i, line in enumerate(lines) if line.startswith(anchor))
+             for anchor in ("![license]",
+                            '  <img src="docs/images/hero-run.png"',
+                            "imp is currently Linux-only.",
+                            "## See it work",
+                            "## A quest leaves a trail",
+                            "## Try it",
+                            "## Features")]
+
+    assert order == sorted(order)
+
+
+def test_readme_caption_counts_what_the_captured_frame_renders() -> None:
+    out = _TTY()
+
+    capture_imp_ui.replay_live(out)
+
+    assert "plan 1/3 · task 1/3" in _ANSI.sub("", out.getvalue())
+    assert ("<em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> "
+            "subagent working under a context budget.</em>") in _readme()
+
+
+def test_readme_links_the_full_run_and_drops_the_typo() -> None:
+    text = _readme()
+
+    assert "[`docs/examples/samo71.md`](docs/examples/samo71.md)" in text
+    assert "Imp's uses" not in text
+    assert "imp uses **fresh LLM context and independent reviewers**" in text
+
+
+def test_no_fenced_readme_block_exceeds_eighty_columns() -> None:
+    inside, fenced, over = False, 0, []
+    for line in _readme().splitlines():
+        if line.startswith("```"):
+            inside = not inside
+            continue
+        fenced += inside
+        if inside and len(line) > gen.WIDTH:
+            over.append(f"{len(line)}: {line}")
+
+    assert not inside                    # every fence closes
+    assert fenced > 150                  # the spliced blocks are in there
+    assert over == []
+
+
+def test_readme_blocks_are_a_fresh_splice_of_the_generated_assets(
+        tmp_path: Path) -> None:
+    committed = _readme()
+    copy = tmp_path / "README.md"
+    copy.write_text(committed, encoding="utf-8")
+
+    gen.splice_readme(_EVENTS, copy)
+
+    assert copy.read_text(encoding="utf-8") == committed, (
+        "README blocks are stale; run `make docs-assets`")
+
+
+def test_readme_evidence_section_claims_no_gate_this_run_did_not_have() -> None:
+    span = _readme().split("## See it work\n")[1].split("\n## ")[0]
+    prose = "".join(span.split("```")[::2]).lower()   # outside the fenced blocks
+
+    assert "everything below is a real run" in prose
+    assert [claim for claim in ("gate", "approv", "open item") if claim in prose] == []
+
+
+_SAMPLE_QUESTS = {"fego87", "jara67", "timo83", "jiro48", "samo71", "gepa93",
+                  "sobi11", "vuka12", "fesa14", "gevu23"}
+
+
+def test_the_static_samples_follow_the_curation_rules() -> None:
+    text = _readme()
+    board = text.split("```console\n$ imp list\n")[1].split("```")[0]
+    search = text.split('```console\n$ imp search "merge queue"\n')[1].split("```")[0]
+
+    assert "followup" not in board
+    assert "backlog:" in board and "completed:" in board
+    assert set(re.findall(r"^(\w{6})[ ·]", board + search, re.M)) == _SAMPLE_QUESTS
