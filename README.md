@@ -57,6 +57,15 @@ changes can trigger test failures.  But LLMs have no problem dealing with that,
 so TDD seems to be a good fit for preventing regressions with AI-native
 development.
 
+Note the default workflow can be a bit token-intensive due to the extra
+thinking involved with detailed specs, plans, and multiple rounds of
+independent review.  Quality, maintainable, functional, well-tested code isn't
+cheap.  **Claude Max (or ChatGPT Pro) subscription recommended for the default
+workflow.**  Local models are not (yet) supported.  Pull requests welcome :-)
+
+For a lighter weight approach, custom workflows can be created, while still
+taking advantage of imp's useful [engine features](#engine-features).
+
 imp is currently Linux-only.  Support for macOS is planned.
 
 ## Example
@@ -69,16 +78,7 @@ imp is currently Linux-only.  Support for macOS is planned.
   <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
 </p>
 
-Note the default workflow can be a bit token-intensive due to the extra
-thinking involved with detailed specs, plans, and multiple rounds of
-independent review.  Quality, maintainable, functional, well-tested code isn't
-cheap.  **Claude Max (or ChatGPT Pro) subscription recommended for the default
-workflow.**  Local models are not (yet) supported.  Pull requests welcome :-)
-
-For a lighter weight approach, custom workflows can be created, while still
-taking advantage of imp's useful [engine features](#engine-features).
-
-Here's an example run, adding a --json flag to `imp list`:
+Here's an example of running imp on itself, adding a --json flag to `imp list`:
 
 <!-- docs-assets:excerpt -->
 ```console
