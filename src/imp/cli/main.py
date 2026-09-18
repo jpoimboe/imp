@@ -3461,6 +3461,44 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                           color=color, name_cap=quest_row.NAME_CAP)
 
 
+def _board_entry_json(r: _Row, *, zone: Literal["active", "backlog", "archive"],
+                      status: str, intent: str | None) -> dict[str, Any]:
+    """One board entry's always-present keys. `status` is a parameter because a
+    backlog row's slot 1 holds its origin word, not a status."""
+    title = r[4].strip()
+    return {
+        "id": r[0],
+        "zone": zone,
+        "title": title or None,
+        "intent": None if title else intent,
+        "status": status,
+        "created": r[5] or None,
+        "last_activity": r[3] or None,
+    }
+
+
+def _board_json(control: Path, *, dispositions: set[str],
+                cutoff: datetime | None) -> list[dict[str, Any]]:
+    """The board as JSON entries in display order: in-flight, backlog, archive."""
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=cutoff)
+    entries: list[dict[str, Any]] = []
+    for r in rows.inflight:
+        entry = _board_entry_json(r, zone="active", status=r[1],
+                                  intent=rows.intents.get(r[0]))
+        if r[2] not in ("", "-"):
+            entry["step"] = {"phase": r[7] or None, "name": r[6] or r[2]}
+        entries.append(entry)
+    for r in rows.backlog:
+        entry = _board_entry_json(r, zone="backlog", status="backlog", intent=None)
+        entry["provenance"] = r[1]
+        entry["readiness"] = "blocked" if r[2] == "blocked" else "ready"
+        entries.append(entry)
+    for r in rows.history:
+        entries.append(_board_entry_json(r, zone="archive", status=r[1],
+                                         intent=rows.intents.get(r[0])))
+    return entries
+
+
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     from imp.engine import worktree
     try:
