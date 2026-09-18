@@ -74,7 +74,7 @@ def shift_to_instant(events: list[dict], instant: datetime) -> list[dict]:
     exactly on `instant`: a driver measuring these stamps against a pinned clock
     then renders each block's real age instead of its age against today."""
     delta = instant - datetime.fromisoformat(events[-1]["timestamp"])
-    seconds = int(delta.total_seconds())
+    seconds = round(delta.total_seconds())
     shifted: list[dict] = []
     for event in events:
         moved = dict(event)

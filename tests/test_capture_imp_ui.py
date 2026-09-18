@@ -64,7 +64,7 @@ def test_shift_lands_the_last_event_on_the_pinned_instant() -> None:
 def test_shift_moves_quota_reset_epochs_by_the_same_delta() -> None:
     events = capture_imp_ui.journal_events(capture_imp_ui.DEMO_JOURNAL, 40)
     instant = datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
-    delta = int((instant - datetime.fromisoformat(
+    delta = round((instant - datetime.fromisoformat(
         events[-1]["timestamp"])).total_seconds())
     source = next(e for e in events if e["type"] == "quota_reading")
 
