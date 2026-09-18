@@ -3983,6 +3983,13 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     assert cap_event["payload"]["action"]["verb"] == "pause"
 
 
+_LAST_REPLY = "Two questions: does the daemon retry, and where does it log?"
+
+_USER_OPEN = "--- THE USER'S MOST RECENT MESSAGE (verbatim) ---"
+
+_USER_CLOSE = "--- END OF THE USER'S MOST RECENT MESSAGE ---"
+
+
 @pytest.mark.anyio
 async def test_reborn_first_user_message_ends_with_the_inlined_handoff_note(tmp_path):
     """AC 1 and 5: the note reaches the reborn session VERBATIM, in the first
@@ -4036,6 +4043,115 @@ async def test_reborn_first_user_message_ends_with_the_inlined_handoff_note(tmp_
             "(verbatim, to end of message) ---") in msg
     assert msg.endswith(note)          # the note itself is last
     assert "/steps/" not in msg
+
+
+@pytest.mark.anyio
+async def test_reborn_handoff_message_quotes_the_users_last_reply(tmp_path):
+    """AC 6: a reply journaled during the step reaches the reborn session between
+    the markers, ahead of the note — the rone10 failure the quest exists to fix."""
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.providers import resolve
+
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    note = "# Handoff\nRemains: answer the user\n"
+
+    sink: list[AgentInvocation] = []
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
+            _persist_initial(invocation)
+            if len(sink) == 1:
+                invocation.event_log.append_user_message(
+                    agent_id=invocation.agent_id,
+                    message=Message(role="user",
+                                    content=(TextBlock(text=_LAST_REPLY),)),
+                    subtype="reply")
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text(note)
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    await run_quest(quest)
+
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    assert "- Owed to the user:" in msg
+    assert f"{_USER_OPEN}\n\n{_LAST_REPLY}\n\n{_USER_CLOSE}" in msg
+    assert msg.count(_LAST_REPLY) == 1
+    assert msg.endswith(note)          # the note is still strictly last
+    # The dead first attempt was handed no block: nothing to carry yet.
+    assert _USER_OPEN not in sink[0].initial_messages[0].content[0].text
+
+
+@pytest.mark.anyio
+async def test_note_less_reborn_message_quotes_the_users_last_reply(tmp_path):
+    """AC 7: on the hard-window backstop there is no handoff note at all, so the
+    quoted message is the reborn session's only record of what was asked."""
+    from imp.providers import resolve
+
+    quest, _phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    sink: list[AgentInvocation] = []
+
+    class _CtxWindowRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
+            _persist_initial(invocation)
+            if len(sink) == 1:
+                invocation.event_log.append_user_message(
+                    agent_id=invocation.agent_id,
+                    message=Message(role="user",
+                                    content=(TextBlock(text=_LAST_REPLY),)),
+                    subtype="reply")
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CtxWindowProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CtxWindowRunner:
+            return _CtxWindowRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _CtxWindowProvider(model))
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.PAUSED
+
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    assert "HANDOFF NOTE FROM THE PREVIOUS ATTEMPT" not in msg
+    assert f"- Primary: `imp events {quest.id} --step {step} --limit N`" in msg
+    assert msg.endswith(f"{_USER_OPEN}\n\n{_LAST_REPLY}\n\n{_USER_CLOSE}")
 
 
 @pytest.mark.anyio
