@@ -301,6 +301,52 @@ git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
 imp log <quest-id>
 ```
 
+The board, across every quest in the project:
+
+```console
+$ imp list
+ID      NAME                                                   STATUS    UPDATED
+fego87  README that shows imp working                          running   0s
+
+backlog:
+jara67  Revisit migrating codex to the official app-server S…  backlog   10d
+timo83  Make test_cmd_slow false skip the slow gate            backlog   36d
+jiro48  Restore archived-row titles and intents under the sa…  backlog   36d
+  … 15 rows elided …
+
+completed:
+samo71  JSON output for imp list                               merged    2h
+gepa93  Wire the completion nudge into codex live tests        merged    10h
+sobi11  Adopt filelock 4.0                                     merged    10h
+vuka12  Cut redundant review ceremony                          merged    10h
+  … 867 rows elided …
+```
+
+And every conversation ever had about this code:
+
+```console
+$ imp search "merge queue"
+433 matches for "merge queue"
+
+vuka12 · Cut redundant review ceremony · archive · 10h
+  … "wait-for-head": "waiting in merge queue", "reconciler": "resol …
+  … body). _IR_SIG = "HEAD of the merge queue" def _prompt_carries_ir(**kw …
+
+fesa14 · Wait for dependencies outside the provider call · archive · 6d
+  … ** for the next quest in the **merge queue**, i.e. the next quest waiting …
+  … acquire step, not yet head in merge queue → `raise AwaitingUserInput()` …
+  … thing that happens when in the merge queue (and what happens today for cr …
+  … +3 more
+
+gevu23 · Resume without replaying the integrate phase · archive · 10d
+  … aml # ── integrate: the FIFO merge queue (base lock from wait-for-head) …
+  … lane label: waiting in merge queue rules: - {el …
+  … y:1290–1293`), enqueues in the merge queue, waits until head, then **mark …
+  … +8 more
+
+  … 430 quests elided …
+```
+
 ## Try it
 
 imp needs Linux, Git, Python 3.11 or newer, `uv`,

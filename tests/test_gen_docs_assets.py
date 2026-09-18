@@ -243,3 +243,17 @@ def test_readme_evidence_section_claims_no_gate_this_run_did_not_have() -> None:
 
     assert "everything below is a real run" in prose
     assert [claim for claim in ("gate", "approv", "open item") if claim in prose] == []
+
+
+_SAMPLE_QUESTS = {"fego87", "jara67", "timo83", "jiro48", "samo71", "gepa93",
+                  "sobi11", "vuka12", "fesa14", "gevu23"}
+
+
+def test_the_static_samples_follow_the_curation_rules() -> None:
+    text = _readme()
+    board = text.split("```console\n$ imp list\n")[1].split("```")[0]
+    search = text.split('```console\n$ imp search "merge queue"\n')[1].split("```")[0]
+
+    assert "followup" not in board
+    assert "backlog:" in board and "completed:" in board
+    assert set(re.findall(r"^(\w{6})[ ·]", board + search, re.M)) == _SAMPLE_QUESTS
