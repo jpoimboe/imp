@@ -338,3 +338,15 @@ def test_list_json_adds_no_trailing_blank_line_on_a_tty(
     assert out.endswith("]\n")
     assert not out.endswith("\n\n")
     assert "\x1b[" not in out
+
+
+def test_list_json_outside_a_project_emits_an_empty_array(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    outside = tmp_path / "not-a-repo"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    assert main(["list", "--json"]) == 0
+    assert capsys.readouterr().out == "[]\n"
+    assert main(["list"]) == 0
+    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n"

@@ -2088,6 +2088,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
+        if args.json:
+            _page_or_print(json.dumps([], indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
         _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     now = datetime.now(UTC)
