@@ -30,15 +30,54 @@ import gzip
 import io
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _RECORDED = _REPO / "tests" / "fixtures" / "cc_open_by_asking_full.jsonl.gz"
 
+# Regenerate: imp events samo71 --all --json | jq -c '.[]' | gzip; re-redact event 256
+_DEMO_JOURNAL = _REPO / "docs" / "examples" / "samo71.jsonl.gz"
+
+# Hero cut point: plan 1/3 · task 1/3, with the coder subagent mid-flight.
+HERO_LIMIT = 930
+HERO_WIDTH = 124
+
 
 def _events() -> list[dict]:
     with gzip.open(_RECORDED, "rt", encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
+
+
+def journal_events(path: Path, limit: int | None = None) -> list[dict]:
+    """A journal's events, one dict per line; `limit` truncates to the first N."""
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        events = [json.loads(line) for line in fh if line.strip()]
+    return events if limit is None else events[:limit]
+
+
+def shift_to_instant(events: list[dict], instant: datetime) -> list[dict]:
+    """Every time-bearing field moved by ONE delta, so the last event lands
+    exactly on `instant`: a driver measuring these stamps against a pinned clock
+    then renders each block's real age instead of its age against today."""
+    delta = instant - datetime.fromisoformat(events[-1]["timestamp"])
+    seconds = int(delta.total_seconds())
+    shifted: list[dict] = []
+    for event in events:
+        moved = dict(event)
+        moved["timestamp"] = (
+            datetime.fromisoformat(event["timestamp"]) + delta).isoformat()
+        payload = moved.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("windows"), list):
+            payload = dict(payload)
+            payload["windows"] = [
+                {**w, "resets_at": w["resets_at"] + seconds}
+                if isinstance(w, dict) and isinstance(w.get("resets_at"), int)
+                else w
+                for w in payload["windows"]]
+            moved["payload"] = payload
+        shifted.append(moved)
+    return shifted
 
 
 class _Pipe(io.StringIO):
