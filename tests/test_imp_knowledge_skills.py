@@ -292,6 +292,10 @@ def test_knowledge_list_bullet_names_done_completions() -> None:
     assert "completed quests (merged or done)" in body
     # the stale merged-only framing of the imp list bullet is gone
     assert "the backlog, and merged\n  quests;" not in body
+    # the structured encoding rides the imp list bullet, not a neighbour's
+    assert (body.index("completed quests (merged or done)")
+            < body.index("`--json` emits the board as a structured array.")
+            < body.index("- `imp show <id>`"))
 
 
 def test_knowledge_cheatsheet_documents_bounded_events_search() -> None:

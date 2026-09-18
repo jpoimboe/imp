@@ -68,7 +68,7 @@ bookkeeping. Ask the CLI instead:
 
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
   completed quests (merged or done); `--all` adds abandoned and shelved
-  conversations.
+  conversations, `--json` emits the board as a structured array.
 - `imp show <id>` — a quest's card: status, why it halted, current step, intent, and summary
   (`show <id> spec` for the raw spec, `show <id> verify` for the last failing
   gate run, `--json` for a structured card).
