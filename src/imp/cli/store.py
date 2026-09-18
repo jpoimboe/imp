@@ -86,6 +86,23 @@ class SearchZones:
     merged_after: str | None
 
 
+@dataclass(frozen=True)
+class NeighbourQuota:
+    """One overlapping quest's in-span quota slice. `anchors` holds, per
+    (agent, session) pair with an in-span `query_result`, the one row before the
+    span its first increment differences against; `agents` the
+    (provider, model, auth_mode) triple resolved from that agent's last
+    `agent_message` at or before the span end, which a usage row carries none of
+    and may precede the span."""
+
+    project: str
+    quest_id: str
+    readings: tuple[dict[str, Any], ...]
+    usage: tuple[dict[str, Any], ...]
+    anchors: tuple[dict[str, Any], ...]
+    agents: dict[str, tuple[str | None, str | None, str | None]]
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
