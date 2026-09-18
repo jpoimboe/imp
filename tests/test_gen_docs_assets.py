@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+import pytest
+
 from scripts import gen_docs_assets as gen
 
 _EVENTS = gen.demo_events()
@@ -67,3 +72,39 @@ def test_ledger_cut_keeps_the_first_cycle_s_coder_reviewer_pairs() -> None:
     # The hero frame's `↳ coder · 47s` is this row's own timing (AC 7b).
     assert ("    ↳ coder (writing code)                47s  149.6k    2.9k   [$0.19]"
             in body)
+
+
+def test_width_guard_fails_the_build_on_an_over_wide_block() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        gen.check_width("probe.md", "fits\n" + "x" * 81 + "\n")
+
+    assert excinfo.value.code
+    assert "81" in str(excinfo.value)
+
+
+def test_generated_assets_are_plain_terminal_text() -> None:
+    blob = "".join(gen.text_assets(_EVENTS).values())
+
+    assert "\x1b" not in blob
+    assert "<details>" not in blob
+    assert "quota_reading" not in blob
+    assert "token_refresh" not in blob
+    assert not [line for line in blob.splitlines()
+                if re.fullmatch(r"\s*\|.*\|\s*", line)]
+
+
+def test_no_elapsed_reading_exceeds_the_run_s_work_time() -> None:
+    blob = "".join(gen.text_assets(_EVENTS).values())
+
+    readings = [(int(h), int(m)) for h, m in re.findall(r"\b(\d+)h (\d+)m\b", blob)]
+
+    assert readings                                  # the total row reads 2h 6m
+    assert all(hours * 60 + minutes <= 126 for hours, minutes in readings)
+
+
+def test_write_text_assets_replaces_the_three_named_assets_in_place(tmp_path: Path) -> None:
+    first = {p.name: p.read_bytes() for p in gen.write_text_assets(_EVENTS, tmp_path)}
+    second = {p.name: p.read_bytes() for p in gen.write_text_assets(_EVENTS, tmp_path)}
+
+    assert sorted(first) == ["samo71-excerpt.md", "samo71-ledger.md", "samo71.md"]
+    assert first == second
