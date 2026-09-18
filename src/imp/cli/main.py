@@ -2088,12 +2088,23 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
+        if args.json:
+            _page_or_print(json.dumps([], indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
         _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
     dispositions = _selected_list_dispositions(args)
     if not dispositions and args.since is None:
+        if args.json:
+            _page_or_print(
+                json.dumps(_board_json(
+                    control, dispositions=_board_dispositions(show_all=args.all),
+                    cutoff=None), indent=2).splitlines(),
+                no_pager=args.no_pager)
+            return 0
         lines = _overview_lines(control, show_all=args.all, now=now, color=color,
                                 name_cap=quest_row.NAME_CAP)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -2103,7 +2114,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except ValueError:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
-    selected = dispositions or {"active", "backlog", "merged", "done"}
+    selected = dispositions or set(_DEFAULT_LIST_DISPOSITIONS)
+    if args.json:
+        _page_or_print(
+            json.dumps(_board_json(control, dispositions=selected, cutoff=cutoff),
+                       indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -3297,6 +3314,17 @@ def _since_cutoff(spec: str, now: datetime) -> datetime:
     return now - timedelta(days=365 * n)  # unit == "y"
 
 
+_DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "merged", "done"})
+
+
+def _board_dispositions(*, show_all: bool) -> set[str]:
+    """The unfiltered board's zones: the defaults, plus abandoned/shelved under --all."""
+    picked = set(_DEFAULT_LIST_DISPOSITIONS)
+    if show_all:
+        picked |= {"abandoned", "shelved"}
+    return picked
+
+
 def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     """Union of the disposition tokens selected by the `imp list` flags."""
     picked: set[str] = set()
@@ -3315,16 +3343,13 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     return picked
 
 
-def _history_rows(control: Path, *, show_all: bool,
-                  live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: merged/done/abandoned, plus shelved rows under --all."""
-    rows = [r for r in _completed_rows(control, live_ids)
-            if r[1] in {"merged", "done", "abandoned", "shelved"}]
-    if show_all:
-        rows += _shelved_rows(control, live_ids)
-    else:
-        rows = [r for r in rows if r[1] in {"merged", "done"}]
-    return _sort_rows_newest_first(rows)
+def _history_by_disposition(control: Path, *, dispositions: set[str],
+                            live_ids: set[str] | None) -> list[_Row]:
+    """Archive-zone rows for the requested dispositions, newest-first."""
+    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
+    rows = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
+    return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
+
 
 
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
@@ -3383,23 +3408,14 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    from imp.cli.store import _backlog_rows, _status_rows, make_store
-    scanned = make_store(control).scan_homes()
-    status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_started_first(status_rows)
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
-    history = _history_rows(control, show_all=show_all,
-                            live_ids={r[0] for r in status_rows})
-    if not inflight and not backlog_rows and not history:
+    rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
+                          cutoff=None)
+    if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
-    intents = {d.quest_id: d.intent_title for d in scanned}
-    for r in history:
-        if not r[4].strip() and r[0] not in intents:
-            intents[r[0]] = _resolve_row_intent(control, r)
-    return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label=label, now=now, color=color,
-                          name_cap=name_cap)
+    return _overview_body(rows.inflight, rows.backlog, rows.history,
+                          intents=rows.intents, history_label=label, now=now,
+                          color=color, name_cap=name_cap)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
@@ -3417,35 +3433,85 @@ def _row_since(r: _Row, cutoff: datetime | None) -> bool:
         return False
 
 
-def _filtered_overview_lines(control: Path, *, dispositions: set[str],
-                              cutoff: datetime | None, now: datetime,
-                              color: bool) -> list[str]:
-    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+class _OverviewRows(NamedTuple):
+    inflight: list[_Row]
+    backlog: list[_Row]
+    history: list[_Row]
+    intents: dict[str, str | None]
+
+
+def _overview_rows(control: Path, *, dispositions: set[str],
+                   cutoff: datetime | None) -> _OverviewRows:
+    """Board rows for the requested dispositions, zone-sorted and cutoff-filtered,
+    with the display intents title-less rows fall back to."""
     from imp.cli.store import _backlog_rows, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
     inflight = (_sort_rows_started_first(status_rows)
                 if "active" in dispositions else [])
-    backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
-                    if "backlog" in dispositions else [])
-    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
-    history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
-    history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
-
+    backlog = (_sort_rows_newest_first(_backlog_rows(control, scanned))
+               if "backlog" in dispositions else [])
+    history = _history_by_disposition(control, dispositions=dispositions,
+                                      live_ids=live_ids)
     inflight = [r for r in inflight if _row_since(r, cutoff)]
-    backlog_rows = [r for r in backlog_rows if _row_since(r, cutoff)]
+    backlog = [r for r in backlog if _row_since(r, cutoff)]
     history = [r for r in history if _row_since(r, cutoff)]
-
-    if not inflight and not backlog_rows and not history:
-        return [_NO_FILTER_MATCH_MESSAGE]
-    intents = {d.quest_id: d.intent_title for d in scanned}
+    intents: dict[str, str | None] = {d.quest_id: d.intent_title for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
-    return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label="history:", now=now, color=color,
-                          name_cap=quest_row.NAME_CAP)
+    return _OverviewRows(inflight, backlog, history, intents)
+
+
+def _filtered_overview_lines(control: Path, *, dispositions: set[str],
+                              cutoff: datetime | None, now: datetime,
+                              color: bool) -> list[str]:
+    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=cutoff)
+    if not rows.inflight and not rows.backlog and not rows.history:
+        return [_NO_FILTER_MATCH_MESSAGE]
+    return _overview_body(rows.inflight, rows.backlog, rows.history,
+                          intents=rows.intents, history_label="history:", now=now,
+                          color=color, name_cap=quest_row.NAME_CAP)
+
+
+def _board_entry_json(r: _Row, *, zone: Literal["active", "backlog", "archive"],
+                      status: str, intent: str | None) -> dict[str, Any]:
+    """One board entry's always-present keys. `status` is a parameter because a
+    backlog row's slot 1 holds its origin word, not a status."""
+    title = r[4].strip()
+    return {
+        "id": r[0],
+        "zone": zone,
+        "title": title or None,
+        "intent": None if title else intent,
+        "status": status,
+        "created": r[5] or None,
+        "last_activity": r[3] or None,
+    }
+
+
+def _board_json(control: Path, *, dispositions: set[str],
+                cutoff: datetime | None) -> list[dict[str, Any]]:
+    """The board as JSON entries in display order: in-flight, backlog, archive."""
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=cutoff)
+    entries: list[dict[str, Any]] = []
+    for r in rows.inflight:
+        entry = _board_entry_json(r, zone="active", status=r[1],
+                                  intent=rows.intents.get(r[0]))
+        if r[2] not in ("", "-"):
+            entry["step"] = {"phase": r[7] or None, "name": r[6] or r[2]}
+        entries.append(entry)
+    for r in rows.backlog:
+        entry = _board_entry_json(r, zone="backlog", status="backlog", intent=None)
+        entry["provenance"] = r[1]
+        entry["readiness"] = "blocked" if r[2] == "blocked" else "ready"
+        entries.append(entry)
+    for r in rows.history:
+        entries.append(_board_entry_json(r, zone="archive", status=r[1],
+                                         intent=rows.intents.get(r[0])))
+    return entries
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -4337,6 +4403,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--since", metavar="SPEC", default=None,
         help="Show only quests active since SPEC — today, yesterday, this-week, "
              "this-month, or a number + unit h/d/w/m/y (e.g. 2d, 1w).")
+    p_list.add_argument(
+        "--json", action="store_true",
+        help="Emit the quest board as a structured JSON array.")
     p_list.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")

@@ -283,7 +283,7 @@ def test_cmd_list_no_quests_precondition_trailing_blank_on_tty(
     def _raise(): raise worktree.PreconditionError()
     monkeypatch.setattr(m, "_control_root", _raise)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._cmd_list(argparse.Namespace())
+    rc = m._cmd_list(argparse.Namespace(json=False))
     assert rc == 0
     assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
 
