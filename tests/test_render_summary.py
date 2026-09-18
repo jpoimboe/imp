@@ -379,8 +379,8 @@ def test_step_own_tokens_summed_from_matching_agent_id():
     usage = rows[0].usage
     assert (usage.fresh_input, usage.output) == (110, 22)
     assert (usage.cached_input, usage.cache_write) == (5, 3)
-    # sonnet, per million: 110*$3 + 5*$0.30 + 3*$3.75 + 22*$15 = $0.00067275
-    assert usage.dollars == pytest.approx(0.00067275)
+    # sonnet, per million: 110*$3 + 5*$0.30 + 3*$6.00 + 22*$15 = $0.0006795
+    assert usage.dollars == pytest.approx(0.0006795)
     assert (usage.priced, usage.unpriced, usage.notional) == (2, 0, 0)
 
 

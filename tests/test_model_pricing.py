@@ -12,11 +12,11 @@ from imp.providers.catalog import (
 
 
 def test_anthropic_rates_match_the_published_table() -> None:
-    assert prices_for("claude-opus-5") == ModelPrices(5.00, 25.00, 0.50, 6.25)
-    assert prices_for("claude-fable-5") == ModelPrices(10.00, 50.00, 1.00, 12.50)
-    assert prices_for("claude-opus-4-8") == ModelPrices(5.00, 25.00, 0.50, 6.25)
-    assert prices_for("claude-sonnet-4-6") == ModelPrices(3.00, 15.00, 0.30, 3.75)
-    assert prices_for("claude-haiku-4-5") == ModelPrices(1.00, 5.00, 0.10, 1.25)
+    assert prices_for("claude-opus-5") == ModelPrices(5.00, 25.00, 0.50, 10.00)
+    assert prices_for("claude-fable-5") == ModelPrices(10.00, 50.00, 1.00, 20.00)
+    assert prices_for("claude-opus-4-8") == ModelPrices(5.00, 25.00, 0.50, 10.00)
+    assert prices_for("claude-sonnet-4-6") == ModelPrices(3.00, 15.00, 0.30, 6.00)
+    assert prices_for("claude-haiku-4-5") == ModelPrices(1.00, 5.00, 0.10, 2.00)
 
 
 def test_openai_rates_match_the_published_table() -> None:
@@ -39,6 +39,16 @@ def test_cache_write_takes_the_1_25x_premium_on_astra_and_5_6() -> None:
     for model in ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5"):
         prices = prices_for(model)
         assert prices.cache_write == pytest.approx(prices.input)
+
+
+def test_anthropic_cache_write_takes_the_one_hour_ttl_2x_premium() -> None:
+    # The claude path writes 1-hour-TTL cache entries, billed at 2x input —
+    # not the 5-minute TTL's 1.25x. Every alias must agree with its dated id.
+    for model in ("claude-opus-5", "claude-fable-5", "claude-opus-4-8",
+                  "claude-sonnet-4-6", "claude-haiku-4-5",
+                  "opus", "sonnet", "haiku"):
+        prices = prices_for(model)
+        assert prices.cache_write == pytest.approx(prices.input * 2.0), model
 
 
 def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
@@ -231,10 +241,11 @@ def test_web_search_is_not_surcharged() -> None:
 # A claude `model_usage` rollup. Each `costUSD` is hand-worked from the
 # PUBLISHED per-million rates, never regenerated from MODEL_PRICES — that is
 # what makes this a drift guard rather than a restatement of the table.
+# Cache writes are the 1-hour TTL the claude path uses: 2x input.
 #   sonnet:  10*$3 + 52*$15 + 12812*$0.30                        = $0.0046536
-#   haiku:   1000*$1 + 2000*$5 + 50000*$0.10 + 4000*$1.25        = $0.021
-#   opus:    2000*$5 + 500*$25 + 100000*$0.50 + 8000*$6.25       = $0.1225
-#            + 3 web searches * $0.01                            = $0.1525
+#   haiku:   1000*$1 + 2000*$5 + 50000*$0.10 + 4000*$2.00        = $0.024
+#   opus:    2000*$5 + 500*$25 + 100000*$0.50 + 8000*$10.00      = $0.1525
+#            + 3 web searches * $0.01                            = $0.1825
 _MODEL_USAGE = {
     "claude-sonnet-4-6": {
         "inputTokens": 10, "outputTokens": 52,
@@ -244,12 +255,12 @@ _MODEL_USAGE = {
     "claude-haiku-4-5-20251001": {
         "inputTokens": 1000, "outputTokens": 2000,
         "cacheReadInputTokens": 50000, "cacheCreationInputTokens": 4000,
-        "webSearchRequests": 0, "costUSD": 0.021,
+        "webSearchRequests": 0, "costUSD": 0.024,
     },
     "claude-opus-4-8[1m]": {
         "inputTokens": 2000, "outputTokens": 500,
         "cacheReadInputTokens": 100000, "cacheCreationInputTokens": 8000,
-        "webSearchRequests": 3, "costUSD": 0.1525,
+        "webSearchRequests": 3, "costUSD": 0.1825,
     },
 }
 
@@ -272,7 +283,7 @@ def test_the_table_reproduces_the_vendor_cost_on_every_key_form() -> None:
 def test_the_table_reproduces_the_vendor_cost_summed_over_the_rollup() -> None:
     total = sum(cost_usd(model, _billing(row))
                 for model, row in _MODEL_USAGE.items())
-    assert total == pytest.approx(0.1781536, rel=1e-9)
+    assert total == pytest.approx(0.2111536, rel=1e-9)
 
 
 def test_a_date_stamped_anthropic_id_prices_rather_than_falling_to_n_a() -> None:

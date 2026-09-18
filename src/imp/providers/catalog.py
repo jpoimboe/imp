@@ -252,15 +252,16 @@ class ModelPrices:
 # input, output, cache read, cache write — USD per million tokens.
 MODEL_PRICES: dict[str, ModelPrices] = {
     # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
-    # request at the same per-token rate as a 9k one.
-    "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 6.25),
-    "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 12.50),
-    "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 6.25),
-    "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 3.75),
-    "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 1.25),
-    "opus": ModelPrices(5.00, 25.00, 0.50, 6.25),
-    "sonnet": ModelPrices(3.00, 15.00, 0.30, 3.75),
-    "haiku": ModelPrices(1.00, 5.00, 0.10, 1.25),
+    # request at the same per-token rate as a 9k one. Cache writes are 2x input:
+    # the claude path writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x.
+    "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 10.00),
+    "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 20.00),
+    "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 10.00),
+    "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 6.00),
+    "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 2.00),
+    "opus": ModelPrices(5.00, 25.00, 0.50, 10.00),
+    "sonnet": ModelPrices(3.00, 15.00, 0.30, 6.00),
+    "haiku": ModelPrices(1.00, 5.00, 0.10, 2.00),
     # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
     # plain input rate everywhere else. Sol's rate is promotional through
     # 2026-11-21.
