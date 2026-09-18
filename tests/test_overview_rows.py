@@ -127,3 +127,29 @@ def test_overview_rows_history_reproduces_history_rows_for_both_boards(
     assert [r[0] for r in every.history] == ["mrgd", "abnd", "shlv"]
     assert plain.history == m._history_rows(tmp_path, show_all=False, live_ids=set())
     assert every.history == m._history_rows(tmp_path, show_all=True, live_ids=set())
+
+
+def test_overview_lines_routes_through_the_shared_gatherer(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
+    asked: list[set[str]] = []
+    real = m._overview_rows
+
+    def spy(control: Path, *, dispositions: set[str],
+            cutoff: datetime | None) -> m._OverviewRows:
+        asked.append(set(dispositions))
+        return real(control, dispositions=dispositions, cutoff=cutoff)
+
+    monkeypatch.setattr(m, "_overview_rows", spy)
+
+    all_lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
+    assert asked == [{"active", "backlog", "merged", "done", "abandoned", "shelved"}]
+    assert any(ln.startswith("abnd") for ln in all_lines)
+
+    asked.clear()
+    plain_lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
+    assert asked == [{"active", "backlog", "merged", "done"}]
+    assert not any(ln.startswith("abnd") for ln in plain_lines)
+    assert any(ln.startswith("mrgd") for ln in plain_lines)

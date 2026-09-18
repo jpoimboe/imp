@@ -2103,7 +2103,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except ValueError:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
-    selected = dispositions or {"active", "backlog", "merged", "done"}
+    selected = dispositions or set(_DEFAULT_LIST_DISPOSITIONS)
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -3297,6 +3297,9 @@ def _since_cutoff(spec: str, now: datetime) -> datetime:
     return now - timedelta(days=365 * n)  # unit == "y"
 
 
+_DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "merged", "done"})
+
+
 def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     """Union of the disposition tokens selected by the `imp list` flags."""
     picked: set[str] = set()
@@ -3388,23 +3391,16 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    from imp.cli.store import _backlog_rows, _status_rows, make_store
-    scanned = make_store(control).scan_homes()
-    status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_started_first(status_rows)
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
-    history = _history_rows(control, show_all=show_all,
-                            live_ids={r[0] for r in status_rows})
-    if not inflight and not backlog_rows and not history:
+    dispositions = set(_DEFAULT_LIST_DISPOSITIONS)
+    if show_all:
+        dispositions |= {"abandoned", "shelved"}
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=None)
+    if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
-    intents = {d.quest_id: d.intent_title for d in scanned}
-    for r in history:
-        if not r[4].strip() and r[0] not in intents:
-            intents[r[0]] = _resolve_row_intent(control, r)
-    return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label=label, now=now, color=color,
-                          name_cap=name_cap)
+    return _overview_body(rows.inflight, rows.backlog, rows.history,
+                          intents=rows.intents, history_label=label, now=now,
+                          color=color, name_cap=name_cap)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
