@@ -999,12 +999,11 @@ def test_sub_body_with_and_without_label():
         == "↳ explorer (map repo)"
 
 
-def test_summary_totals_subtracts_wait_and_rolls_up_steps_and_subs():
+def test_summary_totals_subtracts_the_exclusion_union_and_rolls_up_steps_and_subs():
     rows = [
         StepRow(phase="implement", step="task-lead",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:02:00+00:00",
-                wait_seconds=90.0,
                 usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
                                priced=1),
                 subagents=[SubagentRow(
@@ -1012,8 +1011,9 @@ def test_summary_totals_subtracts_wait_and_rolls_up_steps_and_subs():
                     usage=RowUsage(fresh_input=500, output=10, dollars=0.05,
                                    priced=1))]),
     ]
-    work, total = summary_totals(rows, 120.0)
-    assert work == 30.0                          # 120s total - 90s wait
+    work, total = summary_totals(rows, 120.0, Exclusions(
+        (("2026-01-01T00:00:15+00:00", "2026-01-01T00:01:45+00:00"),)))
+    assert work == 30.0                          # 120s total - 90s excluded
     assert total.input_total == 1500             # 1000 step + 500 subagent
     assert total.output == 50                    # 40 step + 10 subagent
     assert total.dollars == pytest.approx(0.25)  # 0.20 step + 0.05 subagent
@@ -1023,9 +1023,26 @@ def test_summary_totals_subtracts_wait_and_rolls_up_steps_and_subs():
 def test_summary_totals_floors_work_at_zero():
     rows = [StepRow(phase="p", step="s",
                     start_ts="2026-01-01T00:00:00+00:00",
-                    end_ts="2026-01-01T00:00:10+00:00", wait_seconds=999.0)]
-    work, _total = summary_totals(rows, 10.0)
+                    end_ts="2026-01-01T00:00:10+00:00")]
+    work, _total = summary_totals(rows, 10.0, Exclusions(
+        (("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:30+00:00"),)))
     assert work == 0.0
+
+
+def test_summary_totals_deducts_a_gap_no_step_row_covers():
+    # AC 16(d): the run was parked between the two steps, so the pause falls
+    # outside both rows' spans and only the run-level union sees it.
+    rows = [
+        StepRow(phase="spec", step="spec-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:00+00:00"),
+        StepRow(phase="plan", step="plan-writer",
+                start_ts="2026-01-01T00:06:30+00:00",
+                end_ts="2026-01-01T00:08:00+00:00"),
+    ]
+    work, _total = summary_totals(rows, 480.0, Exclusions(
+        (("2026-01-01T00:01:30+00:00", "2026-01-01T00:06:30+00:00"),)))
+    assert work == 180.0                         # 8m wall - 5m parked
 
 
 def test_summary_totals_none_total_gives_none_work():
@@ -1091,7 +1108,10 @@ def test_header_carries_identity_only_and_the_total_row_carries_the_numbers():
                     usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
                                    priced=1))]
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
-                        total_seconds=120.0)
+                        total_seconds=120.0,
+                        exclusions=Exclusions(
+                            (("2026-01-01T00:00:15+00:00",
+                              "2026-01-01T00:01:45+00:00"),)))
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[0] == "f  ·  c  ·  merged"     # AC 19: identity only
     assert "$" not in out[0]

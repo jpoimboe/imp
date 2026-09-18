@@ -2613,6 +2613,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         from imp.cli.render_summary import (
             SummaryHeader,
             build_summary,
+            exclusion_spans,
             render_summary,
             summary_total,
         )
@@ -2621,7 +2622,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         status = card.status if card is not None else "?"
         workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
-                               status=status, total_seconds=summary_total(events))
+                               status=status, total_seconds=summary_total(events),
+                               exclusions=exclusion_spans(events))
         rows = build_summary(events)
         lines = render_summary(rows, header=header,
                                color=color, width=width)
@@ -2645,6 +2647,7 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         from imp.cli.render_summary import (
             SummaryHeader,
             build_summary,
+            exclusion_spans,
             summary_total,
         )
         from imp.providers.effective import resolve_default_workflow
@@ -2652,7 +2655,8 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         status = card.status if card is not None else "?"
         workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
-                               status=status, total_seconds=summary_total(events))
+                               status=status, total_seconds=summary_total(events),
+                               exclusions=exclusion_spans(events))
         rows = build_summary(events)
         document = render_summary_markdown(rows, header=header)
     else:

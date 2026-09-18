@@ -365,15 +365,14 @@ def _sub_body(sub: SubagentRow) -> str:
 
 
 def summary_totals(
-    summary: list[StepRow], total_seconds: float | None
+    summary: list[StepRow], total_seconds: float | None,
+    exclusions: Exclusions = NO_EXCLUSIONS,
 ) -> tuple[float | None, RowUsage]:
-    """The totals row: work time (raw wall minus every step's human wait,
+    """The totals row: work time (raw wall minus the run's exclusion union,
     floored at 0; None when the run has no total yet) and the accounting sum
     over every step row's whole subtree."""
-    if total_seconds is None:
-        work: float | None = None
-    else:
-        work = max(0.0, total_seconds - sum(r.wait_seconds for r in summary))
+    work: float | None = (None if total_seconds is None
+                          else max(0.0, total_seconds - exclusions.total))
     total = RowUsage()
     for r in summary:
         total = total + r.totals
@@ -386,6 +385,7 @@ class SummaryHeader:
     quest_id: str
     status: str
     total_seconds: float | None
+    exclusions: Exclusions = NO_EXCLUSIONS
 
 
 _HUE_ROTATION: tuple[str, ...] = ("step", "magenta", "cyan", "green")
@@ -474,7 +474,8 @@ def _total_line(work: float | None, total: RowUsage, *, name_w: int,
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
     open_label = open_span_label(header.status)
-    work, total = summary_totals(summary, header.total_seconds)
+    work, total = summary_totals(summary, header.total_seconds,
+                                 header.exclusions)
     name_w, dur_w, in_w, out_w, cost_w = _column_widths(
         summary, open_label, work, total)
     lines = [_header_line(header, color=color)]

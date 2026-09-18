@@ -297,7 +297,8 @@ def _md_cells(u: RowUsage) -> str:
 def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
-    work, total = summary_totals(summary, header.total_seconds)
+    work, total = summary_totals(summary, header.total_seconds,
+                                 header.exclusions)
     open_label = open_span_label(header.status)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),

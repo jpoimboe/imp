@@ -59,6 +59,36 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     assert "\n  total        4m 45s" in out
 
 
+def test_summary_total_excludes_a_pause_between_steps(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    events = [
+        {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
+         "payload": {"step": "spec-writer", "phase": "spec"}},
+        {"type": "step_completed", "timestamp": "2026-01-01T00:01:00+00:00",
+         "payload": {"step": "spec-writer", "action": {"verb": "continue"}}},
+        {"type": "workflow_paused", "timestamp": "2026-01-01T00:01:30+00:00",
+         "payload": {"reason": "ctrl_c"}},
+        {"type": "workflow_resumed", "timestamp": "2026-01-01T00:06:30+00:00",
+         "payload": {}},
+        {"type": "step_started", "timestamp": "2026-01-01T00:06:30+00:00",
+         "payload": {"step": "plan-writer", "phase": "plan"}},
+        {"type": "step_completed", "timestamp": "2026-01-01T00:08:00+00:00",
+         "payload": {"step": "plan-writer", "action": {"verb": "continue"}}},
+    ]
+    (project_state_dir(tmp_path) / "quests" / slug / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in events))
+    assert main(["log", "-s", slug]) == 0
+    out = capsys.readouterr().out
+
+    def cells(label):
+        line = next(ln for ln in out.splitlines() if ln.strip().startswith(label))
+        return line.split()[:3]
+
+    assert cells("spec-writer") == ["spec-writer", "1m", "0s"]
+    assert cells("plan-writer") == ["plan-writer", "1m", "30s"]
+    assert cells("total") == ["total", "3m", "0s"]   # 8m wall - 5m parked
+
+
 def test_summary_long_flag_alias(tmp_path, monkeypatch, capsys):
     slug = _setup(tmp_path, monkeypatch)
     assert main(["log", "--summary", slug]) == 0
