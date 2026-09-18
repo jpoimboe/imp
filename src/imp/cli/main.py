@@ -3422,35 +3422,47 @@ def _row_since(r: _Row, cutoff: datetime | None) -> bool:
         return False
 
 
-def _filtered_overview_lines(control: Path, *, dispositions: set[str],
-                              cutoff: datetime | None, now: datetime,
-                              color: bool) -> list[str]:
-    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+class _OverviewRows(NamedTuple):
+    inflight: list[_Row]
+    backlog: list[_Row]
+    history: list[_Row]
+    intents: dict[str, str | None]
+
+
+def _overview_rows(control: Path, *, dispositions: set[str],
+                   cutoff: datetime | None) -> _OverviewRows:
+    """Board rows for the requested dispositions, zone-sorted and cutoff-filtered,
+    with the display intents title-less rows fall back to."""
     from imp.cli.store import _backlog_rows, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
     inflight = (_sort_rows_started_first(status_rows)
                 if "active" in dispositions else [])
-    backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
-                    if "backlog" in dispositions else [])
-    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
-    history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
-    history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
-
+    backlog = (_sort_rows_newest_first(_backlog_rows(control, scanned))
+               if "backlog" in dispositions else [])
+    history = _history_by_disposition(control, dispositions=dispositions,
+                                      live_ids=live_ids)
     inflight = [r for r in inflight if _row_since(r, cutoff)]
-    backlog_rows = [r for r in backlog_rows if _row_since(r, cutoff)]
+    backlog = [r for r in backlog if _row_since(r, cutoff)]
     history = [r for r in history if _row_since(r, cutoff)]
-
-    if not inflight and not backlog_rows and not history:
-        return [_NO_FILTER_MATCH_MESSAGE]
-    intents = {d.quest_id: d.intent_title for d in scanned}
+    intents: dict[str, str | None] = {d.quest_id: d.intent_title for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
-    return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label="history:", now=now, color=color,
-                          name_cap=quest_row.NAME_CAP)
+    return _OverviewRows(inflight, backlog, history, intents)
+
+
+def _filtered_overview_lines(control: Path, *, dispositions: set[str],
+                              cutoff: datetime | None, now: datetime,
+                              color: bool) -> list[str]:
+    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=cutoff)
+    if not rows.inflight and not rows.backlog and not rows.history:
+        return [_NO_FILTER_MATCH_MESSAGE]
+    return _overview_body(rows.inflight, rows.backlog, rows.history,
+                          intents=rows.intents, history_label="history:", now=now,
+                          color=color, name_cap=quest_row.NAME_CAP)
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
