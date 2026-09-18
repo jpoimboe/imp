@@ -8,14 +8,6 @@
 
 ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
 
-<p align="center">
-  <img src="docs/images/hero-run.png" alt="imp mid-run: the live status bar shows the quest, phase, plan and task counters, model, and context gauge, above a coder subagent's own gauge">
-</p>
-
-<p align="center">
-  <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
-</p>
-
 **imp is a declarative agent workflow engine for AI software development.**
 Each change (feature or bug) for a given project gets built as part of an
 isolated, resumable **quest**, which tracks the change's history from inception
@@ -74,19 +66,26 @@ taking advantage of imp's useful [engine features](#engine-features).
 
 imp is currently Linux-only.  Support for macOS is planned.
 
-## See it work
+## Example run
 
-Everything below is a real run — quest `samo71`, "add a `--json` flag to `imp
-list`" — replayed from its recorded event log, not a mockup.
+<p align="center">
+  <img src="docs/images/hero-run.png" alt="imp mid-run: the live status bar shows the quest, phase, plan and task counters, model, and context gauge, above a coder subagent's own gauge">
+</p>
 
-The whole story is one command:
+<p align="center">
+  <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
+</p>
 
 <!-- docs-assets:excerpt -->
 ```console
-$ imp log samo71
+$ imp new
+samo71 · new
+
+  … imp splash screen …
+
 > add a --json flag to imp list
 
-  … 279 events elided …
+  … 279 events elided (human interview) …
 
 • Settled, then. To read it back in one piece before I set it up:
 
@@ -116,7 +115,7 @@ $ imp log samo71
 
 > ok
 
-  … 2,397 events elided …
+  … 2,397 events elided (spec, plan, implementation) …
 
 • I walked all twelve acceptance criteria clause by clause against the committed
   code across the eight commits. Coverage is complete — every clause lands on a
