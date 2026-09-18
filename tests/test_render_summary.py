@@ -5,6 +5,7 @@ import pytest
 from imp.cli.accounting import RowUsage
 from imp.cli.narrative import elapsed_seconds
 from imp.cli.render_summary import (
+    Exclusions,
     StepRow,
     SubagentRow,
     SummaryHeader,
@@ -13,6 +14,7 @@ from imp.cli.render_summary import (
     _sub_body,
     build_summary,
     cost_cell,
+    exclusion_spans,
     legend_lines,
     open_span_label,
     render_summary,
@@ -33,6 +35,20 @@ def _completed(step: str, ts: str) -> dict:
 
 def _await(ts: str) -> dict:
     return {"type": "awaiting_user_input", "timestamp": ts, "payload": {}}
+
+
+def _reply(ts: str, subtype: str = "reply") -> dict:
+    return {"type": "user_message", "timestamp": ts,
+            "payload": {"role": "user", "content": [], "subtype": subtype}}
+
+
+def _paused(ts: str) -> dict:
+    return {"type": "workflow_paused", "timestamp": ts,
+            "payload": {"reason": "ctrl_c"}}
+
+
+def _resumed(ts: str) -> dict:
+    return {"type": "workflow_resumed", "timestamp": ts, "payload": {}}
 
 
 def test_phase_grouping_in_execution_order():
@@ -235,6 +251,91 @@ def test_summary_total_is_first_to_last_timestamp():
               {"timestamp": "2026-01-01T00:39:02+00:00"}]
     assert summary_total(events) == 2342.0
     assert summary_total([]) is None
+
+
+def test_exclusion_spans_pair_every_human_turn_with_its_own_reply():
+    # Two gates in one step: the old single marker kept only the last one and
+    # ran it to step_completed, charging the post-reply work as wait.
+    excl = exclusion_spans([
+        _started("threshold", "spec", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _reply("2026-01-01T00:02:00+00:00"),
+        _await("2026-01-01T00:03:00+00:00"),
+        _reply("2026-01-01T00:05:00+00:00"),
+        _completed("threshold", "2026-01-01T00:10:00+00:00"),
+    ])
+    assert excl.spans == (
+        ("2026-01-01T00:01:00+00:00", "2026-01-01T00:02:00+00:00"),
+        ("2026-01-01T00:03:00+00:00", "2026-01-01T00:05:00+00:00"))
+    assert excl.total == 180.0                    # 60s + 120s, not 420s
+
+
+def test_an_unanswered_gate_closes_at_the_step_boundary():
+    excl = exclusion_spans([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:00:30+00:00"),
+        _completed("verify", "2026-01-01T00:02:00+00:00")])
+    assert excl.total == 90.0
+
+
+def test_a_reply_with_no_open_gate_excludes_nothing():
+    # The opening intent lands before any step; an interject lands mid-step with
+    # no gate open. Neither is a human wait.
+    excl = exclusion_spans([
+        _reply("2026-01-01T00:00:00+00:00", "intent"),
+        _started("verify", "implement", "2026-01-01T00:01:00+00:00"),
+        _reply("2026-01-01T00:02:00+00:00", "interject"),
+        _completed("verify", "2026-01-01T00:03:00+00:00")])
+    assert excl.spans == ()
+    assert excl.total == 0.0
+
+
+def test_a_re_armed_gate_keeps_the_first_ask():
+    excl = exclusion_spans([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _await("2026-01-01T00:01:30+00:00"),
+        _reply("2026-01-01T00:03:00+00:00"),
+        _completed("verify", "2026-01-01T00:04:00+00:00")])
+    assert excl.total == 120.0                    # from the first ask, not 90s
+
+
+def test_a_pause_pairs_with_its_resume():
+    excl = exclusion_spans([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _paused("2026-01-01T00:02:00+00:00"),
+        _resumed("2026-01-01T00:09:00+00:00"),
+        _completed("verify", "2026-01-01T00:10:00+00:00")])
+    assert excl.total == 420.0
+
+
+def test_a_pause_inside_a_human_wait_is_excluded_once():
+    # AC 16(c). The pause closes first, so the spans arrive out of start order:
+    # summing them gives 480s, the union gives the 300s wait that contains it.
+    excl = exclusion_spans([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _paused("2026-01-01T00:02:00+00:00"),
+        _resumed("2026-01-01T00:05:00+00:00"),
+        _reply("2026-01-01T00:06:00+00:00"),
+        _completed("verify", "2026-01-01T00:10:00+00:00")])
+    assert excl.total == 300.0
+
+
+def test_an_interval_the_log_never_closes_excludes_nothing():
+    excl = exclusion_spans([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00")])
+    assert excl.spans == ()
+    assert excl.total == 0.0
+
+
+def test_overlap_clips_to_the_queried_span():
+    excl = Exclusions((("2026-01-01T00:00:30+00:00",
+                        "2026-01-01T00:02:30+00:00"),))
+    assert excl.overlap("2026-01-01T00:00:00+00:00",
+                        "2026-01-01T00:01:30+00:00") == 60.0
+    assert excl.overlap("2026-01-01T00:00:00+00:00", None) == 0.0
 
 
 def test_step_row_work_seconds_is_wall_minus_wait():
