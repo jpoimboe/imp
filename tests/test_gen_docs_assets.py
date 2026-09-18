@@ -5,9 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from scripts import capture_imp_ui
 from scripts import gen_docs_assets as gen
+from tests._event_fixtures import _TTY
 
 _EVENTS = gen.demo_events()
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _readme() -> str:
+    return gen.README.read_text(encoding="utf-8")
 
 
 def test_excerpt_carries_the_run_s_beats_in_order() -> None:
@@ -167,3 +175,71 @@ def test_splice_readme_fills_both_blocks_from_the_journal(tmp_path: Path) -> Non
     assert ("  total                                 2h 6m   28.0M  531.1k  [$42.20]"
             in text)
     assert text.count("```console") == 2
+
+
+def test_readme_leads_with_the_hero_frame_then_the_evidence() -> None:
+    lines = _readme().splitlines()
+
+    order = [next(i for i, line in enumerate(lines) if line.startswith(anchor))
+             for anchor in ("![license]",
+                            '  <img src="docs/images/hero-run.png"',
+                            "imp is currently Linux-only.",
+                            "## See it work",
+                            "## A quest leaves a trail",
+                            "## Try it",
+                            "## Features")]
+
+    assert order == sorted(order)
+
+
+def test_readme_caption_counts_what_the_captured_frame_renders() -> None:
+    out = _TTY()
+
+    capture_imp_ui.replay_live(out)
+
+    assert "plan 1/3 · task 1/3" in _ANSI.sub("", out.getvalue())
+    assert ("<em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> "
+            "subagent working under a context budget.</em>") in _readme()
+
+
+def test_readme_links_the_full_run_and_drops_the_typo() -> None:
+    text = _readme()
+
+    assert "[`docs/examples/samo71.md`](docs/examples/samo71.md)" in text
+    assert "Imp's uses" not in text
+    assert "imp uses **fresh LLM context and independent reviewers**" in text
+
+
+def test_no_fenced_readme_block_exceeds_eighty_columns() -> None:
+    inside, fenced, over = False, 0, []
+    for line in _readme().splitlines():
+        if line.startswith("```"):
+            inside = not inside
+            continue
+        fenced += inside
+        if inside and len(line) > gen.WIDTH:
+            over.append(f"{len(line)}: {line}")
+
+    assert not inside                    # every fence closes
+    assert fenced > 150                  # the spliced blocks are in there
+    assert over == []
+
+
+def test_readme_blocks_are_a_fresh_splice_of_the_generated_assets(
+        tmp_path: Path) -> None:
+    committed = _readme()
+    copy = tmp_path / "README.md"
+    copy.write_text(committed, encoding="utf-8")
+
+    gen.splice_readme(_EVENTS, copy)
+
+    assert copy.read_text(encoding="utf-8") == committed, (
+        "README blocks are stale; run `make docs-assets`")
+
+
+def test_readme_evidence_section_claims_no_gate_this_run_did_not_have() -> None:
+    span = _readme().split("## See it work\n")[1].split("\n## ")[0]
+    prose = "".join(span.split("```")[::2]).lower()   # outside the fenced blocks
+
+    assert "everything below is a real run" in prose
+    assert [claim for claim in ("gate", "approv", "open item") if claim in prose] == []

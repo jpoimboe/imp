@@ -59,7 +59,9 @@ sibling — rendering and driving a page in a browser — is `imp-driving-web-ui
 `make docs-assets` replays the committed demo journal
 (`docs/examples/samo71.jsonl.gz`) through those same renderers to regenerate the
 README's evidence — the hero PNG and the transcript, excerpt and ledger blocks
-under `docs/examples/` — so none of those assets is ever hand-edited.
+under `docs/examples/` — then splices the excerpt and the ledger into README.md
+between its `<!-- docs-assets:… -->` markers, so none of those blocks is ever
+hand-edited.
 
 ## Trailing output spacing
 

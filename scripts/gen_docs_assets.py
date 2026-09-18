@@ -182,7 +182,7 @@ def render_hero_png(out: Path = HERO_PNG) -> Path:
 
 def main() -> int:
     events = demo_events()
-    for path in [*write_text_assets(events), render_hero_png()]:
+    for path in [*write_text_assets(events), splice_readme(events), render_hero_png()]:
         print(f"wrote {path.relative_to(_REPO)}")
     return 0
 
