@@ -71,6 +71,7 @@ _SEED_OPENINGS = {
 
 def reincarnation_seed(
     *, handoff_text: str | None, quest_id: str, step_name: str,
+    last_user_text: str | None,
     cause: Literal["context", "provider_switch"] = "context",
 ) -> str:
     """Recovery text for a reincarnated (reborn) session, appended last to its
@@ -105,6 +106,17 @@ def reincarnation_seed(
         "log to the whole quest — what earlier steps did and what was said (a "
         "bare call prints the quest's index). Use it for quest-level bearings, "
         "not for current state.")
+    if last_user_text is not None:
+        lines.append(
+            "- Owed to the user: the previous attempt may have stopped "
+            "mid-reply, so the last thing on the user's screen can be a "
+            "fragment. The user's most recent message is reproduced between the "
+            "markers below; check whether it has been answered in prose the "
+            "user can see, and answer it yourself if it has not.")
+        lines.append(
+            "\n--- THE USER'S MOST RECENT MESSAGE (verbatim) ---\n\n"
+            f"{last_user_text}\n\n"
+            "--- END OF THE USER'S MOST RECENT MESSAGE ---")
     if handoff_text is not None:
         lines.append(
             "\n--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT (verbatim, to end of "

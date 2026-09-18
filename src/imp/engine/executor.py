@@ -1637,7 +1637,7 @@ def _retire_foreign_session(
         return None
     seed = reincarnation_seed(
         handoff_text=None, quest_id=quest.id, step_name=step.name,
-        cause="provider_switch")
+        last_user_text=None, cause="provider_switch")
     stash = stash_session(session_dir)
     assert stash is not None      # both limbs require resume state
     note = handoff_path_for(session_dir)
@@ -1921,7 +1921,7 @@ async def _route_agent(
             _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
             seed = reincarnation_seed(
                 handoff_text=handoff_text, quest_id=quest.id,
-                step_name=step.name)
+                step_name=step.name, last_user_text=None)
             _reconcile_provider(quest, state, workflow, on_event)
             return await _route_agent(
                 step, workflow, quest, state, log,
@@ -1953,7 +1953,7 @@ async def _route_agent(
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
-                                  step_name=step.name)
+                                  step_name=step.name, last_user_text=None)
         _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(
             step, workflow, quest, state, log,

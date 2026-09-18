@@ -4030,7 +4030,8 @@ async def test_reborn_first_user_message_ends_with_the_inlined_handoff_note(tmp_
     # The rendered body still leads the message; the seed is strictly its tail.
     assert msg.startswith("go ")
     assert msg.endswith(reincarnation_seed(
-        handoff_text=note, quest_id=quest.id, step_name=step))
+        handoff_text=note, quest_id=quest.id, step_name=step,
+        last_user_text=None))
     assert ("--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT "
             "(verbatim, to end of message) ---") in msg
     assert msg.endswith(note)          # the note itself is last
