@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from imp.cli.quota_share import parse_ts
 from imp.cli.store import (
     NeighbourQuota,
     _iso_from_line,
@@ -51,17 +52,6 @@ def _projected(event: dict[str, Any]) -> dict[str, Any]:
     return kept
 
 
-def _ts(value: Any) -> datetime | None:
-    """A foreign log's timestamp as a comparable instant; a naive one reads UTC."""
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
 def _agent(event: dict[str, Any]) -> str:
     aid = event.get("agent_id")
     return aid if isinstance(aid, str) else ""
@@ -81,7 +71,7 @@ def neighbour_slice(
     falls inside it. A `query_result` after the span end is dropped rather than
     prorated: the span ends at the subject's last event, so only a neighbour's
     in-flight query can straddle it."""
-    start, end = _ts(start_iso), _ts(end_iso)
+    start, end = parse_ts(start_iso), parse_ts(end_iso)
     if start is None or end is None:
         return None
     readings: list[dict[str, Any]] = []
@@ -93,7 +83,7 @@ def neighbour_slice(
     for e in events:
         etype = e.get("type")
         aid = _agent(e)
-        when = _ts(e.get("timestamp"))
+        when = parse_ts(e.get("timestamp"))
         if etype == "agent_message_usage_patch":
             when = latest
         elif when is not None:
@@ -132,7 +122,7 @@ def scan_neighbours(
 ) -> list[NeighbourQuota]:
     """The in-span slice of every quest in every discovered project except the
     subject quest, whose own units are counted from its own log."""
-    start, end = _ts(start_iso), _ts(end_iso)
+    start, end = parse_ts(start_iso), parse_ts(end_iso)
     if start is None or end is None:
         return []
     own = claimed_state_dir(control_root)
@@ -183,7 +173,7 @@ def _window_intersects(
 ) -> bool:
     """Cheap prefilter over a quest's known activity window: an unknown endpoint
     never excludes, so the slice stays the authoritative test."""
-    lo, hi = _ts(first), _ts(last)
+    lo, hi = parse_ts(first), parse_ts(last)
     if lo is not None and lo > end:
         return False
     return not (hi is not None and hi < start)

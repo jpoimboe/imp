@@ -129,7 +129,7 @@ def _model_row_billing(row: dict[str, Any]) -> BillingUsage:
         web_search_requests=web_search_request_count(row))
 
 
-def _model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
+def model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
     """The rollup as one (model id, quadruple) pair per model, so a fallback can
     price each id separately."""
     return [(str(model), _model_row_billing(row))
@@ -145,7 +145,7 @@ def billing_from_model_usage(model_usage: dict[str, Any]) -> BillingUsage:
     since that figure already folds web search in.
     """
     total = BillingUsage()
-    for _model, row in _model_rows(model_usage):
+    for _model, row in model_rows(model_usage):
         total = BillingUsage(
             fresh_input=total.fresh_input + row.fresh_input,
             cached_input=total.cached_input + row.cached_input,
@@ -167,7 +167,7 @@ def vendor_contribution(model_usage: dict[str, Any],
         return contribution(billing_from_model_usage(model_usage),
                             float(total_cost_usd), metered=metered)
     total: RowUsage | None = None
-    for model, billing in _model_rows(model_usage):
+    for model, billing in model_rows(model_usage):
         if _billed_or_none(billing) is None:
             continue
         credit = computed_contribution(model, billing, None, metered=metered)
