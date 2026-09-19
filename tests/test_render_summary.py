@@ -1184,7 +1184,7 @@ def test_subagent_label_shown_in_parens():
     assert "↳ explorer (map repo)" in sub_line
 
 
-def test_subagent_duration_follows_subagent_color():
+def test_subagent_duration_recedes_while_its_name_keeps_magenta():
     step = StepRow(phase="implement", step="task-lead",
                    start_ts="2026-01-01T00:00:00+00:00",
                    end_ts="2026-01-01T00:01:00+00:00",
@@ -1194,7 +1194,9 @@ def test_subagent_duration_follows_subagent_color():
                        end_ts="2026-01-01T00:00:50+00:00")])
     out = render_summary([step], header=_HDR, color=True, width=80)
     sub_line = next(ln for ln in out if "explorer" in ln)
-    assert "\x1b[35m   45s\x1b[0m" in sub_line   # magenta subagent duration
+    assert "\x1b[35m↳ explorer\x1b[0m" in sub_line   # magenta subagent name
+    assert "\x1b[2m   45s\x1b[0m" in sub_line        # dim subagent duration
+    assert "\x1b[35m   45s\x1b[0m" not in sub_line
 
 
 def test_errored_subagent_duration_follows_error_color():

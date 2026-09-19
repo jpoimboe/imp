@@ -524,11 +524,13 @@ def _column_widths(summary: list[StepRow], open_label: str,
     return (max(names), max(durs), max(ins), max(outs), max(lasts))
 
 
-def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int,
-           last_w: int) -> str:
-    """The three numeric cells, right-justified and never coloured."""
-    return (f"{_fmt_tokens(u.input_total):>{in_w}}  "
+def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
+           dim: bool = False, color: bool = False) -> str:
+    """The three numeric cells, right-justified; dim on a subagent row, whose
+    figures recede behind the step that dispatched it."""
+    body = (f"{_fmt_tokens(u.input_total):>{in_w}}  "
             f"{_fmt_tokens(u.output):>{out_w}}  {last:>{last_w}}")
+    return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color and dim)
 
 
 def _step_line(row: StepRow, *, last: str, hue: str, name_w: int, dur_w: int,
@@ -543,12 +545,18 @@ def _step_line(row: StepRow, *, last: str, hue: str, name_w: int, dur_w: int,
 
 def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int,
               out_w: int, last_w: int, color: bool, open_label: str) -> str:
-    codes = pal.NODE_COLORS["error"] if sub.errored else pal.NODE_COLORS["subagent"]
+    errored = sub.errored
+    codes = pal.NODE_COLORS["error"] if errored else pal.NODE_COLORS["subagent"]
+    # The name keeps its magenta; the duration joins the numbers in receding,
+    # except on an error, where the signal outranks the recession.
+    dur_codes = codes if errored else pal.NODE_COLORS["metadata"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
-    dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w)
+    dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *dur_codes,
+                   enabled=color)
+    cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w,
+                   dim=True, color=color)
     return f"    {body}  {dur}  {cells}"
 
 
