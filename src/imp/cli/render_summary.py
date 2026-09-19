@@ -19,7 +19,7 @@ from imp.cli.accounting import (
 )
 from imp.cli.narrative import elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
-from imp.cli.quota_column import FOOTNOTE, QuotaColumn
+from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
 from imp.cli.render_text import fmt_seconds
 
@@ -578,21 +578,22 @@ def _total_line(work: float | None, total: RowUsage, last: str, *, name_w: int,
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int,
-                   quota: QuotaColumn | None = None) -> list[str]:
+                   quota: QuotaColumn | QuotaFallback | None = None) -> list[str]:
     open_label = open_span_label(header.status)
     work, total = summary_totals(summary, header.total_seconds,
                                  header.exclusions)
+    column = quota if isinstance(quota, QuotaColumn) else None
     # The total's share is taken over the rows rendered, so it agrees with the
     # column above it under a windowing flag; unfiltered they are the same sum.
-    total_last = (cost_cell(total) if quota is None
-                  else quota.cell(rows_units(summary)))
+    total_last = (cost_cell(total) if column is None
+                  else column.cell(rows_units(summary)))
     name_w, dur_w, in_w, out_w, last_w = _column_widths(
-        summary, open_label, work, total, total_last, quota)
+        summary, open_label, work, total, total_last, column)
     lines = [_header_line(header, color=color)]
     if summary:
         lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
                               out_w=out_w, last_w=last_w,
-                              quota=quota is not None, color=color)
+                              quota=column is not None, color=color)
     cells = [total_last]
     cur_phase: str | None = None
     hues: dict[str, str] = {}
@@ -605,14 +606,14 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
-        last = _last_cell(row.totals, row.subtree_units, quota)
+        last = _last_cell(row.totals, row.subtree_units, column)
         cells.append(last)
         lines.append(_step_line(row, last=last, hue=hues[row.step],
                                 name_w=name_w, dur_w=dur_w, in_w=in_w,
                                 out_w=out_w, last_w=last_w, color=color,
                                 open_label=open_label))
         for sub in row.subagents:
-            sub_last = _last_cell(sub.usage, sub.units, quota)
+            sub_last = _last_cell(sub.usage, sub.units, column)
             cells.append(sub_last)
             lines.append(_sub_line(sub, last=sub_last, name_w=name_w,
                                    dur_w=dur_w, in_w=in_w, out_w=out_w,
@@ -622,7 +623,9 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     lines.append(_total_line(work, total, total_last, name_w=name_w,
                              dur_w=dur_w, in_w=in_w, out_w=out_w,
                              last_w=last_w))
-    notes = legend_lines(cells) if quota is None else [FOOTNOTE]
+    notes = legend_lines(cells) if column is None else [FOOTNOTE]
+    if isinstance(quota, QuotaFallback):
+        notes += list(quota.legends)
     lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
               for t in notes]
     return lines

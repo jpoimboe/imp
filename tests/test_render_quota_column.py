@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from imp.cli.accounting import RowUsage
-from imp.cli.quota_column import FOOTNOTE, QuotaColumn
+from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import QuotaFigure, Units
 from imp.cli.render_summary import (
     StepRow,
@@ -80,3 +80,27 @@ def test_no_quota_argument_leaves_the_cost_column_exactly_as_it_was() -> None:
     assert lines[-2] == "  total        39m 2s  1.0M  20.0k  $3.00*"
     assert lines[-1] == ("  * theoretical API list price; actual subscription"
                          " usage is much lower")
+
+
+_NO_READINGS = "quota unavailable; this run recorded no quota readings"
+
+
+def test_a_withheld_gauge_keeps_todays_cost_column_and_adds_one_legend() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0))]
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=QuotaFallback((_NO_READINGS,)))
+    assert lines[1] == "                 time    in    out    cost"
+    assert lines[3] == "  plan-writer  1m 30s  1.0M  20.0k  $3.00*"
+    assert lines[-3] == "  total        39m 2s  1.0M  20.0k  $3.00*"
+    assert lines[-2] == ("  * theoretical API list price; actual subscription"
+                         " usage is much lower")
+    assert lines[-1] == f"  {_NO_READINGS}"
+    assert not any("weekly" in ln or "—" in ln or FOOTNOTE in ln
+                   for ln in lines)
+
+
+def test_the_fallback_legend_is_dim_like_the_rest() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0))]
+    lines = render_summary(rows, header=_HDR, color=True, width=80,
+                           quota=QuotaFallback((_NO_READINGS,)))
+    assert lines[-1] == f"\x1b[2m  {_NO_READINGS}\x1b[0m"
