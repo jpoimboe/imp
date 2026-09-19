@@ -4,7 +4,7 @@ from __future__ import annotations
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
-from imp.cli.quota_share import QuotaFigure, Units
+from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
 from imp.cli.render_markdown import (
     _md_escape,
     _subagent_status_md,
@@ -911,3 +911,44 @@ def test_summary_markdown_without_a_quota_argument_is_unchanged() -> None:
     assert "5h" not in out              # nor a window label
     assert "| total | 1m 0s |" in out
     assert "Weekly" not in out
+
+
+def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
+    # AC 14(a)/(e) on the export: claude's gauge moved 4 points over a 4-unit
+    # window (its own 2 units => 2.00%); codex's did not move at all, so it has
+    # no figure and says so in its own legend line.
+    rows = [
+        StepRow(phase="plan", step="plan-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:30+00:00",
+                usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                               dollars=3.0, priced=1, notional=1),
+                units=Units.of("claude", 2.0)),
+        StepRow(phase="plan", step="coder",
+                start_ts="2026-01-01T00:01:30+00:00",
+                end_ts="2026-01-01T00:02:30+00:00",
+                usage=RowUsage(fresh_input=200_000, output=3_000, dollars=1.0,
+                               priced=1, notional=1),
+                units=Units.of("codex", 1.0)),
+    ]
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+                           total_seconds=2342.0)
+    column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
+                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
+    out = render_summary_markdown(rows, header=header, quota=column)
+    assert "| plan-writer | 1m 30s | 1.0M | — | — | 20.0k | 2.00% |" in out
+    assert "| coder | 1m 0s | 200.0k | — | — | 3.0k | — |" in out
+    assert "| total | 39m 2s | 1.2M | — | — | 23.0k | — |" in out
+    # The share must sit in the quota column, not pad off the end of a row one
+    # cell short: neither row here has a subagent, so every `| ↳ ` line is a
+    # breakdown row.
+    lines = out.splitlines()
+    width = next(ln for ln in lines if ln.startswith("| Step |")).count("|")
+    breakdown = [ln for ln in lines if ln.startswith("| ↳ ")]
+    assert [ln.count("|") for ln in breakdown] == [width, width]
+    assert [ln.split("|")[1].strip() for ln in breakdown] == ["↳ claude",
+                                                             "↳ codex"]
+    assert [ln.split("|")[-2].strip() for ln in breakdown] == ["2.00%", "—"]
+    assert out.index("| total |") < out.index("| ↳ claude |")
+    assert ("codex: quota below measurement resolution; the weekly gauge did"
+            " not move during this run") in out

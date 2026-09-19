@@ -335,8 +335,13 @@ def render_summary_markdown(summary: list[StepRow], *, header: SummaryHeader,
     for phase, rows in grouped:
         blocks.append("\n".join([_heading(2, _md_escape(phase)),
                                  table_header, _MD_RULE, *rows]))
-    blocks.append("\n".join([
-        table_header, _MD_RULE,
-        f"| total | {_dur_text(work)} | {_md_cells(total, total_last)} |"]))
+    total_rows = [
+        f"| total | {_dur_text(work)} | {_md_cells(total, total_last)} |"]
+    # A cell's leading whitespace is dropped, so the terminal's indent is the
+    # arrow the subagent rows already use.
+    for p, cell in (column.breakdown if column else ()):
+        name = _md_escape(p).replace("|", "\\|")
+        total_rows.append(f"| ↳ {name} |  |  |  |  |  | {cell} |")
+    blocks.append("\n".join([table_header, _MD_RULE, *total_rows]))
     blocks += [_md_legend(t) for t in summary_notes(cells, quota)]
     return "\n\n".join(blocks).strip() + "\n"

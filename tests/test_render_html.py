@@ -4,6 +4,8 @@ import importlib.resources as ir
 
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
+from imp.cli.quota_column import QuotaColumn
+from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
 from imp.cli.render_html import _md_to_fragment, render_html
 from imp.cli.render_markdown import render_markdown, render_summary_markdown
 from imp.cli.render_summary import StepRow, SummaryHeader
@@ -178,3 +180,55 @@ def test_summary_html_export_keeps_the_notional_sigil_out_of_a_list() -> None:
     assert ("<p>* theoretical API list price; actual subscription usage is"
             " much lower</p>") in out
     assert "<li>theoretical API list price" not in out  # never a bullet
+
+
+def test_summary_html_export_carries_the_weekly_column_and_its_footnote() -> None:
+    # AC 19(a): render_html is a pure Markdown pass, so the column arrives with
+    # no work of its own — but the footnote's `*` must stay a paragraph.
+    rows = [
+        StepRow(phase="p", step="plan-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:30+00:00",
+                usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                               dollars=3.00, priced=1, notional=1),
+                units=Units.of("claude", 2.0)),
+    ]
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    column = QuotaColumn((QuotaFigure("claude", 9.0, 2.0, 10.0),))
+    out = render_html(render_summary_markdown(rows, header=hdr, quota=column))
+    assert "<th>Weekly*</th>" in out
+    assert "<td>1.80%</td>" in out               # 9 points x 2/10 units
+    assert ("<p>* estimated to ±1 point of the weekly gauge; usage outside imp"
+            " during the run skews it high</p>") in out
+    assert "<li>estimated to ±1 point" not in out   # never a bullet
+    assert "$" not in out                           # AC 13: no dollar figure
+
+
+def test_summary_html_puts_a_providers_share_in_the_quota_column() -> None:
+    # AC 14(a)/(e) on the export: a breakdown row one cell short of the header
+    # pads at the end, which lands the share in the `Out` column and leaves
+    # `Weekly*` empty — only the rendered table shows which cell it reached.
+    rows = [
+        StepRow(phase="plan", step="plan-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:30+00:00",
+                usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                               dollars=3.0, priced=1, notional=1),
+                units=Units.of("claude", 2.0)),
+        StepRow(phase="plan", step="coder",
+                start_ts="2026-01-01T00:01:30+00:00",
+                end_ts="2026-01-01T00:02:30+00:00",
+                usage=RowUsage(fresh_input=200_000, output=3_000, dollars=1.0,
+                               priced=1, notional=1),
+                units=Units.of("codex", 1.0)),
+    ]
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
+                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
+    out = render_html(render_summary_markdown(rows, header=hdr, quota=column))
+    assert ("<tr>\n<td>↳ claude</td>\n<td></td>\n<td></td>\n<td></td>\n"
+            "<td></td>\n<td></td>\n<td>2.00%</td>\n</tr>") in out
+    assert ("<tr>\n<td>↳ codex</td>\n<td></td>\n<td></td>\n<td></td>\n"
+            "<td></td>\n<td></td>\n<td>—</td>\n</tr>") in out
