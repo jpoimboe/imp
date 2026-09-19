@@ -6,29 +6,114 @@
 
 **Stop babysitting your coding agent.**
 
-![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
+imp is an agent workflow engine for developing software.  It takes a change
+from idea through interview, spec, planning, implementation, review, testing,
+and merge, allowing you to step away from the terminal.
 
-**imp is a declarative agent workflow engine for AI software development.**
+It interviews you up front to nail down the details, then does the rest of the
+work on its own in an isolated git worktree, using fresh agents for each stage.
+
+<p>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/status-pre--release-orange" alt="Status: pre-release">
+</p>
+
+## Example
+
+Here's an abridged example of running imp on itself, adding a --json flag
+to `imp list`.
+
+*[Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
+
+```console
+$ imp new "add a --json flag to imp list"
+samo71 · new
+
+  [imp splash screen]
+
+> add a --json flag to imp list
+
+  [3 explorer subagents map the code in parallel]
+
+• Named this quest `JSON output for imp list`.  Here's what I found and what
+  I propose.
+
+  Today imp list gathers rows in src/imp/cli/main.py:3383 and :3420, each of
+  which loads data and immediately renders it through quest_row.  The data is
+  already clean, so adding --json is mostly splitting gathering from rendering.
+
+  The one real design question is the shape.  imp already has three --json paths
+  to be consistent with: imp show --json emits machine-valued status
+  (merge_blocked, not "merge blocked") [...]
+
+  [proposes three designs, gives much more detail]
+
+  My recommendation: a flat, zone-tagged array, in the board's display order.
+
+> ok
+
+• Settled, then. To read it back in one piece before I set it up:
+
+  [concise yet detailed design summary]
+
+  Ready for me to set this up and start building? Declining sets it aside, and
+  you can pick it back up later with imp resume samo71.
+
+> ok
+
+• I'll fork the worktree and write the spec.
+
+  [spec]                       ✓
+  [spec review]                ✓
+  [plan 1]                     ✓
+  [plan 1 review]              ✓
+  [plan 1 implementation]      ✓
+  [plan 1 code review]         ✓
+  [plans 2-3]                  ✓
+  [full test suite]            ✓
+  [final code review]          ✓
+  [integration]                ✓
+
+Merged samo71 into master.
+```
+Mid-run screenshot:
+
+<p align="center">
+  <img src="docs/images/hero-run.png" alt="imp mid-run: the live status bar shows the quest, phase, plan and task counters, model, and context gauge, above a coder subagent's own gauge">
+</p>
+
+<p align="center">
+  <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
+</p>
+
+Stats:
+- 2h 6m runtime
+- 10 commits
+- 26 new tests
+- ~0.5% of a Claude Max monthly quota
+
+Full run log and cost summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
+
+## Why imp?
+
 Each change (feature or bug) for a given project gets built as part of an
 isolated, resumable **quest**, which tracks the change's history from inception
-through design, planning, coding, review, testing, and integration.
+through merge.  Every conversation is archived, so you can easily **trace any
+line of code back to the full conversation which produced it.**
 
-Every conversation is archived, so you can easily **trace any line of code back
-to the full conversation which produced it.**
-
-**imp is workflow-agnostic, but ships batteries included** with a default
-opinionated workflow, which follows AI software engineering best practices for
-producing AI written, reviewed, and tested code in a fast-moving greenfield or
-small team project.  The default workflow is defined in YAML and can be easily
-customized or replaced with a completely different workflow.
+**imp is workflow-agnostic, but ships batteries included** with an 
+opinionated default workflow for producing well-tested, reviewed, maintainable
+code in a fast-moving greenfield or small team project.  The default workflow
+is defined in YAML and can be easily customized or replaced to suit your needs.
 
 **Human effort is concentrated up front** at the beginning of the quest, during
 an interview with the "threshold" agent.  Once it has picked your brain
 sufficiently, with your approval it runs unattended from spec, plan, code,
 test, review, all the way through merge, so you're free to step away from the
 computer.  The quest can be paused or resumed at any time.  You can also kick
-off another quest for the same project in parallel, as imp runs in **resumable,
-isolated git worktrees.**
+off multiple quests in parallel, as imp runs in **resumable, isolated git
+worktrees.**
 
 For any surprises or open items discovered during the quest, imp agents make
 judgment calls which are then raised back to the user at the merge gate for
@@ -42,20 +127,23 @@ decisions between steps.  Tests are written before code (TDD), every artifact
 is independently reviewed in multiple rounds if needed, and the final code is
 checked against acceptance criteria before merge.
 
-**Bugs are rooted out early.**  Generally with AI development, most bugs tend
-to originate early during the spec or planning phase, due to gaps,
-inconsistencies, or mistakes made by the agent.  imp prevents that by spending
-most of its tokens up front, looping on multiple rounds of adversarial
-spec/plan review until everything is fully specified and verified.
+**Bugs are rooted out early.**  With AI development, most bugs tend to
+originate early during the spec or planning phase, due to gaps,
+inconsistencies, or mistakes made by the agent.  imp spends most of its tokens
+up front, looping on adversarial review of the spec and plan documents until
+the design converges to be fully specified and consistent.
 
 imp's default workflow produces **clean and maintainable code.**  The agents
 look for cleanups, refactorings, simplifications, and code removals. 
 
-It uses **test-driven development (TDD)** extensively.  TDD tends to produces a
+It uses **test-driven development (TDD)** extensively.  TDD tends to produce a
 *lot* of tests that might be considered fragile by a human, as even trivial
-changes can trigger test failures.  But LLMs have no problem dealing with that,
-so TDD seems to be a good fit for preventing regressions with AI-native
+changes can trigger test failures.  But such tests are much easier for an LLM
+to maintain, so TDD is a good fit for preventing regressions in AI-native
 development.
+
+On Linux, imp agents are **isolated and sandboxed** so they can't accidentally
+wreck your system.
 
 Note the default workflow can be a bit token-intensive due to the extra
 thinking involved with detailed specs, plans, and multiple rounds of
@@ -66,239 +154,17 @@ workflow.**  Local models are not (yet) supported.  Pull requests welcome :-)
 For a lighter weight approach, custom workflows can be created, while still
 taking advantage of imp's useful [engine features](#engine-features).
 
-imp is currently Linux-only.  Support for macOS is planned.
-
-## Example
-
-<p align="center">
-  <img src="docs/images/hero-run.png" alt="imp mid-run: the live status bar shows the quest, phase, plan and task counters, model, and context gauge, above a coder subagent's own gauge">
-</p>
-
-<p align="center">
-  <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
-</p>
-
-Here's an example of running imp on itself, adding a --json flag to `imp list`:
-
-```console
-$ imp new
-samo71 · new
-
-  … imp splash screen …
-
-> add a --json flag to imp list
-
-  … 279 events elided (brief human interview) …
-
-• Settled, then. To read it back in one piece before I set it up:
-
-  Goal — imp list gains a --json flag that emits the board as structured data
-  for agents and scripts.
-
-  Scope — the flag on the list parser in src/imp/cli/main.py; a JSON branch in
-  _cmd_list; extraction of the shared row-gathering out of _overview_lines /
-  _filtered_overview_lines so both formats read one source; updates to the
-  imp-knowledge skill bullet, docs/guide/introspection.md, and the README
-  command block.
-
-  Decisions — flat array in board order, each entry zone-tagged active / backlog
-  / archive; raw ISO timestamps rather than relative ages; title null when
-  unnamed with the full opening prompt in intent; backlog entries carry status:
-  "backlog" plus provenance and readiness; step present only on in-flight
-  entries that have one; machine status values kept underscored; all existing
-  filters compose unchanged; no matches emits [].
-
-  Acceptance — the output parses, carries the right entry per zone with the
-  fields above, stays free of ANSI escapes, composes with --all / --backlog /
-  --since, returns [] with exit 0 on an empty board, and leaves today's text
-  output byte-identical.
-
-  Ready for me to set this up and start building? Declining sets it aside, and
-  you can pick it back up later with imp resume samo71.
-
-> ok
-
-  … 646 events elided (spec, review, and the first plan) …
-
-• Task 1 committed. Dispatching review.
-
-  code-reviewer · claude-sonnet-4-6 · 1m 6s
-
-• Review clean, no findings. Moving to task 2.
-
-  coder · claude-sonnet-4-6 · 1m 25s
-
-  code-reviewer · claude-sonnet-4-6 · 1m 29s
-
-• Clean again. Task 3.
-
-  … 2,095 events elided (two more plans, review, and testing) …
-
-── integration phase ───
-
-integration phase · merging · complete
-
-Merged samo71 into master.
-```
-
-Full summary:
-
-- 3 human prompts ("add a --json flag to imp list", "ok", "ok") during the
-  interview phase
-- full generated specification file (with 2 rounds of independent review)
-- 3 implementation plans (each with 1-2 rounds of independent review)
-- 10 code commits (reviewed)
-- 26 new tests
-- full diff code review
-- full test suite pass
-- 0 open items at the merge gate
-- ~$1.00 of a $200/month Claude Max subscription — 0.5% of the monthly
-  quota.  The $42.20* in the ledger below is theoretical API list price,
-  not money anyone spent; subscription runs are billed by quota, not by
-  token.
-
-```console
-$ imp log samo71 --summary
-default  ·  samo71  ·  merged
-                                         time      in     out     cost
-threshold
-  threshold                            5m 20s    1.4M   27.8k   $2.45*
-  … 4 rows elided …
-spec
-  spec-finalizer                        2m 8s  278.0k   10.5k   $0.79*
-  spec-verify-commit                       0s       —       —        —
-  spec-reviewer                        4m 51s  648.3k   22.6k   $1.44*
-  spec-finalizer                       1m 49s  625.2k    8.7k   $1.00*
-  spec-verify-commit                       0s       —       —        —
-  spec-reviewer                        4m 44s  748.3k   22.3k   $1.48*
-plan
-  plan-writer                          8m 35s    1.5M   42.4k   $2.84*
-  plan-verify-commit                       0s       —       —        —
-  plan-reviewer                        6m 15s    1.5M   29.0k   $2.24*
-  plan-finalized                           0s       —       —        —
-implement
-  task-lead                           11m 27s    2.0M   48.6k   $2.99*
-    ↳ coder (writing code)                47s  149.6k    2.9k   $0.19*
-    ↳ code-reviewer (reviewing code)    1m 6s   45.7k    4.2k   $0.13*
-    ↳ coder (writing code)             1m 25s  265.0k    6.1k   $0.29*
-    ↳ code-reviewer (reviewing code)   1m 29s   72.5k    5.8k   $0.20*
-    ↳ coder (writing code)              1m 3s  163.9k    3.0k   $0.19*
-    ↳ code-reviewer (reviewing code)   1m 36s  124.8k    6.3k   $0.23*
-  verify                                2m 9s       —       —        —
-  check-next-plan                          0s       —       —        —
-  … 33 rows elided …
-converge
-  gap-check                             3m 1s  640.0k   10.6k   $1.10*
-  quest-review                         5m 30s    3.0M   21.4k   $3.04*
-  deferred-check                           0s       —       —        —
-  deferred-sweep                       3m 17s  528.7k   12.0k   $1.01*
-  … 5 rows elided …
-  converge-verify                       3m 7s       —       —        —
-integrate
-  wait-for-head                            0s       —       —        —
-  integrate-rebase                         0s       —       —        —
-  summarizer                              22s   52.5k    1.0k   $0.12*
-  finalize                                53s  175.6k    2.8k   $0.42*
-  cleanup-merge                            0s       —       —        —
-  assert-stamped                           0s       —       —        —
-  merge-to-base                            0s       —       —        —
-
-  total                                 2h 6m   28.0M  531.1k  $42.20*
-  * theoretical API list price; actual subscription usage is much lower
-```
-
-Full run: [`docs/examples/samo71.md`](docs/examples/samo71.md).
-
-## A quest leaves a trail
-
-A quest represents a unit of work, from the opening intent to the final merge.
-Before going live, it's just a conversation: no branch or worktree.  You can
-build it, park it in the backlog, or discard it.
-
-Once live, the quest owns its worktree, artifacts, workflow snapshot, and
-append-only event log.  Prompts, responses, and the tool events exposed to imp
-go into that local log alongside decisions, test runs, and gate outcomes.
-State is rebuilt from the log rather than held only in memory, so an
-interrupted run can resume in the middle of a step.  The log can contain source
-code and command output; treat the archive as source-sensitive data.
-
-When the quest finishes, its conversation and artifacts are archived and remain
-searchable.  The commit is not the only surviving explanation of the change:
-
-```bash
-imp list                         # active work, drafts, and backlog
-imp list --json                  # the same board, structured
-imp show <id>                    # intent, status, timing, and result
-imp log <id>                     # readable story of the run
-imp events <id> --agent coder    # the coder's event stream
-imp search "rate limit"          # live and archived conversations
-imp events search "pytest"       # tool calls, results, and agent reasoning
-```
-
-Every commit log produced by the default workflow carries a `Quest: <id>`
-trailer.  That makes it possible to associate every line of code with the
-conversation and full agent logs that created it:
-
-```bash
-git blame path/to/file
-git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
-imp log <quest-id>
-```
-
-The board, across every quest in the project:
-
-```console
-$ imp list
-ID      NAME                                                   STATUS    UPDATED
-fego87  README that shows imp working                          running   0s
-
-backlog:
-jara67  Revisit migrating codex to the official app-server S…  backlog   10d
-timo83  Make test_cmd_slow false skip the slow gate            backlog   36d
-jiro48  Restore archived-row titles and intents under the sa…  backlog   36d
-  … 15 rows elided …
-
-completed:
-samo71  JSON output for imp list                               merged    2h
-gepa93  Wire the completion nudge into codex live tests        merged    10h
-sobi11  Adopt filelock 4.0                                     merged    10h
-vuka12  Cut redundant review ceremony                          merged    10h
-  … 867 rows elided …
-```
-
-And every conversation ever had about this code:
-
-```console
-$ imp search "merge queue"
-433 matches for "merge queue"
-
-vuka12 · Cut redundant review ceremony · archive · 10h
-  … "wait-for-head": "waiting in merge queue", "reconciler": "resol …
-  … body). _IR_SIG = "HEAD of the merge queue" def _prompt_carries_ir(**kw …
-
-fesa14 · Wait for dependencies outside the provider call · archive · 6d
-  … ** for the next quest in the **merge queue**, i.e. the next quest waiting …
-  … acquire step, not yet head in merge queue → `raise AwaitingUserInput()` …
-  … thing that happens when in the merge queue (and what happens today for cr …
-  … +3 more
-
-gevu23 · Resume without replaying the integrate phase · archive · 10d
-  … aml # ── integrate: the FIFO merge queue (base lock from wait-for-head) …
-  … lane label: waiting in merge queue rules: - {el …
-  … y:1290–1293`), enqueues in the merge queue, waits until head, then **mark …
-  … +8 more
-
-  … 430 quests elided …
-```
-
 ## Try it
 
-imp needs Linux, Git, Python 3.11 or newer, `uv`,
-[bubblewrap](https://github.com/containers/bubblewrap), and util-linux 2.38 or
-newer (`nsenter`, `unshare`).
+imp needs Git, Python 3.11+, and `uv`.
 
-For model access, install and sign in to the `claude` or `codex` CLI in your
-path.  To use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+For automatic sandboxing (currently Linux-only), it also needs
+[bubblewrap](https://github.com/containers/bubblewrap), and util-linux 2.38+
+(`nsenter`, `unshare`).
+
+Login to your `claude` CLI (or `codex`) and ensure they're in your path.  Or to
+use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.  Imp has a
+pluggable provider backend but local models are not yet supported.
 
 ```bash
 uv tool install git+https://github.com/jpoimboe/imp
@@ -320,17 +186,93 @@ or interrupt the agent at any time with Ctrl-C to ask a question or send it in
 a different direction.
 
 After the first quest, once the master branch has code, multiple quests can be
-run in parallel in different terminal tabs.
+run on the project in parallel, in different terminal tabs.
 
 Instead of `imp new`, you can use `imp chat` to ask imp questions about itself,
 the code base, bugs or new features.
 
-Brownfield projects are also supported.  Just `imp init` and `imp new` from an
-existing checkout.
+Brownfield projects are also supported.  Just run `imp init` and `imp new` from
+an existing git checkout.
 
-## Features
+## A quest leaves a trail
 
-### Default workflow
+A *quest* represents a unit of work, from the opening intent to the final merge.
+Before going live, it's just a conversation: no branch or worktree.  You can
+build it, park it in the backlog, or discard it.
+
+Once live, the quest owns its worktree, artifacts, workflow snapshot, and event
+log.  Prompts, responses, and tool outputs are logged alongside decisions, test
+runs, and gate outcomes.  State is rebuilt from the log rather than held only
+in memory, so an interrupted run can be resumed in the middle of a step.
+
+When the quest finishes, its conversation and artifacts are archived and remain
+searchable.  Quests can be interacted with via the CLI:
+
+```bash
+imp list                         # active work, drafts, and backlog
+imp show <id>                    # intent, status, timing, and result
+imp log <id>                     # readable story of the run
+imp log --summary <id>           # show a summary of steps and costs
+imp search "rate limit"          # live and archived conversations
+```
+
+Every commit log produced by the default workflow carries a `Quest: <id>`
+trailer.  That makes it possible to associate every line of code with the
+quest and conversation that created it:
+
+```bash
+git blame path/to/file
+git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
+imp log <quest-id>
+```
+
+You can also see all in-progress, backlog, and completed/archived quests:
+
+```console
+$ imp list
+ID      NAME                                                   STATUS    UPDATED
+fego87  README that shows imp working                          running   0s
+
+backlog:
+jara67  Revisit migrating codex to the official app-server S…  backlog   10d
+timo83  Make test_cmd_slow false skip the slow gate            backlog   36d
+jiro48  Restore archived-row titles and intents under the sa…  backlog   36d
+  … 15 rows elided …
+
+completed:
+samo71  JSON output for imp list                               merged    2h
+gepa93  Wire the completion nudge into codex live tests        merged    10h
+sobi11  Adopt filelock 4.0                                     merged    10h
+vuka12  Cut redundant review ceremony                          merged    10h
+  … 867 rows elided …
+```
+
+And full fast search is supported:
+
+```console
+$ imp search "merge queue"
+433 matches for "merge queue"
+
+vuka12 · Cut redundant review ceremony · archive · 10h
+  … "wait-for-head": "waiting in merge queue", "reconciler": "resol …
+  … body). _IR_SIG = "HEAD of the merge queue" def _prompt_carries_ir(**kw …
+
+fesa14 · Wait for dependencies outside the provider call · archive · 6d
+  … ** for the next quest in the **merge queue**, i.e. the next quest waiting …
+  … acquire step, not yet head in merge queue → `raise AwaitingUserInput()` …
+  … thing that happens when in the merge queue (and what happens today for cr …
+  … +3 more
+
+gevu23 · Resume without replaying the integrate phase · archive · 10d
+  … aml # ── integrate: the FIFO merge queue (base lock from wait-for-head) …
+  … lane label: waiting in merge queue rules: - {el …
+  … y:1290–1293`), enqueues in the merge queue, waits until head, then **mark …
+  … +8 more
+```
+
+## Default workflow
+
+Here's a state diagram showing the default "batteries included" workflow:
 
 ```mermaid
 flowchart LR
@@ -349,7 +291,9 @@ flowchart LR
   integrate -. rework .-> plan
 ```
 
-imp's "batteries included" default workflow has the following features:
+<hr/>
+
+It has the following features:
 
 - **Put human judgment up front.** imp asks about decisions it cannot make from
   the code, while changing the design is still cheap.  Once the design is
@@ -390,7 +334,7 @@ imp's "batteries included" default workflow has the following features:
   imp quest merges, rebases onto the current base, resolves conflicts, reruns
   verification, discusses any open items with the human, and merges.
 
-### Engine features
+## Engine features
 
 The workflow sits on top of engine features that keep quests isolated,
 resumable, and inspectable:
