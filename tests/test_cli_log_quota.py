@@ -362,3 +362,131 @@ async def test_local_and_proxied_neighbours_render_the_same_bytes(
         assert direct[-2].endswith("  2.83%")
         await session.close()
         tg.cancel_scope.cancel()
+
+
+_MD_QUOTA_HEADER = ("| Step | Duration | Fresh | Cache read | Cache write | Out"
+                    " | Weekly* |")
+
+
+def test_the_markdown_export_carries_samo71s_share(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 19(a) end to end: the same 2.83% the terminal renders."""
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert _MD_QUOTA_HEADER in out
+    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
+    assert ("| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | 2.83% |"
+            in out)
+    assert ("\\* estimated to ±1 point of the weekly gauge; usage outside imp"
+            " during the run skews it high") in out
+    assert "$" not in out
+
+
+def test_a_filtered_export_keeps_the_steps_own_cell(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 19(b): the export gets the filtered rows, so it needs the unfiltered
+    log to attribute over — or this step's share would be computed against a
+    span and a denominator that the filter moved."""
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--step", "threshold",
+                   "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
+    assert ("| total | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out)
+    assert "2.83%" not in out          # the quest total belongs to the full run
+
+
+def test_the_html_export_carries_the_share_as_a_table_cell(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--html=-"]) == 0
+    out = capsys.readouterr().out
+    assert "<th>Weekly*</th>" in out
+    assert "<td>2.83%</td>" in out
+    assert "<td>0.19%</td>" in out
+
+
+def test_a_metered_export_is_unchanged_and_asks_no_neighbours(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 12 on the export surface: today's bytes, no added legend line."""
+    store = _QuotaStore(_METERED)
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
+            " Cost |") in out
+    assert "| coder | 1m 30s | 200.0k | — | — | 9.0k | ~$0.73 |" in out
+    assert "| total | 1m 30s | 200.0k | — | — | 9.0k | ~$0.73 |" in out
+    assert out.rstrip("\n").endswith("~ estimated at API list price")
+    assert "Weekly" not in out and "quota" not in out
+    assert store.asked == []
+
+
+def test_a_withheld_gauge_exports_the_cost_column_and_its_legend(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 19(a) carries AC 6's fallbacks onto the export too: no gauge resolved,
+    so the document keeps the dollar column and gains the line naming why."""
+    class _Old(_QuotaStore):
+        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
+            raise QuotaNeighboursUnsupported("unknown store op")
+
+    _cli(tmp_path, monkeypatch, _Old(quota_events(SUBJECT_ID)))
+    assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
+            " Cost |") in out
+    assert "| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | $42.20* |" in out
+    star = ("\\* theoretical API list price; actual subscription usage is much"
+            " lower")
+    predates = ("quota unavailable; this quest's session predates the quota"
+                " column")
+    assert star in out and predates in out
+    assert out.index(star) < out.index(predates)
+    assert "Weekly" not in out and "%" not in out
+
+
+def test_an_ordinal_range_export_keeps_the_steps_own_cell(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 19(b)'s other selector. Events 1-107 are the threshold step — its
+    `step_completed` is the 107th event of the fixture."""
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--range=1-107", "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
+    # The range keeps the two events before the step started, so the total's
+    # duration spans marginally wider than the step row's; the share does not.
+    total = next(ln for ln in out.splitlines() if ln.startswith("| total |"))
+    assert total.split("|")[-2].strip() == "0.19%"
+    assert "2.83%" not in out
+
+
+def test_an_unreachable_store_fails_the_export_too(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 10 on the export surface: no document is written over an
+    under-counted denominator."""
+    class _Broken(_QuotaStore):
+        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
+            raise OSError("no such socket")
+
+    _cli(tmp_path, monkeypatch, _Broken(quota_events(SUBJECT_ID)))
+    assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 2
+    captured = capsys.readouterr()
+    assert captured.err == ("imp: cannot reach the quest store for quota "
+                            "attribution (quota_neighbours): no such socket\n")
+    assert captured.out == ""

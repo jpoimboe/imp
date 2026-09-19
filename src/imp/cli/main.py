@@ -2607,7 +2607,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     events = selected
 
     if args.html is not None or args.md is not None:
-        return _write_log_export(args, control, store, quest_id, events)
+        return _write_log_export(args, control, store, quest_id, events,
+                                 unfiltered)
 
     width = _term_width()
     color = should_use_color(sys.stdout)
@@ -2687,7 +2688,8 @@ def _attribute_quota(
 
 
 def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
-                      quest_id: str, events: list[dict[str, Any]]) -> int:
+                      quest_id: str, events: list[dict[str, Any]],
+                      unfiltered: list[dict[str, Any]]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
         from imp.cli.render_summary import (
@@ -2704,7 +2706,10 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
                                status=status, total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))
         rows = build_summary(events)
-        document = render_summary_markdown(rows, header=header)
+        view = _attribute_quota(store, quest_id, unfiltered, rows)
+        if isinstance(view, int):
+            return view
+        document = render_summary_markdown(rows, header=header, quota=view)
     else:
         from imp.cli import narrative
         from imp.cli.render_markdown import render_markdown
