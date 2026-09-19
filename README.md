@@ -6,25 +6,53 @@
 
 **Stop babysitting your coding agent.**
 
-imp is an agent workflow engine for developing software.  It takes a change
-from idea through interview, spec, planning, implementation, review, testing,
-and merge, allowing you to step away from the terminal.
-
-It interviews you up front to nail down the details, then does the rest of the
-work on its own in an isolated git worktree, using fresh agents for each stage.
-
 <p>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/status-pre--release-orange" alt="Status: pre-release">
 </p>
 
+imp is an AI agent workflow engine for developing software.  It takes a change
+from idea through interview, spec, planning, implementation, review, testing,
+and merge.
+
+It's a deterministic wrapper around coding agents and LLM providers.  Instead
+of one long human-managed Claude Code session, it splits the development
+process into a configurable workflow of short-lived, focused sessions.
+
+## Why use imp?
+
+- **Unattended end to end** — Human effort concentrates up front, in a single
+  interview; once you approve, imp runs spec, plan, code, test, review, and
+  merge on its own, so you're free to step away from the computer
+- **Every change is a quest** — Like a pull request, but starting from a
+  conversation rather than the finished diff: one durable, resumable unit of
+  work with an id, a lifecycle, and a home on disk
+- **One interruption, not twenty** — When a question or spec deviation comes
+  up mid-run, imp makes a judgment call and continues, deferring the final
+  decision to the end, where you approve the change, send it back for rework,
+  or file a follow-up as a backlog quest
+- **Full provenance for every line of code** — Every conversation in a quest
+  is archived, so you can trace any code to the discussion that produced it
+- **Fresh context and independent reviewers** — Each step gets its own agent
+  with a clean slate, with specs, plans, and progress files carrying decisions
+  forward, avoiding long sessions where agents get increasingly confused
+- **Bugs rooted out early** — The later a flaw is caught, the more it costs to
+  fix, and an agent will faithfully implement a flawed spec, so imp loops
+  on adversarial review over the spec and plan until the design converges
+- **Built-in regression protection** — imp leans heavily on TDD and writes a
+  lot of regression tests; keeping them green is the agents' job, not yours
+- **Multiple quests in parallel** — A quest runs in its own git worktree, so
+  several can run in parallel, and can be paused or resumed at any time
+- **Sandboxed agents** — On Linux, agent commands run under bubblewrap: the
+  filesystem is read-only outside an explicit writable set, and credentials are
+  replaced with empty mounts
+- **Workflow-agnostic, batteries included** — The opinionated default workflow
+  is plain YAML: modify it or define your own while keeping imp's [engine features](#engine-features)
+
 ## Example
 
-Here's an abridged example of running imp on itself, adding a --json flag
-to `imp list`.
-
-*[Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
+*[imp running on itself.  Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
 
 ```console
 $ imp new "add a --json flag to imp list"
@@ -91,9 +119,7 @@ Stats:
 - 2h 6m runtime
 - 10 commits
 - 26 new tests
-- 2.83% of one week's Claude Max quota — subscription runs are billed by
-  quota, not by token.  Priced at theoretical API list rates the same run
-  would have come to $42.20.
+- ~0.7% of a Claude Max 20x monthly quota
 
 Full run log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
 
@@ -196,7 +222,7 @@ the code base, bugs or new features.
 Brownfield projects are also supported.  Just run `imp init` and `imp new` from
 an existing git checkout.
 
-## A quest leaves a trail
+## Quests
 
 A *quest* represents a unit of work, from the opening intent to the final merge.
 Before going live, it's just a conversation: no branch or worktree.  You can
