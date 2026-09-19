@@ -91,9 +91,11 @@ Stats:
 - 2h 6m runtime
 - 10 commits
 - 26 new tests
-- ~0.5% of a Claude Max monthly quota
+- 2.83% of one week's Claude Max quota — subscription runs are billed by
+  quota, not by token.  Priced at theoretical API list rates the same run
+  would have come to $42.20.
 
-Full run log and cost summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
+Full run log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
 
 ## Why imp?
 
@@ -212,7 +214,7 @@ searchable.  Quests can be interacted with via the CLI:
 imp list                         # active work, drafts, and backlog
 imp show <id>                    # intent, status, timing, and result
 imp log <id>                     # readable story of the run
-imp log --summary <id>           # show a summary of steps and costs
+imp log --summary <id>           # per-step ledger of time, tokens, and quota
 imp search "rate limit"          # live and archived conversations
 ```
 
