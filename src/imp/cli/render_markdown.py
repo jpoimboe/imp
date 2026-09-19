@@ -11,15 +11,18 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.accounting import RowUsage
+from imp.cli.quota_column import QuotaColumn, QuotaFallback
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
     _dur_text,
     _fmt_tokens,
+    _last_cell,
     _sub_body,
     cost_cell,
-    legend_lines,
     open_span_label,
+    rows_units,
+    summary_notes,
     summary_totals,
 )
 
@@ -280,6 +283,8 @@ def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
 
 
 _MD_HEADER = "| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
+_MD_QUOTA_HEADER = ("| Step | Duration | Fresh | Cache read | Cache write | Out"
+                    " | Weekly* |")
 _MD_RULE = "|---|---|---|---|---|---|---|"
 
 
@@ -288,43 +293,50 @@ def _md_legend(text: str) -> str:
     return f"\\{text}" if text.startswith("*") else text
 
 
-def _md_cells(u: RowUsage) -> str:
+def _md_cells(u: RowUsage, last: str) -> str:
     return (f"{_fmt_tokens(u.fresh_input)} | {_fmt_tokens(u.cached_input)}"
             f" | {_fmt_tokens(u.cache_write)} | {_fmt_tokens(u.output)}"
-            f" | {cost_cell(u)}")
+            f" | {last}")
 
 
-def render_summary_markdown(summary: list[StepRow], *,
-                            header: SummaryHeader) -> str:
+def render_summary_markdown(summary: list[StepRow], *, header: SummaryHeader,
+                            quota: QuotaColumn | QuotaFallback | None = None,
+                            ) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
     work, total = summary_totals(summary, header.total_seconds,
                                  header.exclusions)
     open_label = open_span_label(header.status)
+    column = quota if isinstance(quota, QuotaColumn) else None
+    table_header = _MD_HEADER if column is None else _MD_QUOTA_HEADER
+    total_last = (cost_cell(total) if column is None
+                  else column.cell(rows_units(summary)))
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         f"**Status:** {_md_escape(header.status)}",
     ]
-    cells = [cost_cell(total)]
+    cells = [total_last]
     grouped: list[tuple[str, list[str]]] = []
     for row in summary:
         if not grouped or grouped[-1][0] != row.phase:
             grouped.append((row.phase, []))
         step = _md_escape(row.step).replace("|", "\\|")
-        cells.append(cost_cell(row.totals))
+        last = _last_cell(row.totals, row.subtree_units, column)
+        cells.append(last)
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
-            f" | {_md_cells(row.totals)} |")
+            f" | {_md_cells(row.totals, last)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
-            cells.append(cost_cell(sub.usage))
+            sub_last = _last_cell(sub.usage, sub.units, column)
+            cells.append(sub_last)
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
-                f" | {_md_cells(sub.usage)} |")
+                f" | {_md_cells(sub.usage, sub_last)} |")
     for phase, rows in grouped:
         blocks.append("\n".join([_heading(2, _md_escape(phase)),
-                                 _MD_HEADER, _MD_RULE, *rows]))
+                                 table_header, _MD_RULE, *rows]))
     blocks.append("\n".join([
-        _MD_HEADER, _MD_RULE,
-        f"| total | {_dur_text(work)} | {_md_cells(total)} |"]))
-    blocks += [_md_legend(t) for t in legend_lines(cells)]
+        table_header, _MD_RULE,
+        f"| total | {_dur_text(work)} | {_md_cells(total, total_last)} |"]))
+    blocks += [_md_legend(t) for t in summary_notes(cells, quota)]
     return "\n\n".join(blocks).strip() + "\n"

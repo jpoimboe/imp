@@ -1,10 +1,10 @@
 # tests/test_render_markdown.py
 from __future__ import annotations
 
-import pytest
-
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
+from imp.cli.quota_column import QuotaColumn, QuotaFallback
+from imp.cli.quota_share import QuotaFigure, Units
 from imp.cli.render_markdown import (
     _md_escape,
     _subagent_status_md,
@@ -824,6 +824,68 @@ def test_agent_prose_all_codes_span_exports_as_its_literal_text() -> None:
     assert "``" not in out      # no collapsed / empty backtick pair anywhere
 
 
+_FOOTNOTE_MD = ("\\* estimated to ±1 point of the weekly gauge; usage outside"
+                " imp during the run skews it high")
+
+
+def _quota_rows() -> list[StepRow]:
+    """A subscription step with one subagent, plus a step that did no work."""
+    sub = SubagentRow(name="coder", start_ts="2026-01-01T00:00:10+00:00",
+                      end_ts="2026-01-01T00:00:40+00:00",
+                      usage=RowUsage(fresh_input=200_000, output=3_000,
+                                     dollars=1.0, priced=1, notional=1),
+                      units=Units.of("claude", 1.0))
+    return [
+        StepRow(phase="plan", step="plan-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:30+00:00",
+                usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                               dollars=3.0, priced=1, notional=1),
+                units=Units.of("claude", 2.0), subagents=[sub]),
+        StepRow(phase="plan", step="plan-finalized",
+                start_ts="2026-01-01T00:01:30+00:00",
+                end_ts="2026-01-01T00:01:30+00:00"),
+    ]
+
+
+def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
+    # AC 19(a): 9 points of movement over a 10-unit window, so a row's share is
+    # 0.9x its own units — the step's subtree drew 3 of them, its subagent 1.
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+                           total_seconds=2342.0)
+    column = QuotaColumn((QuotaFigure("claude", 9.0, 3.0, 10.0),))
+    out = render_summary_markdown(_quota_rows(), header=header, quota=column)
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out"
+            " | Weekly* |") in out
+    assert "| plan-writer | 1m 30s | 1.2M | — | — | 23.0k | 2.70% |" in out
+    assert "| ↳ coder | 30s | 200.0k | — | — | 3.0k | 0.90% |" in out
+    assert "| plan-finalized | 0s | — | — | — | — | — |" in out
+    assert "| total | 39m 2s | 1.2M | — | — | 23.0k | 2.70% |" in out
+    assert out.rstrip("\n").endswith(_FOOTNOTE_MD)   # AC 3, escaped sigil
+    assert "Cost" not in out                          # AC 13: one money column
+    assert "$" not in out
+
+
+def test_summary_markdown_falls_back_to_cost_with_the_withheld_legend() -> None:
+    # AC 19(a) over AC 6(b): no gauge resolved, so today's Cost column stays and
+    # one extra line names why — under, not instead of, the dollar legend.
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+                           total_seconds=2342.0)
+    still = ("quota below measurement resolution; the weekly gauge did not move"
+             " during this run")
+    out = render_summary_markdown(_quota_rows(), header=header,
+                                  quota=QuotaFallback((still,)))
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out"
+            " | Cost |") in out
+    assert "| total | 39m 2s | 1.2M | — | — | 23.0k | $4.00* |" in out
+    star = ("\\* theoretical API list price; actual subscription usage is much"
+            " lower")
+    assert star in out
+    assert out.index(star) < out.index(still)
+    assert "Weekly" not in out
+    assert "%" not in out
+
+
 def _quota_events() -> list[dict]:
     return [
         _tev("1", "step_started", timestamp="2024-01-01T00:00:00Z",
@@ -838,14 +900,14 @@ def _quota_events() -> list[dict]:
     ]
 
 
-def test_summary_markdown_has_no_quota_input_and_carries_no_quota_block() -> None:
+def test_summary_markdown_without_a_quota_argument_is_unchanged() -> None:
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=60.0)
-    out = render_summary_markdown(build_summary(_quota_events()),
-                                  header=header)
-    assert "**quota**" not in out
-    assert "claude" not in out
-    assert "5h" not in out
+    rows = build_summary(_quota_events())
+    out = render_summary_markdown(rows, header=header)
+    assert out == render_summary_markdown(rows, header=header, quota=None)
+    assert "**quota**" not in out       # no gauge block: saji99 dropped it
+    assert "claude" not in out          # a quota_reading leaks no provider
+    assert "5h" not in out              # nor a window label
     assert "| total | 1m 0s |" in out
-    with pytest.raises(TypeError):
-        render_summary_markdown([], header=header, quota=())
+    assert "Weekly" not in out

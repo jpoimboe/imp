@@ -407,6 +407,18 @@ def legend_lines(cells: list[str]) -> list[str]:
     return lines
 
 
+def summary_notes(cells: list[str],
+                  quota: QuotaColumn | QuotaFallback | None) -> list[str]:
+    """The lines under the total: the dollar legends for the cells rendered, or
+    the quota footnote plus whatever a gauge withheld."""
+    column = quota if isinstance(quota, QuotaColumn) else None
+    notes = (legend_lines(cells) if column is None
+             else [FOOTNOTE, *column.legends])
+    if isinstance(quota, QuotaFallback):
+        notes += list(quota.legends)
+    return notes
+
+
 def _sub_body(sub: SubagentRow) -> str:
     """The subagent's left-column label: '↳ name' plus ' (label)' when present."""
     text = f"↳ {sub.name}"
@@ -643,10 +655,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     lines += [_breakdown_line(p, cell, name_w=name_w, dur_w=dur_w, in_w=in_w,
                               out_w=out_w, last_w=last_w)
               for p, cell in (column.breakdown if column else ())]
-    notes = (legend_lines(cells) if column is None
-             else [FOOTNOTE, *column.legends])
-    if isinstance(quota, QuotaFallback):
-        notes += list(quota.legends)
+    notes = summary_notes(cells, quota)
     lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
               for t in notes]
     return lines
