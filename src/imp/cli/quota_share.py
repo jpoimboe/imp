@@ -25,6 +25,7 @@ from imp.cli.accounting import (
     billing_from_usage_patch,
     model_rows,
 )
+from imp.cli.store import NeighbourQuota
 from imp.providers.catalog import BillingUsage, cost_usd, prices_for
 
 _CACHE_READ_FREE = frozenset({"claude", "anthropic"})
@@ -322,3 +323,87 @@ def weekly_movement(readings: Iterable[dict[str, Any]], provider: str,
     if movement < _GAUGE_QUANTUM:
         return Withheld.BELOW_RESOLUTION
     return movement
+
+
+@dataclass(frozen=True)
+class QuotaFigure:
+    """A resolved gauge: its movement and the unit split that divides it. A
+    figure exists only where it is resolvable, so no half-resolved state is
+    representable and `scale`'s division cannot meet a zero denominator."""
+
+    provider: str
+    movement: float
+    subject_units: float
+    total_units: float
+
+    def scale(self, units: Units) -> float:
+        """Points of the weekly window attributable to `units`."""
+        return self.movement * units.get(self.provider) / self.total_units
+
+    @property
+    def percent(self) -> float:
+        """The whole quest's share of the window, in points."""
+        return self.movement * self.subject_units / self.total_units
+
+
+@dataclass(frozen=True)
+class QuotaWithheld:
+    provider: str
+    reason: Withheld
+
+
+@dataclass(frozen=True)
+class QuotaAttribution:
+    """Every provider gauge the run touched, resolved or withheld."""
+
+    span: tuple[datetime, datetime]
+    gauges: tuple[QuotaFigure | QuotaWithheld, ...]
+
+    @property
+    def figures(self) -> tuple[QuotaFigure, ...]:
+        return tuple(g for g in self.gauges if isinstance(g, QuotaFigure))
+
+
+def _reading_providers(readings: Iterable[dict[str, Any]]) -> set[str]:
+    """A gauge that moved with nothing to attribute is still a gauge to report,
+    so a provider with readings but no units must reach the walk below."""
+    found: set[str] = set()
+    for e in readings:
+        provider = (e.get("payload") or {}).get("provider")
+        if isinstance(provider, str):
+            found.add(provider)
+    return found
+
+
+def quota_attribution(events: Iterable[dict[str, Any]],
+                      span: tuple[datetime, datetime], subject: Units,
+                      neighbours: Iterable[NeighbourQuota]) -> QuotaAttribution:
+    """The run's gauges. The subject contributes its row-attributed sum, so the
+    rendered cells sum to the total exactly; a neighbour has no row structure and
+    contributes its whole in-span increment total.
+
+    A neighbour's anchors lead its stream so each pair differences correctly;
+    each anchor's own increment lies before the span and credits nothing. Own
+    readings need no span filter: the span is this quest's first event to its
+    last."""
+    start, end = span
+    readings = [e for e in events if e.get("type") == "quota_reading"]
+    neighbour_units = NO_UNITS
+    for n in neighbours:
+        readings.extend(n.readings)
+        rows = increments([*n.anchors, *n.usage], dict(n.agents))
+        neighbour_units = neighbour_units + units_in_span(rows, start, end)
+    total = subject + neighbour_units
+    gauges: list[QuotaFigure | QuotaWithheld] = []
+    for provider in sorted({*total.providers, *_reading_providers(readings)}):
+        movement = weekly_movement(readings, provider, start, end)
+        if isinstance(movement, Withheld):
+            gauges.append(QuotaWithheld(provider, movement))
+        elif total.get(provider) <= 0:
+            gauges.append(QuotaWithheld(provider, Withheld.NO_TRACKED_USAGE))
+        else:
+            gauges.append(QuotaFigure(
+                provider=provider, movement=movement,
+                subject_units=subject.get(provider),
+                total_units=total.get(provider)))
+    return QuotaAttribution(span=span, gauges=tuple(gauges))

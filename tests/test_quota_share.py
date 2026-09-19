@@ -6,11 +6,15 @@ from typing import Any
 from imp.cli.quota_share import (
     NO_UNITS,
     Increment,
+    QuotaAttribution,
+    QuotaFigure,
+    QuotaWithheld,
     Units,
     Withheld,
     credits_by_index,
     increments,
     parse_ts,
+    quota_attribution,
     rollup_units,
     run_span,
     units_in_span,
@@ -23,6 +27,7 @@ from imp.cli.render_summary import (
     rows_units,
     units_by_row,
 )
+from imp.cli.store import NeighbourQuota
 from imp.providers.catalog import BillingUsage
 
 
@@ -469,3 +474,121 @@ def test_readings_outside_the_span_are_not_sampled() -> None:
     late = {**_reading(10, 95.0), "id": "late",
             "timestamp": "2026-01-01T02:00:00+00:00"}
     assert weekly_movement([*readings, late], "claude", *_GAUGE_SPAN) == 1.0
+
+
+def _gauge_readings() -> list[dict[str, Any]]:
+    """Two claude readings inside `_quest_log()`'s span: 78% to 81%, one window."""
+    def at(second: int, used_pct: float) -> dict[str, Any]:
+        return {"id": f"g{second}", "type": "quota_reading", "agent_id": None,
+                "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
+                "payload": {"provider": "claude", "windows": [
+                    {"label": "7d", "used_pct": used_pct, "resets_at": 1}]}}
+
+    return [at(2, 78.0), at(38, 81.0)]
+
+
+def _gauge_log() -> list[dict[str, Any]]:
+    """`_quest_log()` with the readings interleaved in timestamp order, as a real
+    log carries them — `run_span` reads the first and last entries, not min/max."""
+    return sorted([*_quest_log(), *_gauge_readings()],
+                  key=lambda e: str(e["timestamp"]))
+
+
+def _neighbour(second: int, tokens: int, *, provider: str = "claude",
+               readings: tuple[dict[str, Any], ...] = (),
+               anchors: tuple[dict[str, Any], ...] = ()) -> NeighbourQuota:
+    usage = {"id": f"n{second}", "type": "query_result", "agent_id": "n1",
+             "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
+             "payload": {"session_id": "ns", "duration_ms": 1000,
+                         "model_usage": {
+                             "claude-sonnet-4-6": {"outputTokens": tokens}}}}
+    return NeighbourQuota(
+        project="other", quest_id="q2", readings=readings, usage=(usage,),
+        anchors=anchors, agents={"n1": (provider, "claude-sonnet-4-6",
+                                        "subscription")})
+
+
+def _attribution(neighbours: list[NeighbourQuota]) -> QuotaAttribution:
+    events = _gauge_log()
+    span = _span_of(events)
+    rows = build_summary(events, span)
+    return quota_attribution(events, span, rows_units(rows), neighbours)
+
+
+def test_the_subject_appears_in_the_denominator_exactly_once() -> None:
+    """AC 24: the quest's row-attributed 9.00 u plus the neighbour's 3.00 u is a
+    12.00 u denominator — not the 21.00 u double-counting the subject gives."""
+    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
+    assert round(figure.subject_units, 4) == 9.0
+    assert round(figure.total_units, 4) == 12.0
+
+
+def test_the_figure_is_the_movement_scaled_by_the_unit_share() -> None:
+    """3 points of movement x 9/12 is 2.25 points of the weekly window, and a
+    row holding 3.00 u of that draws 0.75."""
+    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
+    assert figure.movement == 3.0
+    assert round(figure.percent, 4) == 2.25
+    assert round(figure.scale(Units.of("claude", 3.0)), 4) == 0.75
+    assert figure.scale(NO_UNITS) == 0.0
+
+
+def test_a_widened_span_pulls_in_a_neighbour_increment() -> None:
+    """AC 23(a), second half: the neighbour's 3.00 u query occupies
+    [00:00:00, 00:00:01] — inside the span that opens at the `quest_created`
+    event, outside one that opens a second later."""
+    events = _gauge_log()
+    wide = _span_of(events)
+    narrow = (datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC), wide[1])
+    early = [_neighbour(1, 200_000)]
+    subject = rows_units(build_summary(events, wide))
+    wide_total = quota_attribution(events, wide, subject,
+                                   early).figures[0].total_units
+    narrow_total = quota_attribution(events, narrow, subject,
+                                     early).figures[0].total_units
+    assert (round(wide_total, 4), round(narrow_total, 4)) == (12.0, 9.0)
+
+
+def test_a_gauge_that_moved_with_no_units_yields_no_figure() -> None:
+    """AC 6(d) / AC 14(d): a codex gauge moved 4 points with no codex units
+    anywhere in the span, so there is nothing to divide by — no rule and no
+    division, just a withhold."""
+    codex_gauge = tuple(
+        {"id": f"c{second}", "type": "quota_reading", "agent_id": None,
+         "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
+         "payload": {"provider": "codex", "windows": [
+             {"label": "7d", "used_pct": used_pct, "resets_at": 9}]}}
+        for second, used_pct in ((3, 10.0), (37, 14.0)))
+    attribution = _attribution([_neighbour(30, 200_000, readings=codex_gauge)])
+    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
+    assert isinstance(attribution.gauges[0], QuotaFigure)
+    assert attribution.gauges[1] == QuotaWithheld("codex",
+                                                  Withheld.NO_TRACKED_USAGE)
+    assert [f.provider for f in attribution.figures] == ["claude"]
+
+
+def test_each_provider_gauge_is_resolved_independently() -> None:
+    """AC 14(e): the neighbour's draw is codex's, which recorded no reading, so
+    that gauge is withheld while claude's resolvable figure still stands over a
+    denominator holding only claude's units."""
+    attribution = _attribution([_neighbour(30, 200_000, provider="codex")])
+    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
+    assert round(attribution.figures[0].total_units, 4) == 9.0
+    assert attribution.gauges[1] == QuotaWithheld("codex",
+                                                  Withheld.NO_READINGS)
+
+
+def test_a_neighbours_pre_span_anchor_keeps_its_pre_span_burn_out() -> None:
+    """A neighbour's `query_result` is cumulative, so its pre-span anchor is what
+    stops the denominator swallowing a burn from before the span: 300k output
+    differenced against a 200k anchor is 1.50 u, where dropping the anchor
+    contributes the whole 4.50 u."""
+    anchor = {"id": "n-anchor", "type": "query_result", "agent_id": "n1",
+              "timestamp": "2025-12-31T23:59:00+00:00",
+              "payload": {"session_id": "ns", "duration_ms": 1000,
+                          "model_usage": {
+                              "claude-sonnet-4-6": {"outputTokens": 200_000}}}}
+    anchored = _attribution([_neighbour(30, 300_000, anchors=(anchor,))])
+    bare = _attribution([_neighbour(30, 300_000)])
+    assert round(anchored.figures[0].total_units, 4) == 10.5
+    assert round(bare.figures[0].total_units, 4) == 13.5
