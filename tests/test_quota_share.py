@@ -7,12 +7,14 @@ from imp.cli.quota_share import (
     NO_UNITS,
     Increment,
     Units,
+    Withheld,
     credits_by_index,
     increments,
     parse_ts,
     rollup_units,
     run_span,
     units_in_span,
+    weekly_movement,
     weighted_units,
 )
 from imp.cli.render_summary import (
@@ -375,3 +377,95 @@ def test_a_row_is_identified_by_its_occurrence_not_by_its_agent_id() -> None:
     assert rows[0].subagents[0].key == "sub:e4"
     assert sorted(units_by_row(rows)) == [
         "step:impl/build@2026-01-01T00:00:00+00:00", "sub:e4"]
+
+
+_GAUGE_SPAN = (datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
+               datetime(2026, 1, 1, 1, 0, tzinfo=UTC))
+
+
+def _reading(minute: int, used_pct: float, *, resets_at: int | None = 1_000_000,
+             provider: str = "claude") -> dict[str, Any]:
+    return {"id": f"r{minute}{provider}", "type": "quota_reading",
+            "agent_id": None,
+            "timestamp": f"2026-01-01T00:{minute:02d}:00+00:00",
+            "payload": {"provider": provider, "plan": None, "windows": [
+                {"label": "5h", "used_pct": 50.0, "resets_at": 500},
+                {"label": "7d", "used_pct": used_pct, "resets_at": resets_at}]}}
+
+
+def test_a_run_with_no_reading_for_the_provider_has_no_gauge() -> None:
+    """AC 6(a)."""
+    assert weekly_movement([], "claude", *_GAUGE_SPAN) is Withheld.NO_READINGS
+    codex_only = [_reading(10, 40.0, provider="codex")]
+    assert (weekly_movement(codex_only, "claude", *_GAUGE_SPAN)
+            is Withheld.NO_READINGS)
+
+
+def test_a_gauge_that_did_not_move_is_below_resolution() -> None:
+    """AC 6(b)."""
+    readings = [_reading(10, 78.0), _reading(50, 78.0)]
+    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
+            is Withheld.BELOW_RESOLUTION)
+
+
+def test_a_changed_resets_at_is_a_window_reset() -> None:
+    """AC 6(c)."""
+    readings = [_reading(10, 78.0, resets_at=1_000_000),
+                _reading(50, 2.0, resets_at=2_000_000)]
+    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
+            is Withheld.WINDOW_RESET)
+
+
+def test_a_missing_reset_stamp_is_not_evidence_of_a_reset() -> None:
+    """`resets_at` is None whenever the provider's `resetsAt` is not an int
+    (`src/imp/providers/claude.py:1345`), and one sample missing the stamp beside
+    one carrying it is no window change: 78 → 81 is still 3 points."""
+    readings = [_reading(10, 78.0, resets_at=None), _reading(50, 81.0)]
+    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
+
+
+def test_a_drop_larger_than_the_gauges_quantization_is_a_reset() -> None:
+    """AC 6(c): 78 down to 74 inside one window is not sampling jitter."""
+    readings = [_reading(10, 78.0), _reading(30, 74.0), _reading(50, 76.0)]
+    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
+            is Withheld.WINDOW_RESET)
+
+
+def test_a_one_point_dip_between_samples_is_jitter_not_a_reset() -> None:
+    """Two quests sampling the same gauge seconds apart straddle the provider's
+    own rounding boundary, so 78 → 79 → 78 → 81 is a 3-point rise — as the real
+    `samo71` reading union is."""
+    readings = [_reading(10, 78.0), _reading(20, 79.0),
+                _reading(30, 78.0), _reading(50, 81.0)]
+    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
+
+
+def test_a_reset_outranks_a_zero_movement() -> None:
+    """AC 6(e): endpoints that happen to match still report the reset."""
+    readings = [_reading(10, 78.0, resets_at=1_000_000),
+                _reading(30, 5.0, resets_at=2_000_000),
+                _reading(50, 78.0, resets_at=2_000_000)]
+    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
+            is Withheld.WINDOW_RESET)
+
+
+def test_exactly_one_point_of_movement_resolves() -> None:
+    """AC 7."""
+    readings = [_reading(10, 78.0), _reading(50, 79.0)]
+    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 1.0
+
+
+def test_movement_spans_the_union_of_own_and_neighbour_readings() -> None:
+    """AC 5: a neighbour reading inside the span but later than this quest's own
+    last one extends the movement from 1 point to 3."""
+    own = [_reading(10, 78.0), _reading(30, 79.0)]
+    assert weekly_movement(own, "claude", *_GAUGE_SPAN) == 1.0
+    neighbour = [_reading(45, 81.0)]
+    assert weekly_movement([*own, *neighbour], "claude", *_GAUGE_SPAN) == 3.0
+
+
+def test_readings_outside_the_span_are_not_sampled() -> None:
+    readings = [_reading(10, 78.0), _reading(30, 79.0)]
+    late = {**_reading(10, 95.0), "id": "late",
+            "timestamp": "2026-01-01T02:00:00+00:00"}
+    assert weekly_movement([*readings, late], "claude", *_GAUGE_SPAN) == 1.0

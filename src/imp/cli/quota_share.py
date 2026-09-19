@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import Enum
+from itertools import pairwise
 from typing import Any
 
 from imp.cli.accounting import (
@@ -27,6 +29,9 @@ from imp.providers.catalog import BillingUsage, cost_usd, prices_for
 
 _CACHE_READ_FREE = frozenset({"claude", "anthropic"})
 UNIT_EVENTS = ("query_result", "agent_message", "agent_message_usage_patch")
+_WEEKLY = "7d"
+# The provider quantizes utilization to 0.01 -- one point of the weekly window.
+_GAUGE_QUANTUM = 1.0
 
 
 def parse_ts(value: Any) -> datetime | None:
@@ -249,3 +254,71 @@ def credits_by_index(events: list[dict[str, Any]],
     start, end = span
     return {inc.index: Units.of(inc.provider, inc.credit(start, end))
             for inc in increments(events, {})}
+
+
+class Withheld(Enum):
+    """Why a gauge yields no figure, in the order Scope §1 evaluates them."""
+
+    NO_READINGS = "no_readings"
+    WINDOW_RESET = "window_reset"
+    BELOW_RESOLUTION = "below_resolution"
+    NO_TRACKED_USAGE = "no_tracked_usage"
+
+
+@dataclass(frozen=True)
+class _Sample:
+    when: datetime
+    used_pct: float
+    resets_at: int | None
+
+
+def _samples(readings: Iterable[dict[str, Any]], provider: str,
+             start: datetime, end: datetime) -> list[_Sample]:
+    """The provider's in-span `7d` readings in time order. The gauge is
+    account-global, so a reading from any quest is a valid sample of it."""
+    out: list[_Sample] = []
+    for e in readings:
+        p = e.get("payload") or {}
+        when = parse_ts(e.get("timestamp"))
+        if p.get("provider") != provider or when is None:
+            continue
+        if not start <= when <= end:
+            continue
+        for window in p.get("windows") or []:
+            if isinstance(window, dict) and window.get("label") == _WEEKLY:
+                stamp = window.get("resets_at")
+                out.append(_Sample(when, _number(window.get("used_pct")),
+                                   stamp if isinstance(stamp, int) else None))
+    return sorted(out, key=lambda s: s.when)
+
+
+def _window_reset(samples: list[_Sample]) -> bool:
+    """A reset changes `resets_at`, or drops `used_pct` by more than the gauge's
+    own quantization. Two quests sampling the same gauge seconds apart straddle a
+    rounding boundary and read a point apart in either direction, so a 1-point
+    dip is jitter; a real reset falls the whole window. An absent stamp is no
+    evidence either way."""
+    for earlier, later in pairwise(samples):
+        if (earlier.resets_at is not None and later.resets_at is not None
+                and earlier.resets_at != later.resets_at):
+            return True
+        if earlier.used_pct - later.used_pct > _GAUGE_QUANTUM:
+            return True
+    return False
+
+
+def weekly_movement(readings: Iterable[dict[str, Any]], provider: str,
+                    start: datetime, end: datetime) -> float | Withheld:
+    """The gauge's movement over the span: the plain difference of the first and
+    last in-span `7d` reading. The order of the withhold states is load-bearing —
+    a window that reset mid-span can land back on the `used_pct` it started from
+    and so satisfy both the second state and the third."""
+    samples = _samples(readings, provider, start, end)
+    if not samples:
+        return Withheld.NO_READINGS
+    if _window_reset(samples):
+        return Withheld.WINDOW_RESET
+    movement = samples[-1].used_pct - samples[0].used_pct
+    if movement < _GAUGE_QUANTUM:
+        return Withheld.BELOW_RESOLUTION
+    return movement
