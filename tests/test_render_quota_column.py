@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from imp.cli.accounting import RowUsage
+from imp.cli.quota_column import FOOTNOTE, QuotaColumn
+from imp.cli.quota_share import QuotaFigure, Units
+from imp.cli.render_summary import (
+    StepRow,
+    SubagentRow,
+    SummaryHeader,
+    render_summary,
+)
+
+_HDR = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
+                     total_seconds=2342.0)
+
+
+def _row(step: str, secs: int, usage: RowUsage, units: Units,
+         subs: list[SubagentRow] | None = None) -> StepRow:
+    return StepRow(phase="plan", step=step, start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts=f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00",
+                   usage=usage, units=units, subagents=subs or [])
+
+
+def _usage(fresh: int = 1_000_000, out: int = 20_000) -> RowUsage:
+    """A notional (subscription) row: with no quota column it renders $3.00*."""
+    return RowUsage(fresh_input=fresh, output=out, dollars=3.0, priced=1,
+                    notional=1)
+
+
+def test_a_single_gauge_replaces_the_cost_column_with_each_rows_share() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 2.0)),
+            _row("plan-reviewer", 120, _usage(500_000, 9_000),
+                 Units.of("claude", 1.0)),
+            _row("coder", 60, _usage(200_000, 3_000),
+                 Units.of("claude", 0.001)),
+            _row("plan-finalized", 0, RowUsage(), Units())]
+    # 9 points of movement over a 10-unit window: each row's share is 0.9x its
+    # own units, and the total is 0.9x their sum (3.001) -- 2.70%.
+    column = QuotaColumn((QuotaFigure("claude", 9.0, 3.001, 10.0),))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert lines[1:3] == ["                             tokens       quota",
+                          "                    time      in    out  weekly*"]
+    assert lines[4:8] == [
+        "  plan-writer     1m 30s    1.0M  20.0k   1.80%",
+        "  plan-reviewer    2m 0s  500.0k   9.0k   0.90%",
+        "  coder            1m 0s  200.0k   3.0k  <0.01%",
+        "  plan-finalized      0s       —      —       —"]
+    assert lines[-2] == "  total           39m 2s    1.7M  32.0k   2.70%"
+    assert lines[-1] == ("  * estimated to ±1 point of the weekly gauge; usage "
+                         "outside imp during the run skews it high")
+    assert not any("$" in ln or "cost" in ln for ln in lines)
+
+
+def test_one_point_of_movement_still_renders_the_column() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 4.0))]
+    column = QuotaColumn((QuotaFigure("claude", 1.0, 4.0, 8.0),))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert lines[-2].endswith("  0.50%")
+    assert lines[-1] == f"  {FOOTNOTE}"
+
+
+def test_a_run_mixing_metered_and_notional_steps_shows_no_dollar_figure() -> None:
+    metered = RowUsage(fresh_input=200_000, output=9_000, dollars=0.73, priced=1)
+    rows = [_row("coder", 90, metered, Units.of("claude", 1.0)),
+            _row("task-lead", 120, _usage(), Units.of("claude", 3.0))]
+    column = QuotaColumn((QuotaFigure("claude", 4.0, 4.0, 8.0),))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert [ln.split()[-1] for ln in lines[4:6]] == ["0.50%", "1.50%"]
+    assert lines[-2].endswith("  2.00%")
+    assert not any("$" in ln or "~" in ln for ln in lines)
+
+
+def test_no_quota_argument_leaves_the_cost_column_exactly_as_it_was() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0))]
+    lines = render_summary(rows, header=_HDR, color=False, width=80)
+    assert lines[1] == "                 time    in    out    cost"
+    assert lines[-2] == "  total        39m 2s  1.0M  20.0k  $3.00*"
+    assert lines[-1] == ("  * theoretical API list price; actual subscription"
+                         " usage is much lower")

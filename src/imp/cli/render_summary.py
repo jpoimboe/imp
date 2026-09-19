@@ -19,6 +19,7 @@ from imp.cli.accounting import (
 )
 from imp.cli.narrative import elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
+from imp.cli.quota_column import FOOTNOTE, QuotaColumn
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
 from imp.cli.render_text import fmt_seconds
 
@@ -482,12 +483,23 @@ def _header_line(h: SummaryHeader, *, color: bool) -> str:
 
 
 _TITLES = ("time", "in", "out", "cost")
+_TOKENS_TITLE = "tokens"
+_QUOTA_TITLE = "quota"
+_WEEKLY_TITLE = "weekly"
 _TOTAL_LABEL = "total"
 
 
+def _last_cell(usage: RowUsage, units: Units,
+               column: QuotaColumn | None) -> str:
+    """The right-most column: dollars, or the row's share of the weekly window
+    once a gauge resolves — on a subscription no money was spent."""
+    return cost_cell(usage) if column is None else column.cell(units)
+
+
 def _column_widths(summary: list[StepRow], open_label: str,
-                   total_work: float | None,
-                   total_usage: RowUsage) -> tuple[int, int, int, int, int]:
+                   total_work: float | None, total_usage: RowUsage,
+                   total_last: str,
+                   column: QuotaColumn | None) -> tuple[int, int, int, int, int]:
     """Widths measured across step rows, subagent rows, the totals row, and title labels."""
     names = [len(r.step) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
@@ -495,72 +507,93 @@ def _column_widths(summary: list[StepRow], open_label: str,
     durs = [len(_dur_text(total_work)), len(_TITLES[0])]
     ins = [len(_fmt_tokens(total_usage.input_total)), len(_TITLES[1])]
     outs = [len(_fmt_tokens(total_usage.output)), len(_TITLES[2])]
-    costs = [len(cost_cell(total_usage)), len(_TITLES[3])]
+    lasts = [len(total_last),
+             len(_TITLES[3] if column is None else _WEEKLY_TITLE)]
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
         ins.append(len(_fmt_tokens(r.totals.input_total)))
         outs.append(len(_fmt_tokens(r.totals.output)))
-        costs.append(len(cost_cell(r.totals)))
+        lasts.append(len(_last_cell(r.totals, r.subtree_units, column)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
             ins.append(len(_fmt_tokens(s.usage.input_total)))
             outs.append(len(_fmt_tokens(s.usage.output)))
-            costs.append(len(cost_cell(s.usage)))
-    return (max(names), max(durs), max(ins), max(outs), max(costs))
+            lasts.append(len(_last_cell(s.usage, s.units, column)))
+    return (max(names), max(durs), max(ins), max(outs), max(lasts))
 
 
-def _cells(u: RowUsage, in_w: int, out_w: int, cost_w: int) -> str:
+def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int,
+           last_w: int) -> str:
     """The three numeric cells, right-justified and never coloured."""
     return (f"{_fmt_tokens(u.input_total):>{in_w}}  "
-            f"{_fmt_tokens(u.output):>{out_w}}  {cost_cell(u):>{cost_w}}")
+            f"{_fmt_tokens(u.output):>{out_w}}  {last:>{last_w}}")
 
 
-def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
-               in_w: int, out_w: int, cost_w: int, color: bool,
+def _step_line(row: StepRow, *, last: str, hue: str, name_w: int, dur_w: int,
+               in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    return f"  {name}  {dur}  {_cells(row.totals, in_w, out_w, cost_w)}"
+    cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
+    return f"  {name}  {dur}  {cells}"
 
 
-def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int, in_w: int,
-              out_w: int, cost_w: int, color: bool, open_label: str) -> str:
+def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int,
+              out_w: int, last_w: int, color: bool, open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if sub.errored else pal.NODE_COLORS["subagent"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    return f"    {body}  {dur}  {_cells(sub.usage, in_w, out_w, cost_w)}"
+    cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w)
+    return f"    {body}  {dur}  {cells}"
 
 
-def _title_line(*, name_w: int, dur_w: int, in_w: int, out_w: int,
-                cost_w: int, color: bool) -> str:
+def _title_lines(*, name_w: int, dur_w: int, in_w: int, out_w: int,
+                 last_w: int, quota: bool, color: bool) -> list[str]:
+    """One title row, or two once the quota column is there to label."""
     time_t, in_t, out_t, cost_t = _TITLES
-    body = (f"  {'':<{name_w}}  {time_t:>{dur_w}}  {in_t:>{in_w}}  "
-            f"{out_t:>{out_w}}  {cost_t:>{cost_w}}")
-    return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color)
+    lines: list[str] = []
+    if quota:
+        lines.append(f"  {'':<{name_w}}  {'':>{dur_w}}  "
+                     f"{_TOKENS_TITLE:^{in_w + 2 + out_w}}  "
+                     f"{_QUOTA_TITLE:>{last_w}}")
+        # The footnote marker hangs one column past the numeric edge.
+        lines.append(f"  {'':<{name_w}}  {time_t:>{dur_w}}  {in_t:>{in_w}}  "
+                     f"{out_t:>{out_w}}  {_WEEKLY_TITLE:>{last_w}}*")
+    else:
+        lines.append(f"  {'':<{name_w}}  {time_t:>{dur_w}}  {in_t:>{in_w}}  "
+                     f"{out_t:>{out_w}}  {cost_t:>{last_w}}")
+    return [pal.ansi(ln, *pal.NODE_COLORS["metadata"], enabled=color)
+            for ln in lines]
 
 
-def _total_line(work: float | None, total: RowUsage, *, name_w: int,
-                dur_w: int, in_w: int, out_w: int, cost_w: int) -> str:
+def _total_line(work: float | None, total: RowUsage, last: str, *, name_w: int,
+                dur_w: int, in_w: int, out_w: int, last_w: int) -> str:
     # Work time, not a column sum: it includes the gaps between steps.
-    return (f"  {_TOTAL_LABEL:<{name_w}}  {_dur_text(work):>{dur_w}}  "
-            f"{_cells(total, in_w, out_w, cost_w)}")
+    cells = _cells(total, last, in_w=in_w, out_w=out_w, last_w=last_w)
+    return f"  {_TOTAL_LABEL:<{name_w}}  {_dur_text(work):>{dur_w}}  {cells}"
 
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
-                   color: bool, width: int) -> list[str]:
+                   color: bool, width: int,
+                   quota: QuotaColumn | None = None) -> list[str]:
     open_label = open_span_label(header.status)
     work, total = summary_totals(summary, header.total_seconds,
                                  header.exclusions)
-    name_w, dur_w, in_w, out_w, cost_w = _column_widths(
-        summary, open_label, work, total)
+    # The total's share is taken over the rows rendered, so it agrees with the
+    # column above it under a windowing flag; unfiltered they are the same sum.
+    total_last = (cost_cell(total) if quota is None
+                  else quota.cell(rows_units(summary)))
+    name_w, dur_w, in_w, out_w, last_w = _column_widths(
+        summary, open_label, work, total, total_last, quota)
     lines = [_header_line(header, color=color)]
     if summary:
-        lines.append(_title_line(name_w=name_w, dur_w=dur_w, in_w=in_w,
-                                 out_w=out_w, cost_w=cost_w, color=color))
-    cells = [cost_cell(total)]
+        lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
+                              out_w=out_w, last_w=last_w,
+                              quota=quota is not None, color=color)
+    cells = [total_last]
     cur_phase: str | None = None
     hues: dict[str, str] = {}
     next_hue = 0
@@ -572,19 +605,24 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
-        cells.append(cost_cell(row.totals))
-        lines.append(_step_line(row, hue=hues[row.step], name_w=name_w,
-                                dur_w=dur_w, in_w=in_w, out_w=out_w,
-                                cost_w=cost_w, color=color,
+        last = _last_cell(row.totals, row.subtree_units, quota)
+        cells.append(last)
+        lines.append(_step_line(row, last=last, hue=hues[row.step],
+                                name_w=name_w, dur_w=dur_w, in_w=in_w,
+                                out_w=out_w, last_w=last_w, color=color,
                                 open_label=open_label))
         for sub in row.subagents:
-            cells.append(cost_cell(sub.usage))
-            lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w, in_w=in_w,
-                                   out_w=out_w, cost_w=cost_w, color=color,
+            sub_last = _last_cell(sub.usage, sub.units, quota)
+            cells.append(sub_last)
+            lines.append(_sub_line(sub, last=sub_last, name_w=name_w,
+                                   dur_w=dur_w, in_w=in_w, out_w=out_w,
+                                   last_w=last_w, color=color,
                                    open_label=open_label))
     lines.append("")
-    lines.append(_total_line(work, total, name_w=name_w, dur_w=dur_w,
-                             in_w=in_w, out_w=out_w, cost_w=cost_w))
+    lines.append(_total_line(work, total, total_last, name_w=name_w,
+                             dur_w=dur_w, in_w=in_w, out_w=out_w,
+                             last_w=last_w))
+    notes = legend_lines(cells) if quota is None else [FOOTNOTE]
     lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
-              for t in legend_lines(cells)]
+              for t in notes]
     return lines

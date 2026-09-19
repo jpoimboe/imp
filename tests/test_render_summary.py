@@ -1787,8 +1787,7 @@ def test_the_summary_has_no_quota_input_and_renders_no_quota_output():
     assert lines[-2].startswith("  total")
     assert lines[-1] == ("  * theoretical API list price; actual subscription"
                          " usage is much lower")
-    with pytest.raises(TypeError):
-        render_summary([], header=_HDR, color=False, width=80, quota=())
+
 
 
 def test_build_summary_returns_the_step_rows_directly():
