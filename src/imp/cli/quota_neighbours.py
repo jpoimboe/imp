@@ -106,7 +106,11 @@ def neighbour_slice(
                 elif when < start:
                     anchor[pair] = _projected(e)
             if inside:
-                usage.append(_projected(e))
+                row = _projected(e)
+                # receiver cannot re-derive a patch's instant from the slice alone
+                if etype == "agent_message_usage_patch":
+                    row["timestamp"] = when.isoformat()
+                usage.append(row)
     if not readings and not usage:
         return None
     anchors = [anchor[p] for p in sorted(anchored) if p in anchor]

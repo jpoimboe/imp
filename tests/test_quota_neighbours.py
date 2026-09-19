@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from imp.cli.accounting import billing_from_usage_patch
 from imp.cli.quota_neighbours import neighbour_slice, scan_neighbours
+from imp.cli.quota_share import increments, parse_ts, units_in_span, weighted_units
 from imp.engine import archive
 from tests.conftest import _archive_with_event
 
@@ -166,6 +168,27 @@ def test_a_patch_is_in_span_though_the_message_it_patches_precedes_it() -> None:
     assert got.usage[0]["payload"]["usage"]["input_tokens"] == 777
     # priced from the pre-span message's triple, which the slice still resolves
     assert got.agents == {"step:a": ("codex", "gpt-5.6-sol", "chatgpt")}
+    # the patch must carry the instant the slice resolved (the prose event's ts)
+    assert parse_ts(got.usage[0]["timestamp"]) == parse_ts("2026-06-01T04:00:00+00:00")
+
+
+def test_a_neighbour_patch_units_survive_the_seam() -> None:
+    """A patch shipped across the seam must arrive with its resolved instant so
+    increments/units_in_span can credit it; without the stamp the neighbour's
+    whole draw falls out of the denominator."""
+    got = neighbour_slice("proj", "n1", [
+        _msg("2026-06-01T03:00:00+00:00", eid="msg-pre-span"),
+        _prose("2026-06-01T04:00:00+00:00"),
+        _patch(tokens=777),
+    ], _START, _END)
+    assert got is not None
+    rows = increments([*got.anchors, *got.usage], dict(got.agents))
+    result = units_in_span(rows, parse_ts(_START), parse_ts(_END))
+    provider, model, _ = got.agents["step:a"]
+    billing = billing_from_usage_patch(got.usage[0]["payload"])
+    expected = weighted_units(provider, model, billing)
+    assert result.get(provider) > 0
+    assert result.get(provider) == expected
 
 
 def test_the_triple_is_the_last_message_at_or_before_the_span_end() -> None:
