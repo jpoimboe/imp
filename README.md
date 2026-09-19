@@ -25,6 +25,9 @@ process into a configurable workflow of short-lived, focused sessions.
 - **Unattended end to end** — Human effort concentrates up front, in a single
   interview; once you approve, imp runs spec, plan, code, test, review, and
   merge on its own, so you're free to step away from the computer
+- **Lifecycle management** — Every change lives in a *quest*: a durable unit
+  of work with a unique id, tracked from the opening idea through to the merge,
+  then archived as a self-contained record
 - **Every change is a quest** — Like a pull request, but starting from a
   conversation rather than the finished diff: one durable, resumable unit of
   work with an id, a lifecycle, and a home on disk
@@ -39,7 +42,7 @@ process into a configurable workflow of short-lived, focused sessions.
   forward, avoiding long sessions where agents get increasingly confused
 - **Bugs rooted out early** — The later a flaw is caught, the more it costs to
   fix, and an agent will faithfully implement a flawed spec, so imp loops
-  on adversarial review over the spec and plan until the design converges
+  on adversarial review over the spec and plan 
 - **Built-in regression protection** — imp leans heavily on TDD and writes a
   lot of regression tests; keeping them green is the agents' job, not yours
 - **Multiple quests in parallel** — A quest runs in its own git worktree, so
@@ -123,64 +126,11 @@ Stats:
 
 Full run log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
 
-## Why imp?
-
-Each change (feature or bug) for a given project gets built as part of an
-isolated, resumable **quest**, which tracks the change's history from inception
-through merge.  Every conversation is archived, so you can easily **trace any
-line of code back to the full conversation which produced it.**
-
-**imp is workflow-agnostic, but ships batteries included** with an 
-opinionated default workflow for producing well-tested, reviewed, maintainable
-code in a fast-moving greenfield or small team project.  The default workflow
-is defined in YAML and can be easily customized or replaced to suit your needs.
-
-**Human effort is concentrated up front** at the beginning of the quest, during
-an interview with the "threshold" agent.  Once it has picked your brain
-sufficiently, with your approval it runs unattended from spec, plan, code,
-test, review, all the way through merge, so you're free to step away from the
-computer.  The quest can be paused or resumed at any time.  You can also kick
-off multiple quests in parallel, as imp runs in **resumable, isolated git
-worktrees.**
-
-For any surprises or open items discovered during the quest, imp agents make
-judgment calls which are then raised back to the user at the merge gate for
-their final approval.  They can then send it back for rework, or open a
-follow-up backlog quest for further improvements.
-
-imp uses **fresh LLM context and independent reviewers** so each agent can
-focus on its given task, avoiding long sessions where agents get increasingly
-confused.  Detailed specs, implementation plans, and progress files carry
-decisions between steps.  Tests are written before code (TDD), every artifact
-is independently reviewed in multiple rounds if needed, and the final code is
-checked against acceptance criteria before merge.
-
-**Bugs are rooted out early.**  With AI development, most bugs tend to
-originate early during the spec or planning phase, due to gaps,
-inconsistencies, or mistakes made by the agent.  imp spends most of its tokens
-up front, looping on adversarial review of the spec and plan documents until
-the design converges to be fully specified and consistent.
-
-imp's default workflow produces **clean and maintainable code.**  The agents
-look for cleanups, refactorings, simplifications, and code removals. 
-
-It uses **test-driven development (TDD)** extensively.  TDD tends to produce a
-*lot* of tests that might be considered fragile by a human, as even trivial
-changes can trigger test failures.  But such tests are much easier for an LLM
-to maintain, so TDD is a good fit for preventing regressions in AI-native
-development.
-
-On Linux, imp agents are **isolated and sandboxed** so they can't accidentally
-wreck your system.
-
-Note the default workflow can be a bit token-intensive due to the extra
-thinking involved with detailed specs, plans, and multiple rounds of
-independent review.  Quality, maintainable, functional, well-tested code isn't
-cheap.  **Claude Max (or ChatGPT Pro) subscription recommended for the default
-workflow.**  Local models are not (yet) supported.  Pull requests welcome :-)
-
-For a lighter weight approach, custom workflows can be created, while still
-taking advantage of imp's useful [engine features](#engine-features).
+The default workflow is time and token intensive due to the detailed spec,
+plans, coding, and multiple rounds of independent review.  Making functional,
+maintainable, and well-tested code isn't cheap.  **A Claude Max (or ChatGPT
+Pro) subscription is recommended for the default workflow.**  Local models are
+not (yet) supported.  Pull requests welcome :-)
 
 ## Try it
 
@@ -224,14 +174,15 @@ an existing git checkout.
 
 ## Quests
 
-A *quest* represents a unit of work, from the opening intent to the final merge.
-Before going live, it's just a conversation: no branch or worktree.  You can
-build it, park it in the backlog, or discard it.
+A *quest* represents a unit of work, from the opening intent to the final
+merge: kind of like a pull request that starts at the idea instead of the
+finished diff.
 
-Once live, the quest owns its worktree, artifacts, workflow snapshot, and event
-log.  Prompts, responses, and tool outputs are logged alongside decisions, test
-runs, and gate outcomes.  State is rebuilt from the log rather than held only
-in memory, so an interrupted run can be resumed in the middle of a step.
+After the initial interview, the quest "goes live", with its own worktree,
+artifacts, and event log.  Prompts, responses, and tool outputs are logged
+alongside decisions, test runs, and gate outcomes.  State is rebuilt from the
+log rather than held only in memory, so an interrupted run can be resumed in
+the middle of a step.
 
 When the quest finishes, its conversation and artifacts are archived and remain
 searchable.  Quests can be interacted with via the CLI:
@@ -318,49 +269,6 @@ flowchart LR
   converge -. gap found .-> plan
   integrate -. rework .-> plan
 ```
-
-<hr/>
-
-It has the following features:
-
-- **Put human judgment up front.** imp asks about decisions it cannot make from
-  the code, while changing the design is still cheap.  Once the design is
-  settled, it typically drives the rest of the quest through merge on its own.
-- **Start every step fresh.** Each step is a separate model invocation with only
-  the context it needs, to avoid entering the LLM "dumb zone".  Specs, plans,
-  and progress files carry decisions forward.  Reviewers do not inherit
-  authors' reasoning or assumptions.
-- **Spec-driven development.** A spec defines the result and its acceptance
-  criteria.  An implementation plan names the code and tests needed to get
-  there.  Both are reviewed (often multiple times) before implementation
-  starts.
-- **Adversarial review.** The agents reviewing the spec, plan, and code
-  did not write them.  They inspect the repository and verify claims instead of
-  inheriting the previous agent's assumptions.
-- **Work through big changes one plan at a time.** imp implements and fast-tests
-  each plan before starting the next, then reviews the whole quest as one change.
-- **Test-driven development.** Tests are written early and often, and must be
-  observed failing for the expected reason before implementation.
-- **Keep the code lean and maintainable.** Coders and reviewers push back on
-  speculative fallbacks, dead error handling, and compatibility shims that the
-  design did not ask for.
-- **Sweep up non-blocking review comments.** Correctness blockers loop back for
-  an immediate, re-reviewed fix.  Everything else worth considering goes through
-  a separate, once-per-quest quality sweep, which fixes low-risk improvements,
-  filters out noise, and saves genuine judgment calls for the merge gate.
-- **Save newly discovered human judgment calls for the end.** After the initial
-  interview, any discovered issues are fixed automatically, with judgment calls
-  deferred until the final merge gate for the user to approve, send back for
-  rework, or open a backlog quest.
-- **Converge on the spec.** After implementation, imp checks the whole change
-  against the acceptance criteria, runs the slow tests, and routes gaps back into
-  planning or implementation.
-- **Triage flaky tests.** Failures caused by the change are fixed and retested.
-  Flaky or environmental test failures are recorded and surfaced at the merge
-  gate where they can be tracked in a new backlog quest.
-- **Integrate and merge.** imp gets in a merge queue to coordinate with other
-  imp quest merges, rebases onto the current base, resolves conflicts, reruns
-  verification, discusses any open items with the human, and merges.
 
 ## Engine features
 
