@@ -7,12 +7,19 @@ from imp.cli.quota_share import (
     NO_UNITS,
     Increment,
     Units,
+    credits_by_index,
     increments,
     parse_ts,
     rollup_units,
     run_span,
     units_in_span,
     weighted_units,
+)
+from imp.cli.render_summary import (
+    build_summary,
+    overlay_units,
+    rows_units,
+    units_by_row,
 )
 from imp.providers.catalog import BillingUsage
 
@@ -224,3 +231,147 @@ def test_the_span_start_splits_an_interval_but_not_an_instant() -> None:
     instant = Increment(index=0, agent_id="a1", session_id=None,
                         provider="claude", units=3.0, start=None, end=_SPAN[0])
     assert instant.credit(*_SPAN) == 3.0
+
+
+def _quest_log() -> list[dict[str, Any]]:
+    """One step, one subagent, and a third agent owning no row at all.
+
+    The step's pair `s1` reports 200k sonnet output tokens and then 500k
+    cumulative, so its increments are 3.00 u and 4.50 u — 7.50 u in total, which
+    must ride the second row, the only one surviving the cumulative collapse. The
+    subagent's pair `s2` draws 1.50 u. `ghost` draws 15.00 u that no row owns."""
+    def msg(eid: str, agent: str, second: int) -> dict[str, Any]:
+        return {"id": eid, "type": "agent_message", "agent_id": agent,
+                "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
+                "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
+                            "auth_mode": "subscription"}}
+
+    def result(eid: str, agent: str, second: int, session: str,
+               tokens: int) -> dict[str, Any]:
+        return {"id": eid, "type": "query_result", "agent_id": agent,
+                "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
+                "payload": {"session_id": session, "duration_ms": 1000,
+                            "model_usage": {
+                                "claude-sonnet-4-6": {"outputTokens": tokens}}}}
+
+    return [
+        {"id": "e0", "type": "quest_created", "agent_id": None,
+         "timestamp": "2026-01-01T00:00:00+00:00", "payload": {}},
+        {"id": "e1", "type": "step_started", "agent_id": None,
+         "timestamp": "2026-01-01T00:00:00+00:00",
+         "payload": {"step": "build", "phase": "impl"}},
+        msg("e2", "step:impl/build", 1),
+        result("e3", "step:impl/build", 10, "s1", 200_000),
+        {"id": "e4", "type": "tool_call", "agent_id": "step:impl/build",
+         "timestamp": "2026-01-01T00:00:11+00:00",
+         "payload": {"name": "sub_agent", "id": "t1",
+                     "input": {"subagent_name": "explorer"}}},
+        msg("e5", "sub:e4", 12),
+        result("e6", "sub:e4", 20, "s2", 100_000),
+        {"id": "e7", "type": "tool_result", "agent_id": "step:impl/build",
+         "timestamp": "2026-01-01T00:00:21+00:00", "payload": {"id": "t1"}},
+        result("e8", "step:impl/build", 30, "s1", 500_000),
+        msg("e9", "ghost", 31),
+        result("e10", "ghost", 32, "s9", 1_000_000),
+        {"id": "e11", "type": "step_completed", "agent_id": None,
+         "timestamp": "2026-01-01T00:00:40+00:00", "payload": {"step": "build"}},
+    ]
+
+
+def _codex_log() -> list[dict[str, Any]]:
+    """One codex step. codex emits its assistant message with `usage={}` and
+    patches the totals afterwards, and `state.py:783` persists that patch with
+    three keys and no `id` — so the patch holds the step's whole 0.06335 u."""
+    return [
+        {"id": "e0", "type": "step_started", "agent_id": None,
+         "timestamp": "2026-01-01T00:00:00+00:00",
+         "payload": {"step": "build", "phase": "impl"}},
+        {"id": "e1", "type": "agent_message", "agent_id": "step:impl/build",
+         "timestamp": "2026-01-01T00:00:01+00:00",
+         "payload": {"provider": "codex", "model": "gpt-5.3-codex",
+                     "auth_mode": "subscription", "usage": {}}},
+        {"type": "agent_message_usage_patch", "agent_id": "step:impl/build",
+         "payload": {"usage": _CODEX_USAGE}},
+        {"id": "e3", "type": "step_completed", "agent_id": None,
+         "timestamp": "2026-01-01T00:00:02+00:00", "payload": {"step": "build"}},
+    ]
+
+
+def _span_of(log: list[dict[str, Any]]) -> tuple[datetime, datetime]:
+    span = run_span(log)
+    assert span is not None
+    return span
+
+
+def test_each_increment_is_credited_at_its_own_log_position() -> None:
+    """The step's pair reports 200k then 500k cumulative sonnet output, so its two
+    increments are 3.00 u at index 3 and 4.50 u at index 8 — the second of which
+    the cumulative collapse keeps and the first of which it drops, both belonging
+    to the same row."""
+    log = _quest_log()
+    credits = credits_by_index(log, _span_of(log))
+    assert {i: round(u.get("claude"), 4) for i, u in credits.items()} == {
+        3: 3.0, 6: 1.5, 8: 4.5, 10: 15.0}
+
+
+def test_an_id_less_usage_patch_still_reaches_the_row_that_owns_it() -> None:
+    """A join keyed on the event id leaves a codex run's whole draw unattributed —
+    `quota unattributable` on a gauge that moved — while the dollar column, which
+    resolves the row from the log position, prices the same usage fine."""
+    log = _codex_log()
+    rows = build_summary(log, _span_of(log))
+    assert rows[0].units.get("codex") == 0.06335
+    assert rows_units(rows).get("codex") == 0.06335
+    assert rows[0].usage.dollars > 0
+
+
+def test_a_filtered_render_keeps_the_units_the_whole_log_computed() -> None:
+    """AC 18 / AC 19(b): `--range` can drop the one `query_result` a cumulative
+    pair's dollars ride on — which moves the dollar cell, as the first assertion
+    shows — so the rendered rows take the units the unfiltered log computed,
+    matched by row rather than by event."""
+    log = _quest_log()
+    whole = build_summary(log, _span_of(log))
+    narrowed = build_summary([e for e in log if e["id"] != "e8"])
+    assert round(narrowed[0].usage.dollars, 4) < round(whole[0].usage.dollars, 4)
+    assert narrowed[0].units == NO_UNITS
+    overlay_units(narrowed, units_by_row(whole))
+    assert round(narrowed[0].units.get("claude"), 4) == 7.5
+    assert round(narrowed[0].subagents[0].units.get("claude"), 4) == 1.5
+
+
+def test_units_land_on_the_step_and_subagent_rows_that_own_the_agent() -> None:
+    log = _quest_log()
+    rows = build_summary(log, _span_of(log))
+    assert len(rows) == 1
+    step = rows[0]
+    assert round(step.units.get("claude"), 4) == 7.5
+    assert [s.name for s in step.subagents] == ["explorer"]
+    assert round(step.subagents[0].units.get("claude"), 4) == 1.5
+    assert round(step.subtree_units.get("claude"), 4) == 9.0
+
+
+def test_an_unowned_agents_units_are_dropped_from_both_sides() -> None:
+    """Decision 18: `ghost` draws 15.00 u that no row owns, so the row-attributed
+    sum is 9.00 u — the same figure the per-step cells add up to."""
+    log = _quest_log()
+    rows = build_summary(log, _span_of(log))
+    assert round(rows_units(rows).get("claude"), 4) == 9.0
+
+
+def test_build_summary_without_a_span_leaves_every_row_at_no_units() -> None:
+    rows = build_summary(_quest_log())
+    assert rows[0].units == NO_UNITS
+    assert rows[0].subagents[0].units == NO_UNITS
+    assert rows_units(rows) == NO_UNITS
+
+
+def test_a_row_is_identified_by_its_occurrence_not_by_its_agent_id() -> None:
+    """Two runs of one step share the agent id `step:impl/build`, so the keys the
+    overlay matches on must still tell the occurrences apart."""
+    log = _quest_log()
+    rows = build_summary(log, _span_of(log))
+    assert rows[0].key == "step:impl/build@2026-01-01T00:00:00+00:00"
+    assert rows[0].subagents[0].key == "sub:e4"
+    assert sorted(units_by_row(rows)) == [
+        "step:impl/build@2026-01-01T00:00:00+00:00", "sub:e4"]

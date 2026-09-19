@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from imp.cli import palette as pal
@@ -11,13 +12,14 @@ from imp.cli.accounting import (
     RowUsage,
     billing_from_agent_message,
     billing_from_usage_patch,
-    collapse_cumulative_query_results,
     computed_contribution,
     is_metered,
+    kept_query_results,
     vendor_contribution,
 )
 from imp.cli.narrative import elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
+from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
 from imp.cli.render_text import fmt_seconds
 
 _FINISHED_STATUSES = frozenset({"merged", "done", "abandoned"})
@@ -132,6 +134,13 @@ class SubagentRow:
     end_inferred: bool = False
     errored: bool = False
     usage: RowUsage = field(default_factory=RowUsage)
+    units: Units = NO_UNITS
+    agent_id: str = ""
+
+    @property
+    def key(self) -> str:
+        """Row identity across a filtered and an unfiltered build: one dispatch."""
+        return self.agent_id
 
     @property
     def wall_seconds(self) -> float | None:
@@ -154,6 +163,13 @@ class StepRow:
     agent_id: str | None = None
     usage: RowUsage = field(default_factory=RowUsage)
     subagents: list[SubagentRow] = field(default_factory=list)
+    units: Units = NO_UNITS
+
+    @property
+    def key(self) -> str:
+        """Row identity across a filtered and an unfiltered build: a step agent id
+        repeats on re-run, so the occurrence's own start is what tells them apart."""
+        return f"step:{self.phase}/{self.step}@{self.start_ts}"
 
     @property
     def totals(self) -> RowUsage:
@@ -161,6 +177,14 @@ class StepRow:
         total = self.usage
         for sub in self.subagents:
             total = total + sub.usage
+        return total
+
+    @property
+    def subtree_units(self) -> Units:
+        """Whole subtree, on the same inclusive basis as `totals`."""
+        total = self.units
+        for sub in self.subagents:
+            total = total + sub.units
         return total
 
     @property
@@ -187,8 +211,15 @@ def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 
-def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
+def build_summary(events: Iterable[dict[str, Any]],
+                  units_span: tuple[datetime, datetime] | None = None,
+                  ) -> list[StepRow]:
+    """The summary's step rows. `units_span` turns on quota attribution, always
+    over the events passed here: pass the unfiltered log and `overlay_units` the
+    result onto a filtered build, so no filter can move a step's quota cell."""
     log = list(events)
+    credits = credits_by_index(log, units_span) if units_span is not None else {}
+    kept = kept_query_results(log)
     exclusions = exclusion_spans(log)
     rows: list[StepRow] = []
     open_row: StepRow | None = None        # the currently-open occurrence
@@ -211,15 +242,29 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         open_subs.clear()
         subs_by_agent.clear()
 
-    def _credit(usage: RowUsage) -> None:
+    def _target() -> StepRow | SubagentRow | None:
         sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
         if sub is not None:
-            sub.usage = sub.usage + usage
-        elif (open_row is not None
-              and agent_id is not None and agent_id == open_row.agent_id):
-            open_row.usage = open_row.usage + usage
+            return sub
+        if (open_row is not None
+                and agent_id is not None and agent_id == open_row.agent_id):
+            return open_row
+        return None
 
-    for e in collapse_cumulative_query_results(log):
+    def _credit(usage: RowUsage) -> None:
+        row = _target()
+        if row is not None:
+            row.usage = row.usage + usage
+
+    def _credit_units(index: int) -> None:
+        credited = credits.get(index)
+        if credited is None:
+            return
+        row = _target()
+        if row is not None:
+            row.units = row.units + credited
+
+    for i, e in enumerate(log):
         etype = e.get("type")
         ts = e.get("timestamp")
         agent_id = e.get("agent_id")
@@ -233,6 +278,10 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 and isinstance(agent_id, str)
                 and not agent_id.startswith("sub:")):
             open_row.agent_id = agent_id
+
+        _credit_units(i)
+        if etype == "query_result" and i not in kept:
+            continue  # cumulative predecessor: its dollars ride the surviving row
 
         if etype == "step_started":
             step = str(p.get("step", "?"))
@@ -296,9 +345,10 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 new_sub = SubagentRow(
                     name=str(inp.get("subagent_name", "?")),
                     label=p.get("label"),
-                    start_ts=ts)
+                    start_ts=ts,
+                    agent_id=f"sub:{event_id}")
                 open_row.subagents.append(new_sub)
-                subs_by_agent[f"sub:{event_id}"] = new_sub
+                subs_by_agent[new_sub.agent_id] = new_sub
                 if block_id:
                     open_subs[(p.get("id_ns") == "block", block_id)] = new_sub
         elif etype == "tool_result":
@@ -362,6 +412,34 @@ def _sub_body(sub: SubagentRow) -> str:
     if sub.label:
         text += f" ({sub.label})"
     return text
+
+
+def rows_units(summary: list[StepRow]) -> Units:
+    """Every row's units — the subject's contribution to both sides of the quota
+    ratio, so the rendered cells sum to the quest total by construction."""
+    total = NO_UNITS
+    for row in summary:
+        total = total + row.subtree_units
+    return total
+
+
+def units_by_row(summary: list[StepRow]) -> dict[str, Units]:
+    """Each row's units by row identity, for a build of the same log that a filter
+    narrowed."""
+    out: dict[str, Units] = {}
+    for row in summary:
+        out[row.key] = row.units
+        for sub in row.subagents:
+            out[sub.key] = sub.units
+    return out
+
+
+def overlay_units(summary: list[StepRow], by_row: dict[str, Units]) -> None:
+    """Give each row the units the unfiltered log credited it."""
+    for row in summary:
+        row.units = by_row.get(row.key, NO_UNITS)
+        for sub in row.subagents:
+            sub.units = by_row.get(sub.key, NO_UNITS)
 
 
 def summary_totals(

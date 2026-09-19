@@ -70,6 +70,17 @@ def contribution(billing: BillingUsage, dollars: float | None, *,
         notional=0 if metered else 1)
 
 
+def kept_query_results(events: list[dict[str, Any]]) -> set[int]:
+    """Indices of the `query_result` rows that survive the collapse below: the
+    last per (agent, session)."""
+    last: dict[tuple[str | None, str], int] = {}
+    for i, event in enumerate(events):
+        if event.get("type") == "query_result":
+            payload = event.get("payload") or {}
+            last[(event.get("agent_id"), str(payload.get("session_id") or ""))] = i
+    return set(last.values())
+
+
 def collapse_cumulative_query_results(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -78,12 +89,7 @@ def collapse_cumulative_query_results(
     different id -> both survive and add. Rows carrying no session id (a
     read-only archive root is never rebuilt) share one bucket per agent, which
     under-counts rather than reinstating the cumulative over-report."""
-    last: dict[tuple[str | None, str], int] = {}
-    for i, event in enumerate(events):
-        if event.get("type") == "query_result":
-            payload = event.get("payload") or {}
-            last[(event.get("agent_id"), str(payload.get("session_id") or ""))] = i
-    keep = set(last.values())
+    keep = kept_query_results(events)
     return [event for i, event in enumerate(events)
             if event.get("type") != "query_result" or i in keep]
 

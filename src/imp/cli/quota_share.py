@@ -238,3 +238,14 @@ def units_in_span(rows: Iterable[Increment], start: datetime,
     for inc in rows:
         total = total + Units.of(inc.provider, inc.credit(start, end))
     return total
+
+
+def credits_by_index(events: list[dict[str, Any]],
+                     span: tuple[datetime, datetime]) -> dict[int, Units]:
+    """Each increment's in-span units, keyed by its position in `events` — the one
+    join a row walk over the same list can rely on. An event id cannot serve: the
+    persisted usage patch carries none, which is where a codex run's whole draw
+    lives. One event yields at most one increment, so no key collides."""
+    start, end = span
+    return {inc.index: Units.of(inc.provider, inc.credit(start, end))
+            for inc in increments(events, {})}
