@@ -5,11 +5,23 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import anyio
 import pytest
 
 import imp.cli.main as m
-from imp.cli.store import NeighbourQuota, QuotaNeighboursUnsupported
-from tests._quota_fixture import SUBJECT_ID, quota_events
+from imp.cli.quota_column import QuotaColumn, share_cell
+from imp.cli.quota_share import QuotaFigure
+from imp.cli.render_summary import (
+    SummaryHeader,
+    build_summary,
+    exclusion_spans,
+    render_summary,
+    summary_total,
+)
+from imp.cli.store import LocalStore, NeighbourQuota, QuotaNeighboursUnsupported
+from imp.cli.store_proxy import ProxyStore, run_query
+from imp.remote.session.socket_server import SessionSocket
+from tests._quota_fixture import NEIGHBOUR_ID, SUBJECT_ID, quota_events
 
 
 class _QuotaStore:
@@ -217,3 +229,136 @@ def test_a_run_mixing_apikey_and_subscription_steps_still_gets_the_column(
     # No dollar amounts anywhere
     assert not any("$" in ln for ln in lines)
     assert not any("~" in ln for ln in lines)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+def _neighbour_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """fego87's replay as a live quest home in another project."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / NEIGHBOUR_ID
+    qdir.mkdir(parents=True)
+    (qdir / "quest.json").write_text(json.dumps(
+        {"id": NEIGHBOUR_ID, "title": NEIGHBOUR_ID, "base_branch": "main",
+         "created_at": "2026-09-18T03:00:00+00:00"}))
+    (qdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in quota_events(NEIGHBOUR_ID)))
+
+
+def test_samo71_renders_its_share_of_the_week(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1] == "                                   tokens       quota"
+    assert lines[2] == "                         time      in     out  weekly*"
+    assert lines[4] == "  threshold             5m 5s    1.4M   27.8k   0.19%"
+    assert lines[-2] == "  total                 2h 6m   28.0M  531.1k   2.83%"
+    assert lines[-1] == ("  * estimated to ±1 point of the weekly gauge; usage"
+                         " outside imp during the run skews it high")
+    assert not any("$" in ln for ln in lines)
+    # The span asked for is the quest's first event to its last.
+    assert store.asked == [(SUBJECT_ID, "2026-09-18T03:29:57.904744+00:00",
+                            "2026-09-18T05:38:03.485364+00:00")]
+
+
+def _figure(store: Any, events: list[dict[str, Any]]) -> QuotaFigure:
+    rows = build_summary(events)
+    view = m._attribute_quota(store, SUBJECT_ID, events, rows)
+    assert isinstance(view, QuotaColumn)
+    figure = view.gauges[0]
+    assert isinstance(figure, QuotaFigure)
+    return figure
+
+
+def test_the_per_step_cells_sum_to_the_quest_total(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    events = quota_events(SUBJECT_ID)
+    rows = build_summary(events)
+    view = m._attribute_quota(LocalStore(tmp_path), SUBJECT_ID, events, rows)
+    assert isinstance(view, QuotaColumn)
+    figure = view.gauges[0]
+    assert isinstance(figure, QuotaFigure)
+    assert share_cell(figure.percent) == "2.83%"
+    # Numerator and denominator are the same row-attributed quantity, so the
+    # rendered cells sum to the total rather than approximately to it.
+    assert sum(figure.scale(r.subtree_units) for r in rows) == pytest.approx(
+        figure.percent, abs=1e-9)
+
+
+def test_discovery_routes_through_the_store_not_the_filesystem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    events = quota_events(SUBJECT_ID)
+    # fego87 drew 1.8338 of the 31.7793 in-span units, so reaching it moves the
+    # figure off the 3.00% a store-less walk would report. A direct filesystem
+    # read in-sandbox returns a partial neighbour set, so the guard is that the
+    # denominator provably comes from the store.
+    assert share_cell(_figure(LocalStore(tmp_path), events).percent) == "2.83%"
+    assert share_cell(_figure(_QuotaStore(events, None),
+                              events).percent) == "3.00%"
+
+
+def test_a_filtered_render_keeps_the_steps_own_cell(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    _cli(tmp_path, monkeypatch, store)
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    full = capsys.readouterr().out
+    assert m.main(["log", SUBJECT_ID, "-s", "--step", "threshold",
+                   "--no-pager"]) == 0
+    filtered = capsys.readouterr().out
+    cells = [next(ln for ln in text.splitlines()
+                  if ln.startswith("  threshold ")).split()[-1]
+             for text in (full, filtered)]
+    assert cells == ["0.19%", "0.19%"]
+    # Every column of the totals row is the subtotal of the rows above it, the
+    # share included: 2.83% of the week unfiltered, this step's 0.19% under it.
+    totals = [next(ln for ln in text.splitlines() if ln.startswith("  total"))
+              for text in (full, filtered)]
+    assert totals == ["  total                 2h 6m   28.0M  531.1k   2.83%",
+                      "  total          5m 5s    1.4M  27.8k   0.19%"]
+
+
+@pytest.mark.anyio
+async def test_local_and_proxied_neighbours_render_the_same_bytes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _neighbour_home(tmp_path, monkeypatch)
+    events = quota_events(SUBJECT_ID)
+
+    def _render(store: Any) -> list[str]:
+        rows = build_summary(events)
+        view = m._attribute_quota(store, SUBJECT_ID, events, rows)
+        assert not isinstance(view, int)
+        header = SummaryHeader(workflow="default", quest_id=SUBJECT_ID,
+                               status="merged",
+                               total_seconds=summary_total(events),
+                               exclusions=exclusion_spans(events))
+        return render_summary(rows, header=header, color=False, width=100,
+                              quota=view)
+
+    local = LocalStore(tmp_path)
+    sock = str(tmp_path / "s.sock")
+
+    async def on_query(op: str, args: dict[str, Any]) -> object:
+        return run_query(local, op, args)
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        direct = _render(local)
+        proxied = await anyio.to_thread.run_sync(_render, ProxyStore(sock))
+        assert proxied == direct
+        assert direct[-2].endswith("  2.83%")
+        await session.close()
+        tg.cancel_scope.cancel()
