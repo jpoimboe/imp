@@ -44,6 +44,8 @@ from imp.paths import project_state_dir
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
+    from imp.cli.quota_column import QuotaColumn, QuotaFallback
+    from imp.cli.render_summary import StepRow
     from imp.cli.session_run import SettledOutcome
     from imp.cli.store import SearchHit, Store, _Row
     from imp.cli.terminal_watchdog import WatchedStream
@@ -2598,6 +2600,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
             return _follow_live(control, quest_id, home, cats=show)
         return _follow_log(events, cats=show, project=control.name)
 
+    unfiltered = events
     selected = _select_log_events(args, quest_id, events)
     if isinstance(selected, int):
         return selected
@@ -2625,8 +2628,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                status=status, total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))
         rows = build_summary(events)
+        view = _attribute_quota(store, quest_id, unfiltered, rows)
+        if isinstance(view, int):
+            return view
         lines = render_summary(rows, header=header,
-                               color=color, width=width)
+                               color=color, width=width, quota=view)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
@@ -2638,6 +2644,46 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                           display_width=_display_width())]
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
+
+
+def _attribute_quota(
+    store: Store, quest_id: str, events: list[dict[str, Any]],
+    rows: list[StepRow],
+) -> QuotaColumn | QuotaFallback | int | None:
+    """This run's quota column, overlaid onto `rows` — which a windowing flag may
+    have narrowed, so attribution is computed over the unfiltered log and a
+    step's cell reads the same either way. None is a metered run, which renders
+    today's output untouched; 2 is an unreachable store, since an under-counted
+    denominator must never pass as a figure."""
+    from imp.cli.quota_column import quota_view
+    from imp.cli.quota_share import quota_attribution, run_span
+    from imp.cli.render_summary import (
+        build_summary,
+        overlay_units,
+        rows_units,
+        units_by_row,
+    )
+    from imp.cli.store import QuotaNeighboursUnsupported
+
+    span = run_span(events)
+    if span is None:
+        return None
+    full = build_summary(events, span)
+    if not any(r.totals.notional for r in full):
+        return None   # metered by construction: today's output, untouched
+    overlay_units(rows, units_by_row(full))
+    subject = rows_units(full)
+    try:
+        neighbours = store.quota_neighbours(
+            quest_id, *(when.isoformat() for when in span))
+    except QuotaNeighboursUnsupported:
+        return quota_view(None, providers=subject.providers)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _emit_cli_error("cannot reach the quest store for quota attribution "
+                        f"(quota_neighbours): {exc}")
+        return 2
+    return quota_view(quota_attribution(events, span, subject, neighbours),
+                      providers=subject.providers)
 
 
 def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
