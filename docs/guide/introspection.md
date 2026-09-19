@@ -121,6 +121,37 @@ files two ways, so a fall in `read_file` calls can conceal an equal rise in bash
 `cat`/`sed`/`head`/`grep`. Count bash reads as reads, and prefer a measure of what was
 touched — distinct files opened, overlap with the previous attempt — over call counts.
 
+## The summary ledger
+
+`imp log <id> -s` reads a run as a ledger rather than a story: one row per step,
+each subagent it dispatched indented beneath it, carrying the step's working
+time (human waits and pauses deducted), its tokens in and out, and a right-most
+column that is either money or quota. The windowing filters above narrow the
+rows, and `--md` / `--html` export the same table (`--summary` is the long form
+of `-s`).
+
+On a subscription run that right-most column is `weekly`: the share of the
+account's weekly quota window this quest consumed, attributed to *this* quest
+rather than reported as raw gauge movement. imp divides the window's measured
+movement across every quest that was running at the same time, in proportion to
+the weighted work each one did, so a run that shared the window with a
+concurrent quest is not charged for its neighbour's usage. It is the figure the
+dollar column cannot give you — a subscription run spends no money, and list
+prices are dominated by cache reads, which draw no quota on a Claude
+subscription. A run on an API key keeps the `cost` column unchanged, and so
+does one whose weekly window could not be measured — that second case adds a
+dim legend line naming why.
+
+Two reaches the figure does not cover:
+
+- **A project pinned outside `~/.imp/projects/`.** Overlapping quests are
+  discovered by walking that tree, so a project whose state directory is
+  hand-pinned with `$IMP_STATE_DIR` is not discoverable, and its concurrent
+  usage is absorbed into this run's share instead of being split off.
+- **The gauge's own resolution.** The provider reports the weekly window in
+  whole points, so the figure carries ±1 point of quantization — which is why a
+  run that did not move the gauge at all reports no figure rather than `0.00%`.
+
 ## Reading another quest
 
 To understand a *different* quest — live or archived — reach for the `imp` CLI

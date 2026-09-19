@@ -75,7 +75,9 @@ bookkeeping. Ask the CLI instead:
 - `imp search <query>` — case-insensitive substring search across in-flight,
   backlog, and archived quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;
-  `--step <name>` scopes it to one step.
+  `--step <name>` scopes it to one step, `-s` swaps the story for a per-step
+  ledger of time, tokens, and the run's share of the weekly quota window (or its
+  cost, when that window is unmeasurable).
 - `imp events <id>` — the agent-facing digest, where event content actually
   lives: bare prints an index (steps, subagents, types); add a leaf selector
   (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact
@@ -123,7 +125,7 @@ Using imp — relevant in any project:
 - `guide/what-is-imp.md` — the quest model and the six phases, end to end.
 - `guide/lifecycle.md` — statuses, zones, drafts, and what a left conversation becomes.
 - `guide/features.md` — the capability catalog, one section per capability.
-- `guide/introspection.md` — answering a live-state question from ground truth: the workflow snapshot, event timelines, keeping output bounded.
+- `guide/introspection.md` — answering a live-state question from ground truth: the workflow snapshot, event timelines, the summary ledger, keeping output bounded.
 - `guide/memory.md` — what imp remembers, where it lives, how to inspect it.
 - `guide/operator-notes.md` — runbook for a running quest: unblocking a pause, recovering a dead provider login, snapshot and archive version skew.
 - `guide/remote-control.md` — driving a run from a chat surface.

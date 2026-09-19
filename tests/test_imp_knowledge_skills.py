@@ -401,7 +401,10 @@ def test_knowledge_names_worktree_setup_among_the_settings_init_confirms() -> No
 def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -> None:
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ('- `imp log <id>` — the human "read the story" narrative, tool bursts '
-            "folded; `--step <name>` scopes it to one step.") in flat
+            "folded; `--step <name>` scopes it to one step, `-s` swaps the story "
+            "for a per-step ledger of time, tokens, and the run's share of the "
+            "weekly quota window (or its cost, when that window is "
+            "unmeasurable).") in flat
     assert ("- `imp events <id>` — the agent-facing digest, where event content "
             "actually lives: bare prints an index (steps, subagents, types); add a "
             "leaf selector (`--limit N`, `--type`, `--agent <handle>`, a range, "
@@ -413,6 +416,20 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     # the digest bullet still leads the events-search bullet that refines it
     assert (flat.index("the agent-facing digest")
             < flat.index("imp events search <query>"))
+
+
+def test_introspection_documents_the_summary_ledger_and_its_quota_column() -> None:
+    # AC 20: the column and the two reaches it does not cover are recorded.
+    flat = " ".join(_introspection_doc().split())
+    assert "## The summary ledger" in _introspection_doc()
+    assert "`imp log <id> -s` reads a run as a ledger rather than a story" in flat
+    assert ("the share of the account's weekly quota window this quest"
+            " consumed, attributed to *this* quest rather than reported as raw"
+            " gauge movement") in flat
+    # limit 1: a project pinned outside the discovered tree is absorbed
+    assert "hand-pinned with `$IMP_STATE_DIR` is not discoverable" in flat
+    # limit 2: the gauge's own quantization
+    assert "carries ±1 point of quantization" in flat
 
 
 def test_knowledge_and_introspection_name_the_verify_artifact_view() -> None:
