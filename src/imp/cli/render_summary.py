@@ -504,11 +504,13 @@ def _column_widths(summary: list[StepRow], open_label: str,
     names = [len(r.step) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
     names.append(len(_TOTAL_LABEL))
+    names += [len(p) + 2 for p, _ in (column.breakdown if column else ())]
     durs = [len(_dur_text(total_work)), len(_TITLES[0])]
     ins = [len(_fmt_tokens(total_usage.input_total)), len(_TITLES[1])]
     outs = [len(_fmt_tokens(total_usage.output)), len(_TITLES[2])]
     lasts = [len(total_last),
              len(_TITLES[3] if column is None else _WEEKLY_TITLE)]
+    lasts += [len(cell) for _p, cell in (column.breakdown if column else ())]
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
         ins.append(len(_fmt_tokens(r.totals.input_total)))
@@ -576,6 +578,13 @@ def _total_line(work: float | None, total: RowUsage, last: str, *, name_w: int,
     return f"  {_TOTAL_LABEL:<{name_w}}  {_dur_text(work):>{dur_w}}  {cells}"
 
 
+def _breakdown_line(provider: str, cell: str, *, name_w: int, dur_w: int,
+                    in_w: int, out_w: int, last_w: int) -> str:
+    """One gauge of a mixed-provider run: its own share, the other columns blank."""
+    return (f"    {provider:<{name_w - 2}}  {'':>{dur_w}}  {'':>{in_w}}  "
+            f"{'':>{out_w}}  {cell:>{last_w}}")
+
+
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int,
                    quota: QuotaColumn | QuotaFallback | None = None) -> list[str]:
@@ -623,7 +632,11 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     lines.append(_total_line(work, total, total_last, name_w=name_w,
                              dur_w=dur_w, in_w=in_w, out_w=out_w,
                              last_w=last_w))
-    notes = legend_lines(cells) if column is None else [FOOTNOTE]
+    lines += [_breakdown_line(p, cell, name_w=name_w, dur_w=dur_w, in_w=in_w,
+                              out_w=out_w, last_w=last_w)
+              for p, cell in (column.breakdown if column else ())]
+    notes = (legend_lines(cells) if column is None
+             else [FOOTNOTE, *column.legends])
     if isinstance(quota, QuotaFallback):
         notes += list(quota.legends)
     lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)

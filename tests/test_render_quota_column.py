@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
-from imp.cli.quota_share import QuotaFigure, Units
+from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
@@ -104,3 +104,56 @@ def test_the_fallback_legend_is_dim_like_the_rest() -> None:
     lines = render_summary(rows, header=_HDR, color=True, width=80,
                            quota=QuotaFallback((_NO_READINGS,)))
     assert lines[-1] == f"\x1b[2m  {_NO_READINGS}\x1b[0m"
+
+
+_STILL = ("quota below measurement resolution; the weekly gauge did not move "
+          "during this run")
+
+
+def test_two_gauges_report_one_line_each_below_a_dashed_total() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0)),
+            _row("coder", 120, _usage(500_000, 9_000), Units.of("codex", 2.0)),
+            _row("task-lead", 60, _usage(200_000, 3_000),
+                 Units.of("claude", 1.0) + Units.of("codex", 1.0))]
+    column = QuotaColumn((QuotaFigure("claude", 3.0, 9.0, 10.0),
+                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert lines[4:7] == [
+        "  plan-writer  1m 30s    1.0M  20.0k   0.90%",
+        "  coder         2m 0s  500.0k   9.0k       —",
+        "  task-lead     1m 0s  200.0k   3.0k       —"]
+    assert lines[-5] == "  total        39m 2s    1.7M  32.0k       —"
+    assert lines[-4] == "    claude                             2.70%"
+    assert lines[-3] == "    codex                                  —"
+    assert lines[-2] == f"  {FOOTNOTE}"
+    assert lines[-1] == f"  codex: {_STILL}"
+
+
+def test_a_breakdown_row_can_be_the_widest_thing_in_its_column() -> None:
+    # Both breakdown fields out-measure every row: `claude` is wider than any
+    # step name, and 100.00% (the codex gauge's whole-quest share, of which
+    # these two rows render a sliver) is wider than any cell above it.
+    rows = [_row("coder", 90, _usage(), Units.of("claude", 1.0)),
+            _row("plan", 120, _usage(500_000, 9_000), Units.of("codex", 0.001))]
+    column = QuotaColumn((QuotaFigure("claude", 2.0, 1.0, 4.0),
+                          QuotaFigure("codex", 100.0, 1.0, 1.0)))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert lines[1:3] == ["                       tokens        quota",
+                          "              time      in    out   weekly*"]
+    assert lines[4:6] == ["  coder     1m 30s    1.0M  20.0k    0.50%",
+                          "  plan       2m 0s  500.0k   9.0k    0.10%"]
+    assert lines[-4] == "  total     39m 2s    1.5M  29.0k        —"
+    assert lines[-3] == "    claude                           0.50%"
+    assert lines[-2] == "    codex                          100.00%"
+
+
+def test_a_single_provider_run_renders_no_breakdown_rows() -> None:
+    rows = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0))]
+    column = QuotaColumn((QuotaFigure("claude", 3.0, 3.0, 10.0),))
+    lines = render_summary(rows, header=_HDR, color=False, width=80,
+                           quota=column)
+    assert lines[-3] == ""
+    assert lines[-2] == "  total        39m 2s  1.0M  20.0k   0.90%"
+    assert lines[-1] == f"  {FOOTNOTE}"
