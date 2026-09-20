@@ -105,7 +105,7 @@ Do **not** mark the run degraded — improvement and polish are not correctness 
 
 The only gate that resumes you is the slow **`converge-verify`** gate (its injected feedback contains `(converge-verify)`), so the source label is always `converge-verify`. A toleration emits `converge_verify_tolerated: true`, routing **forward to `wait-for-head`** (the slow gate never re-runs).
 
-Reason over the OPAQUE failure text against the diff (`cur_base_head..HEAD`) — pure judgment. You **never run the gate, the full suite, lint, or typecheck yourself — not even to confirm a fix**; that reasoning is the only action here.
+Reason over the OPAQUE failure text against the diff (`cur_base_head..HEAD`) — pure judgment. You **never run the gate, the full suite, lint, or typecheck yourself — not even to confirm a fix**; that reasoning, plus the read-only `git log` lookup that resolves a fixup target, is the only action here.
 
 Record a toleration as a normal `## Deferred Followups` entry in `{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with `converge-verify` as its source, never an agent. The EXACT shape:
 

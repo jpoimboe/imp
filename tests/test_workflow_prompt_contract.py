@@ -550,6 +550,19 @@ def test_synced_pair_comments_name_one_shared_fix_path() -> None:
     assert "deferred-sweep resolves it from the log" in lead_flat
 
 
+def test_deferred_sweep_triage_ban_exempts_the_fixup_target_lookup() -> None:
+    """The no-self-verify ban covers gates, the suite, lint and typecheck — not
+    reading history. Left absolute, it forbids the `git log` the triage path needs
+    to resolve a fixup target, which the no-confident-target fallback would then
+    swallow as a plain commit."""
+    flat = " ".join(SWEEP.read_text().split())
+    assert ("that reasoning, plus the read-only `git log` lookup that resolves a "
+            "fixup target, is the only action here") in flat
+    assert "that reasoning is the only action here" not in flat
+    # The ban itself is untouched.
+    assert "never run the gate, the full suite, lint, or typecheck yourself" in flat
+
+
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
     integ = (AGENTS_DIR / "reconciler.md").read_text()
