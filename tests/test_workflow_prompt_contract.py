@@ -569,7 +569,7 @@ def test_no_workflow_prompt_records_a_fixed_item_by_sha() -> None:
     may name a sha placeholder after the marker — the writer and the reader both use
     the target commit's subject."""
     offenders = sorted(
-        p.name for p in Path("src/imp/assets/workflows").rglob("*.md")
+        str(p) for p in Path("src/imp/assets").rglob("*.md")
         if re.search(r"— fixed <", p.read_text())
     )
     assert offenders == []
