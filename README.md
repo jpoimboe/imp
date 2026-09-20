@@ -289,23 +289,25 @@ Full quest log and quota summary: [`docs/examples/haje70.md`](docs/examples/haje
 
 ### What it costs
 
-Both runs took 2+ hours.  The [default workflow](#default-workflow) is more
-heavyweight than a typical Claude session, and most of its time and tokens go
-to design and planning, before any code is written.  That up-front effort makes
-the code more functional, maintainable, tested, and more likely to meet the
-user's expectations, with fewer "surprises".
+Both runs took 2+ hours.  The [default workflow](#default-workflow) can be
+quite a bit more heavyweight than a typical Claude session.  Most of the time
+and tokens go to design and planning, before any code is written.  That
+up-front effort makes the code less buggy, more maintainable, and more likely
+to meet the user's expectations, with fewer "surprises".
 
-For that reason, when using the default workflow, **a Claude Max 20x (or
-ChatGPT Pro) subscription is recommended.**  Without a subscription, the
-`--json` feature above would have cost ~$40 in Anthropic API tokens.  Local
-models are not (yet) supported.  Pull requests welcome :-)
+For that reason, when using the default workflow, **a Claude Max (or ChatGPT
+Pro) subscription is recommended.**  Subscriptions are *much* cheaper per token
+than API billing.  With Anthropic API billing, the `--json` feature above would
+have cost ~$44, and the bug fix (including debugging) would have cost ~$49.
+
+Local models are not (yet) supported.  Pull requests welcome :-)
 
 If you want to use fewer resources for a given project or quest, feel free to
 create your own workflow YAML file.  I think the default is worth the tokens if
 you want a maintainable project with decent code.
 
 Note that multiple quests can be run in parallel for a given project.  I often
-have a pipeline of 3-5 quests going.
+have a pipeline of 3-5 quests going at the same time.
 
 ## Try it
 
@@ -346,10 +348,11 @@ run on the project in parallel, in different terminal tabs.
 Instead of `imp new`, you can use `imp chat` to ask imp questions about itself,
 the code base, bugs or new features.
 
-### Existing projects (brownfield)
+### Existing project (brownfield)
 
 Brownfield projects are also supported.  Just run `imp init` and `imp new` from
-an existing git checkout.
+an existing git checkout.  By default, imp stores its per-project state in
+`~/.imp/projects/<project>`.
 
 ```bash
 cd /path/to/my-existing-app
