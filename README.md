@@ -14,11 +14,11 @@
 
 imp is an AI agent workflow engine for developing software.  It takes a change
 from idea through interview, spec, planning, implementation, review, testing,
-and merge.
+integration, and merge.
 
-It's a deterministic wrapper around coding agents and LLM providers.  Instead
-of one long human-managed Claude Code session, it splits the development
-process into a configurable workflow of short-lived, focused sessions.
+It runs coding agents and LLM providers through a deterministic workflow,
+avoiding long human-managed Claude Code sessions by splitting the development
+process into a configurable series of short-lived, focused LLM sessions.
 
 ## Why use imp?
 
@@ -27,10 +27,7 @@ process into a configurable workflow of short-lived, focused sessions.
   merge on its own, so you're free to step away from the computer
 - **Lifecycle management** — Every change lives in a *quest*: a durable unit
   of work with a unique id, tracked from the opening idea through to the merge,
-  then archived as a self-contained record
-- **Every change is a quest** — Like a pull request, but starting from a
-  conversation rather than the finished diff: one durable, resumable unit of
-  work with an id, a lifecycle, and a home on disk
+  archived on disk as a self-contained record
 - **One interruption, not twenty** — When a question or spec deviation comes
   up mid-run, imp makes a judgment call and continues, deferring the final
   decision to the end, where you approve the change, send it back for rework,
@@ -45,17 +42,14 @@ process into a configurable workflow of short-lived, focused sessions.
   on adversarial review over the spec and plan 
 - **Built-in regression protection** — imp leans heavily on TDD and writes a
   lot of regression tests; keeping them green is the agents' job, not yours
-- **Multiple quests in parallel** — A quest runs in its own git worktree, so
-  several can run in parallel, and can be paused or resumed at any time
-- **Sandboxed agents** — On Linux, agent commands run under bubblewrap: the
-  filesystem is read-only outside an explicit writable set, and credentials are
-  replaced with empty mounts
-- **Workflow-agnostic, batteries included** — The opinionated default workflow
-  is plain YAML: modify it or define your own while keeping imp's [engine features](#engine-features)
+- **Run multiple quests in parallel** — A quest runs in its own git worktree,
+  so several can run in parallel, and can be paused or resumed at any time
 
 ## Example
 
-*[imp running on itself.  Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
+Here's an example of imp running on itself with its [default workflow](#default-workflow).
+
+*[Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
 
 ```console
 $ imp new "add a --json flag to imp list"
@@ -124,13 +118,27 @@ Stats:
 - 26 new tests
 - ~0.7% of a Claude Max 20x monthly quota
 
-Full run log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
+Full quest log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
 
-The default workflow is time and token intensive due to the detailed spec,
-plans, coding, and multiple rounds of independent review.  Making functional,
-maintainable, and well-tested code isn't cheap.  **A Claude Max (or ChatGPT
-Pro) subscription is recommended for the default workflow.**  Local models are
-not (yet) supported.  Pull requests welcome :-)
+This quest used imp's [default workflow](#default-workflow), which is more
+heavyweight than a typical Claude session, taking 2+ hours for a minor feature.
+Most of the time and tokens were spent during design and planning, before any
+code was written.  That up-front effort makes the code more functional,
+maintainable, tested, and more likely to meet the user's expectations, with
+fewer "surprises".
+
+For that reason, when using the default workflow, **a Claude Max 20x (or
+ChatGPT Pro) subscription is recommended.**  Without a subscription, the above
+feature would have cost ~$40 in Anthropic API tokens.  Local models are not
+(yet) supported.  Pull requests welcome :-)
+
+If you want to use less resources for a given project or quest, feel free to
+create your own workflow YAML file.  I've iterated on the default workflow over
+several months for building imp on imp, and I think it's worth the tokens if
+you want to have a maintainable project with decent code.
+
+Note that multiple quests can be run in parallel for a given project.  I often
+have a pipeline of 3-5 quests going.
 
 ## Try it
 
@@ -144,11 +152,13 @@ Login to your `claude` CLI (or `codex`) and ensure they're in your path.  Or to
 use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.  Imp has a
 pluggable provider backend but local models are not yet supported.
 
+### New project (greenfield)
+
 ```bash
 uv tool install git+https://github.com/jpoimboe/imp
 
-mkdir /path/to/my-app
-cd /path/to/my-app
+mkdir /path/to/my-new-app
+cd /path/to/my-new-app
 imp init
 imp new "build a local-first task tracker with a web UI"
 ```
@@ -169,8 +179,16 @@ run on the project in parallel, in different terminal tabs.
 Instead of `imp new`, you can use `imp chat` to ask imp questions about itself,
 the code base, bugs or new features.
 
+### Existing projects (brownfield)
+
 Brownfield projects are also supported.  Just run `imp init` and `imp new` from
 an existing git checkout.
+
+```bash
+cd /path/to/my-existing-app
+imp init
+imp new "add rate limiting to the public API"
+```
 
 ## Quests
 
@@ -251,7 +269,8 @@ gevu23 · Resume without replaying the integrate phase · archive · 10d
 
 ## Default workflow
 
-Here's a state diagram showing the default "batteries included" workflow:
+imp runs workflows, each of which consists of a YAML file and agent markdown
+files.  The default "batteries included" workflow can be found [here](src/imp/assets/workflows/default/workflow.yaml).
 
 ```mermaid
 flowchart LR
@@ -272,8 +291,8 @@ flowchart LR
 
 ## Engine features
 
-The workflow sits on top of engine features that keep quests isolated,
-resumable, and inspectable:
+The imp engine is workflow-agnostic.  It has features that keep quests
+isolated, resumable, and inspectable:
 
 - **Isolate each quest.** Once live, every quest gets its own git worktree and
   sandboxed agent tools, so several can run at once without breaking your
@@ -302,8 +321,7 @@ resumable, and inspectable:
 - **Keep a real backlog.** Park ideas for later, or let agents file followup
   work they discover while building something else.
 - **LLM provider agnostic.** imp supplies its own system prompt and agent
-  tools, and disables Claude's and Codex's native equivalents.  Every backend
-  gets the same instructions, tool interface, and permission checks.
+  tools, designed to work the same for all LLM providers.
 - **Per-role LLM vendors/models.** A project or quest can use different model
   tiers or vendors for planning, coding, and review.
 - **Carry project memory forward.** Standing, human-approved instructions in
@@ -316,6 +334,8 @@ resumable, and inspectable:
 - **Embed it in your own application.** A supported Python API can create quests,
   stream events, and answer the questions a workflow asks.  See the
   [embedding guide](docs/guide/embedding.md).
+- **Cost monitoring.** See per-quest accounting of subscription quota and API
+  token usage for both live and archived quests.
 - **Not just for code.** The engine can drive other structured processes, not
   just software development.
 
@@ -337,7 +357,7 @@ guarantee applies to shell commands.
 
 ## Status and contributing
 
-imp is pre-release.  Go forth and test.
+imp is pre-release.
 
 See [Architecture](docs/internals/architecture.md) for an overview of the engine
 and bundled workflows.
