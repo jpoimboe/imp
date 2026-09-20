@@ -487,11 +487,19 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
     assert "triage only" in low
-    # A real regression is fixed with a PLAIN commit, never a --fixup: a sweep fix is its
-    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped
-    # later by the end-of-change cleanup-merge.
+    # The commit rule is CONDITIONAL, not unconditionally-plain: a regression in what a
+    # quest commit did folds into that commit; anything standalone — or any case without
+    # exactly one unambiguous target — is a plain new commit. Both land unfolded until the
+    # end-of-change cleanup-merge folds and stamps them.
+    assert "git commit --fixup=<SHA>" in text
     assert 'git commit -F' in text
-    assert "--fixup=HEAD" in text
+    assert "Never `--fixup=HEAD` blindly" in text
+    # Both paths state the requirement and the fallback: the drain path's
+    # *Commit granularity* section and this triage bullet (AC 3).
+    assert text.count("exactly one unambiguous target") >= 2
+    # The retired unconditional instruction is gone (AC 2).
+    assert "Tell the coder to make a **plain new commit**" not in text
+    assert "NOT `git commit --fixup=HEAD`" not in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -503,6 +511,27 @@ def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
     marker = "SYNCED PAIR (task-lead ↔ deferred-sweep)"
     assert marker in TASK_LEAD.read_text()
     assert marker in SWEEP.read_text()
+
+
+def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None:
+    """The target-resolution command must carry a SUBSTITUTED sha. `cur_base_head` is
+    a quest.json field reaching prompts only through Jinja — no env var or shell var
+    exports it — so a bare `cur_base_head..HEAD` would die `fatal: ambiguous argument`
+    and the "no target you can name with confidence" fallback would swallow it."""
+    text = SWEEP.read_text()
+    assert "git log --oneline {{ quest.cur_base_head }}..HEAD" in text
+    # The bare field name survives ONLY at the pre-existing descriptive diff-range
+    # mention, never inside a command the agent is told to run (AC 1e).
+    assert text.count("cur_base_head..HEAD") == 1
+
+    body = load_workflow(bundled_workflow_dir("default")).agents[
+        "deferred-sweep"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", cur_base_head="BASE"),
+        workflow_dir=bundled_workflow_dir("default"))
+    assert "git log --oneline BASE..HEAD" in out
 
 
 def test_integration_prompts_use_recorded_endpoints() -> None:
