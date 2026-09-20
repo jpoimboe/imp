@@ -534,6 +534,22 @@ def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None
     assert "git log --oneline BASE..HEAD" in out
 
 
+def test_synced_pair_comments_name_one_shared_fix_path() -> None:
+    """Both leads now fix with a fixup when there is a single unambiguous target, so
+    the coordination note must not still claim the paths differ by fixup-vs-plain;
+    the only surviving difference is HOW the target is found."""
+    shared = "the fix path differs only in how a fixup target is found"
+    for path in (TASK_LEAD, SWEEP):
+        flat = " ".join(path.read_text().split())
+        assert shared in flat, path.name
+        assert "only the fix path differs" not in flat, path.name
+        assert "in sweep context with a plain commit" not in flat, path.name
+    sweep_flat = " ".join(SWEEP.read_text().split())
+    lead_flat = " ".join(TASK_LEAD.read_text().split())
+    assert "you resolve it from the log" in sweep_flat
+    assert "deferred-sweep resolves it from the log" in lead_flat
+
+
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
     integ = (AGENTS_DIR / "reconciler.md").read_text()

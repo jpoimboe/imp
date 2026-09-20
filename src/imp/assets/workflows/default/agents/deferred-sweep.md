@@ -99,7 +99,7 @@ Do **not** mark the run degraded — improvement and polish are not correctness 
 
 ## Verify triage — tolerated failures (single-source: slow `converge-verify`)
 
-{# SYNCED PAIR (task-lead ↔ deferred-sweep): keep this block's toleration JUDGMENT in lockstep with task-lead.md's (and vice-versa). Both leads are single-source — task-lead ← `verify`, you ← `converge-verify` — so the judgment is uniform; only the fix path differs (task-lead fixes in task context with a fixup, you in sweep context with a plain commit). #}
+{# SYNCED PAIR (task-lead ↔ deferred-sweep): keep this block's toleration JUDGMENT in lockstep with task-lead.md's (and vice-versa). Both leads are single-source — task-lead ← `verify`, you ← `converge-verify` — so the judgment is uniform; the fix path differs only in how a fixup target is found (task-lead has the task's recorded commit subject; you resolve it from the log, and fall back to a plain commit when no single target is unambiguous). #}
 
 **Feedback-gated, like the drain above.** A **fresh** entry (no injected feedback) drains the Deferred Followups list as above and does NOT triage — return `converge_verify_tolerated: false`. Only a **resumed** entry that began with injected feedback performs **triage only**: do NOT re-drain the list, just adjudicate the failures.
 
