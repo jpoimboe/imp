@@ -563,6 +563,23 @@ def test_deferred_sweep_triage_ban_exempts_the_fixup_target_lookup() -> None:
     assert "never run the gate, the full suite, lint, or typecheck yourself" in flat
 
 
+def test_no_workflow_prompt_records_a_fixed_item_by_sha() -> None:
+    """`cleanup-merge`'s stamp rebase rewrites every commit in the quest range, so a
+    sha recorded in the ledger is dangling by the time `finalize` reads it. No prompt
+    may name a sha placeholder after the marker — the writer and the reader both use
+    the target commit's subject."""
+    offenders = sorted(
+        p.name for p in Path("src/imp/assets/workflows").rglob("*.md")
+        if re.search(r"— fixed <", p.read_text())
+    )
+    assert offenders == []
+    # The writer and the reader of the marker both name the subject.
+    assert '— fixed in "<commit-subject>"' in SWEEP.read_text()
+    assert '— fixed in "<subject>"' in FINALIZE.read_text()
+    # The sweep no longer instructs sha resolution at all.
+    assert "rev-parse" not in SWEEP.read_text()
+
+
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
     integ = (AGENTS_DIR / "reconciler.md").read_text()
