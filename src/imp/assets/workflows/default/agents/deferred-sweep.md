@@ -49,7 +49,7 @@ Load the receiving-code-review discipline (`load_skill(name="receiving-code-revi
 
 An untagged item that **cites spec scope** — naming an AC clause or a Scope ref — may be **fixed** or escalated to **`— needs-decision:`**, but is **never dismissed**: agreed scope is not the sweep's to drop. This overrides the ordinary **dismissed** disposition for spec-cited items only; an item citing no spec scope follows the three cases above.
 
-By the time the sweep runs, the `gap-check` → corrective-plan fixpoint has usually already landed such an item. When an untagged spec-cited item was **already landed by a corrective plan**, close it `— fixed <sha>` in this re-evaluation — resolve `<sha>` to the corrective plan's landing commit (`git log`), **not** `git rev-parse HEAD`, since the sweep made no new commit; otherwise record it exactly as the **fixed** disposition prescribes. Do not re-implement it or dismiss it.
+By the time the sweep runs, the `gap-check` → corrective-plan fixpoint has usually already landed such an item. When an untagged spec-cited item was **already landed by a corrective plan**, close it `— fixed in "<commit-subject>"` in this re-evaluation — take `<commit-subject>` from the corrective plan's landing commit (`git log`), **not** from `HEAD`, since the sweep made no new commit; otherwise record it exactly as the **fixed** disposition prescribes. Do not re-implement it or dismiss it.
 
 {% include "partials/human-decision.md" %}
 
@@ -80,11 +80,11 @@ Which commit an item lands in depends on what the item **is**:
 
 The list lives in the **append-only** `{{ quest.home }}/deferred.md`: never rewrite it wholesale, never delete a line. Resolve an item by **checking off** its box (`[ ]` → `[x]`) and appending a terminal marker; the durable `## Completed plans` section stays in `{{ quest.home }}/progress.md`. After processing an item:
 
-- **fixed** → first append a durable line under `## Completed plans` in `{{ quest.home }}/progress.md` (create the heading if absent), recording the improvement and its sha:
-  `- opportunistic (<source>): <desc> — fixed <commit-sha>`
+- **fixed** → first append a durable line under `## Completed plans` in `{{ quest.home }}/progress.md` (create the heading if absent), recording the improvement and the **subject** of the commit it lands in:
+  `- opportunistic (<source>): <desc> — fixed in "<commit-subject>"`
   Then **check off** the item, flipping its box and appending the marker:
-  `- [x] DEFERRED <source>: <desc> [scope: …] — fixed <commit-sha>`
-  Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the coder's commit. `finalize` counts that durable line into its opportunistic-improvement rollup.
+  `- [x] DEFERRED <source>: <desc> [scope: …] — fixed in "<commit-subject>"`
+  Record the **subject**, never a sha: `cleanup-merge`'s stamp rebase rewrites every commit in range, so a sha recorded here is dangling by the time anyone reads it. For a plain commit that is the subject the coder wrote; for a fixup it is the subject of the **target** commit — where the change ends up after the fold. `finalize` counts that durable line into its opportunistic-improvement rollup.
 - **dismissed** → check off the item with `- [x] DEFERRED <source>: <desc> [scope: …] — dismissed: <why>`, and make **no durable record** under `## Completed plans` — `finalize` never surfaces dismissed items, so they leave no other trace.
 - **needs-decision** → leave the box **open**, edited in place (never deleted) so its reason survives to the merge gate:
   `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`

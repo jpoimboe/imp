@@ -48,7 +48,7 @@ def test_deferred_sweep_checks_off_and_records_fixes_durably() -> None:
     # line is CHECKED OFF (append-only: flipped to - [x] with a terminal marker,
     # never deleted).
     assert "## completed plans" in low
-    assert "fixed <" in low                          # durable opportunistic line carries the sha
+    assert 'fixed in "' in low                       # durable line carries the subject
     assert "opportunistic (" in low                  # durable line prefix that finalize parses
     assert "check off" in low and "append-only" in low
     assert "- [x] deferred" in low                   # the checked-off terminal shape
