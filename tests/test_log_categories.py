@@ -113,3 +113,28 @@ def test_log_threads_computed_show_set(
         rc = main(["log", _ID, "--full", "--hide", "tiers"])
     assert rc == 0
     assert captured["show"] == _ALL - {"tiers"}
+
+
+def test_log_export_threads_computed_show_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.cli.main as m
+    import imp.cli.render_markdown as rmd
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Logq", quest_id=_ID, base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    captured: dict[str, object] = {}
+
+    def _fake_render_markdown(tree, **kwargs):
+        captured.update(kwargs)
+        return "(rendered)\n"
+
+    monkeypatch.setattr(rmd, "render_markdown", _fake_render_markdown)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["log", _ID, "--md", "-", "--show", "thinking", "--hide", "tiers"])
+    assert rc == 0
+    assert captured["show"] == frozenset({"thinking"})
+    assert captured["full"] is False
