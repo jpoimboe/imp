@@ -636,6 +636,21 @@ def test_spec_reviewer_calibration_carries_the_unsettled_design_sentence() -> No
     assert body.index(_CALIBRATION_SENTENCE) < body.index("## Output")
 
 
+_DERIVED_ENUMERATION_PARAGRAPH = (
+    "When what keeps returning is a **derived enumeration** — a list of call sites,\n"
+    "tests or cases the spec worked out by hand — the defect is its shape, not its\n"
+    "contents. Say so, and ask for the rule plus a spiker's computed list, rather than\n"
+    "spending the lap hunting the next wrong row."
+)
+
+
+def test_spec_reviewer_calibration_names_the_derived_enumeration_defect() -> None:
+    body = _agent_prompt("spec-reviewer")
+    assert _DERIVED_ENUMERATION_PARAGRAPH in body
+    assert body.index(_CALIBRATION_SENTENCE) < body.index(_DERIVED_ENUMERATION_PARAGRAPH)
+    assert body.index(_DERIVED_ENUMERATION_PARAGRAPH) < body.index("## Output")
+
+
 def _normalized_prompt(name: str) -> str:
     return " ".join(_agent_prompt(name).split())
 

@@ -1298,9 +1298,13 @@ def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:
 _SPIKER_PARAGRAPH = (
     "Dispatch a **`spiker`** when a claim can only be settled by running code rather "
     "than reading it — runtime ordering, what a provider actually emits, whether a "
-    "seam carries the value you assume. It works in a disposable worktree and parks "
-    "its script and output under `{{ quest.home }}/spike/`; cite that "
-    "evidence in the spec so the reviewer checks it instead of re-deriving it."
+    "seam carries the value you assume. Reach for one too when the spec is about to "
+    "carry a **derived table** — which call sites, which tests, which of N get "
+    "treatment X. A list derived by hand is re-checked by hand every lap, and one "
+    "wrong row buys another: have a spiker compute it, keep the rule in the spec, and "
+    "cite the spike for the list. It works in a disposable worktree and parks its "
+    "script and output under `{{ quest.home }}/spike/`; cite that evidence in the "
+    "spec so the reviewer checks it instead of re-deriving it."
 )
 
 

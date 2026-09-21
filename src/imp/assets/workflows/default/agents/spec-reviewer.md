@@ -116,6 +116,11 @@ meta-commentary defects — do not flag them.
 
 An area that returns lap after lap means the design is unsettled, not the spec under-written: say so in `findings` — another Major buys another lap, not a decision.
 
+When what keeps returning is a **derived enumeration** — a list of call sites,
+tests or cases the spec worked out by hand — the defect is its shape, not its
+contents. Say so, and ask for the rule plus a spiker's computed list, rather than
+spending the lap hunting the next wrong row.
+
 ## Output
 
 Report `findings` as classified prose, grouped by severity. If there are no issues, state so explicitly (e.g., "No findings. Spec is complete and ready for planning.").
