@@ -984,8 +984,14 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(bc) == {
         "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
-    completed = nv.CompletedNode(quest_id="abc123")
-    assert nv.structural_repr(completed) == {"t": "CompletedNode", "quest_id": "abc123"}
+    completed = nv.CompletedNode(quest_id="abc123",
+                                 commits=[{"sha": "f" * 40, "subject": "ship it"}])
+    assert nv.structural_repr(completed) == {
+        "t": "CompletedNode", "quest_id": "abc123",
+        "commits": [{"sha": "f" * 40, "subject": "ship it"}]}
+    merged = nv.MergedNode(quest_id="abc123", base="master")
+    assert nv.structural_repr(merged) == {
+        "t": "MergedNode", "quest_id": "abc123", "base": "master", "commits": []}
 
 
 def test_current_activity_collapses_multiline_bash_command() -> None:

@@ -476,6 +476,7 @@ class MergedNode:
     """Terminal quest_merged event — rendered as the friendly footer in imp log only (F5)."""
     quest_id: str
     base: str
+    commits: list[dict[str, str]] = field(default_factory=list)
     collapsible = False
 
 
@@ -494,6 +495,7 @@ class WarningsSummaryNode:
 class CompletedNode:
     """Terminal workflow_completed footer (imp log only; live line owned by main.py)."""
     quest_id: str
+    commits: list[dict[str, str]] = field(default_factory=list)
     collapsible = False
 
 
@@ -1255,7 +1257,9 @@ def _h_quest_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
     # run-level terminal line that ends the whole transcript, after every phase.
     self._flush_warnings_summary()
-    self._root.children.append(MergedNode(quest_id=descriptor, base=str(p.get("base", ""))))
+    self._root.children.append(MergedNode(quest_id=descriptor,
+                                          base=str(p.get("base", "")),
+                                          commits=p.get("commits", [])))
 
 
 NarrativeBuilder._HANDLERS["quest_merged"] = _h_quest_merged
@@ -1269,7 +1273,8 @@ def _h_workflow_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict
     # Append at the WORKFLOW ROOT: a run-level terminal line ending the whole
     # transcript, after every phase.
     self._flush_warnings_summary()
-    self._root.children.append(CompletedNode(quest_id=descriptor))
+    self._root.children.append(CompletedNode(quest_id=descriptor,
+                                             commits=p.get("commits", [])))
 
 
 NarrativeBuilder._HANDLERS["workflow_completed"] = _h_workflow_completed
@@ -2572,7 +2577,8 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
     if isinstance(node, MergedNode):
-        return {"t": t, "quest_id": node.quest_id, "base": node.base}
+        return {"t": t, "quest_id": node.quest_id, "base": node.base,
+                "commits": node.commits}
     if isinstance(node, CompletedNode):
-        return {"t": t, "quest_id": node.quest_id}
+        return {"t": t, "quest_id": node.quest_id, "commits": node.commits}
     return {"t": t}
