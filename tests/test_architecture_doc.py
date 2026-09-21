@@ -223,6 +223,9 @@ def test_operator_notes_document_archive_version_skew() -> None:
     # the rule that keeps the split floor checks safe (mirrored at _DATA_VERSION)
     assert ("a blob migration that changes an index-visible value must also bump "
             "the index schema version") in section
+    # the index-visible rule carries its worked example
+    assert ("the `commits` list it writes reaches the searchable "
+            "`events_content` column") in section
 
 
 def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
@@ -245,9 +248,21 @@ def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
             "already made") in section
     assert "The fix is to update every imp that writes here" not in section
     assert "Writes are deliberately unguarded" not in section
-    # the constraint a future _DATA_VERSION bump has to honour
-    assert ("bumping `_DATA_VERSION` means shipping the migration and re-wiring "
-            "`ensure_current` and `archive_quest` to call it") in section
+    # one migration now ships, and it heals exactly the 13 -> 14 step
+    assert "No blob migration ships in the tree" not in section
+    assert "One blob migration ships in the tree" in section
+    assert "a marker reading 13 is upgraded to 14 in place" in section
+    assert "`check_data_floor` runs the upgrade" in section
+    # permanence still holds for every other below-floor version
+    assert ("for records written below any version but 13 the stranding is "
+            "permanent") in section
+    # the constraint a future _DATA_VERSION bump has to honour names the hook
+    assert ("ship the migration and hang it off `check_data_floor`") in section
+    assert "it subsumes both sites a bump has to reach" in section
+    # the one v13 archive the migration cannot heal, and its remedy
+    assert ("a v13 archive on a read-only archive root is refused rather than "
+            "healed") in section
+    assert "make the archive root writable" in section
     assert "an archive below the blob floor is never reindexed" in section
 
 
