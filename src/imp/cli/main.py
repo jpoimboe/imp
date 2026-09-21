@@ -614,6 +614,24 @@ def _recorded_commits(events: list[dict[str, Any]], *,
     return []
 
 
+def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
+    """The run's stream ended carrying no outcome: a traceback in daemon.stderr names
+    the crash, otherwise the run simply stopped reporting. No resume line — the inline
+    hint is the remediation."""
+    color = should_use_color(sys.stdout)
+    stderr_path = quest.quest_dir / "daemon.stderr"
+    body: list[str] = []
+    if _daemon_stderr_has_crash(stderr_path):
+        head = f"crash: see {stderr_path}"
+    else:
+        head = "run ended without reporting an outcome"
+        body = [f"It may not have finished — `imp resume {quest.id}` to check."]
+    for ln in _error_block(head, body, quest.id, quest.title,
+                           color=color, intent=intent):
+        print(ln)
+    print()
+
+
 def _handle_terminal_outcome(
     quest: Quest, outcome: SettledOutcome, coord: Any,
 ) -> int:
