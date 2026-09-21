@@ -639,7 +639,7 @@ def test_architecture_engine_half_names_the_current_default_subagents() -> None:
     )
     assert (
         '  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>'
-        'coder · code-reviewer ·<br/>explorer · researcher"]' in text
+        'coder · code-reviewer ·<br/>explorer · researcher · spiker"]' in text
     )
     # `implementer` is a live minimal-workflow agent, so it survives there and
     # nowhere else in the doc

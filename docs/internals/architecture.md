@@ -64,7 +64,7 @@ flowchart TB
   AR["agent_run.py<br/>drive_invocation()"] --> RES["providers/resolve.py<br/>tier → provider + model"]
   AR --> PROV["provider (AgentRunner)<br/>anthropic · openai · claude · codex"]
   PROV --> TOOLS["agents/tools<br/>bash · fs<br/>complete_step · wait_for_user"]
-  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher"]
+  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher · spiker"]
   SUB -.->|"nested invocation"| AR
   PROV -->|"audit events"| LOG[("event log")]
   TOOLS -->|"audit events"| LOG
