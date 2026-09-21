@@ -20,7 +20,7 @@ It runs coding agents and LLM providers through a deterministic workflow,
 avoiding long human-managed Claude Code sessions by splitting the development
 process into a configurable series of short-lived, focused LLM sessions.
 
-imp builds itself: 875 quests merged since May 2026.
+imp builds itself: 875 imp quests merged since May 2026.
 
 ## Why use imp?
 
@@ -426,10 +426,10 @@ quest.
 
 ### Chat
 
-If you want to ask imp questions about your code base, about a quest, or about
-imp itself, you can run `imp chat` rather than `imp new`.  If the conversation
-leads to the need for a code change, it can convert itself to a proper quest or
-open a backlog quest.
+If you want to ask imp questions about your code base, about another quest, or
+about imp itself, you can run `imp chat` rather than `imp new`.  If the
+conversation leads to the need for a code change, it can convert itself into a
+proper quest.
 
 ## Quests
 
