@@ -942,6 +942,31 @@ def test_overlay_mode_still_probes_when_home_is_a_plain_directory(tmp_path, monk
     assert f"lowerdir={home}" in calls[0][-1]
 
 
+def test_overlay_mode_memo_keeps_every_key(tmp_path, monkeypatch):
+    # AC 3a: probe_base A, then B, then A again → exactly two probes. The
+    # maxsize=1 memo evicted A when B arrived, so a process touching several
+    # quest dirs re-probed for each one.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line("/", "btrfs", mid=30)))
+    calls: list = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_mode.cache_clear()
+    base_a, base_b = tmp_path / "quest-a", tmp_path / "quest-b"
+    assert sb.overlay_mode(base_a, home) is True
+    assert sb.overlay_mode(base_b, home) is True
+    assert sb.overlay_mode(base_a, home) is True
+    assert len(calls) == 2
+
+
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"

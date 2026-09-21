@@ -53,7 +53,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, overload
 
@@ -1076,7 +1076,7 @@ def home_is_overlay_mount(home: Path) -> bool:
     return is_overlay
 
 
-@lru_cache(maxsize=1)
+@cache
 def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     """Whether an unprivileged overlay mounts on this host, and in WHICH shape:
     None → none does (the caller falls back to a rw bind of the real home);
@@ -1100,12 +1100,14 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     tmpfs), but the lowerdir is `home` — the SAME shape the keeper's mount in
     build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); the answer is carried to the keeper's
-    mount (via make_home_layer), so probe and spawn always agree.
+    nothing. Memoized unbounded, one entry per (probe_base, home), so a process
+    touching several quest dirs probes once per key instead of evicting; the
+    answer is carried to the keeper's mount (via make_home_layer), so probe and
+    spawn always agree.
 
-    Tests that monkeypatch subprocess.run / shutil.which / platform.system must
-    call overlay_mode.cache_clear() first (the result is process-global cached,
-    keyed on (probe_base, home)).
+    Tests that monkeypatch subprocess.run / shutil.which / platform.system /
+    _MOUNTINFO_PATH must call overlay_mode.cache_clear() first (the result is
+    process-global cached, keyed on (probe_base, home)).
 
     It also returns None WITHOUT probing at all when `home` is itself an overlay
     mount point — a nested imp run, where $HOME is the parent sandbox's overlay:
