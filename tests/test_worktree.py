@@ -819,3 +819,73 @@ def test_worktree_module_names_no_toolchain() -> None:
     for token in ("python", "venv", "uv", "pip", "npm", "node_modules",
                   "cargo", "bundler", "gradle"):
         assert not re.search(rf"\b{token}\b", src, re.IGNORECASE), token
+
+
+def test_commits_in_range_lists_the_merge_side_oldest_first(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "a.txt", "a")
+    _commit_on_branch(tmp_path, "imp/feat", "b.txt", "b")
+    (tmp_path / "base.txt").write_text("x\n")       # base moves on after the fork
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base moves on")
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feat")
+    merge = result.merge_commit
+    assert merge is not None
+
+    commits = wt.commits_in_range(tmp_path, f"{merge}^1..{merge}^2")
+
+    # the quest's own two commits, oldest first: not the base commit, not the merge
+    assert [c["subject"] for c in commits] == ["add a.txt", "add b.txt"]
+    assert all(len(c["sha"]) == 40 for c in commits)
+    assert merge not in [c["sha"] for c in commits]
+
+
+def test_commits_in_range_reads_a_kept_branch_after_the_worktree_is_gone(
+    tmp_path: Path,
+) -> None:
+    """The not-merged shape: the worktree is removed, the branch is kept, and the
+    base has moved on — the range still resolves from the control root."""
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "a.txt", "a")
+    (tmp_path / "base.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base moves on")
+    wt.remove_worktree(tmp_path, "feat", force=True)   # branch KEPT
+
+    commits = wt.commits_in_range(tmp_path, "main..imp/feat")
+
+    assert [c["subject"] for c in commits] == ["add a.txt"]
+
+
+def test_commits_in_range_returns_empty_for_an_unresolvable_range(
+    tmp_path: Path,
+) -> None:
+    _init_repo(tmp_path)
+
+    # git exits 128 on an unknown revision: a legitimate empty answer, not a crash
+    assert wt.commits_in_range(tmp_path, "deadbeef^1..deadbeef^2") == []
+
+
+@pytest.mark.parametrize("subject", [
+    "carriage\rreturn subject",   # a text=True pipe would translate this to \n
+    "form\x0cfeed subject",       # str.splitlines() would break on this
+])
+def test_commits_in_range_keeps_a_subject_carrying_an_exotic_line_break(
+    tmp_path: Path, subject: str,
+) -> None:
+    """A commit subject is untrusted content-origin text, so it must never be able
+    to act as a record separator: either byte would otherwise yield the real commit
+    with a truncated subject plus a bogus record whose sha is the subject's tail —
+    a forged sha8 line on both surfaces."""
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    wtpath = project_state_dir(tmp_path) / "worktrees" / "feat"
+    (wtpath / "a.txt").write_text("a")
+    _git(wtpath, "add", "-A")
+    _git(wtpath, "commit", "-qm", subject)
+
+    commits = wt.commits_in_range(tmp_path, "main..imp/feat")
+
+    assert [c["subject"] for c in commits] == [subject]
