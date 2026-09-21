@@ -1079,9 +1079,10 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
-    # dispatchable by threshold, spec-finalizer, task-lead, and the finalize gate
+    # dispatchable by threshold, the two spec/plan producers, task-lead, and finalize
     assert "spiker" in wf.agents["threshold"].subagents
     assert "spiker" in wf.agents["spec-finalizer"].subagents
+    assert "spiker" in wf.agents["plan-writer"].subagents
     assert "spiker" in wf.agents["task-lead"].subagents
     assert "spiker" in wf.agents["finalize"].subagents
     # full default grant: write + exec + network, but no dispatch/rename caps

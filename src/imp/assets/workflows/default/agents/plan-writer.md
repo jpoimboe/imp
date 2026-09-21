@@ -1,7 +1,7 @@
 ---
 name: plan-writer
 description: Write the next bite-sized plan ({{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md) from the spec and progress, then commit it.
-subagents: [explorer, researcher]
+subagents: [explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
@@ -190,7 +190,11 @@ glob("{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md")
 
 Read relevant source files to learn current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
 
+Read `{{ quest.home }}/spike/` if it exists — empirical evidence a spiker captured. A recorded result is settled fact: build on it, don't re-derive it.
+
 {% include "partials/delegate-exploration.md" %}
+
+Dispatch a **`spiker`** when a plan-time unknown can only be settled by running code — what an existing test actually does under the change, which call sites a refactor really touches, whether a seam behaves as the spec assumes. Reach for one before writing a **derived list** into the plan — which tests, which call sites, which of N get treatment X — because a list derived by hand is re-derived by hand at every review lap. These spikes settle **how** to build what the spec already fixed; an outcome that would change **what** the quest delivers belongs back in the spec, not here. It works in a disposable worktree and parks its script and output under `{{ quest.home }}/spike/`; cite that evidence in the plan so the reviewer checks it instead of re-deriving it.
 
 Use `web_search` sparingly — only to verify a library's current API or version, or whether an idiom is idiomatic for the language/framework. Prefer the codebase and spec over external research.
 
