@@ -88,6 +88,23 @@ def test_no_note_leaves_output_unchanged(
     assert "boom" in out
 
 
+def test_merge_blocked_renders_the_intent_it_is_handed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_main, "should_use_color", lambda stream: False)
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="", quest_id="mb9", base_branch="main")
+    ch.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent",
+                 "content": [{"type": "text", "text": "the log's own intent"}]})
+    cli_main._emit_merge_blocked(ch, "worktree_dirty", intent="witnessed intent")
+    out = capsys.readouterr().out
+    assert "mb9 · > witnessed intent" in out
+    assert "the log's own intent" not in out
+
+
 def test_headline_is_red_merge_blocked_spine_no_glyph(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

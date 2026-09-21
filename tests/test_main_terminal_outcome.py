@@ -594,7 +594,7 @@ def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys)
     quest = _Change([{"type": "user_message",
                       "payload": {"subtype": "intent",
                                   "content": [{"type": "text", "text": "fix the crash"}]}}])
-    main._emit_merge_blocked(quest, "worktree_dirty")
+    main._emit_merge_blocked(quest, "worktree_dirty", intent="fix the crash")
     out = capsys.readouterr().out
     assert "merge blocked: uncommitted work in the worktree" in out
     assert "2026-06-12-run-x · > fix the crash" in out   # identity line, prompt fallback

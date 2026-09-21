@@ -522,7 +522,7 @@ def _emit_cli_error(message: str) -> None:
 
 def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
-    note: str | None = None,
+    note: str | None = None, *, intent: str | None = None,
 ) -> None:
     """Merge couldn't complete — the user must act. Renders the shared three-part
     error block: a red `merge blocked: <summary>` head, the per-reason instruction
@@ -536,7 +536,6 @@ def _emit_merge_blocked(
     surfaced reason is truthful for every refusal, not just the overwrite one.
     `note` (e.g. the recovery-exhaustion note) renders before git's detail.
     `worktree_dirty` has a precise template and gets no detail."""
-    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
@@ -558,9 +557,8 @@ def _emit_merge_blocked(
         body.append(note)
     if detail and reason in ("refused", "conflict"):
         body.append(f"git said: {detail.strip()}")
-    opening = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
-                           color=color, intent=opening):
+                           color=color, intent=intent):
         print(ln)
     print()
 
@@ -592,12 +590,10 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
     print()
 
 
-def _emit_lost_connection(quest: Quest) -> None:
+def _emit_lost_connection(quest: Quest, *, intent: str | None = None) -> None:
     """The client's event stream faulted: report the ending it saw, never a state it didn't."""
-    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     body = [f"It may still be running — `imp resume {quest.id}` to reattach."]
-    intent = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block("lost the connection to the run", body, quest.id,
                            quest.title, color=color, intent=intent):
         print(ln)
@@ -641,7 +637,8 @@ def _handle_terminal_outcome(
                 mb_reason = payload.get("reason")
                 mb_detail = payload.get("detail")
                 mb_note = payload.get("note")
-        _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
+        _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note,
+                            intent=_resolve_intent(outcome.events))
         return 1  # friendly block already carries the resume command; skip redundant summary
     trigger = _leave_trigger(coord)
     _name, _title, _token, info, opening = _pause_facts(quest, trigger)
@@ -653,7 +650,7 @@ def _handle_terminal_outcome(
 
 
 def _print_leave_disposition(
-    quest: Quest, leave_state: dict[str, str],
+    quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
 ) -> int | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
@@ -661,36 +658,34 @@ def _print_leave_disposition(
     here we only echo what was (or is being) done, on the shared spine. Returns 0
     when a leave was handled, None to fall through to the normal exit-code path.
     """
-    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
-    intent = leave_state.get("intent")
-    opening = _resolve_intent(list(quest.event_log().read()))
-    if intent == "abandon":
+    leave_intent = leave_state.get("intent")
+    if leave_intent == "abandon":
         print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color,
-                            intent=opening))
+                            intent=intent))
         print()
         return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
         print(_status_spine(quest.id, quest.title, "saved as draft", "wordmark",
-                            color=color, intent=opening))
+                            color=color, intent=intent))
         print(_resume_line(quest.id))
         print()
         return 0
     if disposition == "archive":
         print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
-                            color=color, intent=opening))
+                            color=color, intent=intent))
         print(_resume_line(quest.id, " — or find it later with imp search"))
         print()
         return 0
     if disposition == "discard":
         print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
-                            color=color, intent=opening))
+                            color=color, intent=intent))
         print()
         return 0
     if leave_state.get("send_failed"):
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
-                            color=color, intent=opening))
+                            color=color, intent=intent))
         print(_resume_line(quest.id))
         print()
         return 0
