@@ -315,6 +315,40 @@ def test_clean_block_empty_body_keeps_the_bare_two_line_block() -> None:
     ]
 
 
+_SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
+_SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def test_commit_lines_are_gray_sha8_two_spaces_then_the_plain_subject() -> None:
+    from imp.cli import palette as pal
+    lines = main._commit_lines(
+        [{"sha": _SHA_A, "subject": "cli: print the commit list"},
+         {"sha": _SHA_B, "subject": "test: cover both finish paths"}],
+        color=True)
+    # the sha is truncated to 8 and gray; the subject carries no styling of its own
+    assert lines == [pal.ansi("4091ab6d", "gray") + "  cli: print the commit list",
+                     pal.ansi("832c04d7", "gray") + "  test: cover both finish paths"]
+
+
+def test_commit_lines_without_color_are_plain_text() -> None:
+    lines = main._commit_lines([{"sha": _SHA_A, "subject": "only"}], color=False)
+    assert lines == ["4091ab6d  only"]
+
+
+def test_commit_lines_caret_escape_a_subject_carrying_control_bytes() -> None:
+    """A commit subject is content-origin text: it must not be able to move the
+    cursor, clear the screen or beep."""
+    lines = main._commit_lines(
+        [{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}], color=False)
+    assert lines == ["4091ab6d  boom^[[2Jwipe^G"]
+    assert "\x1b" not in lines[0]
+    assert "\x07" not in lines[0]
+
+
+def test_commit_lines_of_nothing_is_nothing() -> None:
+    assert main._commit_lines([], color=True) == []
+
+
 def test_emit_completed_merged_prints_gold_block_no_green(
     monkeypatch, capsys,
 ) -> None:

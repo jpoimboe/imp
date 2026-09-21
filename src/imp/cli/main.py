@@ -306,6 +306,15 @@ def _clean_block(head: str, quest_id: str, title: str, *, color: bool,
     return lines
 
 
+def _commit_lines(commits: Sequence[dict[str, str]], *, color: bool) -> list[str]:
+    """One `<sha8>  <subject>` line per recorded commit, oldest first: gray sha8,
+    subject in the default fg. The subject is content-origin text, so it is
+    caret-escaped before any SGR is wrapped around the line."""
+    from imp.cli.render_text import _caret_escape
+    return [ansi(c["sha"][:8], "gray", enabled=color) + "  " + _caret_escape(c["subject"])
+            for c in commits]
+
+
 def _error_block(head: str, body: list[str], quest_id: str, title: str,
                  *, color: bool, intent: str | None = None) -> list[str]:
     """The shared three-part error block: a red `head` line, `body` lines in the
