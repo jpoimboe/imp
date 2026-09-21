@@ -24,9 +24,9 @@ imp builds itself: 875 imp quests merged since May 2026.
 
 ## Why use imp?
 
-- **Unattended end to end** — Human effort concentrates up front, in a single
-  interview; once you approve, imp runs spec, plan, code, test, review, and
-  merge on its own, so you're free to step away from the computer
+- **Unattended after the interview** — Human effort is concentrated up front in
+  a single interview; once you approve, imp drives spec, plan, code, test,
+  review, and merge on its own, so you're free to step away
 - **Lifecycle management** — Every change lives in a *quest*: a durable unit
   of work with a unique id, tracked from the opening idea through to the merge,
   archived on disk as a self-contained record
