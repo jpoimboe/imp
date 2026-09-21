@@ -105,6 +105,7 @@ def _closing_block(
     and it can only upgrade a lost connection to a completed run, never invent a pause."""
     from imp.cli.main import (
         _emit_completed,
+        _emit_daemon_died,
         _emit_leave_pause,
         _emit_lost_connection,
         _emit_merge_blocked,
@@ -112,7 +113,6 @@ def _closing_block(
         _leave_trigger,
         _print_leave_disposition,
         _recorded_commits,
-        _session_exit_code,
     )
     from imp.cli.store import _resolve_intent
     intent = witness.intent()
@@ -147,7 +147,10 @@ def _closing_block(
         _emit_paused_summary(quest, info=None, intent=intent)
         return 1
     if ending is StreamEnding.ENDED:
-        return _session_exit_code(quest, coord)
+        # An end frame arrived, so the ordering guarantee holds: an outcome the client
+        # failed to witness is structurally impossible. The run reported nothing.
+        _emit_daemon_died(quest, intent=intent)
+        return 1
     outcome = resolve_settled_outcome(quest)
     settled_intent = _resolve_intent(outcome.events)
     if outcome.completed:

@@ -129,10 +129,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 ) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-06-15-run")
-    # The on-disk terminal state the client reads once the daemon exits.
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
-        quest.state_dir)
 
     # No real subprocess: in-process server stands in; spawn is a no-op.
     monkeypatch.setattr(
@@ -147,6 +144,9 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "name?"}})
         answered.append(await user_chat_input_fn("name?"))
+        # Real _complete emits quest_merged before returning (executor.py:995).
+        on_event({"type": "quest_merged",
+                  "payload": {"base": "main", "commit": "abc123"}})
         return "merged"
 
     class _Driver:
@@ -179,8 +179,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     out = capsys.readouterr().out
     assert answered == ["imp"]
     assert rc_holder["rc"] == 0
-    # The run's live event log holds no quest_merged event; the recorded status
-    # is what names the base branch.
+    # The merge was witnessed across the wire; its payload names the base branch.
     assert "merged into main" in out
     assert "done · commits on" not in out
 
@@ -191,8 +190,6 @@ async def test_run_session_client_starts_status_tick_when_provided(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-tick")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
-        quest.state_dir)
 
     monkeypatch.setattr(
         "imp.remote.session.attach.spawn_session_daemon",
@@ -216,6 +213,8 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "quest_merged",
+                  "payload": {"base": "main", "commit": "abc123"}})
         return "merged"
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
@@ -1403,10 +1402,10 @@ async def test_end_frame_with_a_genuine_pause_renders_the_pause_summary(
 
     monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-07-04-ended-paused")
-    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
-        quest.state_dir)
-    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED,
+                     {"type": "workflow_paused", "payload": {"reason": "awaiting_user"}}))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
@@ -1568,9 +1567,9 @@ async def test_end_frame_with_done_state_renders_the_completed_block(
 
     monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-07-04-ended-done")
-    State(id=quest.id, step=None, step_attempt=0, status="done").save(
-        quest.state_dir)
-    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED, {"type": "workflow_completed", "payload": {}}))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
@@ -1590,9 +1589,11 @@ async def test_end_frame_with_merged_state_renders_the_completed_block(
 
     monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-07-04-ended-merged")
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
-        quest.state_dir)
-    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED,
+                     {"type": "quest_merged",
+                      "payload": {"base": "main", "commit": "abc123"}}))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
@@ -1612,13 +1613,11 @@ async def test_end_frame_with_merge_blocked_state_renders_the_merge_blocked_bloc
 
     monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-07-04-ended-blocked")
-    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merge_blocked").save(
-        quest.state_dir)
-    quest.event_log().append(
-        agent_id=None, type="merge_blocked",
-        payload={"reason": "conflict", "base": "main"})
-    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED,
+                     {"type": "merge_blocked",
+                      "payload": {"reason": "conflict", "base": "main"}}))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
@@ -2117,3 +2116,109 @@ async def test_a_resumed_merge_blocked_then_a_merge_renders_merged(
     assert rc == 0
     assert out.split("\n")[0] == "merged into main"
     assert "merge blocked" not in out
+
+
+@pytest.mark.anyio
+async def test_end_frame_with_nothing_witnessed_reports_a_crash_when_stderr_has_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-20-died-crash")
+    stderr_path = quest.quest_dir / "daemon.stderr"
+    stderr_path.write_text("Traceback (most recent call last):\nRuntimeError: boom\n")
+    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        f"crash: see {stderr_path}\n"
+        f"{quest.id} · T\n"
+        "\n")
+
+
+@pytest.mark.anyio
+async def test_end_frame_with_nothing_witnessed_reports_no_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The BaseException gap: the run emitted nothing, the server still sent its
+    # end frame. Disk says `paused`, and must not be believed.
+    quest = _paused_quest(tmp_path, "2026-09-20-died-silent")
+    monkeypatch.setattr(session_run, "run_terminal_client", _ended)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "run ended without reporting an outcome\n"
+        f"It may not have finished — `imp resume {quest.id}` to check.\n"
+        f"{quest.id} · T\n"
+        "\n")
+    assert not any(ln.startswith("resume: imp resume") for ln in out.split("\n"))
+    assert "paused" not in out
+
+
+@pytest.mark.anyio
+async def test_a_replayed_pause_then_resume_then_a_cut_reports_lost_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-20-replay-fossil")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.CUT,
+            {"type": "workflow_paused", "_replay": True, "payload": {"reason": "api"}},
+            {"type": "workflow_resumed", "_replay": True, "payload": {}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 4
+    assert out.split("\n")[0] == "lost the connection to the run"
+    assert "API error" not in out                # the fossil reason is gone
+    assert "paused" not in out
+
+
+@pytest.mark.anyio
+async def test_a_replayed_pause_then_resume_then_an_end_frame_reports_the_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-20-replay-crash")
+    stderr_path = quest.quest_dir / "daemon.stderr"
+    stderr_path.write_text("Traceback (most recent call last):\nLoadError\n")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "workflow_paused", "_replay": True, "payload": {"reason": "api"}},
+            {"type": "workflow_resumed", "_replay": True, "payload": {}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        f"crash: see {stderr_path}\n"
+        f"{quest.id} · T\n"
+        "\n")
