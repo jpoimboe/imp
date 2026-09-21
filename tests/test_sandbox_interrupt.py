@@ -23,7 +23,6 @@ from imp.agents.tools.context import ToolContext, descendant_pids, terminate_run
 from imp.engine.sandbox import (
     SandboxPolicy,
     make_home_layer,
-    overlay_mode,
     sandbox_available,
 )
 from imp.engine.types import Pause, SourceLoc, Step
@@ -32,6 +31,7 @@ from tests.conftest import (
     assert_all_tool_contexts_owned,
     own_tool_context,
 )
+from tests.overlay_probe import OVERLAY_MODE, requires_overlay
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -82,40 +82,6 @@ def _ctx(worktree: Path) -> ToolContext:
     return own_tool_context(ctx)
 
 
-# This file defines its own overlay skip rather than importing a shared one (its
-# convention: wrap an imported probe in a module-level skipif). An unprivileged
-# `mount -t overlay` under /var/tmp must succeed — the same real-disk base the
-# overlay home/worktree live under, so no later bind shadows the merged mount.
-_OVERLAY_BASE = Path("/var/tmp")
-
-
-def _probe_overlay() -> bool | None:
-    if not sandbox_available() or not _OVERLAY_BASE.is_dir():
-        return None
-    try:
-        root = Path(tempfile.mkdtemp(prefix="imp-int-ovl-probe-", dir=_OVERLAY_BASE))
-    except OSError:
-        return None
-    try:
-        probe = root / "probe"
-        home = root / "home"
-        probe.mkdir()
-        home.mkdir()
-        return overlay_mode(probe, home)
-    except OSError:
-        return None
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-_OVERLAY_MODE: bool | None = _probe_overlay()
-requires_overlay = pytest.mark.skipif(
-    _OVERLAY_MODE is None,
-    reason="unprivileged overlayfs probe at /var/tmp failed (read-only base or "
-           "stacked overlay under a nested sandbox)",
-)
-
-
 def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     """Active policy whose every spawn mints its own COW-overlay layer under a
     per-step overlay root. home + worktree are SIBLINGS under `base` (a /var/tmp
@@ -127,7 +93,7 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     wt = base / "worktree"
     (wt / ".git").mkdir(parents=True, exist_ok=True)
     layer, overlay_root, cleanup = make_home_layer(
-        str(home), root=base / "ovl", userxattr=_OVERLAY_MODE)
+        str(home), root=base / "ovl", userxattr=OVERLAY_MODE)
     pol = SandboxPolicy(
         active=True,
         worktree=str(wt),
