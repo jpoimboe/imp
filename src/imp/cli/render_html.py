@@ -96,6 +96,7 @@ def render_html(markdown: str) -> str:
         f"{css}\n"
         ".markdown-body { box-sizing: border-box; min-width: 200px; "
         "max-width: 980px; margin: 0 auto; padding: 45px; }\n"
+        ".markdown-body details details { margin-left: 1.5em; }\n"
         "</style>\n"
         "</head>\n"
         '<body class="markdown-body">\n'

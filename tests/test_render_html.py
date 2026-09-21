@@ -226,6 +226,15 @@ def test_render_html_is_self_contained_document() -> None:
     assert 'src="http' not in out
 
 
+def test_render_html_indents_nested_folds() -> None:
+    md = ("<details>\n<summary>outer</summary>\n\n"
+          "<details>\n<summary>inner</summary>\n\nbody\n\n</details>\n\n"
+          "</details>\n")
+    out = render_html(md)
+    assert out.count("<details>") == 2          # both folds are real elements
+    assert ".markdown-body details details { margin-left: 1.5em; }" in out
+
+
 def test_render_html_end_to_end_neutralizes_hostile_tool_result() -> None:
     events = [
         _ev("2", "step_started", step="s", kind="agent", phase="p",
