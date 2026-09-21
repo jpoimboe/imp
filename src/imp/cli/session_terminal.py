@@ -30,6 +30,7 @@ import anyio
 from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.store import _user_message_text
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.terminal_watchdog import WatchedStream, terminal_gone, watch_terminal
 from imp.engine.errors import LoadError, LoadErrors
@@ -42,6 +43,33 @@ from imp.remote.session.protocol import (
 )
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
+
+
+class RunWitness:
+    """An O(1) fold over the events this client saw — never an accumulated list. Fed
+    every event, live and replayed, so a mid-run attach witnesses the whole run."""
+
+    def __init__(self) -> None:
+        self._intent: str | None = None
+        self._human_turn: str | None = None
+
+    def note(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "user_message":
+            self._note_user_message(event.get("payload") or {})
+
+    def _note_user_message(self, payload: dict[str, Any]) -> None:
+        text = _user_message_text(payload).strip()
+        if not text:
+            return
+        if payload.get("subtype") == "intent":
+            self._intent = self._intent or text
+        else:
+            self._human_turn = self._human_turn or text
+
+    def intent(self) -> str | None:
+        """_resolve_intent's order: any intent-subtype message outranks the first
+        genuine human turn, even one that arrived earlier."""
+        return self._intent or self._human_turn
 
 
 async def run_terminal_client(

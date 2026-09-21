@@ -3649,3 +3649,47 @@ async def test_stop_ack_ends_when_the_gate_is_answered_elsewhere(
             await raw.aclose()
 
     assert received == ["remote-answer"]
+
+
+def test_run_witness_intent_prefers_an_intent_message_over_an_earlier_human_turn() -> None:
+    from imp.cli.session_terminal import RunWitness
+    from imp.cli.store import _resolve_intent
+    events = [
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "yes, go ahead"}]}},
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
+    ]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    # The later intent-subtype message wins, exactly as _resolve_intent resolves it.
+    assert witness.intent() == "add a dark mode toggle"
+    assert witness.intent() == _resolve_intent(events)
+
+
+def test_run_witness_intent_falls_back_to_the_first_genuine_human_turn() -> None:
+    from imp.cli.session_terminal import RunWitness
+    from imp.cli.store import _resolve_intent
+    events = [
+        {"type": "step_started", "payload": {"step": "plan", "kind": "agent"}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "fix the login crash"}]}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "and the logout one"}]}},
+    ]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    assert witness.intent() == "fix the login crash"
+    assert witness.intent() == _resolve_intent(events)
+
+
+def test_run_witness_intent_ignores_an_empty_user_message() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    assert witness.intent() is None
+    witness.note({"type": "user_message", "payload": {"content": [
+        {"type": "text", "text": "   "}]}})
+    assert witness.intent() is None
