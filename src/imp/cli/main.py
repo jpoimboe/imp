@@ -2549,7 +2549,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(control_root=control)
+        workflow = (card.workflow if card is not None
+                    else resolve_default_workflow(control_root=control))
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))
@@ -2627,7 +2628,8 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(control_root=control)
+        workflow = (card.workflow if card is not None
+                    else resolve_default_workflow(control_root=control))
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))

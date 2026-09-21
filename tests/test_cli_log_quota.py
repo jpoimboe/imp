@@ -38,7 +38,8 @@ class _QuotaStore:
         return self._events
 
     def quest_card(self, quest_id: str) -> Any:
-        return SimpleNamespace(status=self._status, title=quest_id)
+        return SimpleNamespace(status=self._status, title=quest_id,
+                               workflow="default")
 
     def scan_homes(self) -> list[Any]:
         return []

@@ -16,7 +16,7 @@ class _FakeStore:
         return self._events
 
     def quest_card(self, quest_id: str):
-        return SimpleNamespace(status=self._status)
+        return SimpleNamespace(status=self._status, workflow="imp")
 
     def completed_rows(self):
         return []
@@ -67,6 +67,53 @@ def test_summary_status_from_store_survives_masked_events(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(s, "_row_for_id", _masked)
     monkeypatch.setattr("imp.cli.store.make_store", lambda _c: _FakeStore(_EVENTS, "MERGED"))
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m.main(argv)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert expected in out
+
+
+class _CardlessStore(_FakeStore):
+    """quest_card misses — the branch that already renders status `?`."""
+
+    def quest_card(self, quest_id: str) -> None:
+        return None
+
+
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        (["log", "alpha", "-s", "--no-pager"], "imp  ·  alpha  ·  ?"),
+        (["log", "alpha", "-s", "--md=-"], "# imp — alpha"),
+    ],
+    ids=["terminal", "md"],
+)
+def test_a_missing_card_heads_with_the_project_default_workflow(
+    argv: list[str],
+    expected: str,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No card to source a workflow from: the project default is the only honest
+    answer, and `_seed_control` pins it to `imp`."""
+    import imp.cli.main as m
+    import imp.cli.store as s
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+
+    def _masked(*a: object, **k: object):
+        raise PermissionError("events.jsonl is masked")
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(s, "_row_for_id", _masked)
+    monkeypatch.setattr("imp.cli.store.make_store",
+                        lambda _c: _CardlessStore(_EVENTS, "unused"))
     monkeypatch.setenv("NO_COLOR", "1")
 
     rc = m.main(argv)
