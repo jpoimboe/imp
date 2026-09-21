@@ -2560,6 +2560,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
         _emit_cli_error(f"unknown category {unknown[0]!r} "
                         f"(choose from: {', '.join(LOG_CATEGORIES)})")
         return 2
+    if args.summary and (args.show is not None or args.hide is not None):
+        _emit_cli_error("--show/--hide not allowed with -s/--summary")
+        return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
     control = _control_root()

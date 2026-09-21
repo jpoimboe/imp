@@ -138,3 +138,33 @@ def test_log_export_threads_computed_show_set(
     assert rc == 0
     assert captured["show"] == frozenset({"thinking"})
     assert captured["full"] is False
+
+
+@pytest.mark.parametrize("argv", [
+    ["log", _ID, "-s", "--show", "thinking"],
+    ["log", _ID, "-s", "--hide", "tiers"],
+    ["log", _ID, "-s", "--md", "-", "--show", "thinking"],
+])
+def test_log_summary_rejects_content_categories(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    assert main(argv) == 2
+    assert capsys.readouterr().err.strip() == (
+        "imp: --show/--hide not allowed with -s/--summary")
+
+
+def test_log_unknown_category_still_wins_over_the_summary_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    assert main(["log", _ID, "-s", "--show", "bogus"]) == 2
+    err = capsys.readouterr().err
+    assert "imp: unknown category 'bogus'" in err
+    assert "-s/--summary" not in err
+    assert main(["log", _ID, "--show", "bogus", "--md", "-"]) == 2
+    assert "imp: unknown category 'bogus'" in capsys.readouterr().err
