@@ -792,6 +792,116 @@ def test_overlay_mode_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
     assert str(tmp_path / ".overlay-probe" / "lower") not in mount_cmd
 
 
+def _mi_line(mount_point: str, fstype: str, *, mid: int = 100,
+             optional: str = "shared:1") -> str:
+    """One /proc/self/mountinfo line for `fstype` mounted at `mount_point`."""
+    return (f"{mid} 1 0:81 / {mount_point} rw,nosuid,nodev,relatime "
+            f"{optional}{' ' if optional else ''}"
+            f"- {fstype} {fstype} rw,lowerdir=/lo,upperdir=/up,workdir=/wk")
+
+
+def _mountinfo(tmp_path: Path, *lines: str) -> Path:
+    p = tmp_path / f"mountinfo-{uuid.uuid4().hex}"
+    p.write_text("".join(f"{line}\n" for line in lines))
+    return p
+
+
+def test_home_is_overlay_mount_true_for_overlay_at_home(tmp_path, monkeypatch):
+    # AC 1a: an overlay mounted exactly at the home dir.
+    import imp.engine.sandbox as sb
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path,
+        _mi_line("/", "btrfs", mid=30),
+        _mi_line(str(home), "overlay", mid=31),
+    ))
+    assert sb.home_is_overlay_mount(home) is True
+
+
+def test_home_is_overlay_mount_true_with_no_optional_fields(tmp_path, monkeypatch):
+    # Real kernel lines often carry ZERO optional fields — the ` - ` split, not a
+    # fixed field count, is what makes that shape parse.
+    import imp.engine.sandbox as sb
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line(str(home), "overlay", mid=31, optional="")))
+    assert sb.home_is_overlay_mount(home) is True
+
+
+def test_home_is_overlay_mount_false_for_plain_directory(tmp_path, monkeypatch):
+    # AC 1b: home has no mount of its own — the ordinary bare-host case, where
+    # the probe must still run.
+    import imp.engine.sandbox as sb
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path,
+        _mi_line("/", "btrfs", mid=30),
+        _mi_line("/var/tmp", "overlay", mid=31),
+    ))
+    assert sb.home_is_overlay_mount(home) is False
+
+
+def test_home_is_overlay_mount_false_when_only_a_parent_is_overlay(tmp_path, monkeypatch):
+    # AC 1c: overlay-on-a-parent is fine — a lowerdir pointed at an ordinary
+    # directory INSIDE an overlay mounts cleanly, so don't skip that probe.
+    import imp.engine.sandbox as sb
+    parent = tmp_path.resolve() / "home"
+    home = parent / "agent"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line(str(parent), "overlay", mid=31)))
+    assert sb.home_is_overlay_mount(home) is False
+
+
+def test_home_is_overlay_mount_answers_for_the_topmost_entry_at_home(tmp_path, monkeypatch):
+    # AC 1d: with several mounts stacked at the same mount point, the LAST
+    # mountinfo entry is the one a lowerdir would resolve to.
+    import imp.engine.sandbox as sb
+    home = tmp_path.resolve() / "home"
+    overlay_then_tmpfs = _mountinfo(
+        tmp_path,
+        _mi_line(str(home), "overlay", mid=31),
+        _mi_line(str(home), "tmpfs", mid=32),
+    )
+    tmpfs_then_overlay = _mountinfo(
+        tmp_path,
+        _mi_line(str(home), "tmpfs", mid=31),
+        _mi_line(str(home), "overlay", mid=32),
+    )
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", overlay_then_tmpfs)
+    assert sb.home_is_overlay_mount(home) is False
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", tmpfs_then_overlay)
+    assert sb.home_is_overlay_mount(home) is True
+
+
+def test_home_is_overlay_mount_unescapes_octal_mount_point(tmp_path, monkeypatch):
+    # AC 1e: the kernel escapes a space in a mount point as \040.
+    import imp.engine.sandbox as sb
+    home = tmp_path.resolve() / "my home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line(str(home).replace(" ", r"\040"), "overlay", mid=31)))
+    assert sb.home_is_overlay_mount(home) is True
+
+
+def test_home_is_overlay_mount_matches_through_a_symlinked_home(tmp_path, monkeypatch):
+    # Kernel mountinfo carries canonical paths, so a $HOME that is a symlink
+    # must be realpath'd before comparing or the predicate never engages.
+    import imp.engine.sandbox as sb
+    real = tmp_path.resolve() / "real-home"
+    real.mkdir()
+    link = tmp_path.resolve() / "link-home"
+    link.symlink_to(real)
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line(str(real), "overlay", mid=31)))
+    assert sb.home_is_overlay_mount(link) is True
+
+
+def test_home_is_overlay_mount_false_when_mountinfo_absent(tmp_path, monkeypatch):
+    # AC 1f: no mountinfo (non-Linux, or an unreadable /proc) → probe normally.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", tmp_path / "nope" / "mountinfo")
+    assert sb.home_is_overlay_mount(tmp_path.resolve() / "home") is False
+
+
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"

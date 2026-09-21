@@ -42,6 +42,7 @@ import json
 import os
 import platform
 import random
+import re
 import select
 import shlex
 import shutil
@@ -1035,6 +1036,44 @@ def _force_rmtree(path: Path) -> None:
             with contextlib.suppress(OSError):
                 os.chmod(p, 0o700)
     shutil.rmtree(path, ignore_errors=True)
+
+
+_MOUNTINFO_PATH = Path("/proc/self/mountinfo")
+_MOUNTINFO_ESCAPES = {"040": " ", "011": "\t", "012": "\n", "134": "\\"}
+
+
+def _unescape_mountinfo(field: str) -> str:
+    return re.sub(r"\\(040|011|012|134)",
+                  lambda m: _MOUNTINFO_ESCAPES[m.group(1)], field)
+
+
+def home_is_overlay_mount(home: Path) -> bool:
+    """Whether `home` is itself the mount point of an overlay filesystem — true
+    exactly in a nested imp run, where $HOME is the parent sandbox's overlay.
+
+    Splits each _MOUNTINFO_PATH line on the ` - ` separator (optional fields sit
+    before it, so a fixed field count would misread): index 4 of the head is the
+    mount point, the first token of the tail is the filesystem type. Several
+    mounts can share one mount point; the LAST entry is the topmost, and that is
+    the one a lowerdir would resolve to, so it decides the answer. The home side
+    is realpath'd — the kernel already reports canonical paths, so a symlinked
+    $HOME would otherwise never match. Decoded leniently: a non-UTF-8 path
+    elsewhere in the table must not raise here. An absent or unreadable table is
+    False.
+    """
+    try:
+        text = _MOUNTINFO_PATH.read_text(errors="replace")
+    except OSError:
+        return False
+    target = os.path.realpath(home)
+    is_overlay = False
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" - ")
+        fields = head.split()
+        if not sep or len(fields) < 5 or _unescape_mountinfo(fields[4]) != target:
+            continue
+        is_overlay = tail.split()[:1] == ["overlay"]
+    return is_overlay
 
 
 @lru_cache(maxsize=1)
