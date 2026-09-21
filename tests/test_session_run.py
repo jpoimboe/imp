@@ -4,13 +4,11 @@ import io
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
-from imp.cli import main
 from imp.cli.session_run import (
     make_headless_solicit,
     make_interactive_solicit,
@@ -525,18 +523,14 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
         raise TimeoutError
 
     monkeypatch.setattr(session_run, "run_terminal_client", _boom)
-    summarized: list[Any] = []
-    monkeypatch.setattr(
-        "imp.cli.main._handle_terminal_outcome",
-        lambda c, r, co: summarized.append(r) or 1)
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     assert rc == 3                       # distinct daemon-startup-failure code
-    assert summarized == []              # NOT routed through the paused summary
     out = capsys.readouterr().out
+    assert f"resume: imp resume {quest.id}" not in out   # NOT the paused summary
     assert "startup failed: session daemon did not come up" in out   # backstop block on stdout
     assert str(project_state_dir(quest.control_root) / "remote-control.log") in out
 
@@ -557,9 +551,6 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
         raise TimeoutError
 
     monkeypatch.setattr(session_run, "run_terminal_client", _boom)
-    monkeypatch.setattr(
-        "imp.cli.main._handle_terminal_outcome",
-        lambda c, r, co: 0)
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
@@ -676,7 +667,6 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
         return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
@@ -707,7 +697,6 @@ async def test_run_session_client_passes_control_root(
         return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
@@ -751,7 +740,6 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
         raise TimeoutError
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _boom)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
@@ -786,7 +774,6 @@ async def test_run_session_client_threads_provided_leave_state(
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
     monkeypatch.setattr(
         "imp.cli.main._print_leave_disposition", _fake_disposition)
-    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()
     ls: dict[str, str] = {}
@@ -822,7 +809,6 @@ async def test_run_session_client_reuses_passed_in_title(
         return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
 
     class _SentinelTitle:
         def __init__(self) -> None:
@@ -913,7 +899,6 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
             quest.id, 7, stderr_path, "RuntimeError: boom-on-startup")
 
     monkeypatch.setattr(session_run, "run_terminal_client", _boom)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
@@ -1009,39 +994,6 @@ def test_resolve_settled_outcome_prefers_live_home_over_archive(tmp_path: Path) 
     assert outcome.completed is False
 
 
-def test_terminal_rendering_merged_from_archive_when_home_reaped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("NO_COLOR", "1")
-    quest = _archive_reaped_quest(
-        tmp_path, "2026-07-03-render", status="merged",
-        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
-    quest.title = ""                          # untitled, so the identity line shows the intent
-    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
-    out = capsys.readouterr().out
-    lines = out.split("\n")
-    assert rc == 0
-    assert lines[0] == "merged into main"     # merged=True from the archived record's status
-    assert "done · commits on" not in out     # not the unmerged headline
-    # the opening intent, too, comes from the archived blob
-    assert lines[1] == "2026-07-03-render · > resolve me from archive"
-
-
-def test_terminal_rendering_pauses_when_home_reaped_and_no_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("NO_COLOR", "1")
-    quest = _make_quest(tmp_path, "2026-07-03-norecord")
-    assert not quest.state_dir.exists()
-    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
-    out = capsys.readouterr().out
-    assert rc == 1                            # an unresolvable status renders, never raises
-    assert out.split("\n")[0] == "paused"
-    assert "resume: imp resume 2026-07-03-norecord" in out
-
-
 @pytest.mark.anyio
 async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -1084,7 +1036,6 @@ async def test_run_session_client_installs_startup_status(
         return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
 
     installed: list[bool] = []
 
@@ -1447,25 +1398,6 @@ def test_resolve_settled_outcome_never_takes_events_from_the_archive_when_home_i
     assert outcome.status == "paused"
     assert outcome.events == []
     assert outcome.completed is False
-
-
-def test_stray_live_line_still_renders_merged_from_the_archived_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("NO_COLOR", "1")
-    quest = _archive_reaped_quest(
-        tmp_path, "2026-07-05-keku", status="merged",
-        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
-    quest.title = ""                          # untitled: the identity line shows the intent
-    quest.event_log().append(agent_id=None, type="cli_attached", payload={})
-    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
-    out = capsys.readouterr().out
-    lines = out.split("\n")
-    assert rc == 0
-    assert lines[0] == "merged into main"
-    assert "done · commits on" not in out
-    assert lines[1] == "2026-07-05-keku · > resolve me from archive"
 
 
 @pytest.mark.anyio
