@@ -1800,3 +1800,18 @@ def test_build_summary_returns_the_step_rows_directly():
     assert isinstance(rows, list)
     assert [(r.phase, r.step) for r in rows] == [("plan", "plan-writer")]
     assert rows[0].wall_seconds == 90.0
+
+
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "color"])
+def test_suppressing_the_header_line_drops_exactly_that_line(color: bool) -> None:
+    """The card states the id and the status itself, so it renders the table
+    without the run header — one line fewer, every other line identical."""
+    rows = [_row("plan", "plan-writer", 90)]
+    full = render_summary(rows, header=_HDR, color=color, width=80)
+    bare = render_summary(rows, header=_HDR, color=color, width=80,
+                          header_line=False)
+    assert bare == full[1:]
+    assert len(bare) == len(full) - 1
+    assert not any("feature" in ln or "merged" in ln for ln in bare)
+    assert "cost" in bare[0]          # the dim title row is now first
+    assert bare[-1].startswith("  total")
