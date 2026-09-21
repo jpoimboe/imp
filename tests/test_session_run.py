@@ -1644,6 +1644,34 @@ async def test_save_leave_still_renders_saved_as_draft(
 
 
 @pytest.mark.anyio
+async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-07-04-leave-save-ctrl-d")
+    # A Ctrl-D leave the gate loop resolved to `save`: the disposition mark carries no
+    # intent, so a row 1 keyed on intent alone would fall through to the trigger row.
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving("ctrl-d", disposition="save"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (
+        f"{quest.id} · T · saved as draft\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+    assert "> Ctrl-D" not in out          # row 1 prints no caret shadow
+    assert "paused · Ctrl-D" not in out   # …and no trigger head
+
+
+@pytest.mark.anyio
 async def test_shelve_leave_still_renders_shelved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
