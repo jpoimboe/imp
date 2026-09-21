@@ -3323,7 +3323,7 @@ async def test_terminal_client_reports_cut_ending_on_oversized_frame(
         async with anyio.create_task_group() as tg:
             await serve_raw_frames(
                 sock, good.encode("utf-8") + b"\n" + b"x" * (_MAX_FRAME + 1), tg)
-            ending = await run_terminal_client(
+            ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(),
                 coord=coord, solicit=_solicit, leave_mode="new")
             tg.cancel_scope.cancel()
@@ -3361,9 +3361,10 @@ async def test_terminal_client_reports_cut_when_a_leave_cancels_the_loop(
             tg.start_soon(server.serve)
 
             async def _client() -> None:
-                endings.append(await run_terminal_client(
+                ending, _witness = await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new"))
+                    coord=coord, solicit=_solicit, leave_mode="new")
+                endings.append(ending)
 
             tg.start_soon(_client)
             await wait_until(
@@ -3418,7 +3419,7 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
         async with anyio.create_task_group() as tg:
             # One frame, then the peer closes with no end frame: receive_events ends CUT.
             await serve_raw_frames(sock, good.encode("utf-8") + b"\n", tg)
-            ending = await run_terminal_client(
+            ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(), coord=coord,
                 solicit=_solicit, leave_mode="new", stream=watched)
             tg.cancel_scope.cancel()
@@ -3821,3 +3822,47 @@ def test_run_witness_after_a_resume_reports_a_fresh_merge() -> None:
     witness.note({"type": "quest_merged", "payload": {"base": "main", "commit": "abc"}})
     assert witness.terminal() == TerminalOutcome(
         type="quest_merged", payload={"base": "main", "commit": "abc"})
+
+
+@pytest.mark.anyio
+async def test_terminal_client_returns_the_witness_of_the_events_it_rendered(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.session_terminal import TerminalOutcome
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    intent = encode_event({
+        "type": "user_message",
+        "payload": {"subtype": "intent",
+                    "content": [{"type": "text", "text": "add a dark mode toggle"}]}})
+    merged = encode_event({
+        "type": "quest_merged", "payload": {"base": "main", "commit": "abc123"}})
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await serve_raw_frames(
+                sock,
+                intent.encode("utf-8") + b"\n" + merged.encode("utf-8") + b"\n", tg)
+            ending, witness = await run_terminal_client(
+                attach=_attach, driver=_Driver(),
+                coord=coord, solicit=_solicit, leave_mode="new")
+            tg.cancel_scope.cancel()
+
+    assert ending is StreamEnding.CUT          # the peer closed with no end frame
+    assert witness.intent() == "add a dark mode toggle"
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "main", "commit": "abc123"})

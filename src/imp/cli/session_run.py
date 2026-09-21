@@ -141,7 +141,7 @@ async def run_session_client(
             tg.start_soon(status.tick)
         driver.install_startup_status()
         try:
-            ending = await run_terminal_client(
+            ending, _witness = await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,

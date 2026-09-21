@@ -17,6 +17,7 @@ from imp.cli.session_run import (
     resolve_settled_outcome,
     run_session_client,
 )
+from imp.cli.session_terminal import RunWitness
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_watchdog import WatchedStream
 from imp.engine import archive
@@ -49,6 +50,17 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
 def _watched() -> WatchedStream:
     """The leased funnel now requires its wrapper; these tests only need a real one."""
     return WatchedStream(io.StringIO())
+
+
+def _ending_with(ending: StreamEnding, *events: dict[str, Any]) -> Any:
+    """A run_terminal_client stub: the events the client witnessed, folded into the
+    witness it returns beside `ending`."""
+    async def _stub(**_kwargs: Any) -> tuple[StreamEnding, RunWitness]:
+        witness = RunWitness()
+        for event in events:
+            witness.note(event)
+        return ending, witness
+    return _stub
 
 
 def test_resolve_settled_outcome_completed_when_merged_no_worktree(tmp_path: Path) -> None:
@@ -234,16 +246,15 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-interrupted")
-    # Worktree exists + paused status → the resolved outcome is not completed.
-    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
-        quest.state_dir)
-
-    async def _noop(**_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
+    # What a mid-run SIGINT really produces: the engine emits its interrupt pause
+    # and the daemon then concludes, so the client witnesses the pause and sees the
+    # end frame. Nothing on disk is consulted.
+    monkeypatch.setattr(
+        "imp.cli.session_run.run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "workflow_paused",
+             "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}}))
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -257,8 +268,8 @@ async def test_run_session_client_returns_130_when_user_interrupted(
 
     coord = InterruptCoordinator()
     # The durable `interrupted` flag (set by signal_pause on a real Ctrl-C) is what
-    # _session_exit_code reads for 130 — set it ALONE (should_pause stays False) so
-    # this test fails if the exit-code guard regresses to reading should_pause.
+    # the closing block's one remap rule reads for 130 — set it ALONE (should_pause
+    # stays False) so this test fails if that rule regresses to reading should_pause.
     coord._interrupted = True
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
@@ -460,8 +471,8 @@ async def test_run_session_client_threads_resume_into_attach(
 
     monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
@@ -601,11 +612,11 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: Any) -> None:
+    async def _capture(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
@@ -615,7 +626,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     assert captured["leave_mode"] == "new"
     # The foreground does NOT apply the disposition — the daemon owns it.
     assert (project_state_dir(tmp_path) / "quests" / "d1").exists()
-    assert rc == 0
+    assert rc == 4          # cut stream, nothing witnessed, a draft that never merged
 
 
 @pytest.mark.anyio
@@ -632,11 +643,11 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: Any) -> None:
+    async def _capture(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
@@ -645,7 +656,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
 
     assert captured["leave_mode"] == "chat"
     assert (project_state_dir(tmp_path) / "quests" / "c1").exists()
-    assert rc == 0
+    assert rc == 4          # cut stream, nothing witnessed, a draft that never merged
 
 
 @pytest.mark.anyio
@@ -661,8 +672,9 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: object) -> None:
+    async def _capture(**kwargs: object) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
     monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
@@ -691,8 +703,9 @@ async def test_run_session_client_passes_control_root(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: object) -> None:
+    async def _capture(**kwargs: object) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
     monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
@@ -759,8 +772,9 @@ async def test_run_session_client_threads_provided_leave_state(
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
-    async def _capture(**kwargs: object) -> None:
+    async def _capture(**kwargs: object) -> tuple[StreamEnding, RunWitness]:
         kwargs["leave_state"]["intent"] = "clear"  # gate-loop populates the dict
+        return StreamEnding.CUT, RunWitness()
 
     seen: dict[str, object] = {}
 
@@ -802,8 +816,9 @@ async def test_run_session_client_reuses_passed_in_title(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: object) -> None:
+    async def _capture(**kwargs: object) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
     monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
@@ -854,8 +869,8 @@ async def test_run_session_client_threads_autonomous_into_attach(
 
     monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
@@ -1039,11 +1054,11 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
 
     captured: dict[str, object] = {}
 
-    async def _capture(**kwargs: Any) -> None:
+    async def _capture(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         captured.update(kwargs)
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
-    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     driver = _NullDriver()
     coord = InterruptCoordinator()
@@ -1052,7 +1067,7 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
         leave_mode="new", stream=_watched())
 
     assert captured["local_echo"] == driver.seed_pending_reply
-    assert rc == 0
+    assert rc == 4          # cut stream, nothing witnessed, a draft that never merged
 
 
 @pytest.mark.anyio
@@ -1064,8 +1079,8 @@ async def test_run_session_client_installs_startup_status(
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
     monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
@@ -1106,8 +1121,8 @@ async def test_run_session_client_threads_model(
 
     monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
@@ -1151,8 +1166,8 @@ async def test_run_session_client_threads_opening_unsandboxed(
 
     monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
@@ -1233,8 +1248,8 @@ async def test_run_session_client_registers_ack_hook_when_interactive(
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
     class _Driver:
@@ -1271,8 +1286,8 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
-    async def _noop(**_kwargs: object) -> None:
-        pass
+    async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
+        return StreamEnding.CUT, RunWitness()
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
 
     class _Driver:
@@ -1295,32 +1310,28 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
     assert coord._ack_hook is None                # never registered in a headless run
 
 
-async def _cut(**_kwargs: Any) -> StreamEnding:
-    return StreamEnding.CUT
-
-
-async def _ended(**_kwargs: Any) -> StreamEnding:
-    return StreamEnding.ENDED
+_cut = _ending_with(StreamEnding.CUT)
+_ended = _ending_with(StreamEnding.ENDED)
 
 
 def _leaving(reason: str | None = None, **marks: str) -> Any:
     """A CUT ending from a deliberate leave: bind and set the escalation event the way
     session_terminal.py does, then record the marks the gesture itself would leave."""
-    async def _stub(**kwargs: Any) -> StreamEnding:
+    async def _stub(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         coord = kwargs["coord"]
         coord.escalation_event = anyio.Event()
         coord.escalation_event.set()
         coord.leave_reason = reason
         kwargs["leave_state"].update(marks)
-        return StreamEnding.CUT
+        return StreamEnding.CUT, RunWitness()
     return _stub
 
 
-async def _abandoning(**kwargs: Any) -> StreamEnding:
+async def _abandoning(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
     # /abandon records its intent and sends its own control frame; it deliberately
     # never sets the escalation event (see session_terminal.py).
     kwargs["leave_state"]["intent"] = "abandon"
-    return StreamEnding.CUT
+    return StreamEnding.CUT, RunWitness()
 
 
 @pytest.mark.anyio
@@ -1469,10 +1480,10 @@ async def test_watched_stream_reaches_the_fallback_title_and_the_terminal_client
 
         def reset(self) -> None: ...
 
-    async def _stub(**kwargs: Any) -> StreamEnding:
+    async def _stub(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         seen["client_stream"] = kwargs["stream"]
         seen["title"] = kwargs["title"]
-        return StreamEnding.ENDED
+        return StreamEnding.ENDED, RunWitness()
 
     monkeypatch.setattr(session_run, "TerminalTitle", _RecordingTitle)
     monkeypatch.setattr(session_run, "run_terminal_client", _stub)

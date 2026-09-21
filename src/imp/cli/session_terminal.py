@@ -8,9 +8,11 @@ injected attach thunk), streams the daemon's events into a live event renderer
 (LiveDriver), forwards a local interrupt gesture as a control frame
 (SessionControls, without killing the client), and answers each bare-turn-end
 gate by soliciting one reply and sending it back as an input frame. It returns the
-StreamEnding its receive loop observed: ENDED when the daemon's end-of-run frame
-arrived, else CUT — the stream closed or faulted, or a deliberate leave cancelled
-the loop, with no end frame seen. The CLI flip
+StreamEnding its receive loop observed — ENDED when the daemon's end-of-run frame
+arrived, else CUT (the stream closed or faulted, or a deliberate leave cancelled
+the loop, with no end frame seen) — paired with the RunWitness folded from every
+event it rendered, which is what the caller's closing block is selected from.
+The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
 and the solicit callback, and replaces the in-process run_quest call in
 `imp new` / `imp resume` with this loop.
@@ -167,14 +169,16 @@ async def run_terminal_client(
     provider: str | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
-) -> StreamEnding:
+) -> tuple[StreamEnding, RunWitness]:
     gate_send, gate_recv = anyio.create_memory_object_stream[tuple[str, bool]](
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
         max_buffer_size=math.inf)
     gate_state: dict[str, Any] = {"scope": None, "elsewhere": False}
+    witness = RunWitness()
 
     def _on_event(event: dict[str, Any]) -> None:
+        witness.note(event)
         if event.get("type") == "user_input_resolved":
             if not event.get("_replay"):
                 resolved_send.send_nowait(None)
@@ -438,4 +442,4 @@ async def run_terminal_client(
                         await client.send_control(
                             CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
             await client.aclose()
-    return ending
+    return ending, witness
