@@ -22,8 +22,9 @@ import functools
 import math
 import signal
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -42,7 +43,19 @@ from imp.remote.session.protocol import (
     SkillRequest,
 )
 
+if TYPE_CHECKING:
+    from imp.cli.main import _PauseInfo
+
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
+
+
+@dataclass(frozen=True)
+class WitnessedPause:
+    """A workflow_paused seen this segment. `info` is None when its reason folds to
+    nothing — `awaiting_user`, or a payload carrying no reason — which is the bare
+    `paused` block, not the absence of a pause."""
+
+    info: _PauseInfo | None
 
 
 class RunWitness:
@@ -52,10 +65,23 @@ class RunWitness:
     def __init__(self) -> None:
         self._intent: str | None = None
         self._human_turn: str | None = None
+        self._paused: dict[str, Any] | None = None
+        self._paused_error: dict[str, Any] | None = None
+        self._pending_error: dict[str, Any] | None = None
 
     def note(self, event: dict[str, Any]) -> None:
-        if event.get("type") == "user_message":
-            self._note_user_message(event.get("payload") or {})
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        if etype == "user_message":
+            self._note_user_message(payload)
+        elif etype == "workflow_paused":
+            self._paused = payload
+            self._paused_error = self._pending_error
+            self._pending_error = None
+        elif etype == "step_started":
+            self._pending_error = None
+        elif etype == "error":
+            self._pending_error = payload
 
     def _note_user_message(self, payload: dict[str, Any]) -> None:
         text = _user_message_text(payload).strip()
@@ -70,6 +96,31 @@ class RunWitness:
         """_resolve_intent's order: any intent-subtype message outranks the first
         genuine human turn, even one that arrived earlier."""
         return self._intent or self._human_turn
+
+    def paused(self) -> WitnessedPause | None:
+        """The outer option: None when no pause was witnessed this segment."""
+        if self._paused is None:
+            return None
+        return WitnessedPause(info=self._folded_reason())
+
+    def _folded_reason(self) -> _PauseInfo | None:
+        from imp.cli.main import _PauseInfo
+        paused = self._paused or {}
+        base = paused.get("interrupt_reason") or paused.get("reason")
+        if not base:
+            return None
+        # A your-turn park is an ordinary solicit: it has no reason to render.
+        if base == "awaiting_user":
+            return None
+        cause: str | None = None
+        error = self._paused_error
+        if error is not None:
+            detail = error.get("detail")
+            if isinstance(detail, dict) and detail.get("last_agent_text"):
+                cause = str(detail["last_agent_text"]).strip() or None
+            if cause is None and error.get("message"):
+                cause = str(error["message"]).strip() or None
+        return _PauseInfo(base=str(base), cause=cause)
 
 
 async def run_terminal_client(

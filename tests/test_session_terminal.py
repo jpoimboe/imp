@@ -3693,3 +3693,75 @@ def test_run_witness_intent_ignores_an_empty_user_message() -> None:
     witness.note({"type": "user_message", "payload": {"content": [
         {"type": "text", "text": "   "}]}})
     assert witness.intent() is None
+
+
+def test_run_witness_reports_no_pause_before_one_is_witnessed() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "step_started", "payload": {"step": "plan"}})
+    assert witness.paused() is None
+
+
+def test_run_witness_awaiting_user_pause_is_witnessed_with_no_renderable_reason() -> None:
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "workflow_paused", "payload": {"reason": "awaiting_user"}})
+    # The outer option says "a pause happened"; the inner None says "nothing to render".
+    assert witness.paused() == WitnessedPause(info=None)
+
+
+def test_run_witness_reasonless_pause_is_witnessed_with_no_renderable_reason() -> None:
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "workflow_paused", "payload": {}})
+    assert witness.paused() == WitnessedPause(info=None)
+
+
+def test_run_witness_pause_folds_the_causal_errors_agent_text() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "detail": {"last_agent_text": "API Error 400 — overloaded\ntrace"},
+        "message": "overloaded_error"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "api"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="api", cause="API Error 400 — overloaded\ntrace"))
+
+
+def test_run_witness_pause_falls_back_to_the_errors_message() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "internal boom"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="internal_error", cause="internal boom"))
+
+
+def test_run_witness_pause_drops_an_error_a_later_step_start_recovered() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "transient"}})
+    witness.note({"type": "step_started", "payload": {"step": "plan"}})
+    witness.note({"type": "workflow_paused", "payload": {
+        "reason": "interrupt", "interrupt_reason": "interrupt"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="interrupt", cause=None))
+
+
+def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> None:
+    from imp.cli.main import _pause_reason, _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # The two fields differ, and `reason` alone would fold to nothing — so this
+    # fails if the interrupt_reason term is ever dropped.
+    events = [{"type": "workflow_paused",
+               "payload": {"reason": "awaiting_user", "interrupt_reason": "ctrl-d"}}]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    seen = witness.paused()
+    assert seen is not None
+    assert seen == WitnessedPause(info=_PauseInfo(base="ctrl-d", cause=None))
+    assert seen.info == _pause_reason(events)
