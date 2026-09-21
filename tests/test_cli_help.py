@@ -104,6 +104,16 @@ def test_log_help_no_longer_promises_a_most_recent_default(
     assert "Quest id or its short token" in out
 
 
+def test_log_help_says_the_content_filters_reach_the_exports(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    flat = " ".join(_help_for(["log", "-h"], capsys).split())
+    assert ("--show/--hide toggle individual content categories (thinking, "
+            "tools, subagents, prompts, tiers) over the lean view, in the "
+            "terminal and in --md/--html exports alike.") in flat
+
+
 def test_bare_events_search_prints_full_help_on_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

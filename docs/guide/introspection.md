@@ -102,9 +102,12 @@ answers the question, and never dump the raw log as your default.
   Scope it to a slice with the same windowing filters `imp events` accepts —
   `--step`, `--range` (or a positional `<range>`), `--limit`, and `--agent`
   (no `--type`, which fights the folded narrative) — and those filters carry
-  through the `--md`/`--html` exports; `--follow` takes no windowing filters
-  but composes with the content flags `--full` / `--show` / `--hide`. For
-  example, `imp log <id> --step threshold` reads just the seed conversation.
+  through the `--md`/`--html` exports, as do the content flags `--full` /
+  `--show` / `--hide`: an export starts from the same lean view the terminal
+  shows, `--show <cat>` adds a category as a collapsed `<details>` fold, and
+  `--full` expands every fold inline. `--follow` takes no windowing filters
+  but composes with the content flags. For example,
+  `imp log <id> --step threshold` reads just the seed conversation.
 - **Digest** — `imp events <id>`. A bare `imp events <id>` call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`,
   `--limit N`, or `--all`) to get one compact line per event. On a TTY each compact line is

@@ -4299,7 +4299,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Show the narrative for a quest as plain text. --full expands "
             "every fold; --show/--hide toggle individual content categories "
-            "(thinking, tools, subagents, prompts, tiers) over the lean view. "
+            "(thinking, tools, subagents, prompts, tiers) over the lean view, "
+            "in the terminal and in --md/--html exports alike. "
             "Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
