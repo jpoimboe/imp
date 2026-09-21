@@ -32,6 +32,7 @@ from imp.engine.sandbox import (
     sandbox_available,
     with_scratch_slot,
 )
+from tests.overlay_probe import OVERLAY_BASE, requires_overlay
 
 # The module timeout is the SINGLE outer backstop for a genuine hang. It has to
 # exceed the sum of the inner budgets a test can spend, or an inner budget could
@@ -52,32 +53,6 @@ _ALIVE = "while :; do sleep 5; done"
 
 def _make_root() -> Path:
     return Path(tempfile.mkdtemp(prefix="imp-test-ns-"))
-
-
-_OVERLAY_BASE = Path("/var/tmp")
-
-
-def _probe_overlay() -> bool | None:
-    """overlay_mode's tri-state at _OVERLAY_BASE: None → no unprivileged overlay
-    here; True/False → the mount shape this host accepts."""
-    if not sandbox_available() or not _OVERLAY_BASE.is_dir():
-        return None
-    try:
-        probe = Path(tempfile.mkdtemp(prefix="imp-nsovl-probe-", dir=_OVERLAY_BASE))
-        home = Path(tempfile.mkdtemp(prefix="imp-nsovl-home-", dir=_OVERLAY_BASE))
-    except OSError:
-        return None
-    try:
-        return overlay_mode(probe, home)
-    finally:
-        shutil.rmtree(probe, ignore_errors=True)
-        shutil.rmtree(home, ignore_errors=True)
-
-
-requires_overlay = pytest.mark.skipif(
-    _probe_overlay() is None,
-    reason="sandbox unavailable, or the unprivileged overlayfs probe at /var/tmp "
-           "failed (read-only base or stacked overlay under a nested sandbox)")
 
 
 def _policy_for(root: Path, *, network: bool = True, home: Path | None = None,
@@ -368,7 +343,7 @@ def test_a_keeper_opened_from_an_overlay_policy_owns_the_pid_namespace():
     # the pid-namespace assertion proves child-pid named the INNER bwrap's child.
     # Pinning the outer `unshare` instead also "works" — it just has no pid namespace,
     # so every joined command would quietly get the HOST process table. Fails open.
-    root = Path(tempfile.mkdtemp(prefix="imp-test-nsovl-", dir=_OVERLAY_BASE))
+    root = Path(tempfile.mkdtemp(prefix="imp-test-nsovl-", dir=OVERLAY_BASE))
     home = root / "home"
     home.mkdir()
     (home / "lower.txt").write_text("from-the-real-home\n")
@@ -408,7 +383,7 @@ def test_a_joined_command_cannot_unmask_a_secret_dir():
     # shape, and the only one where the bypass exists. The outer_user_fd assertion
     # holds the test to that shape: with two levels the caps are already empty and
     # this would pass vacuously.
-    root = Path(tempfile.mkdtemp(prefix="imp-test-nsmask-", dir=_OVERLAY_BASE))
+    root = Path(tempfile.mkdtemp(prefix="imp-test-nsmask-", dir=OVERLAY_BASE))
     home = root / "home"
     home.mkdir()
     worktree = root / "wt"

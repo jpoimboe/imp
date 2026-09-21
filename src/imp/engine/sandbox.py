@@ -42,6 +42,7 @@ import json
 import os
 import platform
 import random
+import re
 import select
 import shlex
 import shutil
@@ -52,7 +53,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any, overload
 
@@ -1037,7 +1038,45 @@ def _force_rmtree(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
-@lru_cache(maxsize=1)
+_MOUNTINFO_PATH = Path("/proc/self/mountinfo")
+_MOUNTINFO_ESCAPES = {"040": " ", "011": "\t", "012": "\n", "134": "\\"}
+
+
+def _unescape_mountinfo(field: str) -> str:
+    return re.sub(r"\\(040|011|012|134)",
+                  lambda m: _MOUNTINFO_ESCAPES[m.group(1)], field)
+
+
+def home_is_overlay_mount(home: Path) -> bool:
+    """Whether `home` is itself the mount point of an overlay filesystem — true
+    exactly in a nested imp run, where $HOME is the parent sandbox's overlay.
+
+    Splits each _MOUNTINFO_PATH line on the ` - ` separator (optional fields sit
+    before it, so a fixed field count would misread): index 4 of the head is the
+    mount point, the first token of the tail is the filesystem type. Several
+    mounts can share one mount point; the LAST entry is the topmost, and that is
+    the one a lowerdir would resolve to, so it decides the answer. The home side
+    is realpath'd — the kernel already reports canonical paths, so a symlinked
+    $HOME would otherwise never match. Decoded leniently: a non-UTF-8 path
+    elsewhere in the table must not raise here. An absent or unreadable table is
+    False.
+    """
+    try:
+        text = _MOUNTINFO_PATH.read_text(errors="replace")
+    except OSError:
+        return False
+    target = os.path.realpath(home)
+    is_overlay = False
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" - ")
+        fields = head.split()
+        if not sep or len(fields) < 5 or _unescape_mountinfo(fields[4]) != target:
+            continue
+        is_overlay = tail.split()[:1] == ["overlay"]
+    return is_overlay
+
+
+@cache
 def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     """Whether an unprivileged overlay mounts on this host, and in WHICH shape:
     None → none does (the caller falls back to a rw bind of the real home);
@@ -1061,14 +1100,24 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     tmpfs), but the lowerdir is `home` — the SAME shape the keeper's mount in
     build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); the answer is carried to the keeper's
-    mount (via make_home_layer), so probe and spawn always agree.
+    nothing. Memoized unbounded, one entry per (probe_base, home), so a process
+    touching several quest dirs probes once per key instead of evicting; the
+    answer is carried to the keeper's mount (via make_home_layer), so probe and
+    spawn always agree.
 
-    Tests that monkeypatch subprocess.run / shutil.which / platform.system must
-    call overlay_mode.cache_clear() first (the result is process-global cached,
-    keyed on (probe_base, home)).
+    Tests that monkeypatch subprocess.run / shutil.which / platform.system /
+    _MOUNTINFO_PATH must call overlay_mode.cache_clear() first (the result is
+    process-global cached, keyed on (probe_base, home)).
+
+    It also returns None WITHOUT probing at all when `home` is itself an overlay
+    mount point — a nested imp run, where $HOME is the parent sandbox's overlay:
+    the kernel refuses to clone a mount root as a lowerdir, so both shapes fail
+    while spraying overlayfs errors into dmesg, and the caller's rw-bind fallback
+    is already the parent's isolated view.
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
+        return None
+    if home_is_overlay_mount(home):
         return None
     probe = probe_base / ".overlay-probe"
     upper, work, merged = probe / "upper", probe / "work", probe / "merged"
