@@ -41,16 +41,20 @@ imp builds itself: 875 quests merged since May 2026.
   forward, avoiding long sessions where agents get increasingly confused
 - **Bugs rooted out early** — The later a flaw is caught, the more it costs to
   fix, and an agent will faithfully implement a flawed spec, so imp loops
-  on adversarial review over the spec and plan 
+  on adversarial review over the spec and plan
 - **Built-in regression protection** — imp leans heavily on TDD and writes a
-  lot of regression tests; keeping them green is the agents' job, not yours
+  lot of regression tests (imp itself has over 11,000); keeping them green is
+  the agents' job, not yours
 - **Run multiple quests in parallel** — A quest runs in its own git worktree,
   so several can run in parallel, and can be paused or resumed at any time
 
 ## Examples
 
-Two recent real-world examples of imp (running on its own code base), both
-using the [default workflow](#default-workflow).
+With the [default workflow](#default-workflow), a quest typically takes a
+couple of hours (of imp's time, not yours) and ~3% of a weekly Claude Max 20x
+quota.  See [Token costs](#token-costs) below.
+
+Here are some recent real-world examples of imp running on its own code base.
 
 ### Adding a feature
 
@@ -161,6 +165,7 @@ Mid-run screenshot:
 
 Stats:
 - 2h 6m runtime
+- human input: 1 opening prompt, 2 approvals
 - 10 commits, 9 files, +641/-55
 - 26 new tests
 - 2.8% of a weekly Claude Max 20x quota (~0.7% of monthly total)
@@ -256,6 +261,7 @@ Merged haje70 into master.
 
 Stats:
 - 2h 12m runtime
+- human input: 1 opening prompt, 1 approval
 - 4 commits, 9 files, +266/-91
 - 5 new regression tests
 - 3.0% of a weekly Claude Max 20x quota
@@ -287,27 +293,50 @@ d04c527e fix: make an unclassified provider error legible in the event log
 
 Full quest log and quota summary: [`docs/examples/haje70.md`](docs/examples/haje70.md)
 
-### What it costs
+## Token costs
 
-Both runs took 2+ hours.  The [default workflow](#default-workflow) can be
-quite a bit more heavyweight than a typical Claude session.  Most of the time
-and tokens go to design and planning, before any code is written.  That
+Both of the above [examples](#examples) took 2+ hours of clock time.  The
+[default workflow](#default-workflow) can be quite a bit more heavyweight than
+a typical Claude session.  Most of the time and tokens go towards design and
+planning (through multiple rounds of review), before any code is written.  That
 up-front effort makes the code less buggy, more maintainable, and more likely
 to meet the user's expectations, with fewer "surprises".
 
-For that reason, when using the default workflow, **a Claude Max (or ChatGPT
-Pro) subscription is recommended.**  Subscriptions are *much* cheaper per token
-than API billing.  With Anthropic API billing, the `--json` feature above would
-have cost ~$44, and the bug fix (including debugging) would have cost ~$49.
+Quality isn't cheap.  When using the default workflow, **a Claude Max (or
+ChatGPT Pro) subscription is recommended.**  Subscriptions are *much* cheaper
+per token than API billing.  With Anthropic API billing, the `--json` feature
+above would have cost ~$44, and the bug fix (including debugging) would have
+cost ~$49.
+
+The example runs each cost about ~3% of my weekly Claude Max 20x window.  That
+means *roughly* 30 quests per week for a single subscription.
+
+Multiple quests can run in parallel on the same project.  I often start 3-5
+quests at the same time, batching my "human input", and then just let them run
+unattended for a few hours (or overnight).
+
+If you want to use fewer resources for a given project or quest, you can create
+your own workflow YAML file.  IMO, the overhead of the default workflow is well
+worth the cost if you want a maintainable project with decent code.
 
 Local models are not (yet) supported.  Pull requests welcome :-)
 
-If you want to use fewer resources for a given project or quest, feel free to
-create your own workflow YAML file.  I think the default is worth the tokens if
-you want a maintainable project with decent code.
+## Guardrails
 
-Note that multiple quests can be run in parallel for a given project.  I often
-have a pipeline of 3-5 quests going at the same time.
+- **Stuck/runaway agent detection** — imp pauses the run when it detects
+  excessive token usage, review loops, or agent-reported errors
+- **Flaky test handling** — Any test failures unrelated to the quest are noted
+  and reported to you at the merge gate, where they can be deferred to a
+  backlog quest or ignored
+- **Transparency** — All agent chat logs (including thinking) are logged to
+  disk and can be audited
+- **Notifications** — imp can ping you on [Telegram](docs/guide/remote-control.md)
+  if your attention is needed, where you can reply directly
+- **Auto merge** — If there are no open issues for you to decide on, it
+  auto-merges to your integration branch (this default is configurable)
+- **Local git only** — imp doesn't push to or fetch from any git remotes; you
+  are free to push the quest-specific branch, or create your own PR on GitHub
+  (GitHub integration is planned)
 
 ## Try it
 
@@ -318,47 +347,89 @@ For automatic sandboxing (currently Linux-only), it also needs
 (`nsenter`, `unshare`).
 
 Login to your `claude` CLI (or `codex`) and ensure they're in your path.  Or to
-use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.  Imp has a
+use provider APIs, export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.  imp has a
 pluggable provider backend but local models are not yet supported.
+
+### Install
+
+```bash
+uv tool install git+https://github.com/jpoimboe/imp
+```
+
+Or install from a local clone:
+
+```bash
+git clone https://github.com/jpoimboe/imp && cd imp
+uv tool install .
+```
 
 ### New project (greenfield)
 
 ```bash
-uv tool install git+https://github.com/jpoimboe/imp
-
 mkdir /path/to/my-new-app
 cd /path/to/my-new-app
+
+# imp init does the following:
+#  - create imp/config.yaml and imp/memory scaffolds
+#  - add .imp/ to .gitignore
+#  - git init (if needed) && git commit
+#  - bootstrap ~/.imp/config.yaml (providers, theme)
 imp init
+
+# create the initial quest and start the interview
+# (quest state is persisted in ~/.imp/projects/my-new-app)
 imp new "build a local-first task tracker with a web UI"
 ```
 
-After initializing the repository with `imp init`, `imp new` starts the
-interview.  It asks questions, proposes options, pushes on tradeoffs, and
-spikes throwaway code when the answer needs an experiment rather than an
-opinion.
+After creating and initializing the repository with `imp init`, `imp new`
+starts the interview.  It asks questions, proposes options, pushes on
+tradeoffs, searches the web, and does experiments as needed.
 
-When the design is settled, it creates a git worktree and runs off on its own.
-You can pause it at any time with Ctrl-D for resuming later with `imp resume`,
-or interrupt the agent at any time with Ctrl-C to ask a question or send it in
-a different direction.
-
-After the first quest, once the master branch has code, multiple quests can be
-run on the project in parallel, in different terminal tabs.
-
-Instead of `imp new`, you can use `imp chat` to ask imp questions about itself,
-the code base, bugs or new features.
+When the design is settled, it creates a git worktree and starts the autonomous
+run.  You can pause it at any time with Ctrl-D for resuming later with `imp
+resume`, or interrupt at any time with Ctrl-C to send an agent in a different
+direction.
 
 ### Existing project (brownfield)
 
 Brownfield projects are also supported.  Just run `imp init` and `imp new` from
-an existing git checkout.  By default, imp stores its per-project state in
-`~/.imp/projects/<project>`.
+an existing git checkout.
 
 ```bash
 cd /path/to/my-existing-app
+
+# imp init does the following:
+#  - create imp/config.yaml and imp/memory scaffolds
+#  - add .imp/ to .gitignore
+#  - git init (if needed) && git commit
+#  - bootstrap ~/.imp/config.yaml (providers, theme)
 imp init
+
+# create the initial quest and start the interview
+# (quest state is persisted in ~/.imp/projects/my-existing-app)
 imp new "add rate limiting to the public API"
 ```
+
+### Disabling auto-merge
+
+To approve every merge by hand, put the following in `imp/config.yaml`:
+
+```yaml
+vars:
+  auto_merge: false
+```
+
+imp will then stop and ask before merging.  You can then approve, send it back
+for rework, open related backlog quests for followups, or pause it
+indefinitely.  Pass `--var auto_merge=false` to `imp new` to do so for a single
+quest.
+
+### Chat
+
+If you want to ask imp questions about your code base, about a quest, or about
+imp itself, you can run `imp chat` rather than `imp new`.  If the conversation
+leads to the need for a code change, it can convert itself to a proper quest or
+open a backlog quest.
 
 ## Quests
 
@@ -459,67 +530,16 @@ flowchart LR
   integrate -. rework .-> plan
 ```
 
-## Engine features
+## Isolation and sandboxing
 
-The imp engine is workflow-agnostic.  It has features that keep quests
-isolated, resumable, and inspectable:
+Each live quest runs in a separate git worktree, which enables parallel runs,
+but is not a proper isolation boundary.
 
-- **Isolate each quest.** Once live, every quest gets its own git worktree and
-  sandboxed agent tools, so several can run at once without breaking your
-  system or touching your checkout, index, or stash.
-- **Pause, resume, or redirect.** Pause a quest at any time with Ctrl-D, or
-  interrupt a running agent with Ctrl-C to ask a question or send it in a
-  different direction.  The append-only event log lets the run resume without
-  throwing away the in-flight step or pretending it never happened.
-- **Get notified and steer from Telegram.** imp can alert your phone when a quest
-  needs input, pauses, fails, or finishes.  You can also directly interact with
-  quests and create new ones from Telegram.
-  See [remote-control setup](docs/guide/remote-control.md).
-- **Keep the whole history searchable.** Conversations, artifacts, and tool
-  events remain searchable after a quest finishes, and every line of code can
-  be traced back to the conversation that produced it.
-- **Inspect everything from the CLI.** See active, draft, backlog, and archived
-  quests, then drill into any quest's current state, decisions, summary, readable
-  log, or event stream.
-- **Intra- and Inter-quest interaction.** Agents can inspect earlier steps and
-  search or read other live and archived sibling quests.  With your approval,
-  they can set dependencies or open new quests for work they discover.
-- **Non-committal chat.** Use `imp chat` to ask questions about imp or your
-  codebase, explore an idea, or scout existing work.  It remains just a
-  conversation -- with no branch or worktree -- unless you decide to build,
-  when it continues into the normal workflow.
-- **Keep a real backlog.** Park ideas for later, or let agents file followup
-  work they discover while building something else.
-- **LLM provider agnostic.** imp supplies its own system prompt and agent
-  tools, designed to work the same for all LLM providers.
-- **Per-role LLM vendors/models.** A project or quest can use different model
-  tiers or vendors for planning, coding, and review.
-- **Carry project memory forward.** Standing, human-approved instructions in
-  `imp/memory/` carry architectural decisions, local conventions, and
-  cross-quest preferences into future quests.  See
-  [project memory](docs/guide/memory.md).
-- **Custom workflows.** Workflows, gates, model tiers, scripts, and agent
-  prompts are ordinary files in your repo.  Customize the default workflow or
-  replace it entirely.
-- **Embed it in your own application.** A supported Python API can create quests,
-  stream events, and answer the questions a workflow asks.  See the
-  [embedding guide](docs/guide/embedding.md).
-- **Cost monitoring.** See per-quest accounting of subscription quota and API
-  token usage for both live and archived quests.
-- **Not just for code.** The engine can drive other structured processes, not
-  just software development.
-
-## Isolation and security boundaries
-
-Each live quest uses a separate git worktree.  Nothing touches your checkout,
-index, or stash, and several quests can run at once.
-
-A worktree is not a security boundary because worktrees share one `.git`.  imp
-therefore runs agent shell commands under bubblewrap, in separate user, IPC, and
-UTS namespaces.  The filesystem is read-only outside an explicit writable set;
-credentials are replaced with empty mounts; and shared Git escape paths such as
-hooks, config, the index, and refs outside the quest's namespace are remounted
-read-only.
+To achieve that, imp runs agent shell commands under bubblewrap, in separate
+user, IPC, and UTS namespaces.  The filesystem is read-only outside an explicit
+writable set; credentials are replaced with empty mounts; and shared Git escape
+paths such as hooks, config, the index, and refs outside the quest's namespace
+are remounted read-only.
 
 Network access is allowed by default; set `sandbox.network: false` to disable it.
 File-editing tools enforce the same path policy in-process, so the kernel-level
