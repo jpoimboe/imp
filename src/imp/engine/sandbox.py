@@ -1106,8 +1106,16 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
     call overlay_mode.cache_clear() first (the result is process-global cached,
     keyed on (probe_base, home)).
+
+    It also returns None WITHOUT probing at all when `home` is itself an overlay
+    mount point — a nested imp run, where $HOME is the parent sandbox's overlay:
+    the kernel refuses to clone a mount root as a lowerdir, so both shapes fail
+    while spraying overlayfs errors into dmesg, and the caller's rw-bind fallback
+    is already the parent's isolated view.
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
+        return None
+    if home_is_overlay_mount(home):
         return None
     probe = probe_base / ".overlay-probe"
     upper, work, merged = probe / "upper", probe / "work", probe / "merged"

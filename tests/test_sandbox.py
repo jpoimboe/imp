@@ -902,6 +902,46 @@ def test_home_is_overlay_mount_false_when_mountinfo_absent(tmp_path, monkeypatch
     assert sb.home_is_overlay_mount(tmp_path.resolve() / "home") is False
 
 
+def test_overlay_mode_none_without_probing_when_home_is_overlay_mount(tmp_path, monkeypatch):
+    # AC 2a: an overlay home cannot be a lowerdir, so don't attempt the mount at
+    # all — no subprocess, no kernel noise, no scratch dir.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line(str(home), "overlay", mid=31)))
+
+    def boom(*a, **k):
+        raise AssertionError("probe ran with an overlay mount point as lowerdir")
+
+    monkeypatch.setattr(sb.subprocess, "run", boom)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, home) is None
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_mode_still_probes_when_home_is_a_plain_directory(tmp_path, monkeypatch):
+    # The skip is narrow: a home with no mount of its own probes exactly as before.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    home = tmp_path.resolve() / "home"
+    monkeypatch.setattr(sb, "_MOUNTINFO_PATH", _mountinfo(
+        tmp_path, _mi_line("/", "btrfs", mid=30)))
+    calls: list = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, home) is True
+    assert len(calls) == 1
+    assert f"lowerdir={home}" in calls[0][-1]
+
+
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
