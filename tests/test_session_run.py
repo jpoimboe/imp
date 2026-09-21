@@ -143,6 +143,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
         def show_stop_ack(self, _text: str) -> None: ...
+        def clear_stop_ack(self) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "imp"
@@ -308,6 +309,38 @@ async def test_make_headless_solicit_with_no_message_signals_detach_immediately(
         tg.start_soon(_first_gate)
         await wait_until(lambda: coord.escalation_event.is_set())
         assert "r" not in reply
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_make_headless_solicit_is_spent_by_an_interrupt_gate_without_delivering() -> None:
+    coord = InterruptCoordinator()
+    coord.escalation_event = anyio.Event()  # run_terminal_client sets this before any gate
+    solicit = make_headless_solicit("ship it", coord)
+
+    # An interrupt gate is not the question `--message` answers: the message is
+    # discarded, the solicit signals a clean detach and blocks (no stray reply).
+    reply: dict[str, str] = {}
+
+    async def _interrupt_gate() -> None:
+        reply["first"] = await solicit("steer?", True)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_interrupt_gate)
+        await wait_until(lambda: coord.escalation_event.is_set())
+        assert "first" not in reply
+        tg.cancel_scope.cancel()
+
+    # The latch is spent: a later bare gate does not get the message either.
+    coord.escalation_event = anyio.Event()
+
+    async def _later_bare_gate() -> None:
+        reply["second"] = await solicit("bare gate")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_later_bare_gate)
+        await wait_until(lambda: coord.escalation_event.is_set())
+        assert "second" not in reply
         tg.cancel_scope.cancel()
 
 

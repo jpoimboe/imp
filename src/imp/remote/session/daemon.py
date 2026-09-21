@@ -29,6 +29,7 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
+from imp.engine.resume_gate import unanswered_bare_gate
 from imp.engine.state import (
     EventLog,
     JsonlEventLog,
@@ -188,9 +189,13 @@ async def serve_quest_session(
             # Crash recovery keys on the lock, not the status field. `crashed` is
             # snapshotted BEFORE acquire() (see below): a stale lock means the
             # prior run died mid-step, so replay the interrupted step instead of
-            # re-burning it. A clean pause (no lock) leaves resume_pending unset.
+            # re-burning it. A crash mid-work continues that step; a crash parked
+            # at an unanswered question re-solicits instead — only on the first
+            # resume, since a second one's replayed step_started answers the gate.
+            # A clean pause (no lock) leaves resume_pending unset.
             if crashed:
-                state.arm_step_resume(should_continue=True)
+                state.arm_step_resume(
+                    should_continue=unanswered_bare_gate(quest) is None)
             state.save(quest.state_dir)
             coordinator.set_unsandboxed(state.unsandboxed)
             # A crash replays the interrupted agent step, so it always lands in

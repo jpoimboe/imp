@@ -191,6 +191,28 @@ async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> Non
     assert seen_flags == [False, True]         # the interrupt flag reaches inner
 
 
+@pytest.mark.anyio
+async def test_make_buffered_solicit_is_spent_by_an_interrupt_gate_without_delivering() -> None:
+    # The buffered line was typed in answer to a bare turn-end question. An
+    # interrupt gate is a different question, so the line is discarded and the real
+    # prompt opens — and the latch is spent, so it cannot ambush a later gate either.
+    calls: list[tuple[str, bool]] = []
+
+    async def inner(prompt: str, interrupt: bool = False) -> str:
+        calls.append((prompt, interrupt))
+        return "from-tty"
+
+    solicit = make_buffered_solicit("typed line", inner)
+
+    first = await solicit("steer?", True)
+    assert first == "from-tty"                  # delegated, NOT the buffered line
+    assert calls == [("steer?", True)]          # and the flag reached inner
+
+    second = await solicit("bare gate")
+    assert second == "from-tty"                 # the latch is spent, not merely deferred
+    assert calls == [("steer?", True), ("bare gate", False)]
+
+
 def test_render_inert_question_prefixes_turn_bullet() -> None:
     # The preview must lead with the bold "• " turn bullet on its first non-blank
     # line, matching every other agent-turn rendering.

@@ -1216,3 +1216,24 @@ def test_unresolved_tool_result_content_keeps_bash_parseable_with_null_returncod
             "stderr": unresolved_tool_result_content("write_file"),
             "returncode": None,
         }
+
+
+def test_append_fsyncs_the_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resume gate-detector reads the transcript, so its trailing turn must
+    survive a machine crash — the same durability the event log already holds."""
+    import imp.agents.transcript as transcript_mod
+
+    path = tmp_path / "transcript.jsonl"
+    synced: list[Path] = []
+    real_fsync = transcript_mod.os.fsync
+
+    def fsync(fd: int) -> None:
+        synced.append(Path(f"/proc/self/fd/{fd}").resolve())
+        real_fsync(fd)
+
+    monkeypatch.setattr(transcript_mod.os, "fsync", fsync)
+    Transcript(path).append(Message(role="user", content=(TextBlock(text="hi"),)))
+
+    assert synced == [path.resolve()]

@@ -191,14 +191,18 @@ async def run_session_client(
 def make_headless_solicit(
     message: str | None, coord: InterruptCoordinator,
 ) -> Callable[[str, bool], Awaitable[str]]:
-    """Headless solicit: deliver `message` once, then signal a clean detach and block."""
-    delivered = False
+    """Headless solicit: deliver `message` at the first gate when that gate is a bare
+    turn-end yield, then signal a clean detach and block. The latch is spent at the first
+    gate whatever it is, so an interrupt gate discards the message — a line meant for one
+    question can never answer another — and falls through to the detach."""
+    spent = False
 
-    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        nonlocal delivered
-        if message is not None and not delivered:
-            delivered = True
-            return message
+    async def _solicit(_prompt: str, interrupt: bool = False) -> str:
+        nonlocal spent
+        if message is not None and not spent:
+            spent = True
+            if not interrupt:
+                return message
         # Trip the escalation event so run_terminal_client tears the client down
         # (run survives, the daemon hibernates at the gate); then block — never
         # returning so no stray reply is sent as an input frame.
