@@ -3765,3 +3765,59 @@ def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> N
     assert seen is not None
     assert seen == WitnessedPause(info=_PauseInfo(base="ctrl-d", cause=None))
     assert seen.info == _pause_reason(events)
+
+
+def test_run_witness_keeps_the_terminal_event_it_saw() -> None:
+    from imp.cli.session_terminal import RunWitness, TerminalOutcome
+    witness = RunWitness()
+    witness.note({"type": "quest_merged",
+                  "payload": {"base": "master", "commit": "20d0d699"}})
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "master", "commit": "20d0d699"})
+
+
+def test_run_witness_reports_no_terminal_outcome_before_one_is_witnessed() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "step_completed", "payload": {"step": "plan"}})
+    assert witness.terminal() is None
+
+
+def test_run_witness_resume_clears_a_previous_segments_pause() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "overloaded"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "api"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    assert witness.paused() is None
+
+
+def test_run_witness_resume_clears_a_previous_segments_merge_blocked() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked",
+                  "payload": {"reason": "conflict", "base": "main"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    assert witness.terminal() is None
+
+
+def test_run_witness_after_a_resume_reports_the_fresh_pause_only() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked", "payload": {"reason": "conflict"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "max_loops"}})
+    assert witness.terminal() is None
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="max_loops", cause=None))
+
+
+def test_run_witness_after_a_resume_reports_a_fresh_merge() -> None:
+    from imp.cli.session_terminal import RunWitness, TerminalOutcome
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked", "payload": {"reason": "conflict"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    witness.note({"type": "quest_merged", "payload": {"base": "main", "commit": "abc"}})
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "main", "commit": "abc"})

@@ -49,6 +49,21 @@ if TYPE_CHECKING:
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
 
 
+# The three segment-terminal events: _complete emits one of the first two and reaps
+# the home; _merge_blocked_pause emits the third and leaves it.
+_TERMINAL_EVENT_TYPES: frozenset[str] = frozenset(
+    {"quest_merged", "workflow_completed", "merge_blocked"})
+
+
+@dataclass(frozen=True)
+class TerminalOutcome:
+    """The one segment-terminal event witnessed, with the payload its block renders
+    from — `base` for a merge, `reason` / `detail` / `note` for a blocked one."""
+
+    type: str
+    payload: dict[str, Any]
+
+
 @dataclass(frozen=True)
 class WitnessedPause:
     """A workflow_paused seen this segment. `info` is None when its reason folds to
@@ -68,6 +83,7 @@ class RunWitness:
         self._paused: dict[str, Any] | None = None
         self._paused_error: dict[str, Any] | None = None
         self._pending_error: dict[str, Any] | None = None
+        self._terminal: TerminalOutcome | None = None
 
     def note(self, event: dict[str, Any]) -> None:
         etype = event.get("type")
@@ -78,10 +94,18 @@ class RunWitness:
             self._paused = payload
             self._paused_error = self._pending_error
             self._pending_error = None
+        elif etype == "workflow_resumed":
+            # The replayed log is cumulative: a previous segment's ending is not this
+            # run's, and a stale merge_blocked would outrank a fresh pause.
+            self._paused = None
+            self._paused_error = None
+            self._terminal = None
         elif etype == "step_started":
             self._pending_error = None
         elif etype == "error":
             self._pending_error = payload
+        elif etype in _TERMINAL_EVENT_TYPES:
+            self._terminal = TerminalOutcome(type=str(etype), payload=payload)
 
     def _note_user_message(self, payload: dict[str, Any]) -> None:
         text = _user_message_text(payload).strip()
@@ -102,6 +126,11 @@ class RunWitness:
         if self._paused is None:
             return None
         return WitnessedPause(info=self._folded_reason())
+
+    def terminal(self) -> TerminalOutcome | None:
+        """The segment-terminal event witnessed, if any. One slot, so witnessing two
+        endings is unrepresentable."""
+        return self._terminal
 
     def _folded_reason(self) -> _PauseInfo | None:
         from imp.cli.main import _PauseInfo
