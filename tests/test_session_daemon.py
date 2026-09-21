@@ -583,9 +583,10 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
 
 @pytest.mark.anyio
 async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path) -> None:
-    """A hard-killed run leaves a lock file naming a now-dead pid (the OS frees
-    the flock but not the pid file). The pre-acquire snapshot reads that as a
-    crash and sets resume_pending to the current step so the executor replays it."""
+    """A hard-killed run that died MID-WORK — no unanswered question in the log —
+    leaves a lock file naming a now-dead pid (the OS frees the flock but not the
+    pid file). The pre-acquire snapshot reads that as a crash and sets
+    resume_pending to the current step so the executor replays and continues it."""
     import subprocess
 
     from imp.engine.state import State
@@ -620,7 +621,54 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
 
     assert result is RunResult.COMPLETED
     assert seen["resume_pending"] == "review"
-    assert seen["resume_should_continue"] is True   # crash recovery continues the step
+    assert seen["resume_should_continue"] is True   # a crash mid-work continues
+
+
+@pytest.mark.anyio
+async def test_resume_re_solicits_when_the_crash_landed_at_an_unanswered_gate(
+        tmp_path: Path) -> None:
+    """A crash while parked at a bare-turn-end question must replay the step and
+    re-solicit the human, not tell the agent to carry on: the disposition is
+    armed should_continue=False so _resolve_wait_reply reaches its gate arm."""
+    import subprocess
+
+    from imp.engine.state import State
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    quest.event_log().append(
+        agent_id="step:p/s", type="awaiting_user_input",
+        payload={"steer_hint": "", "interrupt": False,
+                 "last_agent_message": "Does part two look right?"})
+    st = State.load(quest.state_dir)
+    st.step = "review"
+    st.status = "paused"
+    st.resume_pending = None
+    st.save(quest.state_dir)
+    p = subprocess.Popen(["true"])           # dead pid ⇒ stale lock ⇒ crash
+    p.wait()
+    (quest.quest_dir / "lock").write_text(str(p.pid))
+
+    seen: dict[str, object] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        st = State.load(quest.state_dir)
+        seen["resume_pending"] = st.resume_pending
+        seen["resume_should_continue"] = st.resume_should_continue
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        result = await serve_quest_session(
+            quest, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["resume_pending"] == "review"   # the step still replays
+    assert seen["resume_should_continue"] is False
 
 
 @pytest.mark.anyio
