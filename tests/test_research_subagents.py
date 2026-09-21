@@ -94,6 +94,19 @@ def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     assert "researcher" in text
 
 
+def test_delegate_verification_partial_exists_and_carries_the_rule() -> None:
+    from pathlib import Path
+    text = Path("src/imp/assets/partials/delegate-verification.md").read_text()
+    # The reviewer-shaped rule: retrieval fans out, the verdict stays with the reader.
+    assert "Delegate retrieval, never judgment" in text
+    assert 'sub_agent(subagent_name="explorer"' in text
+    assert "a subagent's opinion is not a finding" in text
+    # Reviewers get explorer only: no web-facing researcher, and no evidence they
+    # would then be judging themselves.
+    assert "researcher" not in text
+    assert "spiker" not in text
+
+
 def test_delegate_exploration_partial_names_no_spiker() -> None:
     from pathlib import Path
     shared = Path("src/imp/assets/partials/delegate-exploration.md").read_text()
