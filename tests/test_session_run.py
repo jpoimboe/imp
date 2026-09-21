@@ -778,7 +778,9 @@ async def test_run_session_client_threads_provided_leave_state(
 
     seen: dict[str, object] = {}
 
-    def _fake_disposition(quest: object, leave_state: object) -> None:
+    def _fake_disposition(
+        quest: object, leave_state: object, *, intent: str | None = None,
+    ) -> None:
         seen["leave_state"] = leave_state
         return None
 
@@ -1314,16 +1316,21 @@ _cut = _ending_with(StreamEnding.CUT)
 _ended = _ending_with(StreamEnding.ENDED)
 
 
-def _leaving(reason: str | None = None, **marks: str) -> Any:
+def _leaving(reason: str | None = None, *,
+             witnessed: tuple[dict[str, Any], ...] = (), **marks: str) -> Any:
     """A CUT ending from a deliberate leave: bind and set the escalation event the way
-    session_terminal.py does, then record the marks the gesture itself would leave."""
+    session_terminal.py does, record the marks the gesture itself would leave, and fold
+    whatever the client saw before it departed."""
     async def _stub(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
         coord = kwargs["coord"]
         coord.escalation_event = anyio.Event()
         coord.escalation_event.set()
         coord.leave_reason = reason
         kwargs["leave_state"].update(marks)
-        return StreamEnding.CUT, RunWitness()
+        witness = RunWitness()
+        for event in witnessed:
+            witness.note(event)
+        return StreamEnding.CUT, witness
     return _stub
 
 
@@ -1777,3 +1784,336 @@ async def test_abandon_renders_abandoned_with_the_escalation_event_unset(
     assert coord.escalation_event is None
     assert rc == 0
     assert out == f"{quest.id} · T · abandoned\n\n"      # no resume line for an abandon
+
+
+@pytest.mark.anyio
+async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The gidi44 shape: the merge is witnessed, then the home is reaped and the
+    # archive cannot answer. Disk has nothing to offer and must not be consulted.
+    quest = _make_quest(tmp_path, "2026-09-20-witnessed-merge")
+    quest.title = ""
+    assert not quest.state_dir.exists()
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "user_message",
+             "payload": {"subtype": "intent",
+                         "content": [{"type": "text", "text": "fold the corrections"}]}},
+            {"type": "quest_merged",
+             "payload": {"base": "master", "commit": "20d0d699"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    # The witnessed payload names the base (the quest's own attribute is `main`),
+    # and the identity line carries the witnessed opening prompt.
+    assert out == (
+        "merged into master\n"
+        f"{quest.id} · > fold the corrections\n"
+        "\n")
+    assert "paused" not in out
+    assert "resume: imp resume" not in out
+
+
+@pytest.mark.anyio
+async def test_witnessed_completion_renders_done_with_no_quest_home_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-witnessed-done")
+    assert not quest.state_dir.exists()
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED, {"type": "workflow_completed", "payload": {}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (
+        f"done · commits on imp/{quest.id}\n"
+        f"{quest.id} · T\n"
+        "\n")
+
+
+@pytest.mark.anyio
+async def test_witnessed_merge_blocked_renders_the_payloads_reason_and_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-witnessed-blocked")
+    assert not quest.state_dir.exists()
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "merge_blocked",
+             "payload": {"reason": "conflict", "base": "main",
+                         "detail": "CONFLICT in a.py",
+                         "note": "imp attempted 3 recovery passes."}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 1
+    assert lines[0] == f"merge blocked: imp/{quest.id} doesn't auto-merge into main"
+    assert "imp attempted 3 recovery passes." in out      # the witnessed note
+    assert "git said: CONFLICT in a.py" in out            # the witnessed detail
+    assert not any(ln.startswith("resume: imp resume") for ln in lines)
+
+
+@pytest.mark.anyio
+async def test_witnessed_awaiting_user_pause_renders_the_bare_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # A your-turn park: its reason folds to nothing, so only a row keyed on the
+    # witnessing itself can render it. The log on disk holds a louder fossil, to
+    # prove the block comes from the witness and not from that read.
+    quest = _make_quest(tmp_path, "2026-09-20-awaiting")
+    quest.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "max_loops"})
+    assert not quest.state_dir.exists()
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED,
+                     {"type": "workflow_paused", "payload": {"reason": "awaiting_user"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "paused\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+    assert "loop limit" not in out               # the disk fossil never surfaced
+
+
+@pytest.mark.anyio
+async def test_witnessed_loop_limit_pause_renders_the_qualified_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-loop-limit")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(StreamEnding.ENDED,
+                     {"type": "workflow_paused", "payload": {"reason": "max_loops"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "paused · loop limit\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+
+
+@pytest.mark.anyio
+async def test_witnessed_error_pause_renders_the_error_reason_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-api-error")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "error", "payload": {
+                "detail": {"last_agent_text": "overloaded_error\nretry later"}}},
+            {"type": "workflow_paused", "payload": {"reason": "api"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "API error: overloaded_error\n"
+        "retry later\n"
+        f"{quest.id} · T\n"
+        "\n")
+    assert "resume: imp resume" not in out       # the error block carries none
+
+
+@pytest.mark.anyio
+async def test_a_witnessed_outcome_preempts_a_keystroke_leave_and_prints_no_caret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The arm that produced gidi44: a leave mark used to divert a merged run into
+    # the disk read. The witnessed merge outranks it, and prints no caret.
+    quest = _paused_quest(tmp_path, "2026-09-20-leave-after-merge")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving("ctrl-d", witnessed=(
+            {"type": "quest_merged",
+             "payload": {"base": "main", "commit": "abc123"}},)))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (
+        "merged into main\n"
+        f"{quest.id} · T\n"
+        "\n")
+    assert "> Ctrl-D" not in out
+    assert "paused" not in out
+
+
+@pytest.mark.anyio
+async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The daemon writes its own pause after this client departs, so the client's
+    # trigger is the fresher truth: the leave row must sit above the pause row.
+    quest = _paused_quest(tmp_path, "2026-09-20-leave-over-pause")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving("ctrl-d", witnessed=(
+            {"type": "workflow_paused", "payload": {"reason": "max_loops"}},)))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "> Ctrl-D\n"
+        "paused · Ctrl-D\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+    assert "loop limit" not in out
+
+
+@pytest.mark.anyio
+async def test_headless_detach_on_a_resumed_quest_renders_the_bare_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The headless gate detach on a resumed quest. Its log ends on workflow_resumed
+    # with no later pause — the shape today's STALE limb turns into an `interrupt`
+    # head. The witness saw the same two events and forgot the pause on the resume.
+    quest = _paused_quest(tmp_path, "2026-09-20-detach-resumed")
+    quest.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "api"})
+    quest.event_log().append(agent_id=None, type="workflow_resumed", payload={})
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving(None, witnessed=(
+            {"type": "workflow_paused", "_replay": True, "payload": {"reason": "api"}},
+            {"type": "workflow_resumed", "_replay": True, "payload": {}})))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new",
+        non_interactive=True, stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out == (
+        "paused\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+    assert "interrupt" not in out        # the inferred STALE head is retired
+    assert "API error" not in out
+
+
+@pytest.mark.anyio
+async def test_a_resumed_merge_blocked_never_outranks_this_segments_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-replay-blocked")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "merge_blocked", "_replay": True,
+             "payload": {"reason": "conflict", "base": "main"}},
+            {"type": "workflow_resumed", "_replay": True, "payload": {}},
+            {"type": "workflow_paused", "payload": {"reason": "max_loops"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out.split("\n")[0] == "paused · loop limit"
+    assert "merge blocked" not in out
+
+
+@pytest.mark.anyio
+async def test_a_resumed_merge_blocked_then_a_merge_renders_merged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-20-replay-then-merge")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ending_with(
+            StreamEnding.ENDED,
+            {"type": "merge_blocked", "_replay": True,
+             "payload": {"reason": "conflict", "base": "main"}},
+            {"type": "workflow_resumed", "_replay": True, "payload": {}},
+            {"type": "quest_merged", "payload": {"base": "main", "commit": "abc123"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.split("\n")[0] == "merged into main"
+    assert "merge blocked" not in out

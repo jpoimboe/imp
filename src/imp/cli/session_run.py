@@ -12,7 +12,7 @@ import anyio
 
 from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
-from imp.cli.session_terminal import run_terminal_client
+from imp.cli.session_terminal import RunWitness, run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
@@ -96,6 +96,72 @@ def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
     return SettledOutcome(status=state.status, events=list(quest.event_log().read()))
 
 
+def _closing_block(
+    quest: Quest, *, witness: RunWitness, ending: StreamEnding,
+    coord: InterruptCoordinator, leave_state: dict[str, str],
+) -> int:
+    """Select the closing block from what this client witnessed, in row order. Only the
+    last row consults disk — there the stream broke before anything could be witnessed,
+    and it can only upgrade a lost connection to a completed run, never invent a pause."""
+    from imp.cli.main import (
+        _emit_completed,
+        _emit_leave_pause,
+        _emit_lost_connection,
+        _emit_merge_blocked,
+        _emit_paused_summary,
+        _leave_trigger,
+        _print_leave_disposition,
+        _recorded_commits,
+        _session_exit_code,
+    )
+    from imp.cli.store import _resolve_intent
+    intent = witness.intent()
+    disposition_rc = _print_leave_disposition(quest, leave_state, intent=intent)
+    if disposition_rc is not None:
+        return disposition_rc
+    terminal = witness.terminal()
+    if terminal is not None:
+        if terminal.type == "quest_merged":
+            _emit_completed(quest, merged_base=terminal.payload["base"], intent=intent,
+                            commits=terminal.payload.get("commits", []))
+            return 0
+        if terminal.type == "workflow_completed":
+            _emit_completed(quest, merged_base=None, intent=intent,
+                            commits=terminal.payload.get("commits", []))
+            return 0
+        _emit_merge_blocked(
+            quest, terminal.payload.get("reason"), terminal.payload.get("detail"),
+            terminal.payload.get("note"), intent=intent)
+        return 1
+    trigger = _leave_trigger(coord)
+    if trigger is not None:
+        # The daemon writes its workflow_paused after this client departs, so on a
+        # deliberate leave the client's own trigger is the fresher truth.
+        _emit_leave_pause(quest, trigger, intent=intent)
+        return 1
+    paused = witness.paused()
+    if paused is not None:
+        _emit_paused_summary(quest, info=paused.info, intent=intent)
+        return 1
+    if coord.escalation_event is not None and coord.escalation_event.is_set():
+        _emit_paused_summary(quest, info=None, intent=intent)
+        return 1
+    if ending is StreamEnding.ENDED:
+        return _session_exit_code(quest, coord)
+    outcome = resolve_settled_outcome(quest)
+    settled_intent = _resolve_intent(outcome.events)
+    if outcome.completed:
+        merged = outcome.status == "merged"
+        _emit_completed(
+            quest,
+            merged_base=quest.base_branch if merged else None,
+            intent=settled_intent,
+            commits=_recorded_commits(outcome.events, merged=merged))
+        return 0
+    _emit_lost_connection(quest, intent=settled_intent or intent)
+    return 4
+
+
 async def run_session_client(
     quest: Quest,
     *,
@@ -126,6 +192,7 @@ async def run_session_client(
     startup_failed = False
     startup_error: DaemonStartupError | None = None
     ending = StreamEnding.CUT
+    witness = RunWitness()
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
@@ -141,7 +208,7 @@ async def run_session_client(
             tg.start_soon(status.tick)
         driver.install_startup_status()
         try:
-            ending, _witness = await run_terminal_client(
+            ending, witness = await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
@@ -164,28 +231,11 @@ async def run_session_client(
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
         return 3
-    # A deliberate leave is decided first and from client-side marks only: the daemon
-    # applies the disposition after this client departs, so disk cannot answer it.
-    # /abandon sets only leave_state["intent"]; a bare interrupt-pause and the
-    # headless detach set only the escalation event.
-    deliberate_leave = bool(
-        (coord.escalation_event is not None and coord.escalation_event.is_set())
-        or leave_state.get("intent"))
-    if not deliberate_leave and ending is StreamEnding.CUT:
-        from imp.cli.main import _emit_lost_connection, _handle_terminal_outcome
-        outcome = resolve_settled_outcome(quest)
-        if outcome.completed:
-            return _handle_terminal_outcome(quest, outcome, coord)
-        _emit_lost_connection(quest)
-        return 4
-    from imp.cli.main import (
-        _print_leave_disposition,
-        _session_exit_code,
-    )
-    disposition_rc = _print_leave_disposition(quest, leave_state)
-    if disposition_rc is not None:
-        return disposition_rc
-    return _session_exit_code(quest, coord)
+    rc = _closing_block(
+        quest, witness=witness, ending=ending, coord=coord, leave_state=leave_state)
+    # The single statement of the interrupt rule: every non-zero, non-completed row
+    # becomes 130. The last row returns its own 0 / 4 and is exempt by construction.
+    return 130 if rc == 1 and coord.interrupted else rc
 
 
 def make_headless_solicit(
