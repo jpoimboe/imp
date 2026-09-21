@@ -22,6 +22,7 @@ SEND_TO_LLM resume path has a balanced transcript.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +144,8 @@ class Transcript:
     def append(self, msg: Message) -> None:
         with self._path.open("a") as f:
             f.write(message_to_json(msg) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
     def rewrite(self, messages: list[Message]) -> None:
         """Overwrite the transcript with `messages` — repairs an existing turn in place."""
