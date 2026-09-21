@@ -493,14 +493,26 @@ def _pause_facts(
     return name, quest.title, quest.id, info, opening
 
 
-def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
-    """The trailing run-status line on a non-interactive pause."""
+def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
+                         intent: str | None = None) -> None:
+    """The trailing run-status line on a non-interactive pause; `info` None renders the
+    bare `paused` block."""
     color = should_use_color(sys.stdout)
-    name, title, token, info, opening = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, token, info=info, title=title, color=color,
-                           intent=opening):
+    for ln in _pause_lines(quest.id, quest.id, info=info, title=quest.title,
+                           color=color, intent=intent):
         print(ln)
     print()
+
+
+def _emit_leave_pause(quest: Quest, trigger: str, *,
+                      intent: str | None = None) -> None:
+    """A deliberate leave's own block: the keystroke's caret shadow — never a signal's,
+    since nothing was typed — then the trigger-qualified pause block."""
+    if trigger in _LEAVE_KEYSTROKES:
+        color = should_use_color(sys.stdout)
+        print(pal.caret(enabled=color)
+              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
+    _emit_paused_summary(quest, info=_PauseInfo(trigger, None), intent=intent)
 
 
 def _emit_cli_error(message: str) -> None:
@@ -632,11 +644,11 @@ def _handle_terminal_outcome(
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     trigger = _leave_trigger(coord)
-    if trigger in _LEAVE_KEYSTROKES:
-        color = should_use_color(sys.stdout)
-        print(pal.caret(enabled=color)
-              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
-    _emit_paused_summary(quest, trigger)
+    _name, _title, _token, info, opening = _pause_facts(quest, trigger)
+    if trigger is not None:
+        _emit_leave_pause(quest, trigger, intent=opening)
+    else:
+        _emit_paused_summary(quest, info=info, intent=opening)
     return 1
 
 

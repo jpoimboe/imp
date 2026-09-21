@@ -153,7 +153,8 @@ def test_emit_paused_summary_renders_agent_error_block(capsys) -> None:
         {"type": "workflow_paused",
          "payload": {"reason": "terminated", "kind": "terminated"}},
     ])
-    main._emit_paused_summary(quest)
+    main._emit_paused_summary(quest, info=main._PauseInfo(
+        "terminated", "API Error 400 — tool use concurrency\ntrace"))
     out = capsys.readouterr().out
     assert not out.startswith("\n")                    # no leading blank
     assert "agent error: API Error 400 — tool use concurrency" in out
@@ -174,7 +175,8 @@ def test_emit_paused_summary_api_pause_renders_red_block_not_gold(capsys) -> Non
         {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
     ])
     with patch.object(main, "should_use_color", lambda stream: True):
-        main._emit_paused_summary(quest)
+        main._emit_paused_summary(quest, info=main._PauseInfo(
+            "api", "API Error 400 — tool use concurrency"))
     out = capsys.readouterr().out
     assert pal.ansi("API error: API Error 400 — tool use concurrency", "red") in out
     assert "resume: imp resume" not in out          # error block carries no resume line
@@ -188,7 +190,7 @@ def test_emit_paused_summary_error_block_plain_under_no_color(capsys) -> None:
         {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
     ])
     with patch.object(main, "should_use_color", lambda stream: False):
-        main._emit_paused_summary(quest)
+        main._emit_paused_summary(quest, info=main._PauseInfo("api", "API Error 400"))
     out = capsys.readouterr().out
     assert "API error: API Error 400" in out
     assert "\x1b[" not in out                        # no SGR under NO_COLOR / non-TTY
@@ -201,7 +203,7 @@ def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -
         {"type": "workflow_paused",
          "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
     ])
-    main._emit_paused_summary(quest)
+    main._emit_paused_summary(quest, info=main._PauseInfo("interrupt", None))
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == "interrupt"  # gold headline, own line (plain here)
@@ -212,6 +214,48 @@ def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -
     assert not out.startswith("\n")                            # no leading blank
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_emit_paused_summary_renders_the_info_it_is_handed_not_the_event_log(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    # The log says `max_loops`; the caller hands it the interrupt it witnessed.
+    quest = _Change([{"type": "workflow_paused", "payload": {"reason": "max_loops"}}])
+    main._emit_paused_summary(quest, info=main._PauseInfo("interrupt", None))
+    out = capsys.readouterr().out
+    assert out.split("\n")[0] == "interrupt"
+    assert "loop limit" not in out
+
+
+def test_emit_leave_pause_keystroke_prints_the_caret_shadow_above_the_head(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_leave_pause(_Change([]), "ctrl-d")
+    out = capsys.readouterr().out
+    assert out == (
+        "> Ctrl-D\n"
+        "paused · Ctrl-D\n"
+        "2026-06-12-run-x\n"
+        "resume: imp resume 2026-06-12-run-x\n"
+        "\n")
+
+
+@pytest.mark.parametrize(
+    ("trigger", "display"),
+    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT")])
+def test_emit_leave_pause_signal_prints_no_caret(
+    trigger, display, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_leave_pause(_Change([]), trigger)
+    out = capsys.readouterr().out
+    assert out == (
+        f"paused · {display}\n"
+        "2026-06-12-run-x\n"
+        "resume: imp resume 2026-06-12-run-x\n"
+        "\n")
 
 
 def test_status_spine_prompt_fallback_dim_and_prefixed_color() -> None:
@@ -466,7 +510,7 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
             _Change([]), SettledOutcome(status="paused", events=[]), coord=_Coord())
     assert rc == 1
     ps.assert_called_once()
-    assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
+    assert ps.call_args.kwargs["info"] == main._PauseInfo("ctrl-d", None)
 
 
 class _CtrlDCoord:
@@ -566,7 +610,8 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
         {"type": "workflow_paused",
          "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
     ])
-    main._emit_paused_summary(quest)
+    main._emit_paused_summary(
+        quest, info=main._PauseInfo("interrupt", None), intent="add a dark mode toggle")
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == "interrupt"                                    # gold headline, own line
