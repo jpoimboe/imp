@@ -3663,7 +3663,7 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
     drv.finish()                           # shared teardown: preserves the one owned blank
     monkeypatch.setenv("NO_COLOR", "1")    # plain block → clean screen rows
     with contextlib.redirect_stdout(out):
-        main._emit_completed(_Quest(), merged=True)
+        main._emit_completed(_Quest(), merged_base="master")
 
     screen = TerminalScreen(80, 16, history=200, ratio=0.5)
     pyte.ByteStream(screen).feed(out.getvalue().encode())

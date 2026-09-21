@@ -229,14 +229,15 @@ def _resume_line(token: str, suffix: str = "") -> str:
     return f"resume: imp resume {token}{suffix}"
 
 
-def _emit_completed(quest: Quest, *, merged: bool,
+def _emit_completed(quest: Quest, *, merged_base: str | None,
                     intent: str | None = None,
                     commits: Sequence[dict[str, str]] = ()) -> None:
     """The clean-finish block: a gold `merged into <base>` / `done · commits on imp/<id>`
-    headline on its own line, the run's commits oldest-first when any were recorded,
-    then the identity line; one trailing blank."""
+    headline on its own line, the run's commits oldest-first when any were recorded, then
+    the identity line; one trailing blank. `merged_base` is the branch the merge landed
+    on, None when the run completed without merging."""
     color = should_use_color(sys.stdout)
-    head = (f"merged into {quest.base_branch}" if merged
+    head = (f"merged into {merged_base}" if merged_base is not None
             else f"done · commits on imp/{quest.id}")
     for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent,
                            body=_commit_lines(commits, color=color)):
@@ -613,7 +614,8 @@ def _handle_terminal_outcome(
     from imp.cli.store import _resolve_intent
     if outcome.completed:
         merged = outcome.status == "merged"
-        _emit_completed(quest, merged=merged,
+        _emit_completed(quest,
+                        merged_base=quest.base_branch if merged else None,
                         intent=_resolve_intent(outcome.events),
                         commits=_recorded_commits(outcome.events, merged=merged))
         return 0

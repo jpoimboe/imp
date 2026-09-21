@@ -354,7 +354,7 @@ def test_emit_completed_merged_prints_gold_block_no_green(
 ) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_Change([]), merged=True)
+    main._emit_completed(_Change([]), merged_base="master")
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == pal.ansi("merged into master", "wordmark")   # gold headline, own line
@@ -367,12 +367,24 @@ def test_emit_completed_merged_prints_gold_block_no_green(
     assert not out.endswith("\n\n\n")
 
 
+def test_emit_completed_names_the_witnessed_base_not_the_quest_attribute(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    assert quest.base_branch == "master"      # the attribute the emitter must NOT read
+    main._emit_completed(quest, merged_base="release/9")
+    out = capsys.readouterr().out
+    assert out.split("\n")[0] == "merged into release/9"
+    assert "master" not in out
+
+
 def test_emit_completed_non_merge_headline_is_imp_branch_gold(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     quest = _Change([])
     assert quest.materialized is False                          # the real render seam
-    main._emit_completed(quest, merged=False)
+    main._emit_completed(quest, merged_base=None)
     out = capsys.readouterr().out
     lines = out.split("\n")
     # Headline names the quest branch imp/<id>, NOT the base branch, even though
@@ -388,7 +400,7 @@ def test_emit_completed_non_merge_headline_is_imp_branch_gold(monkeypatch, capsy
 def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(
-        _Change([]), merged=True,
+        _Change([]), merged_base="master",
         commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
                  {"sha": _SHA_B, "subject": "cli: print the commit list"}])
     assert capsys.readouterr().out == (
@@ -403,7 +415,7 @@ def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys)
 
 def test_emit_completed_not_merged_renders_the_same_body(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged=False,
+    main._emit_completed(_Change([]), merged_base=None,
                          commits=[{"sha": _SHA_A, "subject": "only"}])
     assert capsys.readouterr().out == (
         "done · commits on imp/2026-06-12-run-x\n"
@@ -419,7 +431,7 @@ def test_emit_completed_colors_the_sha_and_leaves_the_subject_plain(
 ) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_Change([]), merged=True,
+    main._emit_completed(_Change([]), merged_base="master",
                          commits=[{"sha": _SHA_A, "subject": "first"}])
     lines = capsys.readouterr().out.split("\n")
     assert lines[0] == pal.ansi("merged into master", "wordmark")
@@ -433,7 +445,7 @@ def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
     monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged=True,
+    main._emit_completed(_Change([]), merged_base="master",
                          commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe"}])
     out = capsys.readouterr().out
     assert "4091ab6d  boom^[[2Jwipe\n" in out
@@ -507,7 +519,7 @@ def test_sigterm_leave_prints_no_caret_and_paused_display_head(monkeypatch, caps
 
 def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged=False, intent="add a dark mode toggle")
+    main._emit_completed(_Change([]), merged_base=None, intent="add a dark mode toggle")
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == "done · commits on imp/2026-06-12-run-x"      # headline on its own line
@@ -526,7 +538,7 @@ def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent, commits: captured.update(intent=intent))
+        lambda ch, *, merged_base, intent, commits: captured.update(intent=intent))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
@@ -582,11 +594,11 @@ def test_handle_terminal_outcome_derives_merged_from_the_recorded_status(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent, commits: captured.update(merged=merged))
+        lambda ch, *, merged_base, intent, commits: captured.update(base=merged_base))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
-    assert captured["merged"] is True
+    assert captured["base"] == "master"
 
 
 def test_handle_terminal_outcome_done_status_is_not_merged_despite_the_event(
@@ -599,11 +611,11 @@ def test_handle_terminal_outcome_done_status_is_not_merged_despite_the_event(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent, commits: captured.update(merged=merged))
+        lambda ch, *, merged_base, intent, commits: captured.update(base=merged_base))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="done", events=events), coord=None)
     assert rc == 0
-    assert captured["merged"] is False       # `done` completes without a merge
+    assert captured["base"] is None       # a done run completes without a merge
 
 
 _END_OF_RUN_WARNINGS = ["cache read failed", "cache read failed",
