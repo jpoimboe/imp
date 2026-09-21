@@ -57,7 +57,8 @@ def test_md_writes_default_file_and_prints_path(tmp_path, monkeypatch, capsys):
     assert out_path.exists()
     text = out_path.read_text()
     assert "# add auth" in text                 # heading spine from the tree
-    assert "<details>" in text                   # thinking fold collapsed by default
+    assert "<details>" not in text               # lean omits folded content entirely
+    assert "pondering deeply" not in text        # thinking is off in a lean export
     assert f"imp-log-{slug}.md" in capsys.readouterr().out
 
 

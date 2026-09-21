@@ -130,23 +130,24 @@ def _subagent_outcome_md(sub: nv.SubagentFold) -> str:
     return "\n\n".join(parts)
 
 
-def _walk_children(children: list[Any], *, full: bool, level: int) -> Iterator[str]:
+def _walk_children(children: list[Any], *, full: bool, cats: frozenset[str],
+                   level: int) -> Iterator[str]:
     for child in children:
-        yield from _walk(child, full=full, level=level)
+        yield from _walk(child, full=full, cats=cats, level=level)
 
 
-def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
+def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int) -> Iterator[str]:
     if isinstance(node, nv.WorkflowNode):
         yield _heading(level, _md_escape(node.title or "imp log"))
-        yield from _walk_children(node.children, full=full, level=level + 1)
+        yield from _walk_children(node.children, full=full, cats=cats, level=level + 1)
         return
     if isinstance(node, nv.PhaseNode):
         yield _heading(level, _md_escape(node.label or node.name))
-        yield from _walk_children(node.children, full=full, level=level + 1)
+        yield from _walk_children(node.children, full=full, cats=cats, level=level + 1)
         return
     if isinstance(node, nv.StepNode):
         yield _heading(level, _md_escape(node.label or node.name))
-        yield from _walk_children(node.children, full=full, level=level + 1)
+        yield from _walk_children(node.children, full=full, cats=cats, level=level + 1)
         return
     if isinstance(node, nv.AgentTextNode):
         text = node.text.strip()
@@ -160,7 +161,7 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         return
     if isinstance(node, nv.EngineMessageNode):
         text = node.text.strip()
-        if not full or not text:
+        if "prompts" not in cats or not text:
             return
         label = _ENGINE_MD_LABELS.get(node.subtype, node.subtype)
         yield _details(_md_escape(label), _fence(text), full=full)
@@ -173,18 +174,23 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         return
     if isinstance(node, nv.ThinkingFold):
         content = node.content.strip()
-        if content:
+        if content and "thinking" in cats:
             yield _details("thinking", _md_escape(content), full=full)
         return
     if isinstance(node, nv.ToolBurstFold):
         calls = nv.visible_calls(node)
         if not calls:
             return
-        recap = rt._burst_summary(node) or "tools"
+        recap = _md_escape(rt._burst_summary(node) or "tools")
+        if "tools" not in cats:
+            yield recap
+            return
         inner = "\n\n".join(_fence(_tool_call_text(c)) for c in calls)
-        yield _details(_md_escape(recap), inner, full=full)
+        yield _details(recap, inner, full=full)
         return
     if isinstance(node, nv.StepContextNode):
+        if "prompts" not in cats:
+            return
         p = node.payload
         provider = str(p.get("provider", "?"))
         model = str(p.get("model", "?"))
@@ -195,14 +201,22 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         yield _details(_md_escape(summary), "\n\n".join(inner_blocks), full=full)
         return
     if isinstance(node, nv.SubagentFold):
-        if not full:
+        if "subagents" not in cats:
             yield _subagent_status_md(node)
             return
-        yield f"**{_md_escape(node.subagent_name)}**"
-        yield from _walk_children(node.tree.root.children, full=full, level=level + 1)
+        body = _walk_children(node.tree.root.children, full=full, cats=cats,
+                              level=level + 1)
+        blocks = [b for b in body if b]
         outcome = _subagent_outcome_md(node)
         if outcome:
-            yield outcome
+            blocks.append(outcome)
+        inner_text = "\n\n".join(blocks)
+        if not inner_text and not full:
+            yield _subagent_status_md(node)
+            return
+        summary = (_md_escape(node.subagent_name) if full
+                   else _subagent_status_md(node))
+        yield _details(summary, inner_text, full=full)
         return
     if isinstance(node, nv.OutcomeLine):
         yield "→ " + _md_escape(pal.action_text(node.action))
@@ -258,15 +272,13 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         yield f"**✓ Merged {_md_escape(node.quest_id)} into {_md_escape(node.base)}.**"
         return
     if isinstance(node, nv.TiersResolvedNode):
-        if not full:
+        if "tiers" not in cats:
             return
-        yield "tiers resolved:"
         rows = "\n".join(
             f"- {_md_escape(str(r['tier']))} → "
             f"{_md_escape(str(r['provider']))}/{_md_escape(str(r['model']))}"
             for r in node.rows)
-        if rows:
-            yield rows
+        yield _details("tiers resolved", rows, full=full)
         return
     if isinstance(node, nv.FallbackLine):
         kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
@@ -276,9 +288,11 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
     return
 
 
-def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
+def render_markdown(tree: nv.NarrativeTree, *, full: bool,
+                    show: frozenset[str] | None = None) -> str:
     """Render a NarrativeTree to a Markdown document string."""
-    blocks = [b for b in _walk(tree.root, full=full, level=1) if b]
+    cats = rt._resolve_cats(full, show)
+    blocks = [b for b in _walk(tree.root, full=full, cats=cats, level=1) if b]
     return "\n\n".join(blocks).strip() + "\n"
 
 

@@ -17,14 +17,14 @@ def _load_css() -> str:
         encoding="utf-8")
 
 
-def _fence_marker(line: str) -> str | None:
-    """The backtick fence string when `line` is a code-fence delimiter, else None.
-    Part 1 emits only symmetric all-backtick fences (>=3, length one greater than
-    any backtick run inside), so a delimiter is a stripped line of only backticks."""
-    s = line.strip()
-    if len(s) >= 3 and set(s) == {"`"}:
-        return s
-    return None
+def _code_lines(markdown: str) -> frozenset[int]:
+    """Line numbers markdown-it itself treats as code. Asking the parser is what
+    keeps the fold scan from desynchronizing with it — a tilde fence or an
+    indented fence needs no rule of its own here."""
+    return frozenset(
+        n for tok in _MD.parse(markdown)
+        if tok.map and tok.type in ("fence", "code_block")
+        for n in range(tok.map[0], tok.map[1]))
 
 
 def _md_to_fragment(markdown: str) -> str:
@@ -33,13 +33,13 @@ def _md_to_fragment(markdown: str) -> str:
     imp's own `<details>`/`<summary>` fold markers are the ONLY raw HTML in the
     stream: every Part 1 content path either HTML-escapes `<`/`>` or wraps text in
     a code fence, so a bare `<details>`/`</details>` line OUTSIDE a code fence is
-    always imp's. Such folds are recognized structurally and re-emitted as real
-    tags wrapping the separately-converted inner fragment; everything else goes
-    through markdown-it with raw HTML disabled."""
+    always imp's. Such folds are recognized structurally against markdown-it's own
+    code-block map and re-emitted as real tags wrapping the separately-converted
+    inner fragment; everything else goes through markdown-it with raw HTML disabled."""
     lines = markdown.split("\n")
+    code = _code_lines(markdown)
     parts: list[str] = []
     buf: list[str] = []
-    fence: str | None = None
     i = 0
 
     def flush() -> None:
@@ -50,23 +50,23 @@ def _md_to_fragment(markdown: str) -> str:
 
     while i < len(lines):
         line = lines[i]
-        if fence is None and line == "<details>":
+        if i not in code and line == "<details>":
             flush()
             # Part 1's _details always emits `<summary>...</summary>` on the next
             # line, with the summary text already HTML-escaped (safe to re-emit).
             summary = lines[i + 1][len("<summary>"):-len("</summary>")]
             inner: list[str] = []
-            inner_fence: str | None = None
+            depth = 0
             j = i + 2
             while j < len(lines):
                 lj = lines[j]
-                if inner_fence is None and lj == "</details>":
-                    break
-                marker = _fence_marker(lj)
-                if inner_fence is None and marker:
-                    inner_fence = marker
-                elif inner_fence is not None and marker and len(marker) >= len(inner_fence):
-                    inner_fence = None
+                if j not in code:
+                    if lj == "</details>":
+                        if depth == 0:
+                            break
+                        depth -= 1
+                    elif lj == "<details>":
+                        depth += 1
                 inner.append(lj)
                 j += 1
             inner_html = _md_to_fragment("\n".join(inner).strip("\n"))
@@ -74,11 +74,6 @@ def _md_to_fragment(markdown: str) -> str:
                 f"<details>\n<summary>{summary}</summary>\n{inner_html}</details>\n")
             i = j + 1
             continue
-        marker = _fence_marker(line)
-        if fence is None and marker:
-            fence = marker
-        elif fence is not None and marker and len(marker) >= len(fence):
-            fence = None
         buf.append(line)
         i += 1
     flush()
