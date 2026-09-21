@@ -90,6 +90,7 @@ from imp.engine.sandbox import (
     SandboxOpenFailed,
     SandboxUnavailable,
     _force_rmtree,
+    home_is_overlay_mount,
     make_home_layer,
     overlay_mode,
     resolve_policy,
@@ -2248,14 +2249,18 @@ def _emit_paused_event(
 def _warn_if_no_overlay(policy: Any, quest: Quest, log: EventLog) -> None:
     """When the sandbox is active but the host lacks unprivileged overlayfs, $HOME
     falls back to a writable bind of the REAL home (home isolation lost; secret
-    masks still apply). Emit one durable warning, modeled on sandbox_inactive."""
-    if policy.active and policy.home and overlay_mode(
-            quest.quest_dir, Path(policy.home)) is None:
-        _emit(log, "sandbox_overlay_unavailable",
-              {"reason": "sandbox: unprivileged overlayfs unavailable — $HOME is "
-                         "a writable bind of your real home, so agent writes to "
-                         "$HOME persist (secrets are still masked)"},
-              agent_id=None)
+    masks still apply). Emit one durable warning, modeled on sandbox_inactive. An
+    overlay $HOME is a nested run: the parent already isolates it, so stay silent."""
+    if not policy.active or not policy.home:
+        return
+    home = Path(policy.home)
+    if home_is_overlay_mount(home) or overlay_mode(quest.quest_dir, home) is not None:
+        return
+    _emit(log, "sandbox_overlay_unavailable",
+          {"reason": "sandbox: unprivileged overlayfs unavailable — $HOME is "
+                     "a writable bind of your real home, so agent writes to "
+                     "$HOME persist (secrets are still masked)"},
+          agent_id=None)
 
 
 def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:

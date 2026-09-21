@@ -5017,6 +5017,7 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
 def test_warn_if_no_overlay_emits_when_unavailable(monkeypatch):
     from imp.engine import executor as ex
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: None)
+    monkeypatch.setattr(ex, "home_is_overlay_mount", lambda _home: False)
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
@@ -5063,6 +5064,7 @@ def test_warn_if_no_overlay_silent_for_non_userxattr_overlay(monkeypatch):
 def test_warn_if_no_overlay_emits_verbatim_reason(monkeypatch):
     from imp.engine import executor as ex
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: None)
+    monkeypatch.setattr(ex, "home_is_overlay_mount", lambda _home: False)
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
@@ -5098,6 +5100,7 @@ def test_warn_if_no_overlay_threads_resolved_home(monkeypatch):
         return True
 
     monkeypatch.setattr(ex, "overlay_mode", capture)
+    monkeypatch.setattr(ex, "home_is_overlay_mount", lambda _home: False)
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, _CapLog())
     assert seen["home"] == Path("/home/u")
@@ -5112,6 +5115,33 @@ def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
     ex._warn_if_no_overlay(_active_home_policy(home=""), quest, log)
     assert called == []
     assert log.events == []
+
+
+def test_warn_if_no_overlay_silent_when_home_is_overlay_mount(monkeypatch):
+    # AC 4a: a nested run's $HOME IS the parent sandbox's overlay, so isolation is
+    # inherited and there is nothing to tell the user. overlay_mode is pinned to the
+    # "unavailable" answer to prove the new guard is what silences the event, and
+    # asserted never called to prove the guard sits before the probe.
+    from imp.engine import executor as ex
+    probed: list = []
+    checked: list = []
+
+    def probe(base, home):
+        probed.append((base, home))
+        return None
+
+    def is_overlay_home(home):
+        checked.append(home)
+        return True
+
+    monkeypatch.setattr(ex, "overlay_mode", probe)
+    monkeypatch.setattr(ex, "home_is_overlay_mount", is_overlay_home)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, log)
+    assert log.events == []
+    assert probed == []
+    assert checked == [Path("/home/u")]
 
 
 # ── hutu62 shape: cross-plan verify counter does not accumulate ──────────────
