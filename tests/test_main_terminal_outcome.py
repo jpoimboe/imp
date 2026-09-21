@@ -292,6 +292,29 @@ def test_clean_block_untitled_is_bare_gold_id() -> None:
                      pal.ansi("vahi04", "wordmark")]             # bare gold id, no ` · `
 
 
+def test_clean_block_body_is_unindented_and_blank_separated() -> None:
+    from imp.cli import palette as pal
+    lines = main._clean_block("merged into master", "vahi04", "Real title",
+                              color=True,
+                              body=["4091ab6d  first", "832c04d7  second"])
+    assert lines == [
+        pal.ansi("merged into master", "wordmark"),
+        "",                                   # one blank between headline and body
+        "4091ab6d  first",                    # flush left: this surface does NOT indent
+        "832c04d7  second",
+        "",                                   # one blank between body and identity
+        f'{pal.ansi("vahi04", "wordmark")} · Real title',
+    ]
+
+
+def test_clean_block_empty_body_keeps_the_bare_two_line_block() -> None:
+    from imp.cli import palette as pal
+    assert main._clean_block("completed", "vahi04", "", color=True, body=[]) == [
+        pal.ansi("completed", "wordmark"),
+        pal.ansi("vahi04", "wordmark"),       # no blanks at all when there is no body
+    ]
+
+
 def test_emit_completed_merged_prints_gold_block_no_green(
     monkeypatch, capsys,
 ) -> None:

@@ -22,7 +22,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -294,12 +294,16 @@ def _identity_line(quest_id: str, title: str, *, color: bool,
 
 
 def _clean_block(head: str, quest_id: str, title: str, *, color: bool,
-                 intent: str | None = None) -> list[str]:
+                 intent: str | None = None,
+                 body: Sequence[str] = ()) -> list[str]:
     """The clean-exit sibling of `_error_block`: a gold `head` line on its own line,
-    then the identity line. No body, no resume line — pause callers append their own
-    resume line."""
-    return [ansi(head, "wordmark", enabled=color),
-            _identity_line(quest_id, title, color=color, intent=intent)]
+    an optional un-indented `body` set off by one blank line on each side, then the
+    identity line. No resume line — pause callers append their own resume line."""
+    lines = [ansi(head, "wordmark", enabled=color)]
+    if body:
+        lines.extend(["", *body, ""])
+    lines.append(_identity_line(quest_id, title, color=color, intent=intent))
+    return lines
 
 
 def _error_block(head: str, body: list[str], quest_id: str, title: str,
