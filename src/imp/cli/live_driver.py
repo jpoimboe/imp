@@ -873,6 +873,9 @@ class LiveDriver:
     def show_stop_ack(self, text: str) -> None:
         self._status.show_stop_ack(text)
 
+    def clear_stop_ack(self) -> None:
+        self._status.clear_stop_ack()
+
     def _maybe_reemit_header(self) -> None:
         # On a mid-step POSITION change, emit a fresh position-only header into the
         # scrollback (deduped). A verb push or the internal phrase rotation does not

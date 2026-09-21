@@ -156,6 +156,9 @@ async def run_terminal_client(
                                     reply = await solicit(prompt, interrupt)
                                 finally:
                                     gate_state["scope"] = None
+                                    # The ack belongs to this gate's gesture round, which
+                                    # ends however the solicit does — including cancelled.
+                                    driver.clear_stop_ack()
                             if gate_state["elsewhere"]:
                                 continue     # answered elsewhere: no send_input
                             # Coalesce re-announce frames: mid-solicit the run is

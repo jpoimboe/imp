@@ -14,6 +14,8 @@ import anyio
 import pytest
 
 from imp.agents.transcript import SkillReply
+from imp.cli.live_driver import LiveDriver
+from imp.cli.live_status import LiveStatus
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
@@ -3507,3 +3509,143 @@ async def test_provider_switch_reprompts_and_reaches_the_daemon(
     # The marker drove the driver field and was NOT routed into the tree builder.
     assert markers == ["codex"]
     assert "event:provider_marker" not in log
+
+
+def _tty_pair() -> tuple[LiveStatus, LiveDriver]:
+    out = _TTYStream()
+    status = LiveStatus(out)
+    status._width_fn = lambda: 80
+    return status, LiveDriver(stream=out, color=False, width=80, status=status)
+
+
+def _opening_events() -> list[dict[str, Any]]:
+    return [
+        {"id": "1", "agent_id": None, "type": "quest_created",
+         "payload": {"title": "T", "quest_id": 1}},
+        {"id": "2", "agent_id": None, "type": "step_started",
+         "payload": {"step": "planner", "kind": "agent", "phase": "plan",
+                     "model": "m", "provider": "anthropic"}},
+    ]
+
+
+@pytest.mark.anyio
+async def test_stop_ack_ends_when_a_gate_is_answered_without_a_prompt(
+    tmp_path: Path,
+) -> None:
+    """The sticky `stopping…` ack belongs to one gesture round, and that round is over
+    once the gate it produced has been answered. A latch that returns without opening a
+    prompt never reaches LiveStatus.suspend() — the only in-run clearer — so answering
+    the gate has to end the ack itself."""
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    status, driver = _tty_pair()
+    acks: list[str | None] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        for event in _opening_events():
+            on_event(event)
+        on_event({"id": "3", "agent_id": None, "type": "awaiting_user_input",
+                  "payload": {"steer_hint": "", "interrupt": False}})
+        reply = await user_chat_input_fn("")
+        # _answer_gates clears the ack BEFORE it sends the input frame, so the
+        # reply arriving here orders strictly after the clear: no poll needed.
+        acks.append(status._stop_ack)
+        return reply
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    coord = InterruptCoordinator()
+    coord.set_ack_hook(driver.show_stop_ack)
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        # The ctrl-c round that produced this gate; from here the ack IS the footer.
+        await coord.signal_pause(reason="ctrl-c")
+        assert status._stop_ack == "stopping…"
+        return "latched"
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver, coord=coord,
+                    solicit=_solicit, leave_mode="new")
+
+            tg.start_soon(_client)
+
+    assert acks == [None]
+
+
+@pytest.mark.anyio
+async def test_stop_ack_ends_when_the_gate_is_answered_elsewhere(
+    tmp_path: Path,
+) -> None:
+    """Answered-elsewhere skips the prompt too: _watch_resolved cancels the local
+    solicit, so the ack has to die on the cancelled path as well as the returning one."""
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    status, driver = _tty_pair()
+    received: list[str] = []
+    gate_reached = anyio.Event()
+    released = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        for event in _opening_events():
+            on_event(event)
+        on_event({"id": "3", "agent_id": None, "type": "awaiting_user_input",
+                  "payload": {"steer_hint": "answer?", "interrupt": False}})
+        gate_reached.set()
+        reply = await user_chat_input_fn("answer?")
+        received.append(reply)
+        await released.wait()   # hold the run open while the client is inspected
+        return reply
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "cA", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    coord = InterruptCoordinator()
+    coord.set_ack_hook(driver.show_stop_ack)
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        await coord.signal_pause(reason="ctrl-c")
+        await anyio.sleep_forever()
+        return ""   # unreachable: cancelled when the gate is answered elsewhere
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver, coord=coord,
+                    solicit=_solicit, leave_mode="new")
+
+            tg.start_soon(_client)
+            await gate_reached.wait()
+            await wait_until(lambda: status._stop_ack == "stopping…")
+            # A second raw client answers the open gate remotely.
+            raw = await anyio.connect_unix(sock)
+            await raw.send((encode_attach("cB", "T", True) + "\n").encode())
+            await raw.send((encode_input("remote-answer") + "\n").encode())
+            await wait_until(lambda: received)
+            # The local solicit was cancelled with no prompt ever drawn; the ack must
+            # die with it, while the run is still live (finish() is far too late).
+            await wait_until(lambda: status._stop_ack is None)
+            released.set()
+            await raw.aclose()
+
+    assert received == ["remote-answer"]
