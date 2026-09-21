@@ -304,6 +304,18 @@ def _line(text: str, depth: int, color: bool, *codes: str,
     return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
 
 
+def _commit_lines(commits: list[dict[str, str]], depth: int, color: bool,
+                  gutters: tuple[int, ...] = ()) -> Iterator[str]:
+    """One `<sha8>  <subject>` line per recorded commit, oldest first, two spaces
+    under a terminal footer. Only the sha8 is colored — the subject keeps the
+    default fg and is caret-escaped as content-origin text, before any SGR is
+    composed around the line."""
+    for c in commits:
+        sha = pal.ansi(c["sha"][:8], "gray", enabled=color)
+        yield _line(f"  {sha}  {_caret_escape(c['subject'])}", depth, color,
+                    gutters=gutters)
+
+
 @functools.cache
 def _no_bg_code_block_cls() -> type:
     """A `CodeBlock` element that renders fenced code with NO background fill.
@@ -1259,12 +1271,14 @@ def _render(node: Any, *, depth: int, full: bool = False,
         mark = "✓ " if color else ""
         yield _line(f"{mark}Completed {node.quest_id}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        yield from _commit_lines(node.commits, depth, color, gutters=gutters)
         return
 
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
         yield _line(f"{mark}Merged {node.quest_id} into {node.base}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        yield from _commit_lines(node.commits, depth, color, gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

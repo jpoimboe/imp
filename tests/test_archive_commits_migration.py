@@ -208,3 +208,28 @@ def test_both_markers_bump_and_the_migrated_subject_is_searchable(
     assert archive.data_version_path(tmp_path).read_text().strip() == "14"
     hits = archive_read.search_archive_events_content(tmp_path, "feature work")
     assert [row[0] for row in hits] == [QID]
+
+
+def test_imp_log_shows_the_commits_the_migration_backfilled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The display half of the migration's promise: a v13 archive read through the
+    CLI heals on the way in and the healed list reaches the log footer."""
+    import imp.cli.main as m
+    merge_sha = _repo_with_merge(tmp_path)
+    _seed_v13_archive(tmp_path, QID, [
+        {"id": "c1", "parent_id": None, "agent_id": None,
+         "timestamp": "2026-06-01T00:00:00+00:00", "type": "quest_created",
+         "payload": {"id": QID, "title": "Mrg001"}},
+        _terminal("quest_merged", {"base": "main", "commit": merge_sha})])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    assert m.main(["log", QID]) == 0
+
+    out = capsys.readouterr().out
+    sha8 = _archived_events(tmp_path, QID)[-1]["payload"]["commits"][0]["sha"][:8]
+    assert "Merged mrg001 into main." in out
+    assert f"  {sha8}  feature work" in out     # the migrated subject, indented
