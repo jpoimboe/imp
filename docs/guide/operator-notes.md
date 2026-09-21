@@ -106,7 +106,7 @@ all work for it by its full id while the archive is unreadable. A refusal is one
 line on stderr, exit 2, no output:
 
 ```
-imp: archive data is at v14, newer than this imp (knows v13). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+imp: archive data is at v15, newer than this imp (knows v14). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
@@ -119,7 +119,7 @@ line follows indented, and any readable match is offered as a hint:
 
 ```
 imp: 'lodo' matches an archived quest this imp cannot read: lodo77
-  archive data is at v14, newer than this imp (knows v13). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+  archive data is at v15, newer than this imp (knows v14). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
   hint: readable match lodo40 — pass its full id to resume it.
 ```
 

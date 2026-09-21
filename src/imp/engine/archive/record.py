@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Immutable per-quest record file: build, write, and read."""
+"""Per-quest record file: build, write, and read."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _reread_or_raise(
         return data
     readfault.record("archive_record", path, attempt=None,
                      reason=str(err), bad=raw, good=None)
-    raise err   # the bad record file stays put; records are written once, never rewritten
+    raise err   # the bad record file stays put; a rewrite is always a whole-file replace
 
 
 def read_record(records_dir: Path, quest_id: str) -> dict[str, Any] | None:

@@ -10,6 +10,7 @@ import pytest
 from imp.engine import archive
 from imp.engine.archive.maintenance import reap_archived_homes
 from imp.paths import project_state_dir
+from tests.conftest import BELOW_DATA_FLOOR
 
 
 def _home(control: Path, cid: str, status: str) -> Path:
@@ -83,7 +84,7 @@ def test_below_floor_archive_reaps_nothing(tmp_path: Path) -> None:
     # archived record is unreadable below the floor, so the home is the last readable copy
     done = _home(tmp_path, "done", "completed")
     _archive(tmp_path, done, "done")
-    archive._write_data_version(tmp_path, archive._DATA_VERSION - 1)
+    archive._write_data_version(tmp_path, BELOW_DATA_FLOOR)
 
     assert reap_archived_homes(tmp_path) == 0
     assert done.exists()

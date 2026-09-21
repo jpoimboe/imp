@@ -16,7 +16,7 @@ from typing import Any
 
 import filelock
 
-from imp.engine import durable
+from imp.engine import durable, worktree
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.errors import ArchiveMismatch
@@ -196,7 +196,8 @@ def _index_is_complete(control_root: Path) -> bool:
 
 
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
-_DATA_VERSION = 13
+_DATA_VERSION = 14
+_UPGRADABLE_FROM = 13   # the one stored version this install heals in place
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -219,9 +220,75 @@ def _write_data_version(control_root: Path, version: int) -> None:
         data_version_path(control_root), str(version).encode("ascii"))
 
 
+def _serialize_events(events: list[dict[str, Any]]) -> bytes:
+    """Compact one-JSON-object-per-line bytes — the on-disk events.jsonl shape."""
+    return "".join(json.dumps(ev) + "\n" for ev in events).encode("utf-8")
+
+
+def _commits_of(control_root: Path, event: dict[str, Any]) -> list[dict[str, str]]:
+    """control_root IS the project's git checkout; the archive lives beside it."""
+    if event.get("type") != "quest_merged":
+        return []
+    commit = str((event.get("payload") or {}).get("commit") or "")
+    if not commit:
+        return []
+    return worktree.commits_in_range(control_root, f"{commit}^1..{commit}^2")
+
+
+def _backfill_commits(
+    control_root: Path, events: list[dict[str, Any]],
+) -> bool:
+    """Add `commits` to the terminal event; False when there is nothing to do."""
+    for event in reversed(events):
+        if event.get("type") not in ("quest_merged", "workflow_completed"):
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or "commits" in payload:
+            return False
+        payload["commits"] = _commits_of(control_root, event)
+        return True
+    return False
+
+
+def _upgrade_to_current(control_root: Path) -> None:
+    """One-shot 13 -> 14: backfill `commits` onto each archived terminal event,
+    repoint each record at its rewritten blob, rebuild the index so the derived
+    text matches, then stamp the marker. Old blobs orphan harmlessly."""
+    root = archive_root(control_root)
+    if root.exists() and not os.access(root, os.W_OK):
+        return
+    with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
+        if _read_data_version(control_root) != _UPGRADABLE_FROM:
+            return
+        store = LocalBlobStore(blobs_root(control_root))
+        records_dir = records_root(control_root)
+        for cid in record.list_record_ids(records_dir):
+            rec = record.read_record(records_dir, cid)
+            if rec is None:
+                continue
+            blob = store.get(rec["events_hash"])
+            if blob is None:
+                continue
+            events = _parse_events(blob)
+            if not _backfill_commits(control_root, events):
+                continue
+            rec["events_hash"] = store.put(_serialize_events(events))
+            record.write_record(records_dir, rec)
+        rebuild_index(control_root)
+        _write_data_version(control_root, _DATA_VERSION)
+
+
 def check_data_floor(control_root: Path) -> None:
-    """Gate any blob-backed read, write or delete on the archive's blob-schema floor."""
+    """Gate any blob-backed read, write or delete on the archive's blob-schema floor.
+
+    A stored version of exactly _UPGRADABLE_FROM heals in place first: this is the
+    choke point every blob-backed operation passes, so no entry point can observe
+    an un-migrated archive. Every other mismatch still refuses.
+    """
     stored = _read_data_version(control_root)
+    if stored == _UPGRADABLE_FROM:
+        _upgrade_to_current(control_root)
+        stored = _read_data_version(control_root)
     if stored != _DATA_VERSION:
         raise ArchiveMismatch(floor="data", stored=stored, known=_DATA_VERSION)
 

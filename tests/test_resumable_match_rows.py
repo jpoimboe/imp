@@ -11,7 +11,7 @@ from imp.engine.archive import read as archive_read
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control
+from tests.conftest import BELOW_DATA_FLOOR, _seed_control
 
 
 def _archive_terminal(control: Path, cid: str, status: str) -> None:
@@ -109,7 +109,7 @@ def test_below_the_data_floor_reports_the_unreadable_archived_candidate(
     tmp_path: Path,
 ) -> None:
     _live_and_shelved(tmp_path)
-    below = archive._DATA_VERSION - 1
+    below = BELOW_DATA_FLOOR
     archive._write_data_version(tmp_path, below)
 
     rows, unreadable = m._resumable_matches(tmp_path, "lodo")
