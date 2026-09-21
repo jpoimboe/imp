@@ -272,8 +272,9 @@ is not implementation-local — that belonged to the spec phase, not here.
 
 {# SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
 with deferred-sweep.md's corresponding block (and vice-versa). The toleration JUDGMENT is
-uniform; only the fix path differs (you fix in task context with a fixup; deferred-sweep
-fixes in sweep context with a plain commit). #}
+uniform; the fix path differs only in how a fixup target is found (you have the task's
+recorded commit subject; deferred-sweep resolves it from the log, and falls back to a
+plain commit when no single target is unambiguous). #}
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output. Reason over the OPAQUE failure text against the diff

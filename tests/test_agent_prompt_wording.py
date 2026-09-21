@@ -342,7 +342,7 @@ def test_deferred_sweep_protects_spec_cited_untagged_items() -> None:
     assert "never dismissed" in body
     # (c) an item already landed by a corrective plan is closed fixed, not dismissed
     assert "already landed by a corrective plan" in body
-    assert "close it `— fixed <sha>`" in body
+    assert 'close it `— fixed in "<commit-subject>"`' in body
 
 
 def test_finalize_already_tracked_check_marks_tracked_by() -> None:

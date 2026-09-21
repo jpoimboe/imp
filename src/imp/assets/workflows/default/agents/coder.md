@@ -36,7 +36,7 @@ Once clear on requirements:
 
 ## Apply, Do Not Adjudicate
 
-The task-lead decides which reviewer findings are valid. Make exactly the directed fixes — do not add, remove, or modify other things. After applying, commit using the mode the task-lead specified (a `git commit --fixup=…` for within-loop fixes — see Committing).
+The task-lead decides which reviewer findings are valid. Make exactly the directed fixes — do not add, remove, or modify other things. After applying, commit using the mode your lead specified (a `git commit --fixup=…` for within-loop fixes — see Committing).
 
 ## Code Organization
 
@@ -81,7 +81,7 @@ git commit --fixup=HEAD
 
 A "remove the test file" fix: delete the file (`git rm <file>`), then `git commit --fixup=HEAD`.
 
-**RE-OPENING a buried task**: the task-lead hands you the target commit's **SHA**. Fix the tree, then:
+**FIXUP OF AN EARLIER COMMIT** (a re-opened buried task, or a sweep correction): your lead hands you the target commit's **SHA**. Fix the tree, then:
 
 ```
 git add <changed files>

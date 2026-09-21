@@ -487,11 +487,19 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
     assert "triage only" in low
-    # A real regression is fixed with a PLAIN commit, never a --fixup: a sweep fix is its
-    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped
-    # later by the end-of-change cleanup-merge.
+    # The commit rule is CONDITIONAL, not unconditionally-plain: a regression in what a
+    # quest commit did folds into that commit; anything standalone — or any case without
+    # exactly one unambiguous target — is a plain new commit. Both land unfolded until the
+    # end-of-change cleanup-merge folds and stamps them.
+    assert "git commit --fixup=<SHA>" in text
     assert 'git commit -F' in text
-    assert "--fixup=HEAD" in text
+    assert "Never `--fixup=HEAD` blindly" in text
+    # Both paths state the requirement and the fallback: the drain path's
+    # *Commit granularity* section and this triage bullet (AC 3).
+    assert text.count("exactly one unambiguous target") >= 2
+    # The retired unconditional instruction is gone (AC 2).
+    assert "Tell the coder to make a **plain new commit**" not in text
+    assert "NOT `git commit --fixup=HEAD`" not in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -503,6 +511,73 @@ def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
     marker = "SYNCED PAIR (task-lead ↔ deferred-sweep)"
     assert marker in TASK_LEAD.read_text()
     assert marker in SWEEP.read_text()
+
+
+def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None:
+    """The target-resolution command must carry a SUBSTITUTED sha. `cur_base_head` is
+    a quest.json field reaching prompts only through Jinja — no env var or shell var
+    exports it — so a bare `cur_base_head..HEAD` would die `fatal: ambiguous argument`
+    and the "no target you can name with confidence" fallback would swallow it."""
+    text = SWEEP.read_text()
+    assert "git log --oneline {{ quest.cur_base_head }}..HEAD" in text
+    # The bare field name survives ONLY at the pre-existing descriptive diff-range
+    # mention, never inside a command the agent is told to run (AC 1e).
+    assert text.count("cur_base_head..HEAD") == 1
+
+    body = load_workflow(bundled_workflow_dir("default")).agents[
+        "deferred-sweep"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", cur_base_head="BASE"),
+        workflow_dir=bundled_workflow_dir("default"))
+    assert "git log --oneline BASE..HEAD" in out
+
+
+def test_synced_pair_comments_name_one_shared_fix_path() -> None:
+    """Both leads now fix with a fixup when there is a single unambiguous target, so
+    the coordination note must not still claim the paths differ by fixup-vs-plain;
+    the only surviving difference is HOW the target is found."""
+    shared = "the fix path differs only in how a fixup target is found"
+    for path in (TASK_LEAD, SWEEP):
+        flat = " ".join(path.read_text().split())
+        assert shared in flat, path.name
+        assert "only the fix path differs" not in flat, path.name
+        assert "in sweep context with a plain commit" not in flat, path.name
+    sweep_flat = " ".join(SWEEP.read_text().split())
+    lead_flat = " ".join(TASK_LEAD.read_text().split())
+    assert "you resolve it from the log" in sweep_flat
+    assert "deferred-sweep resolves it from the log" in lead_flat
+
+
+def test_deferred_sweep_triage_ban_exempts_the_fixup_target_lookup() -> None:
+    """The no-self-verify ban covers gates, the suite, lint and typecheck — not
+    reading history. Left absolute, it forbids the `git log` the triage path needs
+    to resolve a fixup target, which the no-confident-target fallback would then
+    swallow as a plain commit."""
+    flat = " ".join(SWEEP.read_text().split())
+    assert ("that reasoning, plus the read-only `git log` lookup that resolves a "
+            "fixup target, is the only action here") in flat
+    assert "that reasoning is the only action here" not in flat
+    # The ban itself is untouched.
+    assert "never run the gate, the full suite, lint, or typecheck yourself" in flat
+
+
+def test_no_workflow_prompt_records_a_fixed_item_by_sha() -> None:
+    """`cleanup-merge`'s stamp rebase rewrites every commit in the quest range, so a
+    sha recorded in the ledger is dangling by the time `finalize` reads it. No prompt
+    may name a sha placeholder after the marker — the writer and the reader both use
+    the target commit's subject."""
+    offenders = sorted(
+        str(p) for p in Path("src/imp/assets").rglob("*.md")
+        if re.search(r"— fixed <", p.read_text())
+    )
+    assert offenders == []
+    # The writer and the reader of the marker both name the subject.
+    assert '— fixed in "<commit-subject>"' in SWEEP.read_text()
+    assert '— fixed in "<subject>"' in FINALIZE.read_text()
+    # The sweep no longer instructs sha resolution at all.
+    assert "rev-parse" not in SWEEP.read_text()
 
 
 def test_integration_prompts_use_recorded_endpoints() -> None:

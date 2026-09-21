@@ -70,7 +70,7 @@ Populate the audit fields:
   identically. A toleration admits non-attribution: do **not** re-run the failure and do
   **not** editorialize about its current status (no "already fixed", no "now green") — present
   its recorded justification and let the human adjudicate. Do **not** list
-  `— fixed <sha>` items (trusted and re-reviewed) or `— dismissed: <why>` items (judged
+  `— fixed in "<subject>"` items (trusted and re-reviewed) or `— dismissed: <why>` items (judged
   not worth doing; never surfaced). **Never originate a decision item from your own
   reading of the diff or code** — if it is not a recorded `— needs-decision:` line, it is
   not surfaced here.
