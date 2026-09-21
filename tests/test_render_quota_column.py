@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
+from imp.cli.render_markdown import render_summary_markdown
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
     SummaryHeader,
     render_summary,
+    total_cell,
 )
 
 _HDR = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
@@ -183,3 +187,51 @@ def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
                         "  \x1b[1m\x1b[31m   50s\x1b[0m"
                         "  \x1b[2m 50.0k   1.0k   0.07%\x1b[0m")
     assert lines[-1] == f"\x1b[2m  {FOOTNOTE}\x1b[0m"
+
+
+def _metered(fresh: int = 200_000, out: int = 9_000) -> RowUsage:
+    """An API-key row: no notional usage, so its cost cell carries the ~ marker."""
+    return RowUsage(fresh_input=fresh, output=out, dollars=0.73, priced=1)
+
+
+def _terminal_total_cell(rows: list[StepRow],
+                         quota: QuotaColumn | QuotaFallback | None) -> str:
+    lines = render_summary(rows, header=_HDR, color=False, width=80, quota=quota)
+    total = next(ln for ln in lines if ln.startswith("  total"))
+    return total.split()[-1]
+
+
+def _markdown_total_cell(rows: list[StepRow],
+                         quota: QuotaColumn | QuotaFallback | None) -> str:
+    out = render_summary_markdown(rows, header=_HDR, quota=quota)
+    total = next(ln for ln in out.splitlines() if ln.startswith("| total |"))
+    return total.split("|")[-2].strip()
+
+
+_RESOLVED = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0))]
+_MIXED = [_row("plan-writer", 90, _usage(), Units.of("claude", 3.0)),
+          _row("coder", 120, _metered(), Units.of("codex", 2.0))]
+
+
+@pytest.mark.parametrize("rows,quota,expected", [
+    # A resolved gauge: 3 points over a 10-unit window, 3 units drawn -> 0.90%.
+    (_RESOLVED, QuotaColumn((QuotaFigure("claude", 3.0, 3.0, 10.0),)), "0.90%"),
+    # Two providers in the total's units: no single window to report.
+    (_MIXED, QuotaColumn((QuotaFigure("claude", 3.0, 9.0, 10.0),
+                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION))),
+     "—"),
+    # No quota view at all: the metered dollar cell, ~ marker and all.
+    ([_row("coder", 90, _metered(), Units.of("claude", 1.0))], None, "~$0.73"),
+    # A withheld gauge: the notional dollar cell, * marker and all.
+    (_RESOLVED, QuotaFallback((_NO_READINGS,)), "$3.00*"),
+], ids=["resolved", "mixed", "metered", "withheld"])
+def test_total_cell_is_the_total_rows_last_cell_in_both_renderers(
+    rows: list[StepRow],
+    quota: QuotaColumn | QuotaFallback | None,
+    expected: str,
+) -> None:
+    """One helper, three call sites that cannot disagree: the terminal table, the
+    markdown export, and (in part 3) the card's `run:` charge."""
+    assert total_cell(rows, quota) == expected
+    assert _terminal_total_cell(rows, quota) == expected
+    assert _markdown_total_cell(rows, quota) == expected

@@ -19,11 +19,10 @@ from imp.cli.render_summary import (
     _fmt_tokens,
     _last_cell,
     _sub_body,
-    cost_cell,
     open_span_label,
-    rows_units,
     summary_notes,
     summary_totals,
+    total_cell,
 )
 
 _MAX_HEADING = 6
@@ -335,8 +334,7 @@ def render_summary_markdown(summary: list[StepRow], *, header: SummaryHeader,
     open_label = open_span_label(header.status)
     column = quota if isinstance(quota, QuotaColumn) else None
     table_header = _MD_HEADER if column is None else _MD_QUOTA_HEADER
-    total_last = (cost_cell(total) if column is None
-                  else column.cell(rows_units(summary)))
+    total_last = total_cell(summary, quota)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         f"**Status:** {_md_escape(header.status)}",
