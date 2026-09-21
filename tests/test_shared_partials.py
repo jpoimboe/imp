@@ -13,7 +13,7 @@ from tests.test_executor import _seed_minimal_workflow
 _RELOCATED = (
     "coding-stance", "action-care", "imp-grounding", "spec-design-principles",
     "brainstorm-dialogue", "memory-authoring", "sandbox-limits",
-    "delegate-exploration", "live-gate-dialogue",
+    "delegate-exploration", "delegate-verification", "live-gate-dialogue",
 )
 
 

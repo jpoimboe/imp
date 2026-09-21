@@ -41,7 +41,7 @@ def test_subagents_have_pinned_static_tier() -> None:
 def test_plan_writer_declares_research_subagents() -> None:
     a = _wf().agents["plan-writer"]
     assert "sub_agent" in a.tools
-    assert set(a.subagents) == {"explorer", "researcher"}
+    assert set(a.subagents) == {"explorer", "researcher", "spiker"}
 
 
 def test_spec_writer_declares_research_subagents() -> None:
@@ -84,6 +84,26 @@ def test_finalize_declares_research_subagents() -> None:
     assert "sub_agent" in a.tools
 
 
+def test_reviewers_declare_explorer_and_include_the_verification_partial() -> None:
+    wf = _wf()
+    include = '{% include "partials/delegate-verification.md" %}'
+    for name in ("spec-reviewer", "plan-reviewer"):
+        a = wf.agents[name]
+        assert a.subagents == ("explorer",), name
+        assert "sub_agent" in a.tools, name
+        body = a.prompt_template_source
+        assert include in body, name
+        # The inline-only mandate the partial supersedes is gone, not softened.
+        assert "with `read_file`/`grep`" not in body, name
+    spec_body = wf.agents["spec-reviewer"].prompt_template_source
+    assert spec_body.index("## Your Role") < spec_body.index(include)
+    assert spec_body.index(include) < spec_body.index("## Process")
+    plan_body = wf.agents["plan-reviewer"].prompt_template_source
+    assert plan_body.index("Do not read prior or future") < plan_body.index(include)
+    assert plan_body.index(include) < plan_body.index(
+        "## Review the prescribed code like a diff (primary)")
+
+
 def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     from pathlib import Path
     p = Path("src/imp/assets/partials/delegate-exploration.md")
@@ -94,13 +114,55 @@ def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     assert "researcher" in text
 
 
-def test_delegate_exploration_partial_names_no_spiker() -> None:
+def test_delegate_verification_partial_exists_and_carries_the_rule() -> None:
+    from pathlib import Path
+    text = Path("src/imp/assets/partials/delegate-verification.md").read_text()
+    # The reviewer-shaped rule: retrieval fans out, the verdict stays with the reader.
+    assert "Delegate retrieval, never judgment" in text
+    assert 'sub_agent(subagent_name="explorer"' in text
+    assert "a subagent's opinion is not a finding" in text
+    # Reviewers get explorer only: no web-facing researcher, and no evidence they
+    # would then be judging themselves.
+    assert "researcher" not in text
+    assert "spiker" not in text
+
+
+_PLAN_WRITER_SPIKER_PARAGRAPH = (
+    "Dispatch a **`spiker`** when a plan-time unknown can only be settled by running "
+    "code — what an existing test actually does under the change, which call sites a "
+    "refactor really touches, whether a seam behaves as the spec assumes. Reach for "
+    "one before writing a **derived list** into the plan — which tests, which call "
+    "sites, which of N get treatment X — because a list derived by hand is re-derived "
+    "by hand at every review lap. These spikes settle **how** to build what the spec "
+    "already fixed; an outcome that would change **what** the quest delivers belongs "
+    "back in the spec, not here. It works in a disposable worktree and parks its "
+    "script and output under `{{ quest.home }}/spike/`; cite that evidence in the "
+    "plan so the reviewer checks it instead of re-deriving it."
+)
+
+_PLAN_WRITER_SPIKE_LINE = (
+    "Read `{{ quest.home }}/spike/` if it exists — empirical evidence a spiker "
+    "captured. A recorded result is settled fact: build on it, don't re-derive it."
+)
+
+_DELEGATE_INCLUDE = '{% include "partials/delegate-exploration.md" %}'
+
+
+def test_spiker_guidance_stays_per_agent_not_in_the_shared_partial() -> None:
     from pathlib import Path
     shared = Path("src/imp/assets/partials/delegate-exploration.md").read_text()
     assert "spiker" not in shared
-    # plan-writer includes the same partial and must stay spiker-less.
+    # When to reach for one differs by phase, so each includer carries its own cue.
     body = _wf().agents["plan-writer"].prompt_template_source
-    assert "spiker" not in body
+    assert _PLAN_WRITER_SPIKER_PARAGRAPH in body
+    assert body.index(_DELEGATE_INCLUDE) < body.index(_PLAN_WRITER_SPIKER_PARAGRAPH)
+
+
+def test_plan_writer_reads_the_spike_record_before_delegating() -> None:
+    body = _wf().agents["plan-writer"].prompt_template_source
+    assert _PLAN_WRITER_SPIKE_LINE in body
+    assert body.index("Read relevant source files") < body.index(_PLAN_WRITER_SPIKE_LINE)
+    assert body.index(_PLAN_WRITER_SPIKE_LINE) < body.index(_DELEGATE_INCLUDE)
 
 
 def test_brainstorm_dialogue_includes_partial_and_drops_inline_duplication() -> None:

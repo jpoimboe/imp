@@ -55,8 +55,8 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     }
     dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-finalizer", "threshold", "finalize"}
-    review_pruned = {"spec-reviewer", "plan-reviewer", "gap-check",
-                     "integration-review", "batch-code-reviewer"}
+    review_dispatchers = {"spec-reviewer", "plan-reviewer"}
+    review_pruned = {"gap-check", "integration-review", "batch-code-reviewer"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -69,6 +69,9 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
             assert agent.tools == BASE_CAPS | agent.allow_tools, name
         elif name in dispatchers:
             assert agent.tools == top_dispatcher | agent.allow_tools, name
+        elif name in review_dispatchers:
+            # deny_tools strips the three TOP_LEVEL_CAPS; the explorer grant keeps sub_agent.
+            assert agent.tools == BASE_CAPS | {"sub_agent"} | agent.allow_tools, name
         elif name in review_pruned:
             # deny_tools strips the three TOP_LEVEL_CAPS, leaving the base grant.
             assert agent.tools == BASE_CAPS | agent.allow_tools, name
@@ -1076,9 +1079,10 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
-    # dispatchable by threshold, spec-finalizer, task-lead, and the finalize gate
+    # dispatchable by threshold, the two spec/plan producers, task-lead, and finalize
     assert "spiker" in wf.agents["threshold"].subagents
     assert "spiker" in wf.agents["spec-finalizer"].subagents
+    assert "spiker" in wf.agents["plan-writer"].subagents
     assert "spiker" in wf.agents["task-lead"].subagents
     assert "spiker" in wf.agents["finalize"].subagents
     # full default grant: write + exec + network, but no dispatch/rename caps
@@ -1295,9 +1299,13 @@ def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:
 _SPIKER_PARAGRAPH = (
     "Dispatch a **`spiker`** when a claim can only be settled by running code rather "
     "than reading it — runtime ordering, what a provider actually emits, whether a "
-    "seam carries the value you assume. It works in a disposable worktree and parks "
-    "its script and output under `{{ quest.home }}/spike/`; cite that "
-    "evidence in the spec so the reviewer checks it instead of re-deriving it."
+    "seam carries the value you assume. Reach for one too when the spec is about to "
+    "carry a **derived table** — which call sites, which tests, which of N get "
+    "treatment X. A list derived by hand is re-checked by hand every lap, and one "
+    "wrong row buys another: have a spiker compute it, keep the rule in the spec, and "
+    "cite the spike for the list. It works in a disposable worktree and parks its "
+    "script and output under `{{ quest.home }}/spike/`; cite that evidence in the "
+    "spec so the reviewer checks it instead of re-deriving it."
 )
 
 

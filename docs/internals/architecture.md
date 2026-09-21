@@ -64,7 +64,7 @@ flowchart TB
   AR["agent_run.py<br/>drive_invocation()"] --> RES["providers/resolve.py<br/>tier → provider + model"]
   AR --> PROV["provider (AgentRunner)<br/>anthropic · openai · claude · codex"]
   PROV --> TOOLS["agents/tools<br/>bash · fs<br/>complete_step · wait_for_user"]
-  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher"]
+  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher · spiker"]
   SUB -.->|"nested invocation"| AR
   PROV -->|"audit events"| LOG[("event log")]
   TOOLS -->|"audit events"| LOG
@@ -197,7 +197,7 @@ flowchart TD
   in([from threshold]) --> SF["spec-finalizer<br/>(explorer · researcher · spiker)"]
   SF --> SVC{{"spec-verify-commit"}}
   SVC -. "no spec / no outline" .-> SF
-  SVC -->|"plan_total = N"| SR["spec-reviewer"]
+  SVC -->|"plan_total = N"| SR["spec-reviewer<br/>(explorer)"]
   SR -->|"Critical / Major"| SF
   SR -->|clean| out([→ plan-writer])
 ```
@@ -213,11 +213,11 @@ seed `task_total`.
 
 ```mermaid
 flowchart TD
-  in([from spec · outline plan N]) --> PW["plan-writer<br/>(explorer · researcher)"]
+  in([from spec · outline plan N]) --> PW["plan-writer<br/>(explorer · researcher · spiker)"]
   PW --> PVC{{"plan-verify-commit"}}
   PVC -. "no plan artifact" .-> PW
   PVC -->|express| PF
-  PVC --> PR["plan-reviewer"]
+  PVC --> PR["plan-reviewer<br/>(explorer)"]
   PR -->|"Critical / Major"| PW
   PR -->|clean| PF{{"plan-finalized"}}
   PF -->|"task_total = N"| out([→ task-lead])
@@ -369,9 +369,9 @@ These are dispatched via `subagents:` frontmatter and are **never** a workflow s
 |---|---|
 | `coder` | `task-lead`, `deferred-sweep` |
 | `code-reviewer` | `task-lead`, `deferred-sweep` |
-| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
+| `explorer` | `threshold`, `spec-finalizer`, `spec-reviewer`, `plan-writer`, `plan-reviewer`, `task-lead`, `finalize` |
 | `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
-| `spiker` | `threshold`, `spec-finalizer`, `task-lead`, `finalize` |
+| `spiker` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
 
 ### Data files
 
