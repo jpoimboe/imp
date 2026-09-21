@@ -230,13 +230,16 @@ def _resume_line(token: str, suffix: str = "") -> str:
 
 
 def _emit_completed(quest: Quest, *, merged: bool,
-                    intent: str | None = None) -> None:
+                    intent: str | None = None,
+                    commits: Sequence[dict[str, str]] = ()) -> None:
     """The clean-finish block: a gold `merged into <base>` / `done · commits on imp/<id>`
-    headline on its own line, then the identity line; one trailing blank."""
+    headline on its own line, the run's commits oldest-first when any were recorded,
+    then the identity line; one trailing blank."""
     color = should_use_color(sys.stdout)
     head = (f"merged into {quest.base_branch}" if merged
             else f"done · commits on imp/{quest.id}")
-    for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent):
+    for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent,
+                           body=_commit_lines(commits, color=color)):
         print(ln)
     print()
 
@@ -588,6 +591,20 @@ def _emit_lost_connection(quest: Quest) -> None:
     print()
 
 
+def _recorded_commits(events: list[dict[str, Any]], *,
+                      merged: bool) -> list[dict[str, str]]:
+    """The commit list the engine recorded on the ending this run actually took.
+    Keyed on the same `merged` the headline is, so the body can never describe the
+    other ending; `[]` when the event predates the field or never landed."""
+    wanted = "quest_merged" if merged else "workflow_completed"
+    for ev in reversed(events):
+        if ev.get("type") == wanted:
+            payload: dict[str, Any] = ev.get("payload") or {}
+            commits: list[dict[str, str]] = payload.get("commits", [])
+            return commits
+    return []
+
+
 def _handle_terminal_outcome(
     quest: Quest, outcome: SettledOutcome, coord: Any,
 ) -> int:
@@ -596,7 +613,9 @@ def _handle_terminal_outcome(
     from imp.cli.store import _resolve_intent
     if outcome.completed:
         merged = outcome.status == "merged"
-        _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
+        _emit_completed(quest, merged=merged,
+                        intent=_resolve_intent(outcome.events),
+                        commits=_recorded_commits(outcome.events, merged=merged))
         return 0
     if outcome.status == "merge_blocked":
         mb_reason: str | None = None
