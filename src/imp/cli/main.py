@@ -2560,6 +2560,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
         _emit_cli_error(f"unknown category {unknown[0]!r} "
                         f"(choose from: {', '.join(LOG_CATEGORIES)})")
         return 2
+    if args.summary and (args.show is not None or args.hide is not None):
+        _emit_cli_error("--show/--hide not allowed with -s/--summary")
+        return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
     control = _control_root()
@@ -2608,7 +2611,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
     if args.html is not None or args.md is not None:
         return _write_log_export(args, control, store, quest_id, events,
-                                 unfiltered)
+                                 unfiltered, show=show)
 
     width = _term_width()
     color = should_use_color(sys.stdout)
@@ -2689,7 +2692,8 @@ def _attribute_quota(
 
 def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
                       quest_id: str, events: list[dict[str, Any]],
-                      unfiltered: list[dict[str, Any]]) -> int:
+                      unfiltered: list[dict[str, Any]], *,
+                      show: frozenset[str]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
         from imp.cli.render_summary import (
@@ -2713,7 +2717,8 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
     else:
         from imp.cli import narrative
         from imp.cli.render_markdown import render_markdown
-        document = render_markdown(narrative.build_tree(events), full=args.full)
+        document = render_markdown(narrative.build_tree(events), full=args.full,
+                                   show=show)
     if args.html is not None:
         from imp.cli.render_html import render_html
         document = render_html(document)
@@ -4294,7 +4299,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Show the narrative for a quest as plain text. --full expands "
             "every fold; --show/--hide toggle individual content categories "
-            "(thinking, tools, subagents, prompts, tiers) over the lean view. "
+            "(thinking, tools, subagents, prompts, tiers) over the lean view, "
+            "in the terminal and in --md/--html exports alike. "
             "Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),

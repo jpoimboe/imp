@@ -78,6 +78,136 @@ def test_fold_inner_fence_with_details_marker_is_not_split_early() -> None:
     assert frag.index("tail-line") < fold_end
 
 
+def test_fold_nested_details_depth_aware() -> None:
+    # An inner fold inside an outer fold must not close the outer fold early.
+    inner_fold = (
+        "<details>\n<summary>thinking</summary>\n\npondering deeply\n\n</details>"
+    )
+    md = (
+        "<details>\n<summary>outer</summary>\n\n"
+        + inner_fold
+        + "\n\nafter inner\n\n</details>"
+    )
+    frag = _md_to_fragment(md)
+    assert frag.count("<details>") == 2        # two real folds
+    assert "&lt;details&gt;" not in frag       # no escaped open tags
+    assert "&lt;/details&gt;" not in frag      # no escaped close tags
+    outer_fold_end = frag.rindex("</details>")
+    assert "after inner" in frag
+    assert frag.index("after inner") < outer_fold_end  # trailing line inside outer fold
+
+
+def test_nested_subagent_thinking_fold_html_no_leaked_close_tag() -> None:
+    # A shown subagent containing a shown thinking fold produces nested <details>.
+    # The HTML converter must not close the outer fold at the inner fold's </details>,
+    # leaking the subagent's outcome and its own closing tag as visible text.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("th1", "thinking", agent_id="sub:tk1", content="pondering deeply"),
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success","summary":"all clear"}', error=False),
+    ]
+    tree = nv.build_tree(events)
+    md = render_markdown(tree, full=False, show=frozenset({"subagents", "thinking"}))
+    # Confirm the markdown really nests folds (thinking inside subagent)
+    assert md.count("<details>") == 2
+    out = render_html(md)
+    assert "&lt;/details&gt;" not in out   # no leaked closing tag as visible text
+    # outcome must sit INSIDE the subagent fold, not spill out after it
+    outer_fold_end = out.rindex("</details>")
+    assert "all clear" in out
+    assert out.index("all clear") < outer_fold_end
+
+
+def test_fold_inner_info_string_fence_does_not_invert_fold_tracking() -> None:
+    # A closing ``` after an info-string opener (```python) must not be treated
+    # as a new fence opener; otherwise the second fold's markers are swallowed.
+    md = (
+        "<details>\n"
+        "<summary>first</summary>\n"
+        "\n"
+        "```python\n"
+        "def f(): ...\n"
+        "```\n"
+        "\n"
+        "</details>\n"
+        "<details>\n"
+        "<summary>second</summary>\n"
+        "\n"
+        "also rendered\n"
+        "\n"
+        "</details>"
+    )
+    frag = _md_to_fragment(md)
+    assert frag.count("<details>") == 2          # both folds are real elements
+    assert "<pre>" in frag                        # code block rendered
+    assert "</code>" in frag
+    assert "&lt;details&gt;" not in frag          # no escaped open tags
+    assert "&lt;/details&gt;" not in frag         # no escaped close tags
+    assert "also rendered" in frag
+
+
+def test_info_string_fence_in_thinking_does_not_swallow_later_fold() -> None:
+    # Thinking prose with an info-string code block (```python...```) reaches
+    # the HTML converter as live markdown (render_markdown escapes <> but not
+    # backticks). The closing ``` must not invert fence state and swallow the
+    # second subagent fold's markers as visible &lt;details&gt; text.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("th1", "thinking", agent_id="sub:tk1",
+            content="Here is code:\n\n```python\ndef f(): ...\n```\n\ndone"),
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success","summary":"all clear"}', error=False),
+        _ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
+            input={"subagent_name": "reviewer2", "task_description": "go2"}),
+        _ev("su2", "agent_message", agent_id="sub:tk2", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "second done"}]}),
+        _ev("r2", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status":"Success","summary":"second clear"}', error=False),
+    ]
+    tree = nv.build_tree(events)
+    md = render_markdown(tree, full=False, show=frozenset({"subagents", "thinking"}))
+    out = render_html(md)
+    assert "&lt;/details&gt;" not in out          # no leaked closing tags
+    assert "&lt;details&gt;" not in out           # no leaked open tags
+    assert "second done" in out                   # second fold's content rendered
+    assert out.count("<details>") >= 2            # second fold is a real element
+
+
+def test_tilde_fence_in_prose_does_not_swallow_a_later_fold() -> None:
+    # A ``` line inside a ~~~ fence is literal content to CommonMark; treating
+    # it as a fence opener would leave the scan fenced for the rest of the doc.
+    md = ("prose\n\n~~~\n```\n~~~\n\n<details>\n<summary>s</summary>\n\n"
+          "body\n\n</details>\n")
+    frag = _md_to_fragment(md)
+    assert frag.count("<details>") == 1
+    assert "&lt;details&gt;" not in frag
+    assert "body" in frag
+
+
+def test_indented_fence_in_prose_does_not_swallow_a_later_fold() -> None:
+    # Four-space-indented ``` is an indented code block, not a fence opener.
+    md = ("prose\n\n    ```\n    indented\n\n<details>\n<summary>s</summary>\n\n"
+          "body\n\n</details>\n")
+    frag = _md_to_fragment(md)
+    assert frag.count("<details>") == 1
+    assert "&lt;details&gt;" not in frag
+    assert "body" in frag
+
+
 def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
@@ -94,6 +224,15 @@ def test_render_html_is_self_contained_document() -> None:
     assert "<link" not in out
     assert 'href="http' not in out
     assert 'src="http' not in out
+
+
+def test_render_html_indents_nested_folds() -> None:
+    md = ("<details>\n<summary>outer</summary>\n\n"
+          "<details>\n<summary>inner</summary>\n\nbody\n\n</details>\n\n"
+          "</details>\n")
+    out = render_html(md)
+    assert out.count("<details>") == 2          # both folds are real elements
+    assert ".markdown-body details details { margin-left: 1.5em; }" in out
 
 
 def test_render_html_end_to_end_neutralizes_hostile_tool_result() -> None:

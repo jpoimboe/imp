@@ -29,9 +29,22 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
         {"id": "2", "agent_id": None, "type": "step_started", "timestamp": T0,
          "payload": {"step": "spec", "kind": "agent", "phase": "design",
                      "model": "m", "provider": "anthropic"}},
-        {"id": "3", "agent_id": "step:design/spec", "type": "thinking",
+        {"id": "3", "agent_id": "step:design/spec", "type": "step_context",
+         "timestamp": T0,
+         "payload": {"provider": "anthropic", "model": "m", "tools_schema": [],
+                     "params": {}, "max_tool_calls": 40,
+                     "system_prompt": "do the thing"}},
+        {"id": "4", "agent_id": "step:design/spec", "type": "thinking",
          "timestamp": T1, "payload": {"content": "pondering deeply"}},
-        {"id": "4", "agent_id": None, "type": "step_completed", "timestamp": T2,
+        {"id": "5", "agent_id": "step:design/spec", "type": "tool_call",
+         "timestamp": T1,
+         "payload": {"id": "b1", "name": "bash", "input": {"command": "ls"}}},
+        {"id": "6", "agent_id": "step:design/spec", "type": "tool_result",
+         "timestamp": T1,
+         "payload": {"id": "b1", "content": "file-a\nfile-b", "error": False}},
+        {"id": "7", "agent_id": None, "type": "token_refresh", "timestamp": T1,
+         "payload": {"outcome": "skipped_fresh"}},
+        {"id": "8", "agent_id": None, "type": "step_completed", "timestamp": T2,
          "payload": {"step": "spec", "kind": "agent",
                      "action": {"verb": "continue"}, "var_mutations": {}}},
     ]
@@ -57,7 +70,8 @@ def test_md_writes_default_file_and_prints_path(tmp_path, monkeypatch, capsys):
     assert out_path.exists()
     text = out_path.read_text()
     assert "# add auth" in text                 # heading spine from the tree
-    assert "<details>" in text                   # thinking fold collapsed by default
+    assert "<details>" not in text               # lean omits folded content entirely
+    assert "pondering deeply" not in text        # thinking is off in a lean export
     assert f"imp-log-{slug}.md" in capsys.readouterr().out
 
 
@@ -157,3 +171,73 @@ def test_export_never_pages(tmp_path, monkeypatch):
     assert main(["log", slug, "--html"]) == 0
     assert main(["log", slug, "--md", "--summary"]) == 0
     assert main(["log", slug, "--html", "--summary"]) == 0
+
+
+def test_md_show_reaches_the_export_and_lean_is_smaller(tmp_path, monkeypatch):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "a.md"]) == 0
+    assert main(["log", slug, "--md", "b.md",
+                 "--show", "thinking,tools,subagents,prompts,tiers"]) == 0
+    lean = (tmp_path / "a.md").read_text()
+    shown = (tmp_path / "b.md").read_text()
+    assert len(shown) > len(lean)                       # --show now reaches the export
+    assert "pondering deeply" in shown and "pondering deeply" not in lean
+    assert "command=ls" in shown and "command=ls" not in lean
+    assert "Internal context" in shown and "Internal context" not in lean
+
+
+def test_md_hide_over_a_lean_export_is_a_no_op(tmp_path, monkeypatch):
+    # Equal bytes are intent: without --full the base set is empty to subtract from.
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "a.md"]) == 0
+    assert main(["log", slug, "--md", "b.md",
+                 "--hide", "thinking,tools,prompts,subagents"]) == 0
+    assert (tmp_path / "a.md").read_bytes() == (tmp_path / "b.md").read_bytes()
+
+
+def test_md_default_export_keeps_the_recap_and_drops_the_bodies(
+        tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "-"]) == 0
+    out = capsys.readouterr().out
+    assert "<details>" not in out                  # nothing folded in a lean export
+    assert "1 call" in out and "· bash" in out      # burst recap line survives
+    assert "pondering deeply" not in out            # no thinking body
+    assert "command=ls" not in out                  # no tool-call bodies
+    assert "file-a" not in out
+    assert "Internal context" not in out            # no per-step context fold
+    assert "token_refresh" not in out               # no bookkeeping lines
+
+
+def test_md_show_thinking_folds_only_thinking(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "-", "--show", "thinking"]) == 0
+    out = capsys.readouterr().out
+    assert "<summary>thinking</summary>" in out
+    assert "pondering deeply" in out
+    assert "command=ls" not in out                  # tools still off
+
+
+def test_md_full_hide_thinking_drops_it_and_keeps_the_rest_inline(
+        tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "-", "--full", "--hide", "thinking"]) == 0
+    out = capsys.readouterr().out
+    assert "pondering deeply" not in out            # --hide bites over --full
+    assert "<details>" not in out                   # the rest stays inline
+    assert "**1 call · bash" in out
+    assert "command=ls" in out
+    assert "**Internal context — anthropic/m**" in out
+    assert "token_refresh" not in out               # no longer the complete set
+
+
+def test_html_show_tools_carries_a_real_details_element(
+        tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--html", "-", "--show", "tools"]) == 0
+    out = capsys.readouterr().out
+    assert "<details>" in out                       # a real element, not escaped text
+    assert "&lt;details&gt;" not in out
+    assert "<summary>" in out
+    assert "command=ls" in out                      # tool bodies inside the fold
+    assert "pondering deeply" not in out            # thinking still off

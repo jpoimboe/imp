@@ -139,9 +139,14 @@ def test_introspection_documents_log_windowing_filters() -> None:
     assert "fights the folded narrative" in body
     # Export carry-through and what --follow does / does not take are documented.
     assert "`--md`/`--html` exports" in body
-    # Wrap-independent: the clause is hard-wrapped across lines in the guide.
-    assert ("`--follow` takes no windowing filters but composes with the content "
-            "flags `--full` / `--show` / `--hide`.") in " ".join(body.split())
+    flat = " ".join(body.split())
+    # The content flags reach an export too, and the guide says what they do there.
+    assert ("as do the content flags `--full` / `--show` / `--hide`: an export "
+            "starts from the same lean view the terminal shows, `--show <cat>` "
+            "adds a category as a collapsed `<details>` fold, and `--full` "
+            "expands every fold inline.") in flat
+    assert ("`--follow` takes no windowing filters but composes with the "
+            "content flags.") in flat
     # The named-consumer read of the seed conversation is called out.
     assert "--step threshold" in body
 

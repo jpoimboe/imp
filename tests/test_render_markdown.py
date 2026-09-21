@@ -19,15 +19,18 @@ from imp.cli.render_summary import (
     build_summary,
     summary_total,
 )
+from imp.cli.render_text import LOG_CATEGORIES
+
+_ALL_CATS = frozenset(LOG_CATEGORIES)
 
 
 def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
 
-def _md(events, *, full=False):
+def _md(events, *, full=False, show=None):
     tree = nv.build_tree(events)
-    return render_markdown(tree, full=full)
+    return render_markdown(tree, full=full, show=show)
 
 
 def _in_code_fence(md: str, needle: str) -> bool:
@@ -161,13 +164,22 @@ def _burst_events():
     ]
 
 
-def test_folds_collapse_to_details_by_default() -> None:
+def test_lean_omits_fold_bodies_and_keeps_the_tool_recap() -> None:
     out = _md(_burst_events())
-    assert "<details>" in out
+    assert "<details>" not in out        # lean omits content, it does not merely fold it
+    assert "pondering deeply" not in out  # thinking category off
+    assert "1 call · bash" in out         # the burst recap survives as a plain paragraph
+    assert "command=ls" not in out        # no call bodies
+    assert "file-a" not in out
+
+
+def test_shown_categories_collapse_to_details_folds() -> None:
+    out = _md(_burst_events(), show=_ALL_CATS)
     assert "<summary>thinking</summary>" in out
-    assert "pondering deeply" in out            # collapsed, but present inside details
-    # tool burst recap appears as a <summary>; the call count is present
-    assert "1 call" in out
+    assert "pondering deeply" in out
+    assert "<summary>1 call · bash" in out   # the recap becomes the fold's summary
+    assert "command=ls" in out               # call bodies inside the fold
+    assert "file-a" in out
 
 
 def test_folds_expand_inline_under_full() -> None:
@@ -194,7 +206,7 @@ def test_hostile_tool_result_inert_in_code_fence() -> None:
     assert "^@" in out
 
 
-def test_step_context_fold_default_full_and_hostile_prompt() -> None:
+def test_prompt_rows_off_lean_folded_when_shown_inline_under_full() -> None:
     sys_node = nv.EngineMessageNode(text="<script>alert(1)</script>",
                                     subtype="system_prompt")
     ctx = nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
@@ -204,14 +216,20 @@ def test_step_context_fold_default_full_and_hostile_prompt() -> None:
     tree = nv.NarrativeTree(root=root)
 
     default = render_markdown(tree, full=False)
-    assert "<summary>Internal context — anthropic/claude</summary>" in default
-    assert "context ·" not in default
+    assert "Internal context" not in default   # prompts off: omitted, not folded
+    assert "system prompt" not in default
+
+    shown = render_markdown(tree, full=False, show=frozenset({"prompts"}))
+    assert "<summary>system prompt</summary>" in shown
+    assert "<summary>Internal context — anthropic/claude</summary>" in shown
+    assert "context ·" not in shown
+    assert _in_code_fence(shown, "<script>")   # untrusted system_prompt fenced/inert
 
     full = render_markdown(tree, full=True)
     assert "**Internal context — anthropic/claude**" in full
     assert "provider: anthropic" in full
     assert "max_tool_calls: 50" in full
-    assert _in_code_fence(full, "<script>")   # untrusted system_prompt is fenced/inert
+    assert _in_code_fence(full, "<script>")
 
 
 def _subagent_events():
@@ -242,6 +260,24 @@ def test_subagent_expands_inline_under_full() -> None:
     assert "looks good" in out          # recursed subagent narrative
     assert "all clear" in out           # structured outcome rendered
     assert "<details>" not in out       # a subagent fold is never a <details>
+
+
+def test_subagent_fold_collapses_under_details_when_shown() -> None:
+    out = _md(_subagent_events(), show=frozenset({"subagents"}))
+    assert "<summary>· reviewer" in out   # the lean status line becomes the summary
+    assert "looks good" in out            # recursed body inside the fold
+    assert "all clear" in out             # structured outcome inside the fold
+    assert "</details>" in out
+
+
+def test_shown_subagent_with_no_body_keeps_its_status_row() -> None:
+    sub = _make_subagent(running=True)
+    root = nv.WorkflowNode(title="t")
+    root.children = [sub]
+    out = render_markdown(nv.NarrativeTree(root=root), full=False,
+                          show=frozenset({"subagents"}))
+    assert "· reviewer (running)" in out
+    assert "<details>" not in out
 
 
 def _make_subagent(**kw):
@@ -331,7 +367,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     assert "→ continue" in out                         # OutcomeLine
     assert 'Set name to "new title"' in out            # RenameNode
     assert "Internal context — anthropic/claude" in out  # ctx fold
-    assert "tiers resolved:" in out                    # TiersResolvedNode (full)
+    assert "**tiers resolved**" in out                 # TiersResolvedNode (full)
     assert "- high → anthropic/claude" in out          # tiers list item
     assert "**2 warnings this run**" in out            # WarningsSummaryNode
     assert "disk low" in out and "(×2)" in out
@@ -361,7 +397,7 @@ def test_error_node_warning_callout() -> None:
     assert "> **error:**" not in out
 
 
-def test_tiers_resolved_suppressed_in_default_mode() -> None:
+def test_tiers_row_off_lean_folded_when_shown_bold_under_full() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.TiersResolvedNode(rows=[{"tier": "high",
                                                  "provider": "anthropic",
@@ -370,7 +406,10 @@ def test_tiers_resolved_suppressed_in_default_mode() -> None:
                                                  "differ_from": None}])]
     tree = nv.NarrativeTree(root=root)
     assert "tiers resolved" not in render_markdown(tree, full=False)
-    assert "tiers resolved" in render_markdown(tree, full=True)
+    shown = render_markdown(tree, full=False, show=frozenset({"tiers"}))
+    assert "<summary>tiers resolved</summary>" in shown
+    assert "- high → anthropic/claude" in shown
+    assert "**tiers resolved**" in render_markdown(tree, full=True)
 
 
 def test_breadcrumb_interrupted_variant() -> None:
@@ -562,6 +601,24 @@ def test_second_retry_still_shows_in_the_lean_markdown() -> None:
     events = [_ev("r1", "agent_retry", category="auth", attempt=2,
                   backoff_seconds=2.0, message="401 revoked")]
     assert "> **warning:** [auth] retry 2 (2.0s) — 401 revoked" in _md(events)
+
+
+def test_lean_omits_engine_bookkeeping_lines() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.FallbackLine(event_type="token_refresh",
+                                     payload={"outcome": "skipped_fresh"})]
+    tree = nv.NarrativeTree(root=root)
+    assert "token_refresh" not in render_markdown(tree, full=False)
+    assert "token_refresh" not in render_markdown(tree, full=False,
+                                                  show=_ALL_CATS - {"tiers"})
+    assert "token_refresh outcome=skipped_fresh" in render_markdown(tree, full=True)
+
+
+def test_quiet_first_retry_needs_every_category() -> None:
+    events = [_ev("r1", "agent_retry", category="auth", attempt=1,
+                  backoff_seconds=1.0, message="401 revoked")]
+    assert "retry 1" not in _md(events, full=True, show=_ALL_CATS - {"thinking"})
+    assert "retry 1" in _md(events, full=True, show=_ALL_CATS)
 
 
 def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
