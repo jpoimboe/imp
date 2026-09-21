@@ -39,6 +39,15 @@ class _TTYStream(io.StringIO):
         return True
 
 
+class _NullDriver:
+    """Structural stand-in for LiveDriver: the methods run_terminal_client calls on
+    every gate, as no-ops. Subclasses override only what they record."""
+
+    def on_event(self, _event: dict[str, Any]) -> None: ...
+    def finish(self) -> None: ...
+    def clear_stop_ack(self) -> None: ...
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -65,7 +74,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
     rendered: list[str] = []
     prompts: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
@@ -485,7 +494,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -539,7 +548,7 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
 
     echoed: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, text: str) -> None:
@@ -590,7 +599,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
 
     echoed: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, text: str) -> None:
@@ -644,7 +653,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -694,7 +703,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
         prompts.append(prompt)
         return "answer"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         event_count = 0
         def on_event(self, _event: dict[str, Any]) -> None:
             _Driver.event_count += 1
@@ -752,7 +761,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/save"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -805,7 +814,7 @@ async def test_shelve_slash_command_records_shelve_intent(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/shelve"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -854,7 +863,7 @@ async def test_abandon_slash_command_records_abandon_intent(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -894,7 +903,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
         on_event({"type": "agent_message", "payload": {}})
         return "done"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -1010,7 +1019,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -1065,7 +1074,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -1119,7 +1128,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/clear"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -1171,7 +1180,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -1286,7 +1295,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -1368,7 +1377,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         await duplicates_injected.wait()
         return "answer"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -2012,7 +2021,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
         on_event({"type": "agent_message", "_replay": True, "payload": {}})
         return "done"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -2071,7 +2080,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
     rendered: list[str] = []
     solicit_cancelled = anyio.Event()
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
@@ -2146,7 +2155,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
 
     rendered: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
@@ -2200,7 +2209,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "p?"}})
         return await user_chat_input_fn("p?")
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -2255,7 +2264,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
 
     echoed: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -2306,7 +2315,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
         on_event({"type": "user_message", "payload": {"text": reply}})
         return reply
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -2370,7 +2379,7 @@ async def test_local_echo_not_invoked_on_leave_command(
                 await server.wait_for_attach_change()
         return "done"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -2436,7 +2445,7 @@ async def test_local_echo_not_invoked_on_abandon(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -2481,7 +2490,7 @@ async def test_mid_conversation_model_sends_control_not_input(
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -2606,7 +2615,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
 
     echoed: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -2667,7 +2676,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
 
     marker: list[bool] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
@@ -2738,7 +2747,7 @@ async def test_sandbox_off_resolves_the_parked_gate_without_reprompting(
 
     log: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             if event.get("type") == "script_output":
                 log.append("confirm:" + event["payload"]["stdout"])
@@ -2814,7 +2823,7 @@ async def test_sandbox_on_reprompts_with_confirmation_after_caret(
 
     log: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             if event.get("type") == "script_output":
                 log.append("confirm:" + event["payload"]["stdout"])
@@ -2873,7 +2882,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
     flips: list[bool] = []
     seen: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             seen.append(event.get("type"))
 
@@ -2929,7 +2938,7 @@ async def test_client_intercepts_provider_marker_without_routing_to_driver(
     markers: list[str | None] = []
     seen: list[str] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             seen.append(event.get("type"))
 
@@ -3099,7 +3108,7 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
         got["reply"] = await user_chat_input_fn("interrupted · x")
         return got["reply"]
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -3156,7 +3165,7 @@ async def test_interrupt_record_after_gate_leaves_title_idle(
         await user_chat_input_fn("steer?")
         return "done"
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
@@ -3459,7 +3468,7 @@ async def test_provider_switch_reprompts_and_reaches_the_daemon(
     log: list[str] = []
     markers: list[str | None] = []
 
-    class _Driver:
+    class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             log.append("event:" + str(event.get("type")))
 
