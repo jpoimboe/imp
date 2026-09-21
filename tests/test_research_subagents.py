@@ -84,6 +84,26 @@ def test_finalize_declares_research_subagents() -> None:
     assert "sub_agent" in a.tools
 
 
+def test_reviewers_declare_explorer_and_include_the_verification_partial() -> None:
+    wf = _wf()
+    include = '{% include "partials/delegate-verification.md" %}'
+    for name in ("spec-reviewer", "plan-reviewer"):
+        a = wf.agents[name]
+        assert a.subagents == ("explorer",), name
+        assert "sub_agent" in a.tools, name
+        body = a.prompt_template_source
+        assert include in body, name
+        # The inline-only mandate the partial supersedes is gone, not softened.
+        assert "with `read_file`/`grep`" not in body, name
+    spec_body = wf.agents["spec-reviewer"].prompt_template_source
+    assert spec_body.index("## Your Role") < spec_body.index(include)
+    assert spec_body.index(include) < spec_body.index("## Process")
+    plan_body = wf.agents["plan-reviewer"].prompt_template_source
+    assert plan_body.index("Do not read prior or future") < plan_body.index(include)
+    assert plan_body.index(include) < plan_body.index(
+        "## Review the prescribed code like a diff (primary)")
+
+
 def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     from pathlib import Path
     p = Path("src/imp/assets/partials/delegate-exploration.md")

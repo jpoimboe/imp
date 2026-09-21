@@ -812,6 +812,16 @@ def test_plan_reviewer_orient_item_four_precedes_the_read_constraint(tmp_path) -
     assert orient < provenance < item_four < constraint < deferred < diff_review
 
 
+def test_reviewer_prompts_render_clean_in_any_lap_context(tmp_path) -> None:
+    for render in (_render_spec_reviewer, _render_plan_reviewer):
+        for laps in (None, [{"lap": 1, "outcome": "reworked", "head": "aaa1111"}]):
+            out = render(tmp_path, prior_laps=laps)
+            assert "Delegate retrieval, never judgment" in out
+            assert 'sub_agent(subagent_name="explorer"' in out
+            assert "{% include" not in out
+            assert "{{" not in out
+
+
 def test_front_door_requires_a_read_before_speaking_about_the_project(tmp_path) -> None:
     fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
     paragraph = (

@@ -3,6 +3,7 @@ name: plan-reviewer
 deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing plan
 description: Review the newest plan's prescribed code like a diff for correctness, with a short doc-integrity tail; severity-classified; any Critical/Major sends it back.
+subagents: [explorer]
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -32,11 +33,13 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan. The project tree is read-only and the sandbox enforces it. You may write exactly one file of record — `{{ quest.home }}/deferred.md`, to append an untagged scope-out line (see backstop below) — plus whatever scratch files you need in a temporary directory outside the tree, which is where any reconstruction belongs.
 
+{% include "partials/delegate-verification.md" %}
+
 ## Review the prescribed code like a diff (primary)
 
-Trust nothing the plan asserts. Verify every factual claim yourself — file paths,
-current signatures, what existing code returns or does — by opening the source
-with `read_file`/`grep`. A confident-sounding claim is not evidence.
+Trust nothing the plan asserts. Verify every factual claim — file paths, current
+signatures, what existing code returns or does — by checking the source.
+A confident-sounding claim is not evidence.
 
 **Execution earns its keep only on what a green suite cannot tell you** — a prescribed
 test that already passes against the unpatched baseline, or a silent behavior change no
