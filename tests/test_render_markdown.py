@@ -603,6 +603,24 @@ def test_second_retry_still_shows_in_the_lean_markdown() -> None:
     assert "> **warning:** [auth] retry 2 (2.0s) — 401 revoked" in _md(events)
 
 
+def test_lean_omits_engine_bookkeeping_lines() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.FallbackLine(event_type="token_refresh",
+                                     payload={"outcome": "skipped_fresh"})]
+    tree = nv.NarrativeTree(root=root)
+    assert "token_refresh" not in render_markdown(tree, full=False)
+    assert "token_refresh" not in render_markdown(tree, full=False,
+                                                  show=_ALL_CATS - {"tiers"})
+    assert "token_refresh outcome=skipped_fresh" in render_markdown(tree, full=True)
+
+
+def test_quiet_first_retry_needs_every_category() -> None:
+    events = [_ev("r1", "agent_retry", category="auth", attempt=1,
+                  backoff_seconds=1.0, message="401 revoked")]
+    assert "retry 1" not in _md(events, full=True, show=_ALL_CATS - {"thinking"})
+    assert "retry 1" in _md(events, full=True, show=_ALL_CATS)
+
+
 def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
     rows = [StepRow(phase="implement", step="task-lead",
                     start_ts="2026-01-01T00:00:00+00:00",

@@ -240,7 +240,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int) -> Iterato
         return
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
-            if node.full_only and not full:
+            if node.full_only and not (cats >= rt._ALL_CATEGORIES):
                 return
             yield "> **warning:** " + _md_escape(node.message)
             return
@@ -281,6 +281,8 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int) -> Iterato
         yield _details("tiers resolved", rows, full=full)
         return
     if isinstance(node, nv.FallbackLine):
+        if not (cats >= rt._ALL_CATEGORIES):
+            return
         kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
         yield _md_escape(f"{node.event_type} {kv}".rstrip())
         return
