@@ -811,20 +811,35 @@ def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
     ) in body
 
 
-def test_plan_reviewer_orient_item_four_precedes_the_read_constraint(tmp_path) -> None:
+def test_plan_reviewer_orient_items_precede_the_read_constraint(tmp_path) -> None:
     out = _render_plan_reviewer(tmp_path, prior_laps=[
         {"lap": 1, "outcome": "reworked", "head": "aaaa1111bbbb2222"},
     ])
     orient = out.index("## Orient")
     provenance = out.index("`imp events abc` — the provenance record")
     item_four = out.index("4. This is review lap 2.")
+    item_five = out.index("5. Read `.imp/quests/abc/spike/` if it exists")
     constraint = out.index(
-        "Read exactly these two artifacts — the newest plan and the spec. Do not "
-        "read prior or future\nplan files")
+        "Read exactly these two artifacts — the newest plan and the spec — plus any "
+        "`spike/` evidence. Do not read prior or future\nplan files")
     deferred = out.index(
         "You may write exactly one file of record — `.imp/quests/abc/deferred.md`")
     diff_review = out.index("## Review the prescribed code like a diff (primary)")
-    assert orient < provenance < item_four < constraint < deferred < diff_review
+    assert orient < provenance < item_four < item_five < constraint < deferred < diff_review
+
+
+_SPIKE_ORIENT_ITEM = (
+    "5. Read `{{ quest.home }}/spike/` if it exists — empirical evidence a spiker\n"
+    "   captured. A recorded result is settled fact: don't re-derive it, don't flag a\n"
+    "   claim it supports."
+)
+
+
+def test_plan_reviewer_treats_spike_evidence_like_spec_reviewer_does() -> None:
+    assert _SPIKE_ORIENT_ITEM in _agent_prompt("plan-reviewer")
+    # Worded identically to spec-reviewer's item, modulo the list number.
+    words = " ".join(_SPIKE_ORIENT_ITEM.split()[1:])
+    assert words in " ".join(_agent_prompt("spec-reviewer").split())
 
 
 def test_reviewer_prompts_render_clean_in_any_lap_context(tmp_path) -> None:
