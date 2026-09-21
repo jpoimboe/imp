@@ -53,6 +53,7 @@ class QuestCard:
     created: str
     step_label: str | None
     phase_label: str | None
+    workflow: str
     base_branch: str | None
     merge_commit: str | None
     parent: dict[str, str] | None
@@ -177,6 +178,7 @@ class LocalStore:
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.engine import quest_refs
+        from imp.providers.effective import resolve_default_workflow
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
@@ -188,6 +190,8 @@ class LocalStore:
             quest_id=_id, status=status, pause_reason=_last_pause_reason(events),
             step=step, last=last, title=title,
             created=created, step_label=step_label, phase_label=phase_label,
+            workflow=(meta.get("workflow")
+                      or resolve_default_workflow(control_root=self.control_root)),
             base_branch=meta.get("base_branch"),
             merge_commit=state.get("merge_commit"),
             parent=quest_refs.resolve_parent(self.control_root, meta.get("parent")),
