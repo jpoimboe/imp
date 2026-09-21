@@ -971,13 +971,15 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     state.step_label = None
     state.phase_label = None
     state.route_label = None
-    from imp.engine import merge_queue
+    from imp.engine import merge_queue, worktree
     if not state.merge_commit:
         _exit_worktree(quest)
         merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
         state.status = "done"
         state.save(quest.state_dir)
-        _emit(log, "workflow_completed", {})
+        _emit(log, "workflow_completed", {
+            "commits": worktree.commits_in_range(
+                quest.control_root, f"{quest.base_branch}..imp/{quest.id}")})
         from imp.engine import archive
         archive.archive_quest(
             quest.control_root, quest.id,
@@ -994,7 +996,10 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     state.status = "merged"
     state.save(quest.state_dir)
     _emit(log, "quest_merged",
-          {"base": quest.base_branch, "commit": state.merge_commit})
+          {"base": quest.base_branch, "commit": state.merge_commit,
+           "commits": worktree.commits_in_range(
+               quest.control_root,
+               f"{state.merge_commit}^1..{state.merge_commit}^2")})
     merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
     from imp.engine import archive
     archive.archive_quest(

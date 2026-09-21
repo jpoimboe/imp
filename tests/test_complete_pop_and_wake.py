@@ -123,7 +123,7 @@ def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) 
     # the merge-only event is NOT emitted on the no-merge path
     assert "quest_merged" not in types
     completed = [e for e in log.read() if e.get("type") == "workflow_completed"]
-    assert completed and completed[0].get("payload") == {}
+    assert completed and completed[0].get("payload") == {"commits": []}
 
 
 def test_complete_without_merge_reaps_quest_tmp_dir(tmp_path, monkeypatch) -> None:
@@ -224,6 +224,84 @@ def test_complete_unlinks_stale_socket_on_early_exit_path(tmp_path, monkeypatch)
     state = State.load(a.state_dir)             # merge_commit unset → early-exit finalize
     _complete(a, state, JsonlEventLog(a.events_path))
     assert not sock.exists()
+
+
+def test_complete_after_merge_records_the_quests_own_commits(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    (a.project_root / "f.txt").write_text("hi")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "first change")
+    (a.project_root / "g.txt").write_text("ho")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "second change")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    state = State.load(a.state_dir)
+    log = JsonlEventLog(a.events_path)
+    anyio.run(_route_merge_and_exit_worktree, _merge_step(), a, state, log)
+    assert state.merge_commit is not None
+    _complete(a, state, log)
+
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(a.control_root, a.id)   # home reaped on merge
+    merged = [e for e in log.read() if e.get("type") == "quest_merged"]
+    assert len(merged) == 1
+    payload = merged[0]["payload"]
+    assert [c["subject"] for c in payload["commits"]] == [
+        "first change", "second change"]                  # oldest first
+    assert all(len(c["sha"]) == 40 for c in payload["commits"])
+    assert state.merge_commit not in [c["sha"] for c in payload["commits"]]
+    assert payload["base"] == "main"                      # existing keys unchanged
+    assert payload["commit"] == state.merge_commit
+
+
+def test_complete_without_merge_records_commits_from_the_kept_branch(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    (ch.project_root / "f.txt").write_text("hi")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "unmerged work")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    state = State.load(ch.state_dir)                 # merge_commit is None
+    log = JsonlEventLog(ch.events_path)
+    _complete(ch, state, log)
+
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)
+    completed = [e for e in log.read() if e.get("type") == "workflow_completed"]
+    # the worktree is gone but imp/feat is kept, so base..imp/<id> still resolves
+    assert [c["subject"] for c in completed[0]["payload"]["commits"]] == [
+        "unmerged work"]
+    assert all(len(c["sha"]) == 40 for c in completed[0]["payload"]["commits"])
+
+
+def test_complete_records_empty_commits_when_the_range_does_not_resolve(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    (a.project_root / "f.txt").write_text("hi")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "a")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    state = State.load(a.state_dir)
+    state.merge_commit = "deadbeef"        # no such object: the range cannot resolve
+    log = JsonlEventLog(a.events_path)
+    result = _complete(a, state, log)      # must NOT raise
+
+    assert result == RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(a.control_root, a.id)
+    merged = [e for e in log.read() if e.get("type") == "quest_merged"]
+    assert merged[0]["payload"]["commits"] == []
 
 
 def test_complete_without_merge_removes_worktree_keeps_branch(tmp_path, monkeypatch) -> None:
