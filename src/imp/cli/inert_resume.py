@@ -34,14 +34,16 @@ def bare_turn_end_question(quest: Quest) -> str | None:
 def make_buffered_solicit(
     first_line: str, inner: Callable[[str, bool], Awaitable[str | SkillRequest]],
 ) -> Callable[[str, bool], Awaitable[str | SkillRequest]]:
-    """Return first_line on the first call; delegate to inner(prompt) on every later call."""
-    delivered = False
+    """Return first_line at the first gate when it is a bare turn-end yield; an interrupt
+    gate spends the latch without delivering, so the line can never answer a later gate."""
+    spent = False
 
     async def _solicit(prompt: str, interrupt: bool = False) -> str | SkillRequest:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return first_line
+        nonlocal spent
+        if not spent:
+            spent = True
+            if not interrupt:
+                return first_line
         return await inner(prompt, interrupt)
 
     return _solicit
