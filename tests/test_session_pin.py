@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -10,11 +11,13 @@ import pytest
 import imp
 import imp.remote.session.pin as pin_mod
 from imp.engine.shim import SOURCE_ROOT_MARKER
+from imp.engine.worktree import RepoGitLock
 from imp.remote.session.pin import (
     OWNER_PID_MARKER,
     PINNED_SRC_DIRNAME,
     pin_source_snapshot,
 )
+from tests.async_wait import HANG_BACKSTOP
 
 
 def _fake_source(root: Path, *, marker: str = "one") -> Path:
@@ -126,3 +129,45 @@ def test_a_missing_impty_beside_the_running_imp_is_a_pin_failure(
 
     assert "impty" in str(excinfo.value)
     assert not (quest_dir / PINNED_SRC_DIRNAME).exists()
+
+
+def test_the_copy_waits_for_the_repo_lock(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """merge_to_base takes this same lock to move the base branch, so holding it across
+    the copy is what makes a merge and a snapshot unable to interleave."""
+    src = _fake_source(tmp_path)
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+    quest_dir = tmp_path / "quest"
+    control_root = tmp_path / "control"
+    copy_started = threading.Event()
+    finished = threading.Event()
+    published: list[Path] = []
+    errors: list[BaseException] = []
+    real_copytree = shutil.copytree
+
+    def watched(*args: Any, **kwargs: Any) -> Any:
+        copy_started.set()
+        return real_copytree(*args, **kwargs)
+
+    monkeypatch.setattr(pin_mod.shutil, "copytree", watched)
+
+    def run_pin() -> None:
+        try:
+            published.append(pin_source_snapshot(quest_dir, control_root))
+        except BaseException as exc:                     # surfaced by the assert below
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=run_pin)
+    with RepoGitLock(control_root).acquire():
+        worker.start()
+        # Negative direction only: a window this side of the lock release, not a tuned
+        # wait for success — the copy must not have started at all.
+        assert not copy_started.wait(0.5)
+        assert not finished.is_set()
+    assert finished.wait(HANG_BACKSTOP)                   # one generous hang backstop
+    worker.join(timeout=HANG_BACKSTOP)
+    assert not worker.is_alive()
+    assert errors == []
+    assert (published[0] / "imp" / "__init__.py").read_text() == "imp one\n"

@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import imp
 from imp.engine.shim import SOURCE_ROOT_MARKER
+from imp.engine.worktree import RepoGitLock
 
 PINNED_SRC_DIRNAME = "pinned-src"
 OWNER_PID_MARKER = "owner-pid"
@@ -31,8 +32,10 @@ def pin_source_snapshot(quest_dir: Path, control_root: Path) -> Path:
     quest_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(dir=quest_dir, prefix="pinning-"))
     try:
-        shutil.copytree(running_pkg, staging / "imp", ignore=_NO_BYTECODE)
-        shutil.copytree(impty_pkg, staging / "impty", ignore=_NO_BYTECODE)
+        # The lock merge_to_base takes: a merge either finishes before the copy or waits.
+        with RepoGitLock(control_root).acquire():
+            shutil.copytree(running_pkg, staging / "imp", ignore=_NO_BYTECODE)
+            shutil.copytree(impty_pkg, staging / "impty", ignore=_NO_BYTECODE)
         (staging / SOURCE_ROOT_MARKER).write_text(f"{source_root}\n")
         (staging / OWNER_PID_MARKER).write_text(f"{os.getpid()}\n")
         # uuid4 name: the rename has no destination to overwrite, so a snapshot appears
