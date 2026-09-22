@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import anyio
@@ -10,6 +9,7 @@ import pytest
 
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
+from tests.async_wait import wait_pgid_gone
 from tests.test_bg_spawn import _ctx, _spawn
 
 
@@ -23,18 +23,6 @@ async def _read(ctx, id: str) -> dict:
     return json.loads(raw)
 
 
-async def _await_group_dead(pid: int) -> None:
-    """Retry briefly: a killed grandchild is reparented to init and reaped
-    asynchronously, and a not-yet-reaped zombie still answers killpg(pgid, 0)."""
-    with anyio.fail_after(30):  # deadlock backstop only
-        while True:
-            try:
-                os.killpg(pid, 0)
-            except ProcessLookupError:
-                return
-            await anyio.sleep(0.05)
-
-
 def test_bash_kill_terminates_group_including_children(tmp_path: Path) -> None:
     async def main() -> None:
         ctx = _ctx(tmp_path)
@@ -43,7 +31,7 @@ def test_bash_kill_terminates_group_including_children(tmp_path: Path) -> None:
         assert r["status"] == "killed"
         assert r["kill_reason"] == "agent"
         assert isinstance(r["returncode"], int) and r["returncode"] < 0
-        await _await_group_dead(out["pid"])
+        await wait_pgid_gone(out["pid"])
     anyio.run(main)
 
 

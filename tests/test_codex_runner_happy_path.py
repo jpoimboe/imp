@@ -18,7 +18,7 @@ from imp.engine.types import (
 from imp.providers.codex_mcp import RunState
 from imp.providers.codex_rollout import RolloutCursor, RolloutReadings, RolloutUsage
 from imp.providers.codex_runner import CodexAgentRunner, CodexSession
-from tests.async_wait import wait_until
+from tests.async_wait import wait_pgid_gone, wait_until
 from tests.codex_fakes import (
     FakeCodex,
     FakeStreamedTurn,
@@ -353,11 +353,9 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
             tg.cancel_scope.cancel()
 
         # run()'s finally must have called terminate_background_processes.
-        import os
         assert ctx_seen is not None
         assert bg_pid is not None
-        with pytest.raises(ProcessLookupError):
-            os.killpg(bg_pid, 0)
+        await wait_pgid_gone(bg_pid)
         assert bg_id is not None
         bp = ctx_seen.background_processes[bg_id]
         assert bp.status == "killed" and bp.kill_reason == "interrupted"

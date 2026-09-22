@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 import anyio
@@ -15,3 +16,15 @@ async def wait_until(
     with anyio.fail_after(backstop):
         while not predicate():
             await anyio.sleep(interval)
+
+
+async def wait_pgid_gone(pgid: int, *, backstop: float = HANG_BACKSTOP) -> None:
+    """Poll until the group is unsignalable — a killed group lingers as zombies until reaped."""
+    def gone() -> bool:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    await wait_until(gone, backstop=backstop, interval=0.05)

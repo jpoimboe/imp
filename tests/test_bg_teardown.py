@@ -11,7 +11,7 @@ import pytest
 
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
-from tests.async_wait import wait_until
+from tests.async_wait import wait_pgid_gone, wait_until
 from tests.test_bg_spawn import _ctx, _spawn
 
 
@@ -39,9 +39,7 @@ def test_teardown_kills_marks_persists_and_deletes(tmp_path: Path) -> None:
         assert ts[out["id"]]["kill_reason"] == "interrupted"
         assert ts[out["id"]]["returncode"] is not None
         assert len(ts[out["id"]]["command"]) <= 200
-        # group actually dead
-        with pytest.raises(ProcessLookupError):
-            os.killpg(out["pid"], 0)
+        await wait_pgid_gone(out["pid"])               # group actually dead
         # post-teardown, the SAME ctx still answers (in-memory tombstone)
         r = await _read(ctx, out["id"])
         assert r["status"] == "killed" and r["kill_reason"] == "interrupted"
@@ -88,15 +86,7 @@ def test_teardown_sigkills_term_immune_children_of_exited_leader(
         await _sweep_bg(ctx)
         assert bp.status == "exited"           # leader gone, child lives
         await terminate_background_processes(ctx)
-        # Retry briefly: the orphaned child is reparented to init and reaped
-        # asynchronously; a zombie still answers killpg(pgid, 0).
-        with anyio.fail_after(30):  # deadlock backstop only
-            while True:
-                try:
-                    os.killpg(out["pid"], 0)
-                except ProcessLookupError:
-                    break
-                await anyio.sleep(0.05)
+        await wait_pgid_gone(out["pid"])
         # terminal state preserved: still 'exited' with the real returncode
         assert bp.status == "exited" and bp.returncode == 0
     anyio.run(main)
@@ -137,13 +127,7 @@ def test_teardown_survives_cancellation_mid_grace(tmp_path: Path) -> None:
         ts = json.loads(_tombstone_path(ctx).read_text())
         assert ts[out["id"]]["status"] == "killed"
         assert ts[out["id"]]["kill_reason"] == "interrupted"
-        with anyio.fail_after(30):  # deadlock backstop only
-            while True:
-                try:
-                    os.killpg(out["pid"], 0)
-                except ProcessLookupError:
-                    break
-                await anyio.sleep(0.05)
+        await wait_pgid_gone(out["pid"])
     anyio.run(main)
 
 

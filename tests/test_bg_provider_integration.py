@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,7 @@ from imp.providers import anthropic as anthropic_mod
 from imp.providers import openai as openai_mod
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+from tests.async_wait import wait_pgid_gone
 from tests.test_build_tools_wait_for_user import _Inv
 from tests.test_heartbeat import _inv
 
@@ -76,8 +76,7 @@ async def test_gen_close_runs_teardown_before_redrive(tmp_path: Path) -> None:
                 break
     await gen.aclose()
     spawn = _spawn_result(log)
-    with pytest.raises(ProcessLookupError):
-        os.killpg(spawn["pid"], 0)                  # attempt 1's group is dead
+    await wait_pgid_gone(spawn["pid"])              # attempt 1's group is dead
     leftover = [p.name for p in _bg_paths(tmp_path)]
     assert leftover == ["tombstones.json"]          # stream files removed
 
@@ -130,8 +129,7 @@ async def test_interrupt_tears_down_background(tmp_path: Path) -> None:
                 break
     await runner.interrupt()
     spawn = _spawn_result(log)
-    with pytest.raises(ProcessLookupError):
-        os.killpg(spawn["pid"], 0)
+    await wait_pgid_gone(spawn["pid"])
     # drain the cancelled generator, then close
     async for _ in gen:
         pass

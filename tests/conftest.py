@@ -78,6 +78,18 @@ _SESSION_SOCKET_TEST_TIMEOUT = 240
 _SESSION_SOCKET_TEST_FILES = frozenset({
     "test_session_daemon.py", "test_session_run.py", "test_session_attach.py",
 })
+# These files' group-liveness probes go through wait_pgid_gone, whose 120 s
+# HANG_BACKSTOP is unreachable under the global timeout = 60 (signal method,
+# pyproject.toml) — SIGALRM fires first and, in an async test, lands in
+# event-loop internals instead of the awaiting frame. At 2x the inner backstop
+# the inner fail_after trips first on a genuine hang, surfacing at the call site
+# that names the observable.
+_PGID_LIVENESS_TEST_TIMEOUT = 240
+_PGID_LIVENESS_TEST_FILES = frozenset({
+    "test_bg_teardown.py", "test_bg_cc_codex_parity.py",
+    "test_codex_runner_happy_path.py", "test_bg_kill.py",
+    "test_bg_provider_integration.py",
+})
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -158,12 +170,13 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Two jobs at collection: (1) raise the per-test timeout for the slow
     liveness families — live provider `*_live.py` files (see _LIVE_TEST_TIMEOUT),
-    impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT), and
+    impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT),
     the session-daemon/socket family (see _SESSION_SOCKET_TEST_FILES /
-    _SESSION_SOCKET_TEST_TIMEOUT) — each keeping its own explicit `timeout`
-    marker if it declares one (e.g. the resume tests that pick 240); and (2) gate
-    every `@pytest.mark.live(<provider>)` test behind --run-live (see
-    tests/_live.py's live_skip_reason)."""
+    _SESSION_SOCKET_TEST_TIMEOUT), and the pgid-liveness family (see
+    _PGID_LIVENESS_TEST_FILES / _PGID_LIVENESS_TEST_TIMEOUT) — each keeping its
+    own explicit `timeout` marker if it declares one (e.g. the resume tests that
+    pick 240); and (2) gate every `@pytest.mark.live(<provider>)` test behind
+    --run-live (see tests/_live.py's live_skip_reason)."""
     from tests._live import live_skip_reason, parse_run_live
 
     requested = parse_run_live(config.getoption("--run-live"))
@@ -179,6 +192,9 @@ def pytest_collection_modifyitems(
         is_session_socket = name in _SESSION_SOCKET_TEST_FILES
         if is_session_socket and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(_SESSION_SOCKET_TEST_TIMEOUT))
+        is_pgid_liveness = name in _PGID_LIVENESS_TEST_FILES
+        if is_pgid_liveness and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_PGID_LIVENESS_TEST_TIMEOUT))
         marker = item.get_closest_marker("live")
         if marker is None:
             continue
