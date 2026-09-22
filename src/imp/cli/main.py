@@ -39,6 +39,12 @@ from imp.cli.help_format import (
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.paths import project_state_dir
+from imp.remote.session.protocol import (
+    CONTROL_ABANDON,
+    CONTROL_ARCHIVE,
+    CONTROL_DISCARD,
+    CONTROL_SAVE,
+)
 
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
@@ -537,6 +543,26 @@ def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
     print()
 
 
+_LEAVE_TAILS: dict[str, str] = {
+    CONTROL_SAVE: "saved as draft",
+    CONTROL_ARCHIVE: "shelved",
+    CONTROL_DISCARD: "discarded",
+    CONTROL_ABANDON: "abandoned",
+}
+
+
+def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> None:
+    """The closing block for a leave the daemon applies, whichever client sent it."""
+    color = should_use_color(sys.stdout)
+    print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
+                        color=color, intent=intent))
+    if disposition == CONTROL_SAVE:
+        print(_resume_line(quest.id))
+    elif disposition == CONTROL_ARCHIVE:
+        print(_resume_line(quest.id, " — or find it later with imp search"))
+    print()
+
+
 def _print_leave_disposition(
     quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
 ) -> int | None:
@@ -546,32 +572,15 @@ def _print_leave_disposition(
     here we only echo what was (or is being) done, on the shared spine. Returns 0
     when a leave was handled, None to fall through to the normal exit-code path.
     """
-    color = should_use_color(sys.stdout)
-    leave_intent = leave_state.get("intent")
-    if leave_intent == "abandon":
-        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color,
-                            intent=intent))
-        print()
+    if leave_state.get("intent") == "abandon":
+        _emit_leave_block(quest, CONTROL_ABANDON, intent=intent)
         return 0
     disposition = leave_state.get("disposition")
-    if disposition == "save":
-        print(_status_spine(quest.id, quest.title, "saved as draft", "wordmark",
-                            color=color, intent=intent))
-        print(_resume_line(quest.id))
-        print()
-        return 0
-    if disposition == "archive":
-        print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
-                            color=color, intent=intent))
-        print(_resume_line(quest.id, " — or find it later with imp search"))
-        print()
-        return 0
-    if disposition == "discard":
-        print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
-                            color=color, intent=intent))
-        print()
+    if disposition is not None:
+        _emit_leave_block(quest, disposition, intent=intent)
         return 0
     if leave_state.get("send_failed"):
+        color = should_use_color(sys.stdout)
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color, intent=intent))
         print(_resume_line(quest.id))

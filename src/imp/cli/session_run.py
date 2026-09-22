@@ -100,12 +100,15 @@ def _closing_block(
     quest: Quest, *, witness: RunWitness, ending: StreamEnding,
     coord: InterruptCoordinator, leave_state: dict[str, str],
 ) -> int:
-    """Select the closing block from what this client witnessed, in row order. Only the
-    last row consults disk — there the stream broke before anything could be witnessed,
-    and it can only upgrade a lost connection to a completed run, never invent a pause."""
+    """Select the closing block from what this client witnessed, in row order: its own
+    leave, then a leave the end frame named, then the run's own outcome. Only the
+    last row consults disk — there the stream broke before anything could be
+    witnessed, and it can only upgrade a lost connection to a completed run, never
+    invent a pause."""
     from imp.cli.main import (
         _emit_completed,
         _emit_daemon_died,
+        _emit_leave_block,
         _emit_leave_pause,
         _emit_lost_connection,
         _emit_merge_blocked,
@@ -119,6 +122,10 @@ def _closing_block(
     disposition_rc = _print_leave_disposition(quest, leave_state, intent=intent)
     if disposition_rc is not None:
         return disposition_rc
+    leave = witness.leave()
+    if leave is not None:
+        _emit_leave_block(quest, leave, intent=intent)
+        return 0
     terminal = witness.terminal()
     if terminal is not None:
         if terminal.type == "quest_merged":

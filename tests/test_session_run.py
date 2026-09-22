@@ -22,8 +22,9 @@ from imp.engine import archive
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from imp.remote.session.client import StreamEnding
+from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.discover import session_socket_path
+from imp.remote.session.protocol import CONTROL_ABANDON, EndOfRun
 from imp.remote.session.server import SessionServer
 from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
@@ -180,6 +181,52 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     # The merge was witnessed across the wire; its payload names the base branch.
     assert "merged into main" in out
     assert "done · commits on" not in out
+
+
+@pytest.mark.anyio
+async def test_an_abandon_sent_by_another_client_renders_the_abandoned_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-09-22-abandon-elsewhere")
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+    monkeypatch.setattr(
+        "imp.remote.session.attach.spawn_session_daemon",
+        lambda ch, **_kw: None)
+
+    sock = str(session_socket_path(quest.id))
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await anyio.sleep_forever()   # only the leave control can end this run
+        return "done"
+
+    other = SessionClient(sock, quest.id, "T", on_event=lambda _e: None)
+    rc_holder: dict[str, int] = {}
+    with anyio.fail_after(HANG_BACKSTOP):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _go() -> None:
+                rc_holder["rc"] = await run_session_client(
+                    quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+                    solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+
+            tg.start_soon(_go)
+            await wait_until(lambda: server.leased_count == 1)
+            await other.connect()
+            await other.send_control(CONTROL_ABANDON)
+            await wait_until(lambda: "rc" in rc_holder)
+            await other.aclose()
+            tg.cancel_scope.cancel()
+
+    out = capsys.readouterr().out
+    assert server.abandoned
+    assert rc_holder["rc"] == 0
+    assert out.endswith(f"{quest.id} · T · abandoned\n\n")
+    assert "lost the connection" not in out
 
 
 @pytest.mark.anyio
@@ -1567,6 +1614,89 @@ def _paused_quest(tmp_path: Path, quest_id: str) -> Quest:
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
     return quest
+
+
+def _ended_by(leave: str, *events: dict[str, Any], **marks: str) -> Any:
+    """An ENDED ending whose end frame named `leave`, after the witnessed events; `marks`
+    are this client's own leave_state entries."""
+    async def _stub(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
+        kwargs["leave_state"].update(marks)
+        witness = RunWitness()
+        for event in events:
+            witness.note(event)
+        witness.note_end(EndOfRun(leave))
+        return StreamEnding.ENDED, witness
+    return _stub
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("disposition", "tail"), [
+    ("archive", "shelved\nresume: imp resume {id} — or find it later with imp search\n"),
+    ("discard", "discarded\n"),
+    ("save", "saved as draft\nresume: imp resume {id}\n"),
+    ("abandon", "abandoned\n"),
+])
+async def test_an_end_frame_disposition_renders_that_leaves_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], disposition: str, tail: str,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # Disk says `paused` and nothing was witnessed: without the disposition this is
+    # the daemon-died block.
+    quest = _paused_quest(tmp_path, f"2026-09-22-end-{disposition}")
+    monkeypatch.setattr(session_run, "run_terminal_client", _ended_by(disposition))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == f"{quest.id} · T · " + tail.format(id=quest.id) + "\n"
+
+
+@pytest.mark.anyio
+async def test_an_end_frame_disposition_outranks_a_witnessed_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-22-end-over-pause")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _ended_by("abandon",
+                  {"type": "workflow_paused", "payload": {"reason": "max_loops"}}))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == f"{quest.id} · T · abandoned\n\n"
+
+
+@pytest.mark.anyio
+async def test_the_clients_own_leave_outranks_the_end_frame_disposition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-22-own-leave-first")
+    monkeypatch.setattr(
+        session_run, "run_terminal_client", _ended_by("save", disposition="archive"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (f"{quest.id} · T · shelved\n"
+                   f"resume: imp resume {quest.id} — or find it later with imp search\n\n")
 
 
 @pytest.mark.anyio

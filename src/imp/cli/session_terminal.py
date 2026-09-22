@@ -42,6 +42,7 @@ from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_LEAVE,
     INTERRUPT_EVENT_TYPES,
+    EndOfRun,
     SkillRequest,
 )
 
@@ -86,6 +87,7 @@ class RunWitness:
         self._paused_error: dict[str, Any] | None = None
         self._pending_error: dict[str, Any] | None = None
         self._terminal: TerminalOutcome | None = None
+        self._leave: str | None = None
 
     def note(self, event: dict[str, Any]) -> None:
         etype = event.get("type")
@@ -133,6 +135,14 @@ class RunWitness:
         """The segment-terminal event witnessed, if any. One slot, so witnessing two
         endings is unrepresentable."""
         return self._terminal
+
+    def note_end(self, end: EndOfRun) -> None:
+        self._leave = end.disposition
+
+    def leave(self) -> str | None:
+        """The leave control the end frame named; None when none arrived or the run
+        concluded itself."""
+        return self._leave
 
     def _folded_reason(self) -> _PauseInfo | None:
         from imp.cli.main import _PauseInfo
@@ -386,7 +396,7 @@ async def run_terminal_client(
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
                 tg.start_soon(_flush_pending_provider)
-                ending = await client.receive_events()
+                ending = await client.receive_events(on_end=witness.note_end)
                 tg.cancel_scope.cancel()
         finally:
             coord.detach_runner()
