@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+
+import anyio
 import pytest
 
-from tests.async_wait import wait_until
+from tests.async_wait import wait_pgid_gone, wait_until
 
 
 @pytest.fixture
@@ -44,4 +49,23 @@ def test_wait_until_defaults_backstop_to_hang_backstop() -> None:
 
     from tests.async_wait import HANG_BACKSTOP
     default = inspect.signature(wait_until).parameters["backstop"].default
+    assert default == HANG_BACKSTOP
+
+
+@pytest.mark.anyio
+async def test_wait_pgid_gone_waits_out_the_unreaped_zombie() -> None:
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    os.killpg(proc.pid, signal.SIGKILL)
+    with anyio.move_on_after(0.3) as scope:
+        await wait_pgid_gone(proc.pid, backstop=5.0)
+    assert scope.cancel_called      # an unreaped zombie still holds the group
+    proc.wait()                     # reaped — now the group is unsignalable
+    await wait_pgid_gone(proc.pid, backstop=5.0)
+
+
+def test_wait_pgid_gone_defaults_backstop_to_hang_backstop() -> None:
+    import inspect
+
+    from tests.async_wait import HANG_BACKSTOP
+    default = inspect.signature(wait_pgid_gone).parameters["backstop"].default
     assert default == HANG_BACKSTOP
