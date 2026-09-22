@@ -26,6 +26,7 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 from imp.engine.types import Pause, SourceLoc, Step
+from tests.async_wait import wait_until
 from tests.conftest import (
     _pid_gone_or_zombie,
     assert_all_tool_contexts_owned,
@@ -250,13 +251,13 @@ def test_sigterm_reaches_the_joined_shell_inside_the_keeper() -> None:
                  "for i in $(seq 1 600); do sleep 0.1; done; echo DONE"}))
 
         async def _killer() -> None:
-            deadline = time.monotonic() + 20.0  # generous inner budget
-            while not ready.exists():
-                if time.monotonic() > deadline:
-                    raise AssertionError("the sandboxed command never signalled readiness")
-                await anyio.sleep(0.02)
+            # Two independent observables, both required: readiness proves the
+            # sandboxed command is running (so its tree is enumerable), while the
+            # registry entry is what the assertions below actually read — the host
+            # side appends it after the spawn, so readiness alone races it.
+            await wait_until(ready.exists, backstop=30.0)
+            await wait_until(lambda: bool(ctx.running_processes), backstop=30.0)
             procs = list(ctx.running_processes)
-            assert procs, "the bash tool registered no process"
             # Enumerate WHILE the tree is alive: once the root dies the PPid links
             # are gone, and /proc/<pid>/cmdline with them.
             inner = descendant_pids(procs[0].pid)
