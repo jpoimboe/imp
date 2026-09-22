@@ -330,31 +330,16 @@ def test_clean_block_untitled_is_bare_gold_id() -> None:
                      pal.ansi("vahi04", "wordmark")]             # bare gold id, no ` · `
 
 
-def test_clean_block_body_is_unindented_and_blank_separated() -> None:
-    from imp.cli import palette as pal
-    lines = main._clean_block("merged into master", "vahi04", "Real title",
-                              color=True,
-                              body=["4091ab6d  first", "832c04d7  second"])
-    assert lines == [
-        pal.ansi("merged into master", "wordmark"),
-        "",                                   # one blank between headline and body
-        "4091ab6d  first",                    # flush left: this surface does NOT indent
-        "832c04d7  second",
-        "",                                   # one blank between body and identity
-        f'{pal.ansi("vahi04", "wordmark")} · Real title',
-    ]
-
-
-def test_clean_block_empty_body_keeps_the_bare_two_line_block() -> None:
-    from imp.cli import palette as pal
-    assert main._clean_block("completed", "vahi04", "", color=True, body=[]) == [
-        pal.ansi("completed", "wordmark"),
-        pal.ansi("vahi04", "wordmark"),       # no blanks at all when there is no body
-    ]
-
-
 _SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
 _SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def _quest(*, quest_id: str = "soro82",
+           title: str = "Closing commit list layout") -> _Change:
+    """A quest stub with a known id and title for _emit_completed assertions."""
+    q = _Change([])
+    q.id, q.title = quest_id, title
+    return q
 
 
 def test_commit_lines_are_gray_sha8_two_spaces_then_the_plain_subject() -> None:
@@ -363,14 +348,15 @@ def test_commit_lines_are_gray_sha8_two_spaces_then_the_plain_subject() -> None:
         [{"sha": _SHA_A, "subject": "cli: print the commit list"},
          {"sha": _SHA_B, "subject": "test: cover both finish paths"}],
         color=True)
-    # the sha is truncated to 8 and gray; the subject carries no styling of its own
-    assert lines == [pal.ansi("4091ab6d", "gray") + "  cli: print the commit list",
-                     pal.ansi("832c04d7", "gray") + "  test: cover both finish paths"]
+    # two-space indent, then the sha truncated to 8 and gray; the subject carries
+    # no styling of its own
+    assert lines == ["  " + pal.ansi("4091ab6d", "gray") + "  cli: print the commit list",
+                     "  " + pal.ansi("832c04d7", "gray") + "  test: cover both finish paths"]
 
 
 def test_commit_lines_without_color_are_plain_text() -> None:
     lines = main._commit_lines([{"sha": _SHA_A, "subject": "only"}], color=False)
-    assert lines == ["4091ab6d  only"]
+    assert lines == ["  4091ab6d  only"]
 
 
 def test_commit_lines_caret_escape_a_subject_carrying_control_bytes() -> None:
@@ -378,7 +364,7 @@ def test_commit_lines_caret_escape_a_subject_carrying_control_bytes() -> None:
     cursor, clear the screen or beep."""
     lines = main._commit_lines(
         [{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}], color=False)
-    assert lines == ["4091ab6d  boom^[[2Jwipe^G"]
+    assert lines == ["  4091ab6d  boom^[[2Jwipe^G"]
     assert "\x1b" not in lines[0]
     assert "\x07" not in lines[0]
 
@@ -387,20 +373,70 @@ def test_commit_lines_of_nothing_is_nothing() -> None:
     assert main._commit_lines([], color=True) == []
 
 
-def test_emit_completed_merged_prints_gold_block_no_green(
+def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys) -> None:
+    # AC 1: spine, two commit lines indented exactly two spaces, one trailing blank.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(
+        _quest(), merged_base="master",
+        commits=[{"sha": _SHA_A, "subject": "first"},
+                 {"sha": _SHA_B, "subject": "second"}])
+    assert capsys.readouterr().out == (
+        "soro82 · Closing commit list layout · merged into master\n"
+        "  4091ab6d  first\n"
+        "  832c04d7  second\n"
+        "\n")
+
+
+def test_emit_completed_not_merged_renders_the_same_commit_list(monkeypatch, capsys) -> None:
+    # AC 2: the four-segment done tail, same indented list beneath it.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(
+        _quest(), merged_base=None,
+        commits=[{"sha": _SHA_A, "subject": "first"},
+                 {"sha": _SHA_B, "subject": "second"}])
+    assert capsys.readouterr().out == (
+        "soro82 · Closing commit list layout · done · commits on imp/soro82\n"
+        "  4091ab6d  first\n"
+        "  832c04d7  second\n"
+        "\n")
+
+
+def test_emit_completed_with_no_commits_is_the_bare_spine(monkeypatch, capsys) -> None:
+    # AC 3a
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_quest(), merged_base="master")
+    assert capsys.readouterr().out == (
+        "soro82 · Closing commit list layout · merged into master\n"
+        "\n")
+
+
+def test_emit_completed_untitled_and_intentless_shows_the_unnamed_placeholder(
     monkeypatch, capsys,
 ) -> None:
+    """Neither a title nor an opening intent: the middle segment is the dim
+    `(unnamed)` placeholder — never a bare id with no ` · `."""
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_quest(title=""), merged_base="master")
+    assert capsys.readouterr().out == "soro82 · (unnamed) · merged into master\n\n"
+
+
+def test_emit_completed_merged_prints_the_gold_spine_never_green(
+    monkeypatch, capsys,
+) -> None:
+    # AC 4a, 4b, 4c
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_Change([]), merged_base="master")
+    main._emit_completed(_quest(), merged_base="master",
+                         commits=[{"sha": _SHA_A, "subject": "first"}])
     out = capsys.readouterr().out
     lines = out.split("\n")
-    assert lines[0] == pal.ansi("merged into master", "wordmark")   # gold headline, own line
-    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity, bare id
-    assert pal.ansi("merged into master", "green") not in out       # no green anywhere
-    assert " · " not in out                                         # no crammed id·title·tail spine
+    assert lines[0] == (f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
+                        f'{pal.ansi("merged into master", "wordmark")}')
+    assert lines[1] == "  " + pal.ansi("4091ab6d", "gray") + "  first"  # subject unstyled
+    assert lines[2] == ""
+    assert pal.ansi("X", "green").split("X")[0] not in out   # no green-coded text at all
     assert "✓" not in out
-    assert not out.startswith("\n")                                 # no leading blank
+    assert not out.startswith("\n")                          # no leading blank
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
@@ -408,95 +444,56 @@ def test_emit_completed_merged_prints_gold_block_no_green(
 def test_emit_completed_names_the_witnessed_base_not_the_quest_attribute(
     monkeypatch, capsys,
 ) -> None:
+    # AC 7
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    quest = _Change([])
+    quest = _quest()
     assert quest.base_branch == "master"      # the attribute the emitter must NOT read
     main._emit_completed(quest, merged_base="release/9")
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "merged into release/9"
+    assert out.split("\n")[0] == "soro82 · Closing commit list layout · merged into release/9"
     assert "master" not in out
 
 
-def test_emit_completed_non_merge_headline_is_imp_branch_gold(monkeypatch, capsys) -> None:
-    from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    quest = _Change([])
-    assert quest.materialized is False                          # the real render seam
-    main._emit_completed(quest, merged_base=None)
-    out = capsys.readouterr().out
-    lines = out.split("\n")
-    # Headline names the quest branch imp/<id>, NOT the base branch, even though
-    # the client quest object is still materialized=False.
-    assert lines[0] == pal.ansi("done · commits on imp/2026-06-12-run-x", "wordmark")
-    assert "commits on master" not in out                       # never the base branch
-    assert pal.ansi("done · commits on imp/2026-06-12-run-x", "green") not in out  # not green
-    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity
-    assert out.endswith("\n\n")
-    assert not out.endswith("\n\n\n")
-
-
-def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(
-        _Change([]), merged_base="master",
-        commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
-                 {"sha": _SHA_B, "subject": "cli: print the commit list"}])
-    assert capsys.readouterr().out == (
-        "merged into master\n"
-        "\n"
-        "4091ab6d  cli: derive the quest's commits\n"
-        "832c04d7  cli: print the commit list\n"
-        "\n"
-        "2026-06-12-run-x\n"
-        "\n")
-
-
-def test_emit_completed_not_merged_renders_the_same_body(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged_base=None,
-                         commits=[{"sha": _SHA_A, "subject": "only"}])
-    assert capsys.readouterr().out == (
-        "done · commits on imp/2026-06-12-run-x\n"
-        "\n"
-        "4091ab6d  only\n"
-        "\n"
-        "2026-06-12-run-x\n"
-        "\n")
-
-
-def test_emit_completed_colors_the_sha_and_leaves_the_subject_plain(
+def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
     monkeypatch, capsys,
 ) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_Change([]), merged_base="master",
-                         commits=[{"sha": _SHA_A, "subject": "first"}])
-    lines = capsys.readouterr().out.split("\n")
-    assert lines[0] == pal.ansi("merged into master", "wordmark")
-    assert lines[1] == ""
-    assert lines[2] == pal.ansi("4091ab6d", "gray") + "  first"   # subject unstyled
-    assert lines[3] == ""
-    assert lines[4] == pal.ansi("2026-06-12-run-x", "wordmark")
+    quest = _quest()
+    assert quest.materialized is False                          # the real render seam
+    main._emit_completed(quest, merged_base=None)
+    out = capsys.readouterr().out
+    # The tail names the quest branch imp/<id>, NOT the base branch, even though the
+    # client quest object is still materialized=False.
+    assert out.split("\n")[0] == (
+        f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
+        f'{pal.ansi("done · commits on imp/soro82", "wordmark")}')
+    assert "commits on master" not in out
+    assert pal.ansi("done · commits on imp/soro82", "green") not in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
     monkeypatch, capsys,
 ) -> None:
+    # AC 6
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged_base="master",
-                         commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe"}])
+    main._emit_completed(_quest(), merged_base="master",
+                         commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}])
     out = capsys.readouterr().out
-    assert "4091ab6d  boom^[[2Jwipe\n" in out
+    assert "  4091ab6d  boom^[[2Jwipe^G\n" in out
     assert "\x1b" not in out
+    assert "\x07" not in out
 
 
 def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    # AC 5
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged_base=None, intent="add a dark mode toggle")
+    main._emit_completed(_quest(title=""), merged_base="master",
+                         intent="add a dark mode toggle")
     out = capsys.readouterr().out
-    lines = out.split("\n")
-    assert lines[0] == "done · commits on imp/2026-06-12-run-x"      # headline on its own line
-    assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
+    assert out.split("\n")[0] == "soro82 · > add a dark mode toggle · merged into master"
     assert "(unnamed)" not in out
     assert "\x1b[" not in out
 
@@ -619,16 +616,21 @@ def _screen_rows(raw: str, *, tty: bool) -> list[str]:
 @pytest.mark.parametrize("tty", [True, False], ids=["pty", "pipe"])
 @pytest.mark.parametrize("warnings", [_END_OF_RUN_WARNINGS, []],
                          ids=["warnings", "no-warnings"])
-def test_exactly_one_blank_between_narrative_and_headline(
+def test_exactly_one_blank_between_narrative_and_the_spine(
     monkeypatch, warnings, tty,
 ) -> None:
+    # AC 8a and 8b, on both a tty and a pipe.
     monkeypatch.setenv("NO_COLOR", "1")
-    rows = _screen_rows(_end_of_run_output(warnings, tty=tty), tty=tty)
-    h = next(i for i, r in enumerate(rows) if r.strip() == "merged into master")
-    assert rows[h - 1].strip() == ""      # exactly one blank directly above the headline
+    raw = _end_of_run_output(warnings, tty=tty)
+    rows = _screen_rows(raw, tty=tty)
+    spine = "2026-06-12-run-x · (unnamed) · merged into master"
+    h = next(i for i, r in enumerate(rows) if r.strip() == spine)
+    assert rows[h - 1].strip() == ""      # exactly one blank directly above the spine
     assert rows[h - 2].strip() != ""      # …and not two
     last = "• retrying after API 529" if warnings else "merging · complete"
     assert last in rows[h - 2]            # …and it follows the LAST narrative line
+    assert raw.endswith("\n\n")           # …and the block ends on exactly one blank
+    assert not raw.endswith("\n\n\n")
 
 
 def test_the_closing_block_prints_the_commits_recorded_on_the_merge(
@@ -646,12 +648,9 @@ def test_the_closing_block_prints_the_commits_recorded_on_the_merge(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "merged into master\n"
-        "\n"
-        "4091ab6d  first\n"
-        "832c04d7  second\n"
-        "\n"
-        "2026-06-12-run-x\n"
+        "2026-06-12-run-x · (unnamed) · merged into master\n"
+        "  4091ab6d  first\n"
+        "  832c04d7  second\n"
         "\n")
 
 
@@ -666,11 +665,8 @@ def test_the_closing_block_prints_the_commits_recorded_on_a_plain_done(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "done · commits on imp/2026-06-12-run-x\n"
-        "\n"
-        "832c04d7  only\n"
-        "\n"
-        "2026-06-12-run-x\n"
+        "2026-06-12-run-x · (unnamed) · done · commits on imp/2026-06-12-run-x\n"
+        "  832c04d7  only\n"
         "\n")
 
 
@@ -707,6 +703,6 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
         _Change(empty), witness=_witness(*empty), ending=StreamEnding.ENDED,
         coord=_NO_LEAVE, leave_state={}) == 0
     assert capsys.readouterr().out == no_key
-    assert no_key == ("done · commits on imp/2026-06-12-run-x\n"
-                      "2026-06-12-run-x\n"
-                      "\n")
+    assert no_key == (
+        "2026-06-12-run-x · (unnamed) · done · commits on imp/2026-06-12-run-x\n"
+        "\n")

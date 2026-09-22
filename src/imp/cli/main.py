@@ -198,7 +198,8 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 # is plain, else the opening prompt renders dim with a plain-ASCII `> ` prefix,
 # else the dim `(unnamed)` placeholder. Exception to the old "no dim, no glyphs"
 # rule — but dim is color-only and `> ` is plain ASCII, so NO_COLOR / non-TTY
-# output stays plain and script-parseable. Shared by `new`/`resume` and leaves.
+# output stays plain and script-parseable. Shared by `new`/`resume`, leaves, and the
+# completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
@@ -230,15 +231,16 @@ def _resume_line(token: str, suffix: str = "") -> str:
 def _emit_completed(quest: Quest, *, merged_base: str | None,
                     intent: str | None = None,
                     commits: Sequence[dict[str, str]] = ()) -> None:
-    """The clean-finish block: a gold `merged into <base>` / `done · commits on imp/<id>`
-    headline on its own line, the run's commits oldest-first when any were recorded, then
-    the identity line; one trailing blank. `merged_base` is the branch the merge landed
-    on, None when the run completed without merging."""
+    """The clean-finish block on the shared status spine: a gold `merged into <base>` /
+    `done · commits on imp/<id>` tail, then the run's commits indented beneath it,
+    oldest-first when any were recorded; one trailing blank. `merged_base` is the branch
+    the merge landed on, None when the run completed without merging."""
     color = should_use_color(sys.stdout)
-    head = (f"merged into {merged_base}" if merged_base is not None
+    tail = (f"merged into {merged_base}" if merged_base is not None
             else f"done · commits on imp/{quest.id}")
-    for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent,
-                           body=_commit_lines(commits, color=color)):
+    print(_status_spine(quest.id, quest.title, tail, "wordmark", color=color,
+                        intent=intent))
+    for ln in _commit_lines(commits, color=color):
         print(ln)
     print()
 
@@ -291,24 +293,20 @@ def _identity_line(quest_id: str, title: str, *, color: bool,
 
 
 def _clean_block(head: str, quest_id: str, title: str, *, color: bool,
-                 intent: str | None = None,
-                 body: Sequence[str] = ()) -> list[str]:
-    """The clean-exit sibling of `_error_block`: a gold `head` line on its own line,
-    an optional un-indented `body` set off by one blank line on each side, then the
-    identity line. No resume line — pause callers append their own resume line."""
-    lines = [ansi(head, "wordmark", enabled=color)]
-    if body:
-        lines.extend(["", *body, ""])
-    lines.append(_identity_line(quest_id, title, color=color, intent=intent))
-    return lines
+                 intent: str | None = None) -> list[str]:
+    """The clean-exit sibling of `_error_block`: a gold `head` line on its own line, then
+    the identity line. No resume line — pause callers append their own resume line."""
+    return [ansi(head, "wordmark", enabled=color),
+            _identity_line(quest_id, title, color=color, intent=intent)]
 
 
 def _commit_lines(commits: Sequence[dict[str, str]], *, color: bool) -> list[str]:
-    """One `<sha8>  <subject>` line per recorded commit, oldest first: gray sha8,
-    subject in the default fg. The subject is content-origin text, so it is
-    caret-escaped before any SGR is wrapped around the line."""
+    """One `  <sha8>  <subject>` line per recorded commit, oldest first, indented two
+    spaces: gray sha8, subject in the default fg. The subject is content-origin text, so
+    it is caret-escaped before any SGR is wrapped around the line."""
     from imp.cli.render_text import _caret_escape
-    return [ansi(c["sha"][:8], "gray", enabled=color) + "  " + _caret_escape(c["subject"])
+    return ["  " + ansi(c["sha"][:8], "gray", enabled=color) + "  "
+            + _caret_escape(c["subject"])
             for c in commits]
 
 
