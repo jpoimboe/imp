@@ -26,7 +26,7 @@ A project's runtime state lives **outside** its checkout, in a per-project state
 
 | Under the state directory | Holds |
 |---|---|
-| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `spike/`, `progress.md`, and the `workflow/` snapshot |
+| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `spike/`, `progress.md`, the `workflow/` snapshot, and `pinned-src/`, holding the source snapshot of imp each session daemon runs from |
 | `worktrees/<id>/` | the quest's git worktree, on branch `imp/<id>` |
 | `archive/` | completed quests: content-addressed blobs, per-quest records, SQLite index |
 | `config.yaml` | the local config layer (`imp config set --local`) |

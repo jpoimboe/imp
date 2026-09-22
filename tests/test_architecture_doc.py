@@ -822,7 +822,9 @@ def test_architecture_documents_no_minors_pass_for_spec_or_plan_review() -> None
 def test_architecture_states_the_artifacts_means_committed_boundary() -> None:
     text = ARCH.read_text()
     assert ("| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, "
-            "`artifacts/`, `spike/`, `progress.md`, and the `workflow/` snapshot |") in text
+            "`artifacts/`, `spike/`, `progress.md`, the `workflow/` snapshot, and "
+            "`pinned-src/`, holding the source snapshot of imp each session daemon "
+            "runs from |") in text
     assert "`artifacts/` means committed: everything under it is journaled by the engine" in text
     assert ("Throwaway spiker evidence is deliberately outside that boundary, in the sibling "
             "`spike/`, which the engine never journals — it dies with the quest home.") in text
