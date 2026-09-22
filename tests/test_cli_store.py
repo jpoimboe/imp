@@ -10,7 +10,7 @@ from imp.engine import archive, worktree
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control
+from tests.conftest import _archive_with_event, _seed_control
 
 
 def _append_event(quest: Quest, event: dict) -> None:
@@ -190,6 +190,27 @@ def test_scan_homes_tolerates_future_layout_version(tmp_path: Path) -> None:
     assert "futq" in digs
     assert "goodq" in digs
     assert digs["goodq"].intent_title == "some intent"
+
+
+def test_quest_card_workflow_is_the_quests_effective_name(tmp_path: Path) -> None:
+    """A quest's own name wins; `null` and an absent key both read as the project
+    default, which _seed_control pins to `imp`."""
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Mem", quest_id="memq", base_branch="main",
+                 workflow="memory")
+    Quest.create(tmp_path, title="Plain", quest_id="noneq", base_branch="main")
+    _archive_with_event(
+        tmp_path, "archq", "Archived",
+        '{"type": "step_started", "timestamp": "2026-06-01T00:00:00+00:00",'
+        ' "payload": {"step": "spec", "phase": "spec"}}\n')
+    store = LocalStore(tmp_path)
+
+    memq = store.quest_card("memq")
+    noneq = store.quest_card("noneq")
+    archq = store.quest_card("archq")
+    assert memq is not None and memq.workflow == "memory"
+    assert noneq is not None and noneq.workflow == "imp"
+    assert archq is not None and archq.workflow == "imp"
 
 
 def test_scan_homes_reports_lock_live(tmp_path: Path) -> None:

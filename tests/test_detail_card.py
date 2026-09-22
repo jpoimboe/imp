@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.cli import main
+from imp.cli.store import make_store
 from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
@@ -158,8 +159,9 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
     assert "Build widget" in card
     assert "paused" in card
     assert "spec phase · writing spec" in card  # <phase label> · <step label>
-    assert "spec-writer" not in card  # never the raw step slug
-    assert "(spec)" not in card  # never the old "<step> (<phase>)" raw-slug format
+    step_line = next(ln for ln in card.splitlines() if ln.startswith("step:"))
+    assert "spec-writer" not in step_line  # never the raw step slug on the step: line
+    assert "(spec)" not in step_line  # never the old "<step> (<phase>)" raw-slug format
     assert "main" in card  # base_branch
     assert "2026-06-16-dep001" in card  # depends_on
     assert "build a widget please" in card  # originating prompt = first user_message
@@ -261,7 +263,9 @@ def test_quest_card_dims_labels_and_intent_header(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     _live_change(tmp_path, "2026-06-20-dim01")
-    lines = main._quest_card(tmp_path, "2026-06-20-dim01", now=_NOW, color=True)
+    card = make_store(tmp_path).quest_card("2026-06-20-dim01")
+    assert card is not None
+    lines = main._quest_card(card, now=_NOW, color=True, ledger=None)
     joined = "\n".join(lines)
     assert pal.ansi("id:", "dim") in joined              # metadata label dimmed
     assert pal.ansi("status:", "dim") in joined
@@ -285,7 +289,9 @@ def test_quest_card_dims_summary_header(tmp_path: Path) -> None:
                / "artifacts" / "summary")
     summary.mkdir(parents=True)
     (summary / "2026-06-20-dim02.md").write_text("Shipped the widget.\n")
-    lines = main._quest_card(tmp_path, "2026-06-20-dim02", now=_NOW, color=True)
+    card = make_store(tmp_path).quest_card("2026-06-20-dim02")
+    assert card is not None
+    lines = main._quest_card(card, now=_NOW, color=True, ledger=None)
     assert pal.ansi("summary:", "dim") in lines           # dim summary section header
     idx = lines.index(pal.ansi("summary:", "dim"))
     assert lines[idx - 1] == ""                            # one blank line precedes it
@@ -295,7 +301,9 @@ def test_quest_card_dims_summary_header(tmp_path: Path) -> None:
 def test_quest_card_plain_without_color_keeps_headers(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _live_change(tmp_path, "2026-06-20-dim03")
-    lines = main._quest_card(tmp_path, "2026-06-20-dim03", now=_NOW, color=False)
+    card = make_store(tmp_path).quest_card("2026-06-20-dim03")
+    assert card is not None
+    lines = main._quest_card(card, now=_NOW, color=False, ledger=None)
     joined = "\n".join(lines)
     assert "\x1b[" not in joined                            # no SGR escapes anywhere
     assert "intent:" in lines                               # header text still present

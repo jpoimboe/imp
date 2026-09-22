@@ -448,7 +448,7 @@ searchable.  Quests can be interacted with via the CLI:
 
 ```bash
 imp list                         # active work, drafts, and backlog
-imp show <id>                    # intent, status, timing, and result
+imp show <id>                    # intent, status, timing, result, and run ledger
 imp log <id>                     # readable story of the run
 imp log --summary <id>           # per-step ledger of time, tokens, and quota
 imp search "rate limit"          # live and archived conversations

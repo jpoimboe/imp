@@ -470,6 +470,17 @@ def summary_totals(
     return work, total
 
 
+def total_cell(summary: list[StepRow],
+               quota: QuotaColumn | QuotaFallback | None) -> str:
+    """The total row's right-most cell: dollars, or the run's share of the weekly
+    window once a gauge resolves. The share is taken over the rows rendered, so it
+    agrees with the column above it under a windowing flag."""
+    if isinstance(quota, QuotaColumn):
+        return quota.cell(rows_units(summary))
+    _, total = summary_totals(summary, None)
+    return cost_cell(total)
+
+
 @dataclass
 class SummaryHeader:
     workflow: str
@@ -607,18 +618,16 @@ def _breakdown_line(provider: str, cell: str, *, name_w: int, dur_w: int,
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int,
-                   quota: QuotaColumn | QuotaFallback | None = None) -> list[str]:
+                   quota: QuotaColumn | QuotaFallback | None = None,
+                   header_line: bool = True) -> list[str]:
     open_label = open_span_label(header.status)
     work, total = summary_totals(summary, header.total_seconds,
                                  header.exclusions)
     column = quota if isinstance(quota, QuotaColumn) else None
-    # The total's share is taken over the rows rendered, so it agrees with the
-    # column above it under a windowing flag; unfiltered they are the same sum.
-    total_last = (cost_cell(total) if column is None
-                  else column.cell(rows_units(summary)))
+    total_last = total_cell(summary, quota)
     name_w, dur_w, in_w, out_w, last_w = _column_widths(
         summary, open_label, work, total, total_last, column)
-    lines = [_header_line(header, color=color)]
+    lines = [_header_line(header, color=color)] if header_line else []
     if summary:
         lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
                               out_w=out_w, last_w=last_w,

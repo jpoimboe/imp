@@ -12,7 +12,8 @@ from imp.engine.quest import LAYOUT_VERSION
 from imp.paths import project_state_dir
 
 
-def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
+def _make_worktree(control: Path, slug: str, status: str = "paused",
+                   workflow: str | None = None) -> None:
     from imp.engine.state import State
 
     quest_dir = project_state_dir(control) / "quests" / slug
@@ -20,6 +21,7 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
                     "created_at": "2026-01-01T00:00:00+00:00",
+                    "workflow": workflow,
                     "layout_version": LAYOUT_VERSION}))
     events = [
         {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
@@ -36,8 +38,8 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     State(id=slug, status=status, step="plan", step_attempt=0).save(quest_dir / "state")
 
 
-def _setup(tmp_path, monkeypatch, slug="sum-smoke"):
-    _make_worktree(tmp_path, slug)
+def _setup(tmp_path, monkeypatch, slug="sum-smoke", workflow=None):
+    _make_worktree(tmp_path, slug, workflow=workflow)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -57,6 +59,22 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     assert "plan\n" in out
     assert "  plan-writer  3m 10s" in out
     assert "\n  total        4m 45s" in out
+
+
+@pytest.mark.parametrize(
+    "workflow,expected",
+    [("memory", "memory"), (None, "default")],
+    ids=["explicit", "null"],
+)
+def test_summary_header_names_the_quests_own_workflow(
+        workflow, expected, tmp_path, monkeypatch, capsys):
+    """A quest's own workflow heads both renders; `"workflow": null` — every quest
+    created without an explicit one — reads as the project default."""
+    slug = _setup(tmp_path, monkeypatch, slug="wf-run", workflow=workflow)
+    assert main(["log", "-s", slug]) == 0
+    assert f"{expected}  ·  {slug}  ·  paused\n" in capsys.readouterr().out
+    assert main(["log", "-s", slug, "--md=-"]) == 0
+    assert f"# {expected} — {slug}" in capsys.readouterr().out
 
 
 def test_summary_total_excludes_a_pause_between_steps(tmp_path, monkeypatch, capsys):

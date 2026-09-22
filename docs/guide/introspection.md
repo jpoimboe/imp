@@ -79,18 +79,23 @@ finished); do not invent quests that the commands did not list.
 ## Detail on one quest
 
 `imp show <id>` — the overview detail card: id, title, status, timing,
-dependencies, opening intent, and the summary inlined. A quest that completed with a
-recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. A quest
-halted as paused or error shows a `reason:` line beneath `status:` naming why it
-stopped; `--json` carries the raw token as `pause_reason`. A running
-quest shows a `vars:` line of its effective workflow variables; one still in the backlog
-shows the overrides it was filed with, or no line at all if it was filed with none. `--json`
-carries the same under a `vars` key. Add a
-subcommand to narrow to one facet: `imp show <id> spec` for the raw spec and
-`imp show <id> verify` for the last failing test-gate run, or add `--json` to get
-the overview card as a structured object. For the event timeline,
-use `imp events <id>` (below). Read the facet the user asked about and answer from
-it.
+dependencies, opening intent, the summary inlined, and the run ledger. A quest
+with recorded steps carries a `run:` line — work time, tokens in and out, and
+the charge (its share of the weekly quota window, or the dollar cost) — then a
+`workflow:` line naming the workflow it ran under, and last on the card a
+`ledger:` section holding the full per-step table. A quest that has not run a
+step yet shows none of the three, and neither does one still in the backlog.
+A quest that completed with a recorded merge SHA also shows a `merge_commit:`
+line beneath `base_branch:`. A quest halted as paused or error shows a
+`reason:` line beneath `status:` naming why it stopped; `--json` carries the
+raw token as `pause_reason`. A running quest shows a `vars:` line of its
+effective workflow variables; one still in the backlog shows the overrides it
+was filed with, or no line at all if it was filed with none. `--json` carries
+the same under a `vars` key. Add a subcommand to narrow to one facet:
+`imp show <id> spec` for the raw spec and `imp show <id> verify` for the last
+failing test-gate run, or add `--json` to get the overview card as a structured
+object. For the event timeline, use `imp events <id>` (below). Read the facet
+the user asked about and answer from it.
 
 ## Reading an event timeline — three tiers
 
@@ -132,6 +137,10 @@ time (human waits and pauses deducted), its tokens in and out, and a right-most
 column that is either money or quota. The windowing filters above narrow the
 rows, and `--md` / `--html` export the same table (`--summary` is the long form
 of `-s`).
+The same table is on `imp show <id>` — a `ledger:` section at the foot of the
+card, with its total row restated as a one-line `run:` field high up — so
+`imp log <id> -s` is where the windowing and export flags live rather than
+where the numbers live.
 
 On a subscription run that right-most column is `weekly`: the share of the
 account's weekly quota window this quest consumed, attributed to *this* quest
@@ -166,8 +175,10 @@ answers them — not the sandbox floor:
 
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
   read: the quest's detail card (id, title, status, why it halted, timing, dependencies, the
-  opening intent, and the summary inlined). Add `spec` for the raw spec, `verify`
-  for the last failing gate run, or `--json` for the card as a structured object.
+  opening intent, the summary inlined, and the run ledger — a `run:` totals line
+  and the per-step `ledger:` table). Add `spec` for the raw spec, `verify`
+  for the last failing gate run, or `--json` for the card as a structured object
+  (which carries no ledger).
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`

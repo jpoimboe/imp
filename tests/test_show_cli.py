@@ -327,7 +327,8 @@ def test_show_step_line_prints_human_labels_not_raw_slugs(
         )
     out = _run(monkeypatch, tmp_path, "show", "shwstp")
     assert "spec phase · writing spec" in out  # <phase label> · <step label>
-    assert "write_spec" not in out  # never the raw step slug
+    step_line = next(ln for ln in out.splitlines() if ln.startswith("step:"))
+    assert "write_spec" not in step_line  # never the raw step slug on the step: line
 
 
 def test_show_step_line_omits_phase_when_no_phase_label(
@@ -760,12 +761,15 @@ def test_show_card_renders_merge_blocked_two_words(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
     from imp.cli.main import _quest_card
+    from imp.cli.store import make_store
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Gate", quest_id="mbk01", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "merge_blocked"
     st.save(ch.state_dir)
-    card = "\n".join(_quest_card(tmp_path, "mbk01", now=datetime.now(UTC), color=False))
+    qc = make_store(tmp_path).quest_card("mbk01")
+    assert qc is not None
+    card = "\n".join(_quest_card(qc, now=datetime.now(UTC), color=False, ledger=None))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "merge blocked" in status_line
     assert "merge_blocked" not in status_line
@@ -787,13 +791,16 @@ def test_show_card_step_line_shows_for_error(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
     from imp.cli.main import _quest_card
+    from imp.cli.store import make_store
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Broke", quest_id="err02", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "error"
     st.step = "task-lead"
     st.save(ch.state_dir)
-    card = "\n".join(_quest_card(tmp_path, "err02", now=datetime.now(UTC), color=False))
+    qc = make_store(tmp_path).quest_card("err02")
+    assert qc is not None
+    card = "\n".join(_quest_card(qc, now=datetime.now(UTC), color=False, ledger=None))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "error" in status_line
     assert any(ln.startswith("step:") for ln in card.splitlines())   # error is in-flight
