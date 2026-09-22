@@ -407,9 +407,8 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ('- `imp log <id>` — the human "read the story" narrative, tool bursts '
             "folded; `--step <name>` scopes it to one step, `-s` swaps the story "
-            "for a per-step ledger of time, tokens, and the run's share of the "
-            "weekly quota window (or its cost, when that window is "
-            "unmeasurable).") in flat
+            "for the per-step ledger `imp show` also carries, and owns its "
+            "windowing and `--md`/`--html` export.") in flat
     assert ("- `imp events <id>` — the agent-facing digest, where event content "
             "actually lives: bare prints an index (steps, subagents, types); add a "
             "leaf selector (`--limit N`, `--type`, `--agent <handle>`, a range, "
