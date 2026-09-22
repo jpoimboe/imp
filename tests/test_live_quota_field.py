@@ -268,6 +268,17 @@ def test_a_live_over_limit_reading_is_untouched() -> None:
     assert "\x1b[31m101%" in colored[1]
 
 
+def test_the_countdown_has_no_past_reset_branch() -> None:
+    from imp.cli.live_driver import _reset_countdown
+
+    # Its only None is the carrier stating no reset time at all.
+    assert _reset_countdown(None, _NOW) is None
+    # A past reset is now filtered out before it can reach here, so the branch
+    # that used to swallow it is gone: the countdown just floors at a minute.
+    assert _reset_countdown(int(_NOW) - 10, _NOW) == "1m"
+    assert _reset_countdown(int(_NOW) + 2400, _NOW) == "40m"
+
+
 def test_the_prelaunch_row_expires_against_the_wall_clock() -> None:
     from imp.cli.live_driver import compose_prelaunch_position_row
 

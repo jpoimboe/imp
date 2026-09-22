@@ -106,15 +106,11 @@ def _coarse_left(seconds: float) -> str:
     return f"{max(1, round(seconds / 60))}m"
 
 
-def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
-    """Time until this window resets. None when the carrier stated none or it has
-    already passed: the percentage is still true, only the countdown is unknown."""
+def _reset_countdown(resets_at: int | None, now: float) -> str | None:
+    """Time until this window resets. None only when the carrier stated none."""
     if resets_at is None:
         return None
-    remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
-    if remaining <= 0:
-        return None
-    return _coarse_left(remaining)
+    return _coarse_left(resets_at - now)
 
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
