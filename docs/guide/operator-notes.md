@@ -138,6 +138,23 @@ genuinely older checkout is the other cause — an agent working in a quest work
 whose branch predates the archive's last format change, where `pythonpath: [src]`
 resolves `imp` to that older source; there, update the checkout.
 
+A run that has already merged no longer pauses when the stale process cannot file
+it. The terminal status and the merge event are written before the archive is
+touched, so a refusal there is post-terminal bookkeeping: imp keeps the `merged`
+(or `done`) status, exits 0, and leaves the quest home standing under one warning —
+
+```
+warning: this quest finished but was not filed into the archive; imp files it on its next run
+  archive data is at v14; this imp knows v13
+```
+
+The stranded-home sweep on the next `imp list` or `imp show` files the record, and
+the daemon's startup reaper deletes the home after that — except below the blob
+floor, where nothing files it and the stranding described below is permanent. Only
+the home reap is deferred: the per-quest scratch dirs and the session socket are
+still removed, since nothing else reaps them. Any other failure while archiving is
+an engine bug and still pauses the run.
+
 An older imp may still archive a quest into a newer archive; its trailing stamp
 lowers both floors (the blob `data_version` marker and the index's `PRAGMA
 user_version`). One blob migration ships in the tree, and it heals exactly one

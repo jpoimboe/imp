@@ -276,6 +276,19 @@ def test_operator_notes_skew_names_the_stale_process_first() -> None:
     assert "this checkout is behind" not in section
 
 
+def test_operator_notes_skew_defers_filing_an_already_merged_run() -> None:
+    """The merge is durable before the archive is touched, so a refusal while
+    filing it warns rather than pausing a run whose work already landed."""
+    text = Path("docs/guide/operator-notes.md").read_text()
+    section = " ".join(text.split("## Archive version skew", 1)[1].split())
+    assert "A run that has already merged no longer pauses" in section
+    assert "this quest finished but was not filed into the archive" in section
+    assert "leaves the quest home standing" in section
+    assert "except below the blob floor" in section
+    assert "Only the home reap is deferred" in section
+    assert "still pauses the run" in section
+
+
 def test_operator_notes_skew_scope_excludes_a_live_quest() -> None:
     """Ids resolve against live homes and a live quest's data sits in its own
     home, so the refusal no longer reaches an id-resolving command for one."""
