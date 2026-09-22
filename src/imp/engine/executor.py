@@ -980,17 +980,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         _emit(log, "workflow_completed", {
             "commits": worktree.commits_in_range(
                 quest.control_root, f"{quest.base_branch}..imp/{quest.id}")})
-        from imp.engine import archive
-        archive.archive_quest(
-            quest.control_root, quest.id,
-            events_path=quest.events_path,
-            quest_json_path=quest.quest_dir / "quest.json",
-            state_json_path=quest.state_dir / "state.json",
-        )
-        _force_rmtree(quest.quest_dir)
-        shutil.rmtree(quest.tmp_dir, ignore_errors=True)
-        session_socket_path(quest.id).unlink(missing_ok=True)
-        _force_rmtree(quest.var_tmp_dir)
+        _archive_and_reap(quest)
         return RunResult.COMPLETED
 
     state.status = "merged"
@@ -1001,6 +991,12 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
                quest.control_root,
                f"{state.merge_commit}^1..{state.merge_commit}^2")})
     merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
+    _archive_and_reap(quest)
+    return RunResult.COMPLETED
+
+
+def _archive_and_reap(quest: Quest) -> None:
+    """File the quest into the archive, then reap its home, scratch dirs and socket."""
     from imp.engine import archive
     archive.archive_quest(
         quest.control_root, quest.id,
@@ -1012,7 +1008,6 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     session_socket_path(quest.id).unlink(missing_ok=True)
     _force_rmtree(quest.var_tmp_dir)
-    return RunResult.COMPLETED
 
 
 def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
