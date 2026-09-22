@@ -13,6 +13,7 @@ from imp.remote.session.protocol import (
     SIDE_EFFECT_REASONS,
     Attach,
     Control,
+    EndOfRun,
     Input,
     SetLease,
     SkillRequest,
@@ -366,3 +367,35 @@ def test_parse_event_still_rejects_the_end_frame() -> None:
     # parse_event is event-only; parse_stream_frame is the stream decoder that handles end frames.
     with pytest.raises(ValueError, match="expected event frame"):
         parse_event(encode_end())
+
+
+def test_a_bare_end_frame_parses_with_no_disposition() -> None:
+    frame = parse_stream_frame(encode_end())
+    assert isinstance(frame, EndOfRun)
+    assert frame.disposition is None
+
+
+@pytest.mark.parametrize("disposition", ["save", "abandon", "archive", "discard"])
+def test_an_end_frame_round_trips_its_leave_disposition(disposition: str) -> None:
+    line = encode_end(EndOfRun(disposition))
+    assert json.loads(line) == {"kind": "end", "disposition": disposition}
+    assert parse_stream_frame(line) == EndOfRun(disposition)
+
+
+def test_an_end_frame_with_an_unknown_extra_key_still_parses() -> None:
+    assert parse_stream_frame(
+        json.dumps({"kind": "end", "since": "v9"})) == EndOfRun()
+    assert parse_stream_frame(
+        json.dumps({"kind": "end", "disposition": "save", "since": "v9"})
+    ) == EndOfRun("save")
+
+
+@pytest.mark.parametrize("disposition", ["interrupt", "detach", 5, ["save"]])
+def test_an_end_frame_naming_no_leave_control_is_rejected(disposition: object) -> None:
+    with pytest.raises(ValueError, match="unknown end disposition"):
+        parse_stream_frame(json.dumps({"kind": "end", "disposition": disposition}))
+
+
+def test_an_end_of_run_cannot_name_a_non_leave_control() -> None:
+    with pytest.raises(ValueError, match="unknown end disposition"):
+        EndOfRun("interrupt")
