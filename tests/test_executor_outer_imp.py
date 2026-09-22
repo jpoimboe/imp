@@ -154,3 +154,26 @@ async def test_non_imp_project_emits_nothing(
 
     assert result is RunResult.COMPLETED
     assert _outer_imp_events(events) == []
+
+
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_a_run_from_a_snapshot_of_this_checkout_emits_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pinned daemon runs from <quest home>/pinned-src/<token>, so the raw comparison
+    would mismatch on every imp-on-imp run. Resolved through the snapshot's source-root
+    — which names this checkout's src — the run start stays silent."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _fake_imp_checkout(tmp_path)
+    snapshot = quest.quest_dir / "pinned-src" / "tok"
+    (snapshot / "imp").mkdir(parents=True)
+    (snapshot / "imp" / "__init__.py").write_text("")
+    (snapshot / "source-root").write_text(f"{(tmp_path / 'src').resolve()}\n")
+    monkeypatch.setattr(imp, "__file__", str(snapshot / "imp" / "__init__.py"))
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert _outer_imp_events(events) == []
