@@ -57,7 +57,7 @@ from imp.engine.env import (
     ensure_quest_tmp_dir,
 )
 from imp.engine.error_policy import budget_for
-from imp.engine.errors import LoadError, summarize_exception
+from imp.engine.errors import ArchiveMismatch, LoadError, summarize_exception
 from imp.engine.feedback import (
     apply_completion_backstop,
     format_clean_tree_feedback,
@@ -964,7 +964,8 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     live in the routable merge-to-base step (B3/F1), and the H1 dirty net moved
     into merge_to_base under the lock (R5). The no-merge branch DOES do the
     keep-branch worktree teardown (_exit_worktree: remove the worktree, keep the
-    imp/<id> branch) before reaping the home."""
+    imp/<id> branch) before reaping the home. Either branch keeps the home rather
+    than reaping it when the archive refuses the write; see _archive_and_reap."""
     state.held_lane = None
     state.held_acquire_step = None
     state.step = None
@@ -980,7 +981,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         _emit(log, "workflow_completed", {
             "commits": worktree.commits_in_range(
                 quest.control_root, f"{quest.base_branch}..imp/{quest.id}")})
-        _archive_and_reap(quest)
+        _archive_and_reap(quest, log)
         return RunResult.COMPLETED
 
     state.status = "merged"
@@ -991,20 +992,31 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
                quest.control_root,
                f"{state.merge_commit}^1..{state.merge_commit}^2")})
     merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
-    _archive_and_reap(quest)
+    _archive_and_reap(quest, log)
     return RunResult.COMPLETED
 
 
-def _archive_and_reap(quest: Quest) -> None:
-    """File the quest into the archive, then reap its home, scratch dirs and socket."""
+def _archive_and_reap(quest: Quest, log: EventLog) -> None:
+    """Post-terminal bookkeeping; an archive version skew defers the filing, not the run."""
     from imp.engine import archive
-    archive.archive_quest(
-        quest.control_root, quest.id,
-        events_path=quest.events_path,
-        quest_json_path=quest.quest_dir / "quest.json",
-        state_json_path=quest.state_dir / "state.json",
-    )
-    _force_rmtree(quest.quest_dir)
+    try:
+        archive.archive_quest(
+            quest.control_root, quest.id,
+            events_path=quest.events_path,
+            quest_json_path=quest.quest_dir / "quest.json",
+            state_json_path=quest.state_dir / "state.json",
+        )
+    except ArchiveMismatch as exc:
+        _emit(log, "warning",
+              {"source": "archive_skew",
+               "message": ("this quest finished but was not filed into the archive; "
+                           "imp files it on its next run"),
+               "detail": (f"archive {exc.floor} is at v{exc.stored}; "
+                          f"this imp knows v{exc.known}")},
+              agent_id=None)
+    else:
+        _force_rmtree(quest.quest_dir)
+    # No other reaper touches these, and the archive never reads them.
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     session_socket_path(quest.id).unlink(missing_ok=True)
     _force_rmtree(quest.var_tmp_dir)
