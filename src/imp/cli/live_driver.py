@@ -106,35 +106,38 @@ def _coarse_left(seconds: float) -> str:
     return f"{max(1, round(seconds / 60))}m"
 
 
-def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
-    """Time until this window resets. None when the carrier stated none or it has
-    already passed: the percentage is still true, only the countdown is unknown."""
+def _reset_countdown(resets_at: int | None, now: float) -> str | None:
+    """Time until this window resets. None only when the carrier stated none."""
     if resets_at is None:
         return None
-    remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
-    if remaining <= 0:
-        return None
-    return _coarse_left(remaining)
+    return _coarse_left(resets_at - now)
 
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
-                color: bool, over_bg: bool) -> tuple[str, str]:
+                color: bool, over_bg: bool) -> tuple[str, str] | None:
     """The position row's two right-group candidates, widest first:
     `claude · session 62% (3h left) · week 7% (5d left)`, and the same
     windows without the provider segment for a row too narrow to carry it. The
     provider name and the window labels are uncolored and the countdown gray;
     only the percentage is hued, banded on the displayed integer so a number can
-    never disagree with its own hue."""
+    never disagree with its own hue. A window whose reset has passed is dead
+    data, not a stale countdown: it is dropped, and None is the whole reading
+    expiring."""
+    now = time.time() if now_epoch is None else now_epoch
     windows: list[str] = []
     for w in reading.windows:
+        if w.resets_at is not None and w.resets_at <= now:
+            continue
         pct = pal.quota_pct(w.used_pct)
         label = _WINDOW_WORDS.get(w.label, w.label)
         seg = (label + " "
                + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
-        left = _reset_countdown(w.resets_at, now_epoch)
+        left = _reset_countdown(w.resets_at, now)
         if left is not None:
             seg += " " + _paint(f"({left} left)", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
+    if not windows:
+        return None
     joined = " · ".join(windows)
     return f"{reading.provider} · {joined}", joined
 
@@ -267,8 +270,9 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         dollars = cost_field(cost)
         rights = [dollars] if dollars else []
     elif carrier.quota is not None:
-        rights = list(quota_field(carrier.quota, now_epoch=now_epoch, color=color,
-                                  over_bg=over))
+        field = quota_field(carrier.quota, now_epoch=now_epoch, color=color,
+                            over_bg=over)
+        rights = list(field) if field is not None else []
     else:
         rights = []
     left_segs = [project_seg, id_seg, title_seg, unsandboxed_seg,
