@@ -3,6 +3,7 @@ against a copy of src/ that is rewritten after the pin, the way a merge to the b
 branch rewrites the checkout under a live run."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -85,3 +86,74 @@ def test_the_shim_runs_snapshot_bytes_after_the_checkout_moves(
     assert ran.stdout.strip() == "imp 9.9.9-pinned"
     # Control: this is what the shim would print if it pointed at the checkout.
     assert control.stdout.strip() == "9.9.9-merged", control
+
+
+# The daemon's own -c bootstrap, plus a readout of where every import resolved.
+PROBE = """
+import sys, json
+{insert}
+from imp.remote.session.warmup import warm_module_graph
+fails = warm_module_graph()
+api_preloaded = "imp.api" in sys.modules
+import imp, imp.api, impty.driver
+print("RESULT" + json.dumps({{
+    "imp": imp.__file__, "api": imp.api.__file__, "impty": impty.driver.__file__,
+    "warmed": sys.modules["imp.engine.shim"].__file__,
+    "version": imp.__version__,
+    "merged_api": hasattr(imp.api, "MERGED_AFTER_SNAPSHOT"),
+    "merged_impty": hasattr(impty.driver, "MERGED_AFTER_SNAPSHOT"),
+    "api_preloaded": api_preloaded,
+    "fails": sorted(name for name, _ in fails),
+}}))
+"""
+
+
+def _run_probe(*, snapshot: Path | None, checkout: Path, cwd: Path) -> dict[str, object]:
+    """Run PROBE as a child process, with the snapshot at sys.path[0] exactly as the
+    daemon's bootstrap puts it there — or, for the control direction, not at all."""
+    insert = f"sys.path.insert(0, {str(snapshot)!r})" if snapshot is not None else ""
+    proc = subprocess.run(
+        [sys.executable, "-c", PROBE.format(insert=insert)],
+        capture_output=True, text=True, cwd=cwd, timeout=HANG_BACKSTOP,
+        env=_child_env(checkout))
+    assert proc.returncode == 0, proc.stderr
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT"))
+    resolved: dict[str, object] = json.loads(line[len("RESULT"):])
+    resolved["stderr"] = proc.stderr
+    return resolved
+
+
+def test_a_merge_after_the_pin_reaches_no_import_in_the_pinned_process(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A daemon warms its whole module graph out of the snapshot and then, mid-run,
+    lazily imports more — imp.api sits outside the five warmed subpackages and
+    impty.driver is imported per agent launch. A merge rewriting the checkout after the
+    pin must reach none of them. The same probe without the snapshot on sys.path takes
+    the merged checkout for every one of those resolutions, which is what makes these
+    assertions non-vacuous."""
+    checkout = _copy_checkout(tmp_path / "checkout" / "src")
+    monkeypatch.setattr(imp, "__file__", str(checkout / "imp" / "__init__.py"))
+
+    snapshot = pin_source_snapshot(tmp_path / "quest", tmp_path / "control")
+
+    _append(snapshot / "imp" / "__init__.py", PINNED_VERSION)
+    _merge_into(checkout)
+
+    pinned = _run_probe(snapshot=snapshot, checkout=checkout, cwd=tmp_path)
+    unpinned = _run_probe(snapshot=None, checkout=checkout, cwd=tmp_path)
+
+    # A snapshot whose module graph cannot warm is not a runnable imp.
+    assert pinned["fails"] == [], pinned["stderr"]
+    assert pinned["version"] == "9.9.9-pinned"
+    # imp.api is outside the warmed packages, so its resolution is a first-time import.
+    assert pinned["api_preloaded"] is False
+    assert pinned["merged_api"] is False
+    assert pinned["merged_impty"] is False
+    for where in ("imp", "warmed", "api", "impty"):
+        assert str(pinned[where]).startswith(f"{snapshot}/"), pinned
+    # Control: unpinned, the merged checkout wins every one of those resolutions.
+    assert unpinned["version"] == "9.9.9-merged"
+    assert unpinned["merged_api"] is True
+    assert unpinned["merged_impty"] is True
+    for where in ("imp", "warmed", "api", "impty"):
+        assert str(unpinned[where]).startswith(f"{checkout}/"), unpinned
