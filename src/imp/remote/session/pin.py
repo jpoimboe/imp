@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import imp
 from imp.engine.shim import SOURCE_ROOT_MARKER
+from imp.engine.state import lock_is_live
 from imp.engine.worktree import RepoGitLock
 
 PINNED_SRC_DIRNAME = "pinned-src"
@@ -46,4 +47,18 @@ def pin_source_snapshot(quest_dir: Path, control_root: Path) -> Path:
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    _reap_dead_snapshots(published)
     return published
+
+
+def _reap_dead_snapshots(own: Path) -> None:
+    """Delete published siblings whose owner pid is gone. Never our own, never a
+    temporary build directory (a build in flight looks identical to an abandoned one),
+    and never at the cost of failing the pin: reaping is a disk concern only."""
+    try:
+        for sibling in own.parent.iterdir():
+            if sibling == own or lock_is_live(sibling / OWNER_PID_MARKER):
+                continue
+            shutil.rmtree(sibling, ignore_errors=True)
+    except OSError:
+        return

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -171,3 +172,115 @@ def test_the_copy_waits_for_the_repo_lock(
     assert not worker.is_alive()
     assert errors == []
     assert (published[0] / "imp" / "__init__.py").read_text() == "imp one\n"
+
+
+def _dead_pid() -> int:
+    # A reaped child's pid is gone (and not reused within this test).
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+def _seed_snapshot(quest_dir: Path, name: str, *, owner: int, body: str) -> Path:
+    snapshot = quest_dir / PINNED_SRC_DIRNAME / name
+    (snapshot / "imp").mkdir(parents=True)
+    (snapshot / "imp" / "__init__.py").write_text(body)
+    (snapshot / SOURCE_ROOT_MARKER).write_text(f"{quest_dir / 'elsewhere'}\n")
+    (snapshot / OWNER_PID_MARKER).write_text(f"{owner}\n")
+    return snapshot
+
+
+def test_a_pin_leaves_a_live_sibling_snapshot_untouched(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sibling is another daemon's running code. It is stale relative to the source
+    tree — which has moved since — and that is exactly why it must not be refreshed or
+    removed while its owner lives."""
+    src = _fake_source(tmp_path, marker="new")
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+    quest_dir = tmp_path / "quest"
+    live = _seed_snapshot(quest_dir, "live-one", owner=os.getpid(), body="imp old\n")
+
+    snapshot = pin_source_snapshot(quest_dir, tmp_path / "control")
+
+    assert snapshot != live
+    assert (live / "imp" / "__init__.py").read_text() == "imp old\n"
+    assert (live / OWNER_PID_MARKER).read_text() == f"{os.getpid()}\n"
+    assert (snapshot / "imp" / "__init__.py").read_text() == "imp new\n"
+    assert sorted(p.name for p in (quest_dir / PINNED_SRC_DIRNAME).iterdir()) == sorted(
+        ["live-one", snapshot.name])
+
+
+def test_a_dead_owners_snapshot_is_reaped_but_a_build_directory_is_not(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A published snapshot whose owner pid is gone is disk to reclaim. A temporary
+    build directory is indistinguishable from a concurrent cold start's half-built
+    snapshot — whatever it contains, dead owner marker included — so it is never
+    touched. It sits directly in quest_dir because that is where mkdtemp puts it, so
+    this pins the one reaper mis-scoping that can actually occur."""
+    src = _fake_source(tmp_path)
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+    quest_dir = tmp_path / "quest"
+    dead = _seed_snapshot(quest_dir, "dead-one", owner=_dead_pid(), body="imp gone\n")
+    half_built = quest_dir / "pinning-abandoned"
+    (half_built / "imp").mkdir(parents=True)
+    (half_built / "imp" / "__init__.py").write_text("half\n")
+    (half_built / OWNER_PID_MARKER).write_text(f"{_dead_pid()}\n")
+
+    snapshot = pin_source_snapshot(quest_dir, tmp_path / "control")
+
+    assert not dead.exists()
+    assert [p.name for p in (quest_dir / PINNED_SRC_DIRNAME).iterdir()] == [snapshot.name]
+    assert (half_built / "imp" / "__init__.py").read_text() == "half\n"
+    assert (half_built / OWNER_PID_MARKER).exists()
+
+
+def test_a_stray_file_under_pinned_src_does_not_fail_the_pin(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An already-published snapshot must not be lost to a disk-cleanup hiccup: a
+    non-directory entry under pinned-src/ makes lock_is_live raise NotADirectoryError,
+    which must be swallowed by the reaper rather than propagated to the caller."""
+    src = _fake_source(tmp_path)
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+    quest_dir = tmp_path / "quest"
+    (quest_dir / PINNED_SRC_DIRNAME).mkdir(parents=True)
+    (quest_dir / PINNED_SRC_DIRNAME / "stray").write_text("noise\n")
+
+    snapshot = pin_source_snapshot(quest_dir, tmp_path / "control")
+
+    assert (snapshot / "imp" / "__init__.py").read_text() == "imp one\n"
+    assert (snapshot / OWNER_PID_MARKER).read_text().strip() == str(os.getpid())
+
+
+def test_two_concurrent_pins_each_publish_their_own_snapshot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing serializes two cold-starting daemons for one quest, so both must
+    succeed with a tree of their own and neither may disturb the other's."""
+    src = _fake_source(tmp_path)
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+    quest_dir = tmp_path / "quest"
+    control_root = tmp_path / "control"
+    published: list[Path] = []
+    errors: list[BaseException] = []
+    both_ready = threading.Barrier(2)
+
+    def run_pin() -> None:
+        try:
+            both_ready.wait(timeout=HANG_BACKSTOP)
+            published.append(pin_source_snapshot(quest_dir, control_root))
+        except BaseException as exc:                     # surfaced by the assert below
+            errors.append(exc)
+
+    workers = [threading.Thread(target=run_pin) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=HANG_BACKSTOP)
+        assert not worker.is_alive()
+
+    assert errors == []
+    assert len(set(published)) == 2
+    for snapshot in published:
+        assert (snapshot / "imp" / "__init__.py").read_text() == "imp one\n"
+        assert (snapshot / OWNER_PID_MARKER).read_text().strip() == str(os.getpid())
+    assert sorted(p.name for p in (quest_dir / PINNED_SRC_DIRNAME).iterdir()) == sorted(
+        s.name for s in published)
