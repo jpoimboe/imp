@@ -54,6 +54,7 @@ LIVE_SIB = "live-sib"
 DORM_SIB = "dorm-sib"
 ARCH = "arch-quest"
 BLK = "blk-quest"
+LEDGER = "ldg-quest"
 
 # Short, unique, per-quest markers. `imp events <id> --all` takes the leaf path
 # (main.py:3445 `leaf = bool(... or args.all ...)`) and emits one per-event digest
@@ -112,6 +113,29 @@ def _events(marker: str) -> list[dict[str, object]]:
     ]
 
 
+def _ledger_events() -> list[dict[str, object]]:
+    """A run with one recorded step and metered usage, so build_summary yields a row
+    and the card carries its ledger. _events' user_message-only log yields none, which
+    is why the other quests cannot exercise this. Metered matters: without a notional
+    row _attribute_quota returns the None view before touching the store."""
+    return [
+        {"id": "e1", "timestamp": "2026-06-01T00:00:00+00:00", "agent_id": None,
+         "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add the ledger widget"}]}},
+        {"id": "s1", "timestamp": "2026-06-01T00:00:00+00:00", "agent_id": None,
+         "type": "step_started", "payload": {"step": "spec-writer", "phase": "spec"}},
+        {"id": "m1", "timestamp": "2026-06-01T00:00:30+00:00", "agent_id": "a1",
+         "type": "agent_message",
+         "payload": {"provider": "codex", "model": "gpt-5-codex",
+                     "auth_mode": "apikey",
+                     "usage": {"input_tokens": 120_000, "output_tokens": 4_000}}},
+        {"id": "s2", "timestamp": "2026-06-01T00:01:30+00:00", "agent_id": None,
+         "type": "step_completed",
+         "payload": {"step": "spec-writer", "action": {"verb": "continue"}}},
+    ]
+
+
 def _write_quest(
     control: Path, qid: str, *, title: str,
     events: list[dict[str, object]],
@@ -164,7 +188,7 @@ def _write_archived_quest(control: Path, qid: str, *, title: str, marker: str) -
 
 
 def _build_project(base: Path) -> Path:
-    """A real git-repo control root with five quests covering AC 2's target categories.
+    """A real git-repo control root with six quests covering AC 2's target categories.
 
     - CUR: current quest (its daemon serves every command; events.jsonl masked).
     - LIVE_SIB / DORM_SIB: sibling live quests the daemon reads from disk (both
@@ -174,6 +198,8 @@ def _build_project(base: Path) -> Path:
     - ARCH: archived quest (blobs/ + index.db masked; served via archive_read).
     - BLK: backlog quest (materialized False, origin 'backlog') depending on a never-
       archived id, so backlog_readiness classifies it blocked.
+    - LEDGER: a quest with a completed step, so build_summary returns a row and
+      the detail card renders the workflow: and ledger: sections via get_events.
     """
     control = base
     _init_repo(control)
@@ -186,6 +212,7 @@ def _build_project(base: Path) -> Path:
                  materialized=False, origin="backlog",
                  depends_on=("ghost-dep",), write_state=False,
                  seed_opening=BLK_SEED)
+    _write_quest(control, LEDGER, title="Ledger Quest", events=_ledger_events())
     return control
 
 
@@ -476,3 +503,21 @@ def test_events_search_matches_the_backlog_body(project) -> None:
     rc, out, err = _imp(control, "events", "search", BLK_MARK)
     assert rc == 0, f"imp events search {BLK_MARK} failed: rc={rc} err={err!r}"
     assert BLK in out, f"events search missed the backlog body: {out!r}"
+
+
+def test_show_card_ledger_via_proxied_store(project) -> None:
+    """The card's ledger renders over the proxy: `quest_card` carries the workflow
+    across the wire and `get_events` serves the masked event log. A quest with no
+    step rows still renders its ledger-free card."""
+    control = project
+    rc, out, err = _imp(control, "show", LEDGER)
+    assert rc == 0, f"imp show {LEDGER} failed: rc={rc} err={err!r}"
+    assert "run:" in out, f"card missing the run field: {out!r}"
+    assert "workflow:" in out, f"card missing the workflow field: {out!r}"
+    assert "ledger:" in out, f"card missing the ledger section: {out!r}"
+    assert "spec-writer" in out, f"ledger missing its step row: {out!r}"
+    assert "\n  total" in out, f"ledger missing its total row: {out!r}"
+
+    rc, out, err = _imp(control, "show", CUR)
+    assert rc == 0, f"imp show {CUR} failed: rc={rc} err={err!r}"
+    assert "ledger:" not in out, f"a quest with no step rows grew a ledger: {out!r}"
