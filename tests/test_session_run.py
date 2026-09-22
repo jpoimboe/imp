@@ -1311,7 +1311,7 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == "merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
     assert "lost the connection" not in out
 
 
@@ -1508,7 +1508,7 @@ async def test_end_frame_with_done_state_renders_the_completed_block(
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == f"done · commits on imp/{quest.id}"
+    assert out.split("\n")[0] == f"{quest.id} · T · done · commits on imp/{quest.id}"
     assert "lost the connection" not in out
 
 
@@ -1532,7 +1532,7 @@ async def test_end_frame_with_merged_state_renders_the_completed_block(
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == "merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
     assert "lost the connection" not in out
 
 
@@ -1775,10 +1775,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
     assert rc == 0
     # The witnessed payload names the base (the quest's own attribute is `main`),
     # and the identity line carries the witnessed opening prompt.
-    assert out == (
-        "merged into master\n"
-        f"{quest.id} · > fold the corrections\n"
-        "\n")
+    assert out == f"{quest.id} · > fold the corrections · merged into master\n\n"
     assert "paused" not in out
     assert "resume: imp resume" not in out
 
@@ -1802,10 +1799,7 @@ async def test_witnessed_completion_renders_done_with_no_quest_home_at_all(
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == (
-        f"done · commits on imp/{quest.id}\n"
-        f"{quest.id} · T\n"
-        "\n")
+    assert out == f"{quest.id} · T · done · commits on imp/{quest.id}\n\n"
 
 
 @pytest.mark.anyio
@@ -1950,10 +1944,7 @@ async def test_a_witnessed_outcome_preempts_a_keystroke_leave_and_prints_no_care
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == (
-        "merged into main\n"
-        f"{quest.id} · T\n"
-        "\n")
+    assert out == f"{quest.id} · T · merged into main\n\n"
     assert "> Ctrl-D" not in out
     assert "paused" not in out
 
@@ -2074,7 +2065,7 @@ async def test_a_resumed_merge_blocked_then_a_merge_renders_merged(
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == "merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
     assert "merge blocked" not in out
 
 

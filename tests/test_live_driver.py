@@ -3668,7 +3668,8 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
     screen = TerminalScreen(80, 16, history=200, ratio=0.5)
     pyte.ByteStream(screen).feed(out.getvalue().encode())
     rows = screen_lines(screen)
-    c = next(i for i, r in enumerate(rows) if r.strip() == "merged into master")
+    spine = "2026-06-12-run-x · (unnamed) · merged into master"
+    c = next(i for i, r in enumerate(rows) if r.strip() == spine)
     assert rows[c - 1].strip() == ""            # exactly one blank directly above the block
     assert rows[c - 2].strip() != ""            # …and not two — the row above the blank has content
     assert "merging · complete" in rows[c - 2]  # breadcrumb, directly above the blank
