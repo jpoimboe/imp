@@ -511,7 +511,7 @@ async def _settle_inflight(
 ) -> list[_InFlightOutcome]:
     """Wait out the imp calls in flight at an interrupt — bounded per wait, not per
     call — and report each one's real outcome, substituting the uncertainty body for
-    any that has not finished when the bound expires.
+    any that has not finished when the bound expires, and close each one out.
     """
     entries = list(state.inflight.items())
     if not entries:
@@ -519,6 +519,9 @@ async def _settle_inflight(
     await asyncio.wait([e.future for _, e in entries], timeout=timeout)
     out: list[_InFlightOutcome] = []
     for key, e in entries:
+        # Reporting IS the close-out: imp has now stated this call's outcome, so a
+        # later settle must not wait on it again nor withhold another filler for it.
+        state.inflight.pop(key, None)
         if e.future.done():
             content, is_error = e.future.result()
         else:

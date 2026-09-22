@@ -478,6 +478,44 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
 
 
 @pytest.mark.anyio
+async def test_handoff_closes_out_the_call_its_bound_gave_up_on(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The give-up close-out is not a steer-path property: the threshold-crossing
+    settle leaves nothing behind either, and it still reports the call before
+    dropping it — the run continues past this point with the same state."""
+    from imp.agents.transcript import captured_result_key
+    from imp.providers import claude as cc
+
+    monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    key = captured_result_key("write_file", SLOW_ARGS)
+
+    class WedgedClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            holder["runner"]._state.register_inflight(key, "write_file")
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return WedgedClient(opts, scripted_messages=_interrupted_script(),
+                            context_usage=cu)
+
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert runner._state.inflight == {}
+    body = (tmp_path / "step" / "transcript.jsonl").read_text()
+    assert "was not recorded" in body
+    assert "doesn't want to proceed" not in body
+
+
+@pytest.mark.anyio
 async def test_handoff_dangling_assistant_tail_stays_balanced(
         tmp_path: Path) -> None:
     """The other tail shape: an assistant turn with a tool_use and no user turn
