@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import functools
+import os
 import sys
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
@@ -38,8 +39,10 @@ from imp.engine.state import (
     State,
     lock_is_live,
 )
+from imp.paths import project_state_dir
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
+from imp.remote.session.pin import pin_source_snapshot
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
 from imp.remote.session.warmup import warm_module_graph
@@ -373,6 +376,22 @@ def _record_load_failure(quest: Quest, exc: LoadError | LoadErrors) -> int:
     return 2
 
 
+def _pin_and_exec(ns: argparse.Namespace, args: list[str]) -> None:
+    """Snapshot the running source into the quest home and re-exec out of it. Returns
+    only if os.execv is intercepted; a real exec never comes back."""
+    control_root = Path(ns.control_root)
+    # Inline, not a helper: the pin runs before Quest.load, from the parsed argv alone.
+    quest_dir = project_state_dir(control_root) / "quests" / ns.quest_id
+    snapshot = pin_source_snapshot(quest_dir, control_root)
+    # -c, never PYTHONPATH: an env entry is inherited by every child the daemon spawns,
+    # including the project's test command, where it would shadow the worktree's imports.
+    bootstrap = (
+        f"import sys; sys.path.insert(0, {str(snapshot)!r}); "
+        "from imp.remote.session.daemon import main; "
+        "sys.exit(main(sys.argv[1:]))")
+    os.execv(sys.executable, [sys.executable, "-c", bootstrap, "--pinned", *args])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
@@ -382,7 +401,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--autonomous", action="store_true")
     parser.add_argument("--model", default=None)
     parser.add_argument("--unsandboxed", action="store_true")
+    parser.add_argument("--pinned", action="store_true")
     ns = parser.parse_args(argv)
+    if not ns.pinned:
+        try:
+            _pin_and_exec(ns, list(sys.argv[1:]) if argv is None else list(argv))
+        except OSError as exc:
+            print(f"imp: could not pin this run's imp source: {exc}", file=sys.stderr)
+            return 2
     warm_module_graph()
     try:
         quest = Quest.load(Path(ns.control_root), ns.quest_id)

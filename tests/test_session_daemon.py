@@ -327,7 +327,7 @@ def test_main_loads_named_change_and_serves_it(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main(
-        ["--control-root", str(tmp_path), "--quest-id", "2026-06-15-abc"])
+        ["--pinned", "--control-root", str(tmp_path), "--quest-id", "2026-06-15-abc"])
 
     assert rc == 0
     assert calls["load"] == (tmp_path, "2026-06-15-abc")
@@ -755,6 +755,7 @@ def test_main_forwards_resume_flag_via_partial(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
+        "--pinned",
         "--control-root", str(tmp_path),
         "--quest-id", "2026-06-15-abc",
         "--resume",
@@ -846,7 +847,7 @@ def test_main_unknown_quest_id_prints_clean_error_and_exits_nonzero(
         raise LoadError("no such change feat")
 
     monkeypatch.setattr(daemon.Quest, "load", staticmethod(boom))
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 2
     assert "no such change feat" in capsys.readouterr().err
 
@@ -861,7 +862,7 @@ def test_main_maps_paused_outcome_to_nonzero(
         daemon.Quest, "load",
         staticmethod(lambda r, c: SimpleNamespace(quest_dir=tmp_path)))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 1
 
 
@@ -875,7 +876,8 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
         daemon.Quest, "load",
         staticmethod(lambda r, c: SimpleNamespace(quest_dir=tmp_path)))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat", "--resume"])
+    rc = daemon.main([
+        "--pinned", "--control-root", str(tmp_path), "--quest-id", "feat", "--resume"])
     assert rc == 1
 
 
@@ -1311,6 +1313,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
 
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
     rc = daemon.main([
+        "--pinned",
         "--control-root", str(tmp_path),
         "--quest-id", "2026-06-15-mnint", "--non-interactive"])
     assert rc == 0
@@ -1483,6 +1486,7 @@ def test_main_forwards_autonomous_via_partial(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
+        "--pinned",
         "--control-root", str(tmp_path),
         "--quest-id", "2026-06-15-abc",
         "--autonomous",
@@ -1954,6 +1958,7 @@ def test_main_forwards_model_to_serve(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
+        "--pinned",
         "--control-root", str(tmp_path),
         "--quest-id", "2026-07-10-mdl",
         "--model", "a:b",
@@ -2019,6 +2024,7 @@ def test_main_forwards_unsandboxed_to_serve(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
+        "--pinned",
         "--control-root", str(tmp_path),
         "--quest-id", "2026-07-10-unsbx",
         "--unsandboxed",
@@ -2496,7 +2502,7 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
 
     monkeypatch.setattr(daemon.anyio, "run", _raise)
 
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 2
 
     events = list(quest.event_log().read())
@@ -2825,5 +2831,5 @@ def test_main_exits_zero_on_reaped_home(
         daemon, "serve_quest_session",
         functools.partial(real_serve, run_fn=fake_run, hibernate=False))
 
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 0

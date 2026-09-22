@@ -12,9 +12,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import imp
-from imp.engine.shim import SOURCE_ROOT_MARKER
 from imp.engine.state import lock_is_live
 from imp.engine.worktree import RepoGitLock
+from imp.paths import SOURCE_ROOT_MARKER
 
 PINNED_SRC_DIRNAME = "pinned-src"
 OWNER_PID_MARKER = "owner-pid"

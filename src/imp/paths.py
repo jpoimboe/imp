@@ -12,6 +12,9 @@ from collections.abc import Iterator
 from itertools import count
 from pathlib import Path
 
+# Written into every source snapshot; names the tree the snapshot was copied from.
+SOURCE_ROOT_MARKER = "source-root"
+
 
 def imp_home() -> Path:
     """$IMP_HOME, default ~/.imp — imp's per-machine directory."""

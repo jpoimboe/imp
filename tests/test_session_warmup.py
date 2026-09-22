@@ -67,7 +67,7 @@ def test_main_warms_module_graph_before_serving(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(daemon.Quest, "load", classmethod(_fake_load))
     monkeypatch.setattr(daemon.anyio, "run", _fake_run)
 
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "abc123"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "abc123"])
 
     assert calls == ["warmup", "load", "run"]
     assert rc == 0

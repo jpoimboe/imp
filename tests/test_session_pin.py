@@ -11,8 +11,8 @@ import pytest
 
 import imp
 import imp.remote.session.pin as pin_mod
-from imp.engine.shim import SOURCE_ROOT_MARKER
 from imp.engine.worktree import RepoGitLock
+from imp.paths import SOURCE_ROOT_MARKER
 from imp.remote.session.pin import (
     OWNER_PID_MARKER,
     PINNED_SRC_DIRNAME,

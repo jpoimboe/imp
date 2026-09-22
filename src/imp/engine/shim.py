@@ -9,11 +9,9 @@ import sys
 from pathlib import Path
 
 import imp
+from imp.paths import SOURCE_ROOT_MARKER
 
 _SHIM_DIRNAME = "imp-shim"
-
-# Written into every source snapshot; names the tree the snapshot was copied from.
-SOURCE_ROOT_MARKER = "source-root"
 
 
 def imp_shim_dir(quest_dir: Path) -> Path:
