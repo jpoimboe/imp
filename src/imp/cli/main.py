@@ -1920,25 +1920,35 @@ def _run_field(summary: list[StepRow], header: SummaryHeader,
             f" · {_fmt_tokens(total.output)} out · {charge}")
 
 
+def _summary_header(quest_id: str, card: QuestCard | None,
+                    events: list[dict[str, Any]]) -> SummaryHeader:
+    """A missing card has no quest to source a workflow from, so the project
+    default is the only honest answer."""
+    from imp.cli.render_summary import SummaryHeader, exclusion_spans, summary_total
+    from imp.providers.effective import resolve_default_workflow
+    return SummaryHeader(
+        workflow=(card.workflow if card is not None
+                  else resolve_default_workflow(control_root=_control_root())),
+        quest_id=quest_id,
+        status=card.status if card is not None else "?",
+        total_seconds=summary_total(events),
+        exclusions=exclusion_spans(events))
+
+
 def _card_ledger(store: Store, card: QuestCard, *, color: bool,
                  width: int) -> _CardLedger | int | None:
     """None when the quest has recorded no step rows yet — the card is then what it
     was before these fields existed. 2 propagates `_attribute_quota`'s unreachable
     store, which must print no card at all."""
     from imp.cli.render_summary import (
-        SummaryHeader,
         build_summary,
-        exclusion_spans,
         render_summary,
-        summary_total,
     )
     events = store.get_events(card.quest_id) or []
     rows = build_summary(events)
     if not rows:
         return None
-    header = SummaryHeader(workflow=card.workflow, quest_id=card.quest_id,
-                           status=card.status, total_seconds=summary_total(events),
-                           exclusions=exclusion_spans(events))
+    header = _summary_header(card.quest_id, card, events)
     view = _attribute_quota(store, card.quest_id, events, rows)
     if isinstance(view, int):
         return view
@@ -2600,28 +2610,19 @@ def _cmd_log(args: argparse.Namespace) -> int:
     events = selected
 
     if args.html is not None or args.md is not None:
-        return _write_log_export(args, control, store, quest_id, events,
-                                 unfiltered, show=show)
+        return _write_log_export(args, store, quest_id, events, unfiltered,
+                                 show=show)
 
     width = _term_width()
     color = should_use_color(sys.stdout)
 
     if args.summary:
         from imp.cli.render_summary import (
-            SummaryHeader,
             build_summary,
-            exclusion_spans,
             render_summary,
-            summary_total,
         )
-        from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
-        status = card.status if card is not None else "?"
-        workflow = (card.workflow if card is not None
-                    else resolve_default_workflow(control_root=control))
-        header = SummaryHeader(workflow=workflow, quest_id=quest_id,
-                               status=status, total_seconds=summary_total(events),
-                               exclusions=exclusion_spans(events))
+        header = _summary_header(quest_id, card, events)
         rows = build_summary(events)
         view = _attribute_quota(store, quest_id, unfiltered, rows)
         if isinstance(view, int):
@@ -2681,26 +2682,15 @@ def _attribute_quota(
                       providers=subject.providers)
 
 
-def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
+def _write_log_export(args: argparse.Namespace, store: Store,
                       quest_id: str, events: list[dict[str, Any]],
                       unfiltered: list[dict[str, Any]], *,
                       show: frozenset[str]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
-        from imp.cli.render_summary import (
-            SummaryHeader,
-            build_summary,
-            exclusion_spans,
-            summary_total,
-        )
-        from imp.providers.effective import resolve_default_workflow
+        from imp.cli.render_summary import build_summary
         card = store.quest_card(quest_id)
-        status = card.status if card is not None else "?"
-        workflow = (card.workflow if card is not None
-                    else resolve_default_workflow(control_root=control))
-        header = SummaryHeader(workflow=workflow, quest_id=quest_id,
-                               status=status, total_seconds=summary_total(events),
-                               exclusions=exclusion_spans(events))
+        header = _summary_header(quest_id, card, events)
         rows = build_summary(events)
         view = _attribute_quota(store, quest_id, unfiltered, rows)
         if isinstance(view, int):
