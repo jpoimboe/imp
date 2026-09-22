@@ -16,6 +16,7 @@ from imp.agents.skills import SkillNotFound
 from imp.agents.transcript import SkillReply
 from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
+    EndOfRun,
     encode_attach,
     encode_control,
     encode_input,
@@ -456,9 +457,9 @@ async def test_abandon_is_delivered_even_when_the_control_queue_is_full() -> Non
     server._enqueue_control("abandon")
     assert server._abandon_requested is True  # signal set regardless of queue state
     async with anyio.create_task_group() as tg:
-        server._serve_scope = tg.cancel_scope
+        server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
-        # _dispatch_control(CONTROL_ABANDON) calls on_abandon() then cancels _serve_scope,
+        # _dispatch_control(CONTROL_ABANDON) calls on_abandon() then cancels _run_scope,
         # which cancels the task group — the loop exits cleanly.
     assert abandoned == [True]
 
@@ -476,6 +477,15 @@ async def test_ordinary_control_overflow_is_logged_not_silently_suppressed(
         server._enqueue_control("interrupt")   # overflow
     assert any("control" in r.message.lower() and "overflow" in r.message.lower()
                for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_a_control_after_the_control_stream_closes_is_dropped() -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT, CONTROL_SAVE
+    server = SessionServer("/unused.sock")
+    await server._control_send.aclose()   # the run is over; the end frame may still drain
+    server._enqueue_control(CONTROL_INTERRUPT)
+    server._enqueue_control(CONTROL_SAVE)
 
 
 @pytest.mark.anyio
@@ -844,7 +854,7 @@ async def test_archive_is_delivered_even_when_the_control_queue_is_full() -> Non
     server._enqueue_control("archive")
     assert server._archive_requested is True  # signal set regardless of queue state
     async with anyio.create_task_group() as tg:
-        server._serve_scope = tg.cancel_scope
+        server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
     assert server.archived is True
 
@@ -858,7 +868,7 @@ async def test_discard_is_delivered_even_when_the_control_queue_is_full() -> Non
     server._enqueue_control("discard")
     assert server._discard_requested is True  # signal set regardless of queue state
     async with anyio.create_task_group() as tg:
-        server._serve_scope = tg.cancel_scope
+        server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
     assert server.discarded is True
 
@@ -1358,9 +1368,9 @@ async def test_save_reason_survives_a_full_control_queue() -> None:
     assert server._save_requested is True   # flag set regardless of queue state
 
     async with anyio.create_task_group() as tg:
-        server._serve_scope = tg.cancel_scope
+        server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
-        # _dispatch_control(CONTROL_SAVE, ...) flips self.saved and cancels _serve_scope,
+        # _dispatch_control(CONTROL_SAVE, ...) sets self.leave and cancels _run_scope,
         # which cancels the task group — the loop exits cleanly.
     assert server.saved is True
     assert server.save_reason == "ctrl-d"   # the stored reason, not a buffered frame's None
@@ -1898,20 +1908,24 @@ async def test_a_raising_run_still_ends_the_stream(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("action", ["abandon", "save", "archive", "discard"])
-async def test_a_leave_control_sends_no_end_frame(
+async def test_a_leave_control_ends_the_stream_with_its_disposition(
     tmp_path: Path, action: str,
 ) -> None:
     sock = str(tmp_path / "s.sock")
     started = anyio.Event()
     server = SessionServer(sock)
-    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count >= 1)
+        on_event({"type": "agent_message", "payload": {"text": "bye"}})
         started.set()
         await anyio.sleep_forever()   # only the leave control can end this run
         return "done"
 
     endings: list[StreamEnding] = []
+    ends: list[EndOfRun] = []
     result: dict[str, Any] = {}
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -1921,20 +1935,24 @@ async def test_a_leave_control_sends_no_end_frame(
                 result["r"] = await server.serve(run_fn)
 
             async def _receive() -> None:
-                endings.append(await client.receive_events())
+                endings.append(await client.receive_events(on_end=ends.append))
 
             tg.start_soon(_serve)
             await client.connect()
             tg.start_soon(_receive)
-            await wait_until(lambda: server.attached_count == 1)
             await started.wait()
             await client.send_control(action)
             await wait_until(lambda: endings and "r" in result)
             await client.aclose()
             tg.cancel_scope.cancel()
 
-    # The run was cancelled, not concluded: the client renders its own leave state.
-    assert endings == [StreamEnding.CUT]
+    # The leave cancelled the run, not the socket: the end frame still drained,
+    # behind every event emitted before it, naming the leave.
+    assert endings == [StreamEnding.ENDED]
+    assert ends == [EndOfRun(action)]
+    assert received == [{"type": "agent_message", "payload": {"text": "bye"}}]
+    assert result["r"] is None
+    assert server.leave == action
 
 
 def _quest_log_server(tmp_path: Path) -> tuple[SessionServer, Path]:
@@ -2069,4 +2087,37 @@ async def test_a_drop_with_no_quest_log_is_dropped_but_not_recorded(
     server._emit({"type": "agent_result", "payload": {"text": "x"}})
     assert client not in server._socket._clients
     assert list(tmp_path.iterdir()) == []   # no log written where there is no quest log
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_viewer_lost_after_the_end_frame_is_queued_is_not_recorded(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    client, recv = _stub_client(_DeadStream(), buffer=2)
+    server._socket._clients.add(client)
+    server._socket.enqueue_end(EndOfRun("save"))
+    client.send.close()
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        await server._socket._pump_client(client, recv)
+    assert client not in server._socket._clients   # still dropped
+    assert not (home / "events.jsonl").exists()    # but teardown is not a viewer fault
+    recv.close()
+
+
+@pytest.mark.anyio
+async def test_a_viewer_too_far_behind_to_queue_the_end_frame_is_recorded(
+    tmp_path: Path,
+) -> None:
+    server, home = _quest_log_server(tmp_path)
+    client, recv = _stub_client(SimpleNamespace(), buffer=1)
+    server._socket._clients.add(client)
+    client.send.send_nowait({"type": "filler", "payload": {}})
+    server._socket.enqueue_end(EndOfRun("save"))
+    assert client not in server._socket._clients
+    assert [(r["type"], r["payload"]) for r in _records(home)] == [
+        ("runner_warning",
+         {"message": "a viewer fell behind and was disconnected",
+          "detail": "its event queue passed 256 pending events"})]
     recv.close()

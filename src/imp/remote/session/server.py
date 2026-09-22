@@ -28,7 +28,9 @@ from imp.remote.session.protocol import (
     CONTROL_SET_MODEL,
     CONTROL_SET_PROVIDER,
     CONTROL_SET_SANDBOX,
+    LEAVE_DISPOSITIONS,
     SIDE_EFFECT_REASONS,
+    EndOfRun,
     SkillRequest,
 )
 from imp.remote.session.socket_server import (
@@ -109,17 +111,14 @@ class SessionServer:
         # keep-alive client attached and left" (hibernate now) at the
         # zero-leased gates.
         self._first_leased_attach_fired: bool = False
-        self.abandoned = False
-        self.saved = False
+        self.leave: str | None = None   # the leave control that ended the run
         self.save_reason: str | None = None
-        self.archived = False
-        self.discarded = False
         self._abandon_requested = False
         self._save_requested = False
         self._save_reason: str | None = None
         self._archive_requested = False
         self._discard_requested = False
-        self._serve_scope: anyio.CancelScope | None = None
+        self._run_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         self._last_gate_event: dict[str, Any] | None = None
         self._in_wait_for_turn = False
@@ -150,6 +149,22 @@ class SessionServer:
     def leased_count(self) -> int:
         return self._socket.leased_count
 
+    @property
+    def abandoned(self) -> bool:
+        return self.leave == CONTROL_ABANDON
+
+    @property
+    def saved(self) -> bool:
+        return self.leave == CONTROL_SAVE
+
+    @property
+    def archived(self) -> bool:
+        return self.leave == CONTROL_ARCHIVE
+
+    @property
+    def discarded(self) -> bool:
+        return self.leave == CONTROL_DISCARD
+
     async def open(self) -> None:
         self._attach_changed = anyio.Event()
         self._side_effect_pending = anyio.Event()
@@ -166,17 +181,17 @@ class SessionServer:
         result: Any = None
         try:
             async with anyio.create_task_group() as tg:
-                self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
-                # The run reached its own conclusion — returned, or raised. A cancelled
-                # run_fn is the control-driven leave (_serve_scope.cancel), which the
-                # client renders from its own state and must not be sent a frame.
+                # The run reached its own conclusion — returned, or raised. A leave
+                # control cancels only run_tg, so the client pumps outlive the run
+                # and the end frame still reaches every client, naming the leave.
                 concluded = False
                 try:
-                    async with anyio.create_task_group() as pump_tg:
+                    async with anyio.create_task_group() as run_tg:
+                        self._run_scope = run_tg.cancel_scope
                         if self._coordinator is not None:
-                            self._coordinator.set_delivery_spawner(pump_tg.start_soon)
-                        pump_tg.start_soon(self._control_loop)
+                            self._coordinator.set_delivery_spawner(run_tg.start_soon)
+                        run_tg.start_soon(self._control_loop)
                         try:
                             result = await run_fn(
                                 on_event=self._emit, user_chat_input_fn=self._chat)
@@ -191,10 +206,10 @@ class SessionServer:
                                 self._coordinator.clear_delivery_spawner()
                             await self._control_send.aclose()
                 finally:
-                    if concluded:
+                    if concluded or self.leave is not None:
                         # Queued behind every pending event, then drained by the same
                         # flush, so it is provably the last frame each client receives.
-                        self._socket.enqueue_end()
+                        self._socket.enqueue_end(EndOfRun(self.leave))
                         await self._socket.flush_pending()
                 tg.cancel_scope.cancel()
         finally:
@@ -429,7 +444,7 @@ class SessionServer:
             # enqueue is dropped but the buffered items still wake the loop, which
             # then fires abandon on its very next iteration via the signal.
             self._abandon_requested = True
-            with contextlib.suppress(anyio.WouldBlock):
+            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_SAVE:
@@ -440,17 +455,17 @@ class SessionServer:
             # buffered frame's.
             self._save_requested = True
             self._save_reason = reason
-            with contextlib.suppress(anyio.WouldBlock):
+            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_ARCHIVE:
             self._archive_requested = True
-            with contextlib.suppress(anyio.WouldBlock):
+            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_DISCARD:
             self._discard_requested = True
-            with contextlib.suppress(anyio.WouldBlock):
+            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
         try:
@@ -458,6 +473,8 @@ class SessionServer:
         except anyio.WouldBlock:
             _log.warning(
                 "session control queue overflow; dropping ordinary control %r", action)
+        except anyio.ClosedResourceError:
+            pass   # the run is over; the end frame may still be draining
 
     async def _control_loop(self) -> None:
         async for action, reason in self._control_recv:
@@ -528,26 +545,12 @@ class SessionServer:
             self._coordinator.request_retry_now()
         elif action == CONTROL_DETACH:
             await self._socket.detach_all()
-        elif action == CONTROL_ABANDON:
-            self.abandoned = True
-            if self._on_abandon is not None:
+        elif action in LEAVE_DISPOSITIONS:
+            self.leave = action
+            if action == CONTROL_SAVE:
+                self.save_reason = reason
+            if action == CONTROL_ABANDON and self._on_abandon is not None:
                 self._on_abandon()
-            if self._serve_scope is None:
-                raise RuntimeError("abandon dispatched outside serve()")
-            self._serve_scope.cancel()
-        elif action == CONTROL_SAVE:
-            self.saved = True
-            self.save_reason = reason
-            if self._serve_scope is None:
-                raise RuntimeError("save dispatched outside serve()")
-            self._serve_scope.cancel()
-        elif action == CONTROL_ARCHIVE:
-            self.archived = True
-            if self._serve_scope is None:
-                raise RuntimeError("archive dispatched outside serve()")
-            self._serve_scope.cancel()
-        elif action == CONTROL_DISCARD:
-            self.discarded = True
-            if self._serve_scope is None:
-                raise RuntimeError("discard dispatched outside serve()")
-            self._serve_scope.cancel()
+            if self._run_scope is None:
+                raise RuntimeError(f"{action} dispatched outside serve()")
+            self._run_scope.cancel()

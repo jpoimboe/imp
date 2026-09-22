@@ -133,6 +133,7 @@ class SessionSocket:
         self._input_armed: bool = False
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
+        self._ended = False
 
     async def open(self) -> None:
         parent = Path(self._path).parent
@@ -185,10 +186,11 @@ class SessionSocket:
         for client in list(self._clients):
             self._send_one(client, event)
 
-    def enqueue_end(self) -> None:
+    def enqueue_end(self, end: EndOfRun = END_OF_RUN) -> None:
         """Queue the end-of-run marker behind every pending event, for every client."""
+        self._ended = True
         for client in list(self._clients):
-            self._send_one(client, END_OF_RUN)
+            self._send_one(client, end)
 
     def _send_one(self, client: _Client, item: PumpItem) -> None:
         try:
@@ -203,7 +205,8 @@ class SessionSocket:
         with contextlib.suppress(anyio.ClosedResourceError):
             client.send.close()
         client.scope.cancel()
-        if self._on_drop is not None:
+        # After the end frame is queued a broken write is teardown; an overflow still lost data.
+        if self._on_drop is not None and not (self._ended and reason is DropReason.WRITE_FAILURE):
             self._on_drop(reason)
 
     async def _pump_client(
@@ -223,7 +226,7 @@ class SessionSocket:
                         except (anyio.WouldBlock, anyio.EndOfStream):
                             break
                     line = b"".join(
-                        ((encode_end() if isinstance(item, EndOfRun)
+                        ((encode_end(item) if isinstance(item, EndOfRun)
                           else encode_event(item)) + "\n").encode("utf-8")
                         for item in batch)
                     try:
