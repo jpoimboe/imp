@@ -205,6 +205,39 @@ def test_operator_notes_document_dead_provider_login_recovery() -> None:
     assert "bills the OpenAI API, not your ChatGPT subscription" in section
 
 
+def test_operator_notes_document_the_per_run_source_snapshot() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    # Ahead of the archive-skew heading: the tests below slice on it and assert
+    # phrases are ABSENT from the remainder.
+    assert text.index("## Source snapshot") < text.index("## Archive version skew")
+    section = " ".join(
+        text.split("## Source snapshot", 1)[1]
+            .split("## Archive version skew", 1)[0].split())
+    # what it is, where it lives, one per daemon start
+    assert "**source snapshot**" in section
+    assert "quests/<id>/pinned-src/<token>/" in section
+    assert "one directory per daemon start" in section
+    # the in-sandbox imp and the process serving it are one build
+    assert "the process serving it over the session socket are always one build" in section
+    # a mid-run merge does not reach a running quest, and the remedy that does
+    assert "does not reach a running quest — by design, not by accident" in section
+    assert ("`imp resume <id>` (after Ctrl-D) is how a running quest moves onto "
+            "newer code") in section
+    # the two things a merge still reaches
+    assert "imp's `docs/` corpus, which agents read live from the checkout" in section
+    assert "the project's local config layer" in section
+
+
+def test_operator_notes_qualify_the_ff_merge_deploy_claim() -> None:
+    """A running quest executes the imp it started with, so an engine fix merged to
+    the base branch reaches it only at its next resume."""
+    flat = " ".join(Path("docs/guide/operator-notes.md").read_text().split())
+    assert "Engine *code* fixes deploy on ff-merge" in flat
+    assert "picks up an engine fix only at its next `imp resume <id>`" in flat
+    # the unqualified claim, which the source snapshot falsifies, is gone
+    assert "`src/`); workflow *assets and scripts* do not — the snapshot wins" not in flat
+
+
 def test_operator_notes_document_archive_version_skew() -> None:
     from imp.engine.archive import _DATA_VERSION
     from imp.engine.errors import ArchiveMismatch

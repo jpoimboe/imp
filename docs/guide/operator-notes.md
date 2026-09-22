@@ -9,7 +9,10 @@ Runbook for operating a running imp quest.
   reaches as `.imp/quests/<id>/workflow/`) that shadows its branch (`quest.py` —
   `workflow_dir` returns the snapshot when present, else `live_workflow_dir`).
   Engine *code* fixes deploy on ff-merge (editable pipx install → `main`'s
-  `src/`); workflow *assets and scripts* do not — the snapshot wins.
+  `src/`) to the *next* quest that starts: a **running** quest executes its own
+  **source snapshot** of imp (see *Source snapshot* below) and picks up an engine
+  fix only at its next `imp resume <id>`. Workflow *assets and scripts* never
+  deploy on ff-merge at all — the workflow snapshot wins.
 - **Consequence:** cherry-picking a workflow fix onto a paused quest's branch is
   **inert** when the quest has a snapshot (the normal case). To unblock, edit
   the snapshot directly (`.imp/quests/<id>/workflow/workflow.yaml` plus
@@ -90,6 +93,27 @@ cd /path/to/the/owning/checkout
 DIR=~/.imp/projects/whatever   # substitute: the directory $IMP_STATE_DIR names
 pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
 ```
+
+## Source snapshot
+
+- A daemon copies the imp it is running — the `imp` and `impty` packages — into
+  its quest home at startup, under the repo lock, and re-execs itself out of that
+  copy: `~/.imp/projects/<slug>/quests/<id>/pinned-src/<token>/`, one directory
+  per daemon start, never rewritten once published. The `imp` an agent runs
+  inside the sandbox is that same **source snapshot**, read-only to the agent, so
+  the CLI a sandboxed agent invokes and the process serving it over the session
+  socket are always one build.
+- **Consequence:** a merge to the base branch mid-run does not reach a running
+  quest — by design, not by accident. Before this, a merge that changed a wire
+  type mid-run left a freshly spawned in-sandbox `imp log` / `imp show` reading
+  post-merge code while the process answering it was pre-merge, and it died with
+  a raw `KeyError`. Two things outside the snapshot do still change under a
+  running quest: imp's `docs/` corpus, which agents read live from the checkout,
+  and the project's local config layer above.
+- `imp resume <id>` (after Ctrl-D) is how a running quest moves onto newer code:
+  the resumed daemon takes a fresh source snapshot. Old snapshots need no
+  tending — the next daemon started in that home deletes any whose owning process
+  is gone, and reaping the quest home takes the rest.
 
 ## Archive version skew
 
