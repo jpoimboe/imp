@@ -1,7 +1,7 @@
 """Shared probe machinery for the claude built-in deny-posture guard.
 
-Mechanism: resolve the CLI the SDK actually spawns (its bundled binary, not
-whatever `claude` is on PATH), launch it with the exact --disallowedTools
+Mechanism: resolve the CLI the SDK actually spawns (imp pins cli_path to the
+PATH `claude`, so that one), launch it with the exact --disallowedTools
 list _build_options produces, and read the `init` system message, where
 claude advertises its live tool registry. Anything advertised beyond the
 ToolSearch exemption is a built-in the agent could call from every

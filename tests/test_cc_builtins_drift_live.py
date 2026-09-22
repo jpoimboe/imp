@@ -1,4 +1,4 @@
-"""Live deny-posture probes: spawn the SDK's bundled claude CLI under imp's exact
+"""Live deny-posture probes: spawn the claude CLI imp pins via cli_path under its exact
 deny list and read the tool registry it advertises in the `init` frame. The
 shared machinery is tests/cc_probe.py; the CLI-free regression tests that pin
 the probe's fail-loud contract are in tests/test_cc_builtins_drift.py."""
