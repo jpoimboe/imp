@@ -1287,11 +1287,14 @@ def resolve_policy(
         secret_dirs += list(_existing([str(quest_dir / "steps")]))
         secret_files += list(_existing([str(quest_dir / "events.jsonl")]))
 
-    # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
-    # bind, so last-covering-wins makes only workflow/ read-only.
+    # ro overlays inside the quest home — bind_plan emits them after the quest_home rw
+    # bind, so last-covering-wins makes only these subtrees read-only. pinned-src is the
+    # shared parent: the daemon imports a snapshot mid-run and executes it OUTSIDE the
+    # sandbox, so no snapshot in the home may be agent-writable.
     readonly_overlays: tuple[str, ...] = ()
-    if quest_dir is not None and (quest_dir / "workflow").is_dir():
-        readonly_overlays = (str(quest_dir / "workflow"),)
+    if quest_dir is not None:
+        overlaid = (quest_dir / "workflow", quest_dir / "pinned-src")
+        readonly_overlays = tuple(str(p) for p in overlaid if p.is_dir())
 
     state_mask = str(_state_mask(control_root))    # creates imp_home()/projects
     projects_ro = _projects_ro()                   # ...which this then existence-gates
