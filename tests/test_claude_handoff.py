@@ -1062,7 +1062,7 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    args = {"command": "sleep 120"}
+    args = {"command": "echo hello; sleep 120"}
     before_result = [
         assistant(text("running"), tool_use("u1", "mcp__imp__bash", args)),
         user(tool_result("u1", REJECTION, is_error=True)),
@@ -1109,6 +1109,22 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
                 break
             await asyncio.sleep(0.01)
         assert runner._ctx.running_processes
+        # wait for echo output before killing so the kill can't race it
+        from imp.agents.tools.bg import _bg_dir
+        bg = _bg_dir(runner._ctx)
+        hello_seen = False
+        for _ in range(2000):
+            for f in bg.glob("fg-*.out"):
+                try:
+                    if b"hello" in f.read_bytes():
+                        hello_seen = True
+                        break
+                except OSError:
+                    pass
+            if hello_seen:
+                break
+            await asyncio.sleep(0.01)
+        assert hello_seen, "echo output never appeared before interrupt"
         t0 = time.monotonic()
         await runner.interrupt()
         await asyncio.wait_for(task, timeout=60)
@@ -1123,3 +1139,4 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
     assert content != REJECTION
     assert "was not recorded" not in content
     assert json.loads(content)["returncode"] < 0
+    assert json.loads(content)["stdout"] == "hello\n"
