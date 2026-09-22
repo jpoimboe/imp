@@ -143,7 +143,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         {
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
-            "high": "claude-opus-5[1m]",
+            "high": "claude-opus-5-5",
         },
         "ANTHROPIC_API_KEY",
     ),
@@ -155,7 +155,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         {
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
-            "high": "claude-opus-5[1m]",
+            "high": "claude-opus-5-5",
         },
         None,
     ),

@@ -2877,11 +2877,13 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
     assert opts.model == "opus"
 
 
-def test_high_tier_floor_defaults_to_opus_1m() -> None:
+def test_high_tier_floor_defaults_to_opus_5_5() -> None:
     from imp.providers import BUILTIN_FLOOR
     tiers = BUILTIN_FLOOR["claude"].tier_defaults
     assert tiers is not None
-    assert tiers["high"] == "claude-opus-5[1m]"
+    # The bare id, not `[1m]`: 5.5's 1M window is native, so the suffix buys
+    # nothing on either auth path.
+    assert tiers["high"] == "claude-opus-5-5"
 
 
 @pytest.mark.anyio
