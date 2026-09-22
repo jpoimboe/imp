@@ -349,7 +349,7 @@ def test_agent_message_digest_reports_tools_and_stop():
 def test_agent_message_ctx_resolves_window_from_the_catalog() -> None:
     # anthropic/openai report context_tokens alone: the window comes from the
     # model catalog, and the percentage is against that window's handoff limit
-    # (80% of 200000 = 160000), not the window.
+    # (the 200000 ceiling, below 80% of the 1M window), not the window.
     ev = {
         "id": "c1", "type": "agent_message", "agent_id": "step:build/coder",
         "payload": {
@@ -360,18 +360,18 @@ def test_agent_message_ctx_resolves_window_from_the_catalog() -> None:
             "raw": {"content": [{"type": "text", "text": "done"}]},
         },
     }
-    assert "ctx=159842/160000 (99.9%)" in digest_event(ev)
+    assert "ctx=159842/200000 (79.9%)" in digest_event(ev)
 
 
 def test_agent_message_ctx_prefers_the_reported_window() -> None:
-    # claude reports its own window; it wins over the catalog's (200000,
-    # limit 160000), giving the 200000 ceiling here. Occupancy past the limit
-    # reports past 100%, and the legacy percentage is ignored — 203000/200000 is
-    # 101.5%, not the 79.9% the payload claims.
+    # claude reports its own window; it wins over the catalog's (200000 for
+    # sonnet, limit 160000), giving the 200000 ceiling here. Occupancy past the
+    # limit reports past 100%, and the legacy percentage is ignored — 203000/200000
+    # is 101.5%, not the 79.9% the payload claims.
     ev = {
         "id": "c2", "type": "agent_message", "agent_id": "step:build/coder",
         "payload": {
-            "provider": "claude", "model": "claude-opus-5",
+            "provider": "claude", "model": "claude-sonnet-4-6",
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 10, "output_tokens": 2},
             "context_tokens": 203_000, "context_window": 1_000_000,

@@ -156,7 +156,7 @@ def test_the_cost_field_reaches_the_row_from_the_streamed_events() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000))
     row = _position_row(events)
     # 40 + 153 + 5 = 198 = width - 2: the dollars sit at the band's right edge.
-    assert row == "t · claude-opus-5 · ████████░░ 120k/160k" + " " * 153 + "$4.21"
+    assert row == "t · claude-opus-5 · ██████░░░░ 120k/200k" + " " * 153 + "$4.21"
     assert pal.display_width(row) == 198
 
 
@@ -170,7 +170,7 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row == ("t · claude-opus-5 · ████████░░ 120k/160k" + " " * 128
+    assert row == ("t · claude-opus-5 · ██████░░░░ 120k/200k" + " " * 128
                    + "claude · session 34% · week 7%")
     assert "$" not in row
 
@@ -228,7 +228,7 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     assert total.priced == 0                  # attributed to nothing, priced as nothing
     row = _position_row(events)
     assert "$" not in row and "n/a" not in row
-    assert row.endswith("claude-opus-5 · ████████░░ 120k/160k")
+    assert row.endswith("claude-opus-5 · ██████░░░░ 120k/200k")
 
 
 # AC 4, AC 14

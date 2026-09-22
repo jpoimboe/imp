@@ -1868,14 +1868,17 @@ def test_context_bar_bands_are_relative_to_the_handoff_limit() -> None:
 def test_the_gauge_means_the_same_thing_across_models() -> None:
     from imp.cli.live_driver import context_bar
     # The same 150k of occupancy: eight cells of a 200k limit wherever the
-    # ceiling binds, nine of claude-opus-5's 80%-of-200k limit.
+    # ceiling binds, nine of claude-sonnet-4-6's 80%-of-200k limit.
     for provider, model in (("claude", "claude-opus-5[1m]"),
+                            ("claude", "claude-opus-5"),
+                            ("claude", "claude-opus-5-5"),
+                            ("anthropic", "claude-opus-5-5"),
                             ("openai", "gpt-5"),
                             ("openai", "gpt-5.6-terra"),
                             ("codex", "gpt-6-astra")):
         assert context_bar(provider, model, 150_000, color=False,
                            over_bg=False) == "████████░░ 150k/200k", model
-    assert context_bar("claude", "claude-opus-5", 150_000, color=False,
+    assert context_bar("claude", "claude-sonnet-4-6", 150_000, color=False,
                        over_bg=False) == "█████████░ 150k/160k"
 
 
@@ -1898,9 +1901,9 @@ def test_context_bar_resolves_a_dated_id_through_limits_for() -> None:
     from imp.providers.catalog import limits_for
     dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert dated is not None
-    assert dated.window == 200_000                 # longest-prefix, not substring
+    assert dated.window == 1_000_000               # longest-prefix, not substring
     assert context_bar("anthropic", "claude-opus-5-20260315", 48_000,
-                       color=False, over_bg=False) == "███░░░░░░░ 48k/160k"
+                       color=False, over_bg=False) == "██░░░░░░░░ 48k/200k"
 
 
 def test_live_driver_has_no_context_windows_symbol() -> None:
@@ -2542,8 +2545,8 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
             quest_id="z", title="t", context_tokens=120_000, color=False,
             width=120)
 
-    assert "120k/160k" in row("agent")
-    assert "█" not in row("script") and "120k/160k" not in row("script")
+    assert "120k/200k" in row("agent")
+    assert "█" not in row("script") and "120k/200k" not in row("script")
     # prelaunch kind=None suppresses the bar even with usage present
     assert "█" not in row(None)
     assert "implementation phase" in row("script")
@@ -2555,7 +2558,7 @@ def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
         activity=_pos_activity(kind="agent", lane_wait=True,
                                model="claude-opus-5", provider="claude"),
         quest_id="z", title="t", context_tokens=120_000, color=False, width=120)
-    assert "█" not in row and "120k/160k" not in row
+    assert "█" not in row and "120k/200k" not in row
     assert "implementation phase" in row
 
 
@@ -2731,7 +2734,7 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
 
 def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
     left = ("imp · nota40 · Context and quota gauges in the live footer · "
-            "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 70k/160k")
+            "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 70k/200k")
     row = _wide_row(200)
     # 133 + 25 + 40 = 198: both groups at their edges, spaces in between.
     assert row == left + " " * 25 + "claude · session 62% (3h left) · week 7%"
@@ -2746,14 +2749,14 @@ def test_position_row_fit_ladder_drops_the_quota_then_the_gauge_then_clips() -> 
     # 150: the quota goes whole and the gauge survives, ending at a segment
     # boundary — where the blind clip used to sever the 160-column row mid-field.
     at150 = _wide_row(150)
-    assert at150.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
+    assert at150.endswith("claude-opus-5 · ████░░░░░░ 70k/200k")
     assert "session" not in at150 and "…" not in at150
     assert pal.display_width(at150) == 133
     # 120: the gauge goes next; every structural segment is still there.
     at120 = _wide_row(120)
     assert at120.startswith(f"imp · nota40 · {_LONG_TITLE} · implementation")
     assert at120.endswith("plan-1 · step 3/7 · claude-opus-5")
-    assert "70k/160k" not in at120 and "…" not in at120
+    assert "70k/200k" not in at120 and "…" not in at120
     # 100: nothing left to drop, so the title itself is truncated — and only then.
     at100 = _wide_row(100)
     assert at100.endswith("…")

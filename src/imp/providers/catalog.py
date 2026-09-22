@@ -8,8 +8,7 @@ layer, never the renderer — see docs/internals/invariants.md "Layering invaria
 supersedes it once a turn completes. `cli_model` overrides the alias passed to
 the CLI/SDK when the alias is not the wire model id (e.g. the raw Anthropic API
 rejects the bracketed `claude-opus-4-8[1m]` form, so its entry sends
-`claude-opus-4-8` and requests the 1M window via `betas`, the anthropic-beta
-header opt-ins).
+`claude-opus-4-8`). `betas` carries anthropic-beta header opt-ins.
 
 Hand-maintained: no provider exposes context-window size via an endpoint.
 """
@@ -39,11 +38,12 @@ CLAUDE: dict[str, ModelInfo] = {
     # remain resolvable for operator config layers that still use them.
     "claude-haiku-4-5": ModelInfo(window=200_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000),
-    "claude-opus-4-8": ModelInfo(window=200_000),
-    # The bracketed model-id form is a real CLI model id that requests the 1M
-    # window under both subscription (OAuth) and API-key auth. A `betas` opt-in
-    # would only work for API-key auth: under subscription auth claude-p
-    # silently drops the beta (window falls back to 200k) and warns to stderr
+    "claude-opus-4-8": ModelInfo(window=1_000_000),
+    # These models serve 1M natively, so the bare id asks for nothing and the
+    # bracketed form is just another real CLI model id, kept resolvable for
+    # configs that spell it. No entry here carries a `betas` opt-in: it would
+    # work only under API-key auth, and under subscription auth claude-p
+    # silently drops it (window falls back to 200k) while warning to stderr
     # every request ("Custom betas are only available for API key users").
     "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
     # Opus 5.5: the 1M window is native, so neither form needs a beta opt-in.
@@ -51,11 +51,11 @@ CLAUDE: dict[str, ModelInfo] = {
     "claude-opus-5-5[1m]": ModelInfo(window=1_000_000),
     # Opus 5: window-only, mirroring the opus-4-8 entries. The bracketed form is
     # a real CLI model id passed through as-is (no cli_model/betas indirection).
-    "claude-opus-5": ModelInfo(window=200_000),
+    "claude-opus-5": ModelInfo(window=1_000_000),
     "claude-opus-5[1m]": ModelInfo(window=1_000_000),
     # Fable 5: window-only, mirroring the opus entries. The bracketed form is a
     # real CLI model id passed through as-is (no cli_model/betas indirection).
-    "claude-fable-5": ModelInfo(window=200_000),
+    "claude-fable-5": ModelInfo(window=1_000_000),
     "claude-fable-5[1m]": ModelInfo(window=1_000_000),
     "haiku": ModelInfo(window=200_000),
     "sonnet": ModelInfo(window=200_000),
@@ -63,9 +63,11 @@ CLAUDE: dict[str, ModelInfo] = {
 }
 
 ANTHROPIC: dict[str, ModelInfo] = {
-    # The raw API rejects the bracketed form, so cli_model strips it and the
-    # context-1m beta header requests the 1M window instead (this provider is
-    # API-key-only, where custom betas are honored — unlike claude above).
+    # These models serve 1M natively, so the bare entries request nothing. The
+    # raw API rejects the bracketed form, so cli_model strips it; its context-1m
+    # beta is retained only so the [1m] alias keeps behaving as it always has
+    # (this provider is API-key-only, where custom betas are honored — unlike
+    # claude above).
     "claude-opus-4-8[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=64_000,
@@ -81,28 +83,28 @@ ANTHROPIC: dict[str, ModelInfo] = {
         cli_model="claude-opus-5-5",
     ),
     # Opus 5: 128k output cap (2026-07-23 rollout doubles opus-4.8's 64k). The
-    # [1m] form is rejected by the raw API, so cli_model strips it and the
-    # context-1m beta header requests the 1M window (API-key-only provider).
+    # [1m] alias is handled as above: cli_model strips the bracket the raw API
+    # rejects, and its context-1m beta is retained rather than load-bearing.
     "claude-opus-5[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=128_000,
         cli_model="claude-opus-5",
         betas=("context-1m-2025-08-07",),
     ),
-    "claude-opus-5": ModelInfo(window=200_000, max_output_tokens=128_000),
-    # Fable 5: 128k output cap confirmed live from /v1/models. The [1m] form is
-    # rejected by the raw API, so cli_model strips it and the context-1m beta
-    # header requests the 1M window (this provider is API-key-only).
+    "claude-opus-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    # Fable 5: 128k output cap confirmed live from /v1/models. The [1m] alias is
+    # handled as above: cli_model strips the bracket the raw API rejects, and its
+    # context-1m beta is retained rather than load-bearing.
     "claude-fable-5[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=128_000,
         cli_model="claude-fable-5",
         betas=("context-1m-2025-08-07",),
     ),
-    "claude-fable-5": ModelInfo(window=200_000, max_output_tokens=128_000),
+    "claude-fable-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
     "claude-haiku-4-5": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000, max_output_tokens=32_000),
-    "claude-opus-4-8": ModelInfo(window=200_000, max_output_tokens=64_000),
+    "claude-opus-4-8": ModelInfo(window=1_000_000, max_output_tokens=64_000),
     "haiku": ModelInfo(window=200_000, max_output_tokens=32_000),
     "sonnet": ModelInfo(window=200_000, max_output_tokens=32_000),
     "opus": ModelInfo(window=200_000, max_output_tokens=64_000),

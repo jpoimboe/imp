@@ -39,7 +39,7 @@ def _row(**kw: Any) -> str:
 
 # AC 8
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
-    left = "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
+    left = "implement phase · claude-opus-5 · ████░░░░░░ 70k/200k"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     row = _row(carrier=_carrier(calm, auth_mode="subscription"))
     # 53 + 115 + 30 = 198 = width - 2: the field is reached across the gap.
@@ -91,14 +91,14 @@ def test_a_past_reset_renders_no_field_at_any_level() -> None:
     for pct in (92.0, 34.0):
         already_past = _reading(QuotaWindow("5h", pct, int(_NOW) - 10))
         row = _row(carrier=_carrier(already_past, auth_mode="subscription"))
-        assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
+        assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/200k"
 
 
 # AC 10
 def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     priced = RowUsage(dollars=4.21, priced=1)
     row = _row(carrier=_carrier(auth_mode="apikey"), cost=priced)
-    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k" + " " * 140 + "$4.21"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/200k" + " " * 140 + "$4.21"
     assert " · $4.21" not in row                 # flush right, no label, no color, no ~
     assert pal.display_width(row) == 198
     # A step on a model the price table lacks still renders the figure, no ≥.
@@ -119,7 +119,7 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
 def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None:
     row = _row(carrier=_carrier(_reading(QuotaWindow("5h", 34.0, None)),
                                 auth_mode="apikey"), cost=RowUsage())
-    assert row.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
+    assert row.endswith("claude-opus-5 · ████░░░░░░ 70k/200k")
     assert "n/a" not in row and "—" not in row
     # The metered choice is exclusive: a stale reading never leaks onto this row.
     assert "session" not in row and "week" not in row
@@ -128,7 +128,7 @@ def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None
 # AC 11
 def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
     row = _row(carrier=_carrier(auth_mode="subscription"))
-    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/200k"
 
 
 def test_an_unrecognized_window_label_renders_verbatim() -> None:
@@ -203,7 +203,7 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
     assert pal.display_width(windows_only) == 98
     # (c) target 78 fits neither candidate: the quota goes whole, the gauge stays.
     bare = at(80)
-    assert bare.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
+    assert bare.endswith("claude-opus-5 · ████░░░░░░ 70k/200k")
     assert "session" not in bare
 
 
@@ -237,7 +237,7 @@ def test_a_fully_expired_reading_renders_no_field() -> None:
     dead = _reading(QuotaWindow("5h", 101.0, int(_NOW) - 60))
     row = _row(carrier=_carrier(dead, auth_mode="subscription"))
     # Byte-identical to the no-reading row: no placeholder, no trailing padding.
-    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/200k"
     assert quota_field(dead, now_epoch=_NOW, color=False, over_bg=False) is None
 
 
