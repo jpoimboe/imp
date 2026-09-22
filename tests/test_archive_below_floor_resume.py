@@ -14,7 +14,7 @@ from imp.engine.abandon import archive_conversation
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control
+from tests.conftest import BELOW_DATA_FLOOR, _seed_control
 
 LIVE = "lodo40"
 SHELVED = "lodo77"
@@ -31,7 +31,7 @@ def _live_and_shelved(control: Path) -> None:
 
 
 def _lower_data_floor(control: Path) -> None:
-    archive._write_data_version(control, archive._DATA_VERSION - 1)
+    archive._write_data_version(control, BELOW_DATA_FLOOR)
 
 
 def _resolve(control: Path, token: str) -> str | int:
@@ -75,7 +75,7 @@ def test_below_floor_a_token_matching_both_refuses_and_names_the_archived_id(
     target = _resolve(tmp_path, "lodo")
 
     reason = str(ArchiveMismatch(floor="data",
-                                 stored=archive._DATA_VERSION - 1,
+                                 stored=BELOW_DATA_FLOOR,
                                  known=archive._DATA_VERSION))
     assert {r[0] for r in rows} == {LIVE}
     assert unreadable == m._UnreadableMatches(ids=(SHELVED,), reason=reason)

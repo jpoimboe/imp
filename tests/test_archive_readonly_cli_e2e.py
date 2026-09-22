@@ -158,7 +158,8 @@ def _run_readonly(
 
 def _run_writable(repo: Path, home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """`imp <args>` in `repo` with no sandbox — the writable counterpart of
-    `_run_readonly`, which no longer diverges now that nothing heals the marker."""
+    `_run_readonly`. The two diverge only at stored version 13, the one version a
+    writable archive heals in place; below-floor otherwise, both refuse alike."""
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
@@ -257,8 +258,8 @@ def test_below_floor_reads_split_on_a_read_only_archive(
 def test_below_floor_reads_split_on_a_writable_archive(
     tmp_path: Path, project: tuple[Path, Path, Path],
 ) -> None:
-    """Nothing heals the marker any more, so a writable archive refuses exactly
-    what a read-only one does."""
+    """Only version 13 heals, so at any other below-floor version a writable archive
+    refuses exactly what a read-only one does."""
     repo, home, _state = project
     archive.data_version_path(repo).unlink()
 

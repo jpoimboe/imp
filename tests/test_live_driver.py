@@ -2275,6 +2275,17 @@ def test_merged_node_still_suppressed_in_live_leaf() -> None:
     assert "master" not in out.getvalue()
 
 
+def test_merged_node_with_commits_still_suppressed_in_live_leaf() -> None:
+    drv, out = _driver()
+    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master",
+                                 commits=[{"sha": "4091ab6d" + "0" * 32,
+                                           "subject": "cli: print the commit list"}]), 0)
+    # main.py's completion block owns the live list; the log footer's body must not
+    # double it into the stream
+    assert out.getvalue() == "\n"
+    assert "4091ab6d" not in out.getvalue()
+
+
 def test_show_label_false_script_silent_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [

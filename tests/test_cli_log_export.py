@@ -241,3 +241,19 @@ def test_html_show_tools_carries_a_real_details_element(
     assert "<summary>" in out
     assert "command=ls" in out                      # tool bodies inside the fold
     assert "pondering deeply" not in out            # thinking still off
+
+
+def test_html_export_renders_the_commit_list_as_a_real_list(tmp_path, monkeypatch):
+    slug = _setup(tmp_path, monkeypatch)
+    events_path = project_state_dir(tmp_path) / "quests" / slug / "events.jsonl"
+    with events_path.open("a") as fh:
+        fh.write(json.dumps(
+            {"id": "5", "agent_id": None, "type": "quest_merged", "timestamp": T2,
+             "payload": {"base": "main", "commit": "f" * 40,
+                         "commits": [{"sha": "4091ab6d" + "0" * 32,
+                                      "subject": "cli: print the commit list"}]}}) + "\n")
+    assert main(["log", slug, "--html"]) == 0
+    html = (tmp_path / f"imp-log-{slug}.html").read_text()
+    # a genuine <li>, i.e. the Markdown list was not swallowed into the footer's
+    # paragraph on the way through markdown-it
+    assert "<li><code>4091ab6d</code> cli: print the commit list</li>" in html

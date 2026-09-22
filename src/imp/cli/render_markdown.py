@@ -45,6 +45,14 @@ def _md_escape(text: str) -> str:
     return html.escape(rt._caret_escape(rt._strip_sgr(text)), quote=False)
 
 
+def _commit_block(footer: str, commits: list[dict[str, str]]) -> str:
+    """A terminal footer line plus, when commits were recorded, an unquoted Markdown
+    list of `<sha8>` + subject beneath it. One block, so the list is not separated
+    from the footer by a blank line; unquoted because a bold line is not a callout."""
+    return "\n".join([footer, *(f"- `{c['sha'][:8]}` {_md_escape(c['subject'])}"
+                                for c in commits)])
+
+
 def _heading(level: int, text: str) -> str:
     return "#" * min(level, _MAX_HEADING) + " " + text.replace("\n", " ")
 
@@ -266,10 +274,13 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int) -> Iterato
         yield "\n".join(lines)
         return
     if isinstance(node, nv.CompletedNode):
-        yield f"**✓ Completed {_md_escape(node.quest_id)}.**"
+        yield _commit_block(f"**✓ Completed {_md_escape(node.quest_id)}.**",
+                            node.commits)
         return
     if isinstance(node, nv.MergedNode):
-        yield f"**✓ Merged {_md_escape(node.quest_id)} into {_md_escape(node.base)}.**"
+        yield _commit_block(
+            f"**✓ Merged {_md_escape(node.quest_id)} into {_md_escape(node.base)}.**",
+            node.commits)
         return
     if isinstance(node, nv.TiersResolvedNode):
         if "tiers" not in cats:

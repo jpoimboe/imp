@@ -28,7 +28,7 @@ A project's runtime state lives **outside** its checkout, in a per-project state
 |---|---|
 | `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `spike/`, `progress.md`, and the `workflow/` snapshot |
 | `worktrees/<id>/` | the quest's git worktree, on branch `imp/<id>` |
-| `archive/` | completed quests: content-addressed blobs, immutable records, SQLite index |
+| `archive/` | completed quests: content-addressed blobs, per-quest records, SQLite index |
 | `config.yaml` | the local config layer (`imp config set --local`) |
 | `remote-control.log`, `remote-control.pid` | the session daemon's files |
 
@@ -84,7 +84,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Worktrees are cut under the state directory (`worktrees/<id>/`), and a quest's artifacts live in the quest home (`quests/<id>/artifacts/`, which the worktree reaches as `.imp/quests/<id>/artifacts/`); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under the state directory's `archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
+All git mechanics sit behind `worktree.py`. Worktrees are cut under the state directory (`worktrees/<id>/`), and a quest's artifacts live in the quest home (`quests/<id>/artifacts/`, which the worktree reaches as `.imp/quests/<id>/artifacts/`); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with a per-quest record + SQLite index under the state directory's `archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
 
 ```mermaid
 flowchart LR
@@ -124,7 +124,7 @@ flowchart LR
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the quest is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under the state directory's `archive/`). |
+| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the quest is archived (content-addressed `events.jsonl` blob + per-quest record + SQLite index under the state directory's `archive/`). |
 | Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. Workflow-agnostic front-door partials ship bundled under `assets/partials/` and are overlaid (local-first) into each quest's `workflow/partials/` at snapshot time, like skills. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |

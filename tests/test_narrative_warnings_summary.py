@@ -264,3 +264,49 @@ def test_finalize_no_flush_for_reasonless_terminal_pause() -> None:
     b.add({"id": "z", "agent_id": None, "type": "workflow_paused", "payload": {}})
     b.finalize()                       # status=paused but _pause_outcome_shown is False
     assert _summary_nodes(b.tree.root) == []
+
+
+_SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
+_SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def test_merged_node_carries_the_commits_recorded_in_the_payload() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "quest_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        {"id": "m", "agent_id": None, "type": "quest_merged",
+         "payload": {"base": "master", "commit": "f" * 40,
+                     "commits": [{"sha": _SHA_A, "subject": "cli: derive the commits"},
+                                 {"sha": _SHA_B, "subject": "cli: print the list"}]}},
+    ])
+    merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
+    assert merged[0].commits == [{"sha": _SHA_A, "subject": "cli: derive the commits"},
+                                 {"sha": _SHA_B, "subject": "cli: print the list"}]
+    assert merged[0].base == "master"          # the existing field still lands
+
+
+def test_completed_node_carries_the_commits_recorded_in_the_payload() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "quest_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        {"id": "k", "agent_id": None, "type": "workflow_completed",
+         "payload": {"commits": [{"sha": _SHA_B, "subject": "only"}]}},
+    ])
+    completed = [c for c in tree.root.children if isinstance(c, nv.CompletedNode)]
+    assert completed[0].commits == [{"sha": _SHA_B, "subject": "only"}]
+
+
+def test_a_terminal_payload_with_no_commits_key_yields_an_empty_list() -> None:
+    """An un-reaped quest home can hold a pre-change terminal event: absent is [],
+    not a missing attribute and not a second code path."""
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "quest_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        {"id": "m", "agent_id": None, "type": "quest_merged",
+         "payload": {"base": "master", "commit": "f" * 40}},
+        _completed(),
+    ])
+    merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
+    completed = [c for c in tree.root.children if isinstance(c, nv.CompletedNode)]
+    assert merged[0].commits == []
+    assert completed[0].commits == []

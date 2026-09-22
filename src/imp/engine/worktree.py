@@ -47,6 +47,11 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _git_bytes(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    r"""Undecoded output: `_git`'s text=True translates a \r inside content to \n."""
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True)
+
+
 def _git_ok(cwd: Path, *args: str) -> str:
     proc = _git(cwd, *args)
     if proc.returncode != 0:
@@ -122,6 +127,23 @@ def commit_count(control_root: Path, quest_id: str, base: str) -> int:
     if proc.returncode != 0:
         return 0
     return int(proc.stdout.strip())
+
+
+def commits_in_range(control_root: Path, rev_range: str) -> list[dict[str, str]]:
+    """The commits in <rev_range>, oldest first, as {"sha", "subject"} pairs.
+    A range git cannot resolve is a legitimate empty answer, not an error."""
+    proc = _git_bytes(
+        control_root, "log", "--reverse", "--format=%H%x00%s", rev_range)
+    if proc.returncode != 0:
+        return []
+    out: list[dict[str, str]] = []
+    for line in proc.stdout.split(b"\n"):
+        if not line:
+            continue
+        sha, _, subject = line.partition(b"\0")
+        out.append({"sha": sha.decode("utf-8", errors="replace"),
+                    "subject": subject.decode("utf-8", errors="replace")})
+    return out
 
 
 def create_worktree(control_root: Path, quest_id: str, base: str) -> Path:

@@ -1554,6 +1554,74 @@ def test_merged_node_renders_lifecycle_wordmark_in_all_themes() -> None:
             pal.set_theme("ansi")
 
 
+_SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
+_SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def _footer(node, *, color=False):
+    return list(rt._render(node, depth=0, full=False, color=color, width=80))
+
+
+def test_merged_footer_lists_the_commits_indented_two_spaces() -> None:
+    node = nv.MergedNode(
+        quest_id="2026-06-12-run-x", base="master",
+        commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
+                 {"sha": _SHA_B, "subject": "cli: print the commit list"}])
+    # the log's house style for a multi-line node: body indented two spaces
+    assert _footer(node) == [
+        "Merged 2026-06-12-run-x into master.",
+        "  4091ab6d  cli: derive the quest's commits",
+        "  832c04d7  cli: print the commit list",
+    ]
+
+
+def test_completed_footer_lists_the_same_body() -> None:
+    node = nv.CompletedNode(quest_id="2026-06-12-run-x",
+                            commits=[{"sha": _SHA_A, "subject": "only"}])
+    assert _footer(node) == ["Completed 2026-06-12-run-x.", "  4091ab6d  only"]
+
+
+def test_commit_line_colors_the_sha_and_leaves_the_subject_plain() -> None:
+    node = nv.MergedNode(quest_id="q", base="b",
+                         commits=[{"sha": _SHA_A, "subject": "plain subject"}])
+    lines = _footer(node, color=True)
+    assert lines[1] == "  " + pal.ansi("4091ab6d", "gray") + "  plain subject"
+    # the footer's lifecycle color must not bleed onto the body
+    assert pal.sgr("wordmark", enabled=True) in lines[0]
+    assert pal.sgr("wordmark", enabled=True) not in lines[1]
+
+
+def test_commit_subject_is_caret_escaped_in_the_footer() -> None:
+    """A commit subject is content-origin text: it must not reach the terminal
+    able to clear the screen or beep."""
+    node = nv.MergedNode(quest_id="q", base="b",
+                         commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}])
+    lines = _footer(node)
+    assert lines[1] == "  4091ab6d  boom^[[2Jwipe^G"
+    assert "\x1b" not in lines[1]
+    assert "\x07" not in lines[1]
+
+
+def test_footers_with_no_commits_render_the_single_pre_change_line() -> None:
+    """Absent and [] are one code path, and both print exactly what imp printed
+    before this change."""
+    assert _footer(nv.MergedNode(quest_id="q", base="b")) == ["Merged q into b."]
+    assert _footer(nv.MergedNode(quest_id="q", base="b", commits=[])) == [
+        "Merged q into b."]
+    assert _footer(nv.CompletedNode(quest_id="q")) == ["Completed q."]
+    assert _footer(nv.CompletedNode(quest_id="q", commits=[])) == ["Completed q."]
+
+
+def test_recorded_commits_reach_the_footer_through_build_tree() -> None:
+    lines = _lines([
+        _ev("0", "quest_created", id="runx01", title="Run X"),
+        _ev("1", "quest_merged", base="master", commit="f" * 40,
+            commits=[{"sha": _SHA_B, "subject": "test: cover both finish paths"}]),
+    ])
+    assert "Merged runx01 into master." in lines
+    assert "  832c04d7  test: cover both finish paths" in lines
+
+
 def test_complete_step_findings_hidden_lean_visible_full() -> None:
     events = [
         _ev("1", "step_started", step="rev", kind="agent", phase="review",

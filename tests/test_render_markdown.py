@@ -376,6 +376,52 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     assert "odd_event k=v" in out                      # FallbackLine
 
 
+_SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
+_SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def _footer_md(node) -> str:
+    root = nv.WorkflowNode(title="demo")
+    root.children = [node]
+    return render_markdown(nv.NarrativeTree(root=root), full=False)
+
+
+def test_merged_footer_gains_an_unquoted_commit_list() -> None:
+    out = _footer_md(nv.MergedNode(
+        quest_id="gumu81", base="main",
+        commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
+                 {"sha": _SHA_B, "subject": "cli: print the commit list"}]))
+    # one block: no blank line between the bold footer and its list
+    assert ("**✓ Merged gumu81 into main.**\n"
+            "- `4091ab6d` cli: derive the quest's commits\n"
+            "- `832c04d7` cli: print the commit list") in out
+    assert "> - " not in out       # a bold footer takes a bare list, not a callout
+
+
+def test_completed_footer_gains_the_same_list() -> None:
+    out = _footer_md(nv.CompletedNode(quest_id="gumu81",
+                                      commits=[{"sha": _SHA_A, "subject": "only"}]))
+    assert "**✓ Completed gumu81.**\n- `4091ab6d` only" in out
+
+
+def test_commit_subject_is_md_escaped_in_the_list() -> None:
+    out = _footer_md(nv.MergedNode(
+        quest_id="gumu81", base="main",
+        commits=[{"sha": _SHA_A, "subject": "fix <script> & \x1b[2Jwipe"}]))
+    assert "- `4091ab6d` fix &lt;script&gt; &amp; ^[[2Jwipe" in out
+    assert "<script>" not in out
+    assert "\x1b" not in out
+
+
+def test_footers_with_no_commits_stay_the_bare_bold_line() -> None:
+    merged = _footer_md(nv.MergedNode(quest_id="gumu81", base="main"))
+    assert merged.strip().endswith("**✓ Merged gumu81 into main.**")
+    assert "- `" not in merged
+    completed = _footer_md(nv.CompletedNode(quest_id="gumu81", commits=[]))
+    assert completed.strip().endswith("**✓ Completed gumu81.**")
+    assert "- `" not in completed
+
+
 def test_error_node_detail_block_rendered_and_escaped() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.ErrorNode(message="boom", category="script",

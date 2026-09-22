@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from imp.engine import archive as _archive
 from imp.paths import project_state_dir
 from imp.providers.codex_rollout import RolloutReadings
 
@@ -37,6 +38,11 @@ def _command_summaries() -> dict[str, str]:
 
 FIXTURES = Path(__file__).parent / "fixtures"
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
+
+# The highest stored data version check_data_floor still refuses: one below the
+# lowest it heals in place. A below-floor test must use this — _DATA_VERSION - 1
+# is now migrated, which would invert the test into asserting success.
+BELOW_DATA_FLOOR = _archive._UPGRADABLE_FROM - 1
 
 # Live provider tests (the `*_live.py` convention, excluding the unrelated
 # `test_live_*` UI tests) drive a real provider toolchain — an API round-trip,

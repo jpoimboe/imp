@@ -292,6 +292,63 @@ def test_clean_block_untitled_is_bare_gold_id() -> None:
                      pal.ansi("vahi04", "wordmark")]             # bare gold id, no ` · `
 
 
+def test_clean_block_body_is_unindented_and_blank_separated() -> None:
+    from imp.cli import palette as pal
+    lines = main._clean_block("merged into master", "vahi04", "Real title",
+                              color=True,
+                              body=["4091ab6d  first", "832c04d7  second"])
+    assert lines == [
+        pal.ansi("merged into master", "wordmark"),
+        "",                                   # one blank between headline and body
+        "4091ab6d  first",                    # flush left: this surface does NOT indent
+        "832c04d7  second",
+        "",                                   # one blank between body and identity
+        f'{pal.ansi("vahi04", "wordmark")} · Real title',
+    ]
+
+
+def test_clean_block_empty_body_keeps_the_bare_two_line_block() -> None:
+    from imp.cli import palette as pal
+    assert main._clean_block("completed", "vahi04", "", color=True, body=[]) == [
+        pal.ansi("completed", "wordmark"),
+        pal.ansi("vahi04", "wordmark"),       # no blanks at all when there is no body
+    ]
+
+
+_SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
+_SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+
+
+def test_commit_lines_are_gray_sha8_two_spaces_then_the_plain_subject() -> None:
+    from imp.cli import palette as pal
+    lines = main._commit_lines(
+        [{"sha": _SHA_A, "subject": "cli: print the commit list"},
+         {"sha": _SHA_B, "subject": "test: cover both finish paths"}],
+        color=True)
+    # the sha is truncated to 8 and gray; the subject carries no styling of its own
+    assert lines == [pal.ansi("4091ab6d", "gray") + "  cli: print the commit list",
+                     pal.ansi("832c04d7", "gray") + "  test: cover both finish paths"]
+
+
+def test_commit_lines_without_color_are_plain_text() -> None:
+    lines = main._commit_lines([{"sha": _SHA_A, "subject": "only"}], color=False)
+    assert lines == ["4091ab6d  only"]
+
+
+def test_commit_lines_caret_escape_a_subject_carrying_control_bytes() -> None:
+    """A commit subject is content-origin text: it must not be able to move the
+    cursor, clear the screen or beep."""
+    lines = main._commit_lines(
+        [{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}], color=False)
+    assert lines == ["4091ab6d  boom^[[2Jwipe^G"]
+    assert "\x1b" not in lines[0]
+    assert "\x07" not in lines[0]
+
+
+def test_commit_lines_of_nothing_is_nothing() -> None:
+    assert main._commit_lines([], color=True) == []
+
+
 def test_emit_completed_merged_prints_gold_block_no_green(
     monkeypatch, capsys,
 ) -> None:
@@ -326,6 +383,61 @@ def test_emit_completed_non_merge_headline_is_imp_branch_gold(monkeypatch, capsy
     assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(
+        _Change([]), merged=True,
+        commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
+                 {"sha": _SHA_B, "subject": "cli: print the commit list"}])
+    assert capsys.readouterr().out == (
+        "merged into master\n"
+        "\n"
+        "4091ab6d  cli: derive the quest's commits\n"
+        "832c04d7  cli: print the commit list\n"
+        "\n"
+        "2026-06-12-run-x\n"
+        "\n")
+
+
+def test_emit_completed_not_merged_renders_the_same_body(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=False,
+                         commits=[{"sha": _SHA_A, "subject": "only"}])
+    assert capsys.readouterr().out == (
+        "done · commits on imp/2026-06-12-run-x\n"
+        "\n"
+        "4091ab6d  only\n"
+        "\n"
+        "2026-06-12-run-x\n"
+        "\n")
+
+
+def test_emit_completed_colors_the_sha_and_leaves_the_subject_plain(
+    monkeypatch, capsys,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
+    main._emit_completed(_Change([]), merged=True,
+                         commits=[{"sha": _SHA_A, "subject": "first"}])
+    lines = capsys.readouterr().out.split("\n")
+    assert lines[0] == pal.ansi("merged into master", "wordmark")
+    assert lines[1] == ""
+    assert lines[2] == pal.ansi("4091ab6d", "gray") + "  first"   # subject unstyled
+    assert lines[3] == ""
+    assert lines[4] == pal.ansi("2026-06-12-run-x", "wordmark")
+
+
+def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=True,
+                         commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe"}])
+    out = capsys.readouterr().out
+    assert "4091ab6d  boom^[[2Jwipe\n" in out
+    assert "\x1b" not in out
 
 
 def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
@@ -414,7 +526,7 @@ def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent: captured.update(intent=intent))
+        lambda ch, *, merged, intent, commits: captured.update(intent=intent))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
@@ -470,7 +582,7 @@ def test_handle_terminal_outcome_derives_merged_from_the_recorded_status(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent: captured.update(merged=merged))
+        lambda ch, *, merged, intent, commits: captured.update(merged=merged))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
@@ -487,7 +599,7 @@ def test_handle_terminal_outcome_done_status_is_not_merged_despite_the_event(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, intent: captured.update(merged=merged))
+        lambda ch, *, merged, intent, commits: captured.update(merged=merged))
     rc = main._handle_terminal_outcome(
         _Change(events), SettledOutcome(status="done", events=events), coord=None)
     assert rc == 0
@@ -578,3 +690,82 @@ def test_exactly_one_blank_between_narrative_and_headline(
     assert rows[h - 2].strip() != ""      # …and not two
     last = "• retrying after API 529" if warnings else "merging · complete"
     assert last in rows[h - 2]            # …and it follows the LAST narrative line
+
+
+def test_handle_terminal_outcome_prints_the_commits_recorded_on_the_merge(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    events = [
+        {"type": "quest_merged",
+         "payload": {"base": "master", "commit": "f" * 40,
+                     "commits": [{"sha": _SHA_A, "subject": "first"},
+                                 {"sha": _SHA_B, "subject": "second"}]}},
+    ]
+    rc = main._handle_terminal_outcome(
+        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
+    assert rc == 0
+    assert capsys.readouterr().out == (
+        "merged into master\n"
+        "\n"
+        "4091ab6d  first\n"
+        "832c04d7  second\n"
+        "\n"
+        "2026-06-12-run-x\n"
+        "\n")
+
+
+def test_handle_terminal_outcome_prints_the_commits_recorded_on_a_plain_done(
+    monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    events = [{"type": "workflow_completed",
+               "payload": {"commits": [{"sha": _SHA_B, "subject": "only"}]}}]
+    rc = main._handle_terminal_outcome(
+        _Change(events), SettledOutcome(status="done", events=events), coord=None)
+    assert rc == 0
+    assert capsys.readouterr().out == (
+        "done · commits on imp/2026-06-12-run-x\n"
+        "\n"
+        "832c04d7  only\n"
+        "\n"
+        "2026-06-12-run-x\n"
+        "\n")
+
+
+def test_recorded_commits_is_keyed_on_merged_not_on_whichever_event_came_last() -> None:
+    """Both terminal events can sit in one log; `merged` — derived from the
+    recorded status — decides which one the body comes from."""
+    events = [
+        {"type": "workflow_completed",
+         "payload": {"commits": [{"sha": _SHA_A, "subject": "completed side"}]}},
+        {"type": "quest_merged",
+         "payload": {"base": "master", "commit": "f" * 40,
+                     "commits": [{"sha": _SHA_B, "subject": "merged side"}]}},
+    ]
+    assert main._recorded_commits(events, merged=False) == [
+        {"sha": _SHA_A, "subject": "completed side"}]
+    assert main._recorded_commits(events, merged=True) == [
+        {"sha": _SHA_B, "subject": "merged side"}]
+
+
+def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
+    monkeypatch, capsys,
+) -> None:
+    """An un-reaped quest home can hold a pre-change terminal event. Absent and []
+    are one code path: both produce the block imp printed before this change."""
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    absent = [{"type": "workflow_completed", "payload": {}}]
+    assert main._handle_terminal_outcome(
+        _Change(absent), SettledOutcome(status="done", events=absent),
+        coord=None) == 0
+    no_key = capsys.readouterr().out
+
+    empty = [{"type": "workflow_completed", "payload": {"commits": []}}]
+    assert main._handle_terminal_outcome(
+        _Change(empty), SettledOutcome(status="done", events=empty),
+        coord=None) == 0
+    assert capsys.readouterr().out == no_key
+    assert no_key == ("done · commits on imp/2026-06-12-run-x\n"
+                      "2026-06-12-run-x\n"
+                      "\n")

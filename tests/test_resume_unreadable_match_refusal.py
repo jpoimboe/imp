@@ -19,7 +19,7 @@ from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
-from tests.conftest import _seed_control
+from tests.conftest import BELOW_DATA_FLOOR, _seed_control
 
 LIVE = "lodo40"
 SHELVED = "lodo77"
@@ -180,7 +180,7 @@ def test_below_the_floor_with_no_index_still_names_the_record(
     _seed_control(tmp_path)
     _live(tmp_path, LIVE)
     _shelve(tmp_path, SHELVED)
-    below = archive._DATA_VERSION - 1
+    below = BELOW_DATA_FLOOR
     archive._write_data_version(tmp_path, below)
     archive.index_path(tmp_path).unlink()
     assert archive_read.archived_ids(tmp_path) == []                  # guard
