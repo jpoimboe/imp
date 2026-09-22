@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -12,7 +13,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.transcript import captured_result_key
+from imp.agents.transcript import captured_result_key, unresolved_tool_result_content
 from imp.engine.state import InMemoryEventLog
 from imp.providers.claude import (
     INFLIGHT_RESULT_BOUND_S,
@@ -239,3 +240,75 @@ def test_tool_use_block_finds_the_call_a_result_answers() -> None:
     assert found is not None
     assert (found.name, found.input) == ("mcp__imp__write_file", {"path": "a"})
     assert _tool_use_block(messages, "u404") is None
+
+
+@pytest.mark.anyio
+async def test_settle_closes_out_the_call_it_gave_up_on() -> None:
+    """Once the settle has reported a call as unrecorded, imp has said all it will
+    ever say about it: keeping the entry only buys a second full-bound wait on a
+    future nothing can complete, and keeps withholding fillers for a closed call."""
+    state = _RunState()
+    args = {"path": "scratch", "content": "x"}
+    key = captured_result_key("write_file", args)
+    state.register_inflight(key, "write_file")
+
+    settled = await _settle_inflight(state, 0.05)
+
+    assert [(s.key, s.name, s.is_error) for s in settled] == [
+        (key, "write_file", True)]
+    assert state.inflight == {}
+    assert state.withhold_inflight(
+        ToolUseBlock(id="u1", name="mcp__imp__write_file", input=args),
+        FILLER, journaled=False) is False
+    assert state.withheld == []
+
+
+@pytest.mark.anyio
+async def test_a_second_settle_after_a_give_up_waits_for_nothing() -> None:
+    """quest fabe76's second bill: a stranded entry makes every later interrupt in
+    the same run pay the whole bound again for an answer imp has already reported
+    it does not have."""
+    state = _RunState()
+    state.register_inflight("k1", "write_file")
+    assert len(await _settle_inflight(state, 0.05)) == 1
+
+    t0 = time.monotonic()
+    again = await asyncio.wait_for(
+        _settle_inflight(state, INFLIGHT_RESULT_BOUND_S), timeout=10)
+    elapsed = time.monotonic() - t0
+
+    assert again == []
+    assert elapsed < 1.0
+
+
+@pytest.mark.anyio
+async def test_duplicate_completion_on_shared_key_does_not_raise() -> None:
+    """Shared-key: abandon→abandon is idempotent."""
+    state = _RunState()
+    key = captured_result_key("write_file", {"path": "x", "content": "y"})
+    state.register_inflight(key, "write_file")
+
+    state.abandon_inflight(key)  # first completion — sets the future
+    state.abandon_inflight(key)  # second — must be idempotent, not raise
+
+    settled = await _settle_inflight(state, 0.05)
+
+    assert len(settled) == 1
+    assert settled[0].key == key
+    assert settled[0].is_error is True
+    assert settled[0].content == unresolved_tool_result_content("write_file")
+
+
+@pytest.mark.anyio
+async def test_resolve_after_abandon_on_shared_key_does_not_raise() -> None:
+    """Shared-key: resolve after abandon is silently ignored."""
+    state = _RunState()
+    key = captured_result_key("write_file", {"path": "x", "content": "y"})
+    state.register_inflight(key, "write_file")
+
+    state.abandon_inflight(key)
+    state.resolve_inflight(key, "real result", is_error=False)
+
+    # resolve_inflight popped the entry; inflight must be clean with no exception
+    assert state.inflight == {}
+    assert await _settle_inflight(state, 0.05) == []

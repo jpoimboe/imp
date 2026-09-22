@@ -394,6 +394,11 @@ class _InFlight:
     name: str
     future: asyncio.Future[tuple[str, bool]]
 
+    def complete(self, content: str, *, is_error: bool) -> None:
+        # a shared key lets a second wrapper reach an entry another already completed
+        if not self.future.done():
+            self.future.set_result((content, is_error))
+
 
 @dataclass(frozen=True, slots=True)
 class _InFlightOutcome:
@@ -449,9 +454,10 @@ class _RunState:
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
     # None until _run assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
-    # imp tools currently executing, keyed by captured_result_key. An entry lives
-    # ONLY while its call is in flight — every wrapper exit path resolves and pops
-    # it — so this dict is the in-flight set.
+    # imp tools currently executing, keyed by captured_result_key. Every entry is
+    # closed out: a returning wrapper resolves and pops it, a cancelled one
+    # completes it in place so the settle can still report it, and the settle pops
+    # whatever it reported.
     inflight: dict[str, _InFlight] = field(default_factory=dict)
     # Fillers withheld at the streaming append site, awaiting imp's own result.
     # Drained on every terminal path, so a withheld result is never dropped.
@@ -464,7 +470,18 @@ class _RunState:
     def resolve_inflight(self, key: str, content: str, *, is_error: bool) -> None:
         entry = self.inflight.pop(key, None)
         if entry is not None:
-            entry.future.set_result((content, is_error))
+            entry.complete(content, is_error=is_error)
+
+    def abandon_inflight(self, key: str) -> None:
+        """Complete a call whose wrapper left without a result, KEEPING the entry.
+
+        Popping here would be wrong twice over: the SDK's filler for this call has
+        not streamed yet, so withhold_inflight would stop withholding it, and the
+        settle would have nothing left to report to the model.
+        """
+        entry = self.inflight.get(key)
+        if entry is not None:
+            entry.complete(unresolved_tool_result_content(entry.name), is_error=True)
 
     def withhold_inflight(
         self, call: ToolUseBlock | None, filler: _ToolResultContent, *,
@@ -495,7 +512,7 @@ async def _settle_inflight(
 ) -> list[_InFlightOutcome]:
     """Wait out the imp calls in flight at an interrupt — bounded per wait, not per
     call — and report each one's real outcome, substituting the uncertainty body for
-    any that has not finished when the bound expires.
+    any that has not finished when the bound expires, and close each one out.
     """
     entries = list(state.inflight.items())
     if not entries:
@@ -503,6 +520,9 @@ async def _settle_inflight(
     await asyncio.wait([e.future for _, e in entries], timeout=timeout)
     out: list[_InFlightOutcome] = []
     for key, e in entries:
+        # Reporting IS the close-out: imp has now stated this call's outcome, so a
+        # later settle must not wait on it again nor withhold another filler for it.
+        state.inflight.pop(key, None)
         if e.future.done():
             content, is_error = e.future.result()
         else:
@@ -946,6 +966,12 @@ def _wrap_one(
             raise_if_suspended(exc)
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
+        except BaseException:
+            # CancelledError — the SDK cancelling this handler — misses both arms
+            # above, and nothing else can ever complete the entry.
+            if inflight_key is not None:
+                state.abandon_inflight(inflight_key)
+            raise
 
     # task: posture+width gated (Decision 5 / §2). read_only tools: width-only
     # honest readOnlyHint. Everything else wraps unannotated.
@@ -2070,8 +2096,9 @@ class ClaudeSession(ObserveSession):
             self._flush_turn_record()
             # Kills only: this branch RE-QUERIES with the same ctx, so closing the
             # namespace here would fail-close every later bash call. Ahead of the
-            # bounded await so a killed bash yields its real result inside the
-            # kill's own escalation instead of stalling the prompt for the bound.
+            # bounded await so a bash imp is still running yields its real result
+            # inside the kill's own escalation; a bash whose handler the SDK
+            # cancelled has already deregistered itself and is not reached here.
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
             # imp executed these tools itself; the SDK's account of them is hearsay.

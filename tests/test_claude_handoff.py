@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from dataclasses import replace
@@ -349,6 +350,22 @@ def _slow_write_tool(started: asyncio.Event) -> Tool:
                 fn=_fn)
 
 
+def _wedged_write_tool(started: asyncio.Event) -> Tool:
+    """A tool that never finishes on its own — the only way out is the SDK
+    cancelling the handler task, which is what the CLI does on Ctrl-C."""
+    async def _fn(ctx: Any, path: str, content: str) -> str:
+        started.set()
+        await asyncio.sleep(3600)
+        return "unreachable"
+
+    return Tool(name="write_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"},
+                                             "content": {"type": "string"}},
+                              "required": ["path", "content"]},
+                fn=_fn)
+
+
 def _interrupted_script() -> list[Any]:
     """The shape the jibu68 spike observed: imp's tool_use, the SDK's matched
     rejection filler, its interrupt marker, then the balanced error close."""
@@ -457,6 +474,44 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
     assert [(b["content"], b["is_error"]) for b in results] == [(
         "imp interrupted this turn; this call was still running and its outcome "
         "was not recorded. Verify the current state before relying on it.", True)]
+    assert "doesn't want to proceed" not in body
+
+
+@pytest.mark.anyio
+async def test_handoff_closes_out_the_call_its_bound_gave_up_on(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The give-up close-out is not a steer-path property: the threshold-crossing
+    settle leaves nothing behind either, and it still reports the call before
+    dropping it — the run continues past this point with the same state."""
+    from imp.agents.transcript import captured_result_key
+    from imp.providers import claude as cc
+
+    monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    key = captured_result_key("write_file", SLOW_ARGS)
+
+    class WedgedClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            holder["runner"]._state.register_inflight(key, "write_file")
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return WedgedClient(opts, scripted_messages=_interrupted_script(),
+                            context_usage=cu)
+
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert runner._state.inflight == {}
+    body = (tmp_path / "step" / "transcript.jsonl").read_text()
+    assert "was not recorded" in body
     assert "doesn't want to proceed" not in body
 
 
@@ -872,9 +927,17 @@ def _steer_script() -> tuple[list[Any], list[Any]]:
     return before_result, after_steer
 
 
-async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
+async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str, *,
+                     cancel_in_flight: bool = False,
+                     marks: list[float] | None = None) -> Any:
     """Drive a Ctrl-C steer whose interrupt lands while one of imp's own tools is
-    mid-flight, and return the live client once the run has finished."""
+    mid-flight, and return the live client once the run has finished.
+
+    cancel_in_flight models the CLI cancelling the outstanding tools/call: the
+    dispatched tool never finishes on its own and its task is cancelled before the
+    fake's stream is released, so the cancellation precedes the SDK's filler the way
+    it does in production. marks collects (interrupt, steer solicit) timestamps.
+    """
     from imp.cli.signals import InterruptCoordinator
     from tests.cc_fakes import CooperativeClient
 
@@ -890,11 +953,22 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
             # complete_step. Only the first lands mid-tool.
             if "call" not in holder:
                 runner = holder["runner"]
-                wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                    runner._ctx, runner._state, _passthrough)
+                tool = (_wedged_write_tool(started) if cancel_in_flight
+                        else _slow_write_tool(started))
+                wrapped = _wrap_one("write_file", tool, runner._ctx,
+                                    runner._state, _passthrough)
                 holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
                 await started.wait()
+                if cancel_in_flight:
+                    holder["call"].cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await holder["call"]
             await super().interrupt()
+
+    def _user_input(_prompt: str) -> str:
+        if marks is not None:
+            marks.append(time.monotonic())
+        return reply
 
     def factory(opts: Any) -> Any:
         c = DispatchingCooperativeClient(opts, after_steer=after_steer,
@@ -904,7 +978,7 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
 
     runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
-        user_input_fn=lambda _prompt: reply)
+        user_input_fn=_user_input)
     holder["runner"] = runner
     inv = replace(_inv(tmp_path, log), coordinator=coord)
     coord.attach_runner(runner.interrupt)
@@ -918,9 +992,12 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
         if "c" in holder and holder["c"].queries:
             break
         await asyncio.sleep(0.01)
+    if marks is not None:
+        marks.append(time.monotonic())
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=60)
-    await holder["call"]
+    with contextlib.suppress(asyncio.CancelledError):
+        await holder["call"]
     return holder["c"]
 
 
@@ -982,6 +1059,36 @@ async def test_steer_empty_reply_carries_the_increment_before_the_nudge(
 
 
 @pytest.mark.anyio
+async def test_steer_returns_promptly_when_the_handler_is_cancelled(
+        tmp_path: Path) -> None:
+    """The fabe76 hang end to end: the CLI cancels the in-flight tools/call, so the
+    wrapper unwinds on CancelledError and nothing can ever complete its future. The
+    prompt must not wait out the 30 s bound — and all three corrections must still
+    land, with imp's uncertainty body in place of the client's filler."""
+    log = InMemoryEventLog()
+    marks: list[float] = []
+    client = await _run_steer(tmp_path, log, "never mind",
+                              cancel_in_flight=True, marks=marks)
+
+    assert len(marks) >= 2
+    assert marks[1] - marks[0] < 2.0
+
+    uncertain = (
+        "imp interrupted this turn; this call was still running and its outcome "
+        "was not recorded. Verify the current state before relying on it.")
+    events = list(log.read())
+    assert REJECTION not in json.dumps(events)
+    assert [(e["payload"]["id"], e["payload"]["content"], e["payload"]["error"])
+            for e in events if e["type"] == "tool_result"] == [
+        ("u1", uncertain, True)]
+    assert [e["payload"]["id"] for e in events
+            if e["type"] == "tool_call"].count("u1") == 1
+    assert client.queries[-1] == correction_increment([
+        _InFlightOutcome(key="k", name="write_file", content=uncertain,
+                         is_error=True)]) + "never mind"
+
+
+@pytest.mark.anyio
 async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
         tmp_path: Path) -> None:
     """AC 15: Ctrl-C during a long bash. The kill runs ahead of the bounded await,
@@ -993,7 +1100,7 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    args = {"command": "sleep 120"}
+    args = {"command": "echo hello; sleep 120"}
     before_result = [
         assistant(text("running"), tool_use("u1", "mcp__imp__bash", args)),
         user(tool_result("u1", REJECTION, is_error=True)),
@@ -1040,6 +1147,22 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
                 break
             await asyncio.sleep(0.01)
         assert runner._ctx.running_processes
+        # wait for echo output before killing so the kill can't race it
+        from imp.agents.tools.bg import _bg_dir
+        bg = _bg_dir(runner._ctx)
+        hello_seen = False
+        for _ in range(2000):
+            for f in bg.glob("fg-*.out"):
+                try:
+                    if b"hello" in f.read_bytes():
+                        hello_seen = True
+                        break
+                except OSError:
+                    pass
+            if hello_seen:
+                break
+            await asyncio.sleep(0.01)
+        assert hello_seen, "echo output never appeared before interrupt"
         t0 = time.monotonic()
         await runner.interrupt()
         await asyncio.wait_for(task, timeout=60)
@@ -1054,3 +1177,4 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
     assert content != REJECTION
     assert "was not recorded" not in content
     assert json.loads(content)["returncode"] < 0
+    assert json.loads(content)["stdout"] == "hello\n"
