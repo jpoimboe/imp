@@ -46,6 +46,9 @@ CLAUDE: dict[str, ModelInfo] = {
     # silently drops the beta (window falls back to 200k) and warns to stderr
     # every request ("Custom betas are only available for API key users").
     "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
+    # Opus 5.5: the 1M window is native, so neither form needs a beta opt-in.
+    "claude-opus-5-5": ModelInfo(window=1_000_000),
+    "claude-opus-5-5[1m]": ModelInfo(window=1_000_000),
     # Opus 5: window-only, mirroring the opus-4-8 entries. The bracketed form is
     # a real CLI model id passed through as-is (no cli_model/betas indirection).
     "claude-opus-5": ModelInfo(window=200_000),
@@ -68,6 +71,14 @@ ANTHROPIC: dict[str, ModelInfo] = {
         max_output_tokens=64_000,
         cli_model="claude-opus-4-8",
         betas=("context-1m-2025-08-07",),
+    ),
+    # Opus 5.5: 1M is native, so no context-1m beta on either form; cli_model
+    # only strips the bracket the raw API rejects.
+    "claude-opus-5-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    "claude-opus-5-5[1m]": ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-opus-5-5",
     ),
     # Opus 5: 128k output cap (2026-07-23 rollout doubles opus-4.8's 64k). The
     # [1m] form is rejected by the raw API, so cli_model strips it and the

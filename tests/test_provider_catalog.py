@@ -264,6 +264,48 @@ def test_anthropic_catalog_has_opus_5_entries() -> None:
     )
 
 
+def test_claude_catalog_has_opus_5_5_entries() -> None:
+    # Both aliases present in the table (not merely resolved via the
+    # conservative default), window-only like the opus-5 entries above.
+    assert "claude-opus-5-5" in CLAUDE
+    assert "claude-opus-5-5[1m]" in CLAUDE
+    assert CLAUDE["claude-opus-5-5"] == ModelInfo(window=1_000_000)
+    assert CLAUDE["claude-opus-5-5[1m]"] == ModelInfo(window=1_000_000)
+
+
+def test_anthropic_catalog_has_opus_5_5_entries() -> None:
+    # Plain: native 1M window, 128k output cap, no cli_model/betas indirection.
+    assert "claude-opus-5-5" in ANTHROPIC
+    assert ANTHROPIC["claude-opus-5-5"] == ModelInfo(
+        window=1_000_000, max_output_tokens=128_000
+    )
+    # 1M: the raw API rejects the bracketed form, so cli_model strips it — but
+    # 5.5's 1M window is native, so no context-1m beta rides along.
+    assert "claude-opus-5-5[1m]" in ANTHROPIC
+    assert ANTHROPIC["claude-opus-5-5[1m]"] == ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-opus-5-5",
+    )
+    assert ANTHROPIC["claude-opus-5-5[1m]"].betas == ()
+    # The same values through the resolver an agent run actually calls.
+    resolved = limits_for("anthropic", "claude-opus-5-5[1m]")
+    assert resolved is not None
+    assert (resolved.cli_model, resolved.betas) == ("claude-opus-5-5", ())
+
+
+def test_opus_5_5_is_listed_ahead_of_opus_5_in_both_rosters() -> None:
+    # catalog_aliases returns table order and /model prints it, so placement IS
+    # display order: 5.5 leads the family it supersedes, on both providers.
+    for provider in ("claude", "anthropic"):
+        aliases = catalog_aliases(provider)
+        last_5_5 = max(aliases.index(key) for key in
+                       ("claude-opus-5-5", "claude-opus-5-5[1m]"))
+        first_5 = min(aliases.index(key) for key in
+                      ("claude-opus-5", "claude-opus-5[1m]"))
+        assert last_5_5 < first_5, provider
+
+
 def test_limits_for_covers_fable() -> None:
     # The bracketed 1M form and the plain alias are both exact catalog keys.
     one_m = limits_for("anthropic", "claude-fable-5[1m]")

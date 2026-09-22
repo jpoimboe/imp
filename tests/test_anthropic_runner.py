@@ -112,6 +112,26 @@ async def test_1m_alias_sends_stripped_model_and_beta_header(tmp_path: Path) -> 
 
 
 @pytest.mark.anyio
+async def test_opus_5_5_1m_alias_sends_the_bare_id_with_no_beta_header(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-opus-5-5[1m]",
+                                  client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=InMemoryEventLog())):
+        pass
+
+    call = fake.messages.calls[0]
+    # cli_model still strips the bracket the raw API rejects, but 5.5's 1M
+    # window is native, so no context-1m opt-in rides along.
+    assert call["model"] == "claude-opus-5-5"
+    assert "extra_headers" not in call
+
+
+@pytest.mark.anyio
 async def test_plain_model_sends_no_beta_header(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     fake = FakeAsyncAnthropic([response(
