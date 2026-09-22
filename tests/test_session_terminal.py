@@ -3753,7 +3753,7 @@ def test_run_witness_pause_drops_an_error_a_later_step_start_recovered() -> None
 
 
 def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> None:
-    from imp.cli.main import _pause_reason, _PauseInfo
+    from imp.cli.main import _PauseInfo
     from imp.cli.session_terminal import RunWitness, WitnessedPause
     # The two fields differ, and `reason` alone would fold to nothing — so this
     # fails if the interrupt_reason term is ever dropped.
@@ -3765,7 +3765,6 @@ def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> N
     seen = witness.paused()
     assert seen is not None
     assert seen == WitnessedPause(info=_PauseInfo(base="ctrl-d", cause=None))
-    assert seen.info == _pause_reason(events)
 
 
 def test_run_witness_keeps_the_terminal_event_it_saw() -> None:
@@ -3822,6 +3821,49 @@ def test_run_witness_after_a_resume_reports_a_fresh_merge() -> None:
     witness.note({"type": "quest_merged", "payload": {"base": "main", "commit": "abc"}})
     assert witness.terminal() == TerminalOutcome(
         type="quest_merged", payload={"base": "main", "commit": "abc"})
+
+
+def test_run_witness_a_second_pause_does_not_inherit_the_first_pauses_cause() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # A terminated pause, then a fresh invocation the user ctrl-c'd. The second
+    # pause's segment carries no error, so the first one's cause must not leak.
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "detail": {"last_agent_text": "API Error 400 — tool use concurrency"}}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "terminated"}})
+    witness.note({"type": "workflow_paused", "payload": {
+        "reason": "interrupt", "interrupt_reason": "interrupt"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="interrupt", cause=None))
+
+
+def test_run_witness_pause_is_bare_when_the_error_carries_no_cause_fields() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "category": "internal", "kind": "ValueError"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="internal_error", cause=None))
+
+
+def test_run_witness_pause_keeps_only_the_final_attempts_error() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # A backoff burst: the last failed attempt is the one that contributes a cause.
+    witness = RunWitness()
+    for event in (
+        {"type": "step_started", "payload": {"step": "task-lead"}},
+        {"type": "error", "payload": {"detail": {"last_agent_text": "first blip"}}},
+        {"type": "step_started", "payload": {"step": "task-lead"}},
+        {"type": "error", "payload": {"detail": {"last_agent_text": "final failure"}}},
+        {"type": "workflow_paused", "payload": {"reason": "retry_ceiling"}},
+    ):
+        witness.note(event)
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="retry_ceiling", cause="final failure"))
 
 
 @pytest.mark.anyio
