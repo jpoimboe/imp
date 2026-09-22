@@ -18,7 +18,7 @@ from imp.cli.render_summary import (
     render_summary,
     summary_total,
 )
-from imp.cli.store import LocalStore, NeighbourQuota, QuotaNeighboursUnsupported
+from imp.cli.store import LocalStore, NeighbourQuota
 from imp.cli.store_proxy import ProxyStore, run_query
 from imp.remote.session.socket_server import SessionSocket
 from tests._quota_fixture import NEIGHBOUR_ID, SUBJECT_ID, quota_events
@@ -60,6 +60,20 @@ def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any,
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: quest_id)
     monkeypatch.setattr("imp.cli.store.make_store", lambda _c: store)
     monkeypatch.setenv("NO_COLOR", "1")
+
+
+class _ResetGauge(_QuotaStore):
+    """A neighbour whose claude 7d sample stamps a resets_at the samo71 fixture never does."""
+
+    def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
+        return [NeighbourQuota(
+            project="other", quest_id="zzzz11",
+            readings=({"type": "quota_reading",
+                       "timestamp": "2026-09-18T05:00:00+00:00",
+                       "payload": {"provider": "claude", "plan": None,
+                                   "windows": [{"label": "7d", "used_pct": 3.0,
+                                                "resets_at": 1789844400}]}},),
+            usage=(), anchors=(), agents={})]
 
 
 _METERED = [
@@ -121,21 +135,19 @@ def test_an_unreachable_store_fails_loudly_rather_than_undercounting(
     assert "%" not in captured.out
 
 
-def test_a_session_predating_the_op_keeps_the_cost_column(
+def test_a_withheld_gauge_keeps_the_cost_column(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    class _Old(_QuotaStore):
-        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
-            raise QuotaNeighboursUnsupported("unknown store op")
-
-    _cli(tmp_path, monkeypatch, _Old(quota_events(SUBJECT_ID)))
+    """No gauge resolved, so `imp log -s` keeps the dollar column and gains the
+    one line naming why."""
+    _cli(tmp_path, monkeypatch, _ResetGauge(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[-3] == "  total                 2h 6m   28.0M  531.1k  $42.20*"
     assert lines[-2] == ("  * theoretical API list price; actual subscription"
                          " usage is much lower")
-    assert lines[-1] == ("  quota unavailable; this quest's session predates"
-                         " the quota column")
+    assert lines[-1] == ("  quota unmeasurable; the weekly window reset during"
+                         " this run")
 
 
 def _codex_reading(ts: str, used_pct: float) -> dict[str, Any]:
@@ -439,11 +451,7 @@ def test_a_withheld_gauge_exports_the_cost_column_and_its_legend(
         capsys: pytest.CaptureFixture[str]) -> None:
     """AC 19(a) carries AC 6's fallbacks onto the export too: no gauge resolved,
     so the document keeps the dollar column and gains the line naming why."""
-    class _Old(_QuotaStore):
-        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
-            raise QuotaNeighboursUnsupported("unknown store op")
-
-    _cli(tmp_path, monkeypatch, _Old(quota_events(SUBJECT_ID)))
+    _cli(tmp_path, monkeypatch, _ResetGauge(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
     out = capsys.readouterr().out
     assert ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
@@ -451,10 +459,9 @@ def test_a_withheld_gauge_exports_the_cost_column_and_its_legend(
     assert "| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | $42.20* |" in out
     star = ("\\* theoretical API list price; actual subscription usage is much"
             " lower")
-    predates = ("quota unavailable; this quest's session predates the quota"
-                " column")
-    assert star in out and predates in out
-    assert out.index(star) < out.index(predates)
+    reset = "quota unmeasurable; the weekly window reset during this run"
+    assert star in out and reset in out
+    assert out.index(star) < out.index(reset)
     assert "Weekly" not in out and "%" not in out
 
 
