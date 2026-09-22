@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from imp.cli import main
-from imp.cli.session_run import SettledOutcome
+from imp.cli.session_run import _closing_block
+from imp.cli.session_terminal import RunWitness
+from imp.remote.session.client import StreamEnding
 
 
 class _Events:
@@ -34,38 +37,41 @@ class _Change:
         return _Events(self._events)
 
 
-def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
+# No deliberate departure: _leave_trigger reads these two attributes only.
+_NO_LEAVE = SimpleNamespace(escalation_event=None, leave_reason=None)
+
+
+def _witness(*events: dict) -> RunWitness:
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    return witness
+
+
+def test_witnessed_merge_blocked_emits_no_paused_summary() -> None:
     events = [{"type": "merge_blocked",
                "payload": {"reason": "refused", "base": "master",
                            "detail": "error: Aborting"}}]
     with patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change(events), SettledOutcome(status="merge_blocked", events=events),
-            coord=None)
+        rc = _closing_block(
+            _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
+            coord=_NO_LEAVE, leave_state={})
     assert rc == 1
-    mb.assert_called_once()          # the friendly ⚠ block still prints
+    mb.assert_called_once()          # the friendly block still prints
     ps.assert_not_called()           # the redundant second pause line is gone
+    assert mb.call_args.args[1:] == ("refused", "error: Aborting", None)
 
 
-def test_non_merge_pause_still_emits_paused_summary() -> None:
+def test_witnessed_pause_emits_the_paused_summary() -> None:
+    events = [{"type": "workflow_paused", "payload": {"reason": "interrupt"}}]
     with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change([]), SettledOutcome(status="paused", events=[]), coord=None)
-    assert rc == 1
-    ps.assert_called_once()          # ordinary pauses keep the summary line
-
-
-def test_unresolvable_status_routes_to_paused_summary() -> None:
-    # Neither the reaped home nor the archive could answer: render, never raise.
-    # This fallback is load-bearing for a deliberate leave, which reaches this
-    # function with a non-terminal status; a CUT ending no longer routes here
-    # (see test_cut_ending_with_no_resolvable_status_reports_lost_connection).
-    with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change([]), SettledOutcome(status=None, events=[]), coord=None)
+        rc = _closing_block(
+            _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
+            coord=_NO_LEAVE, leave_state={})
     assert rc == 1
     ps.assert_called_once()
+    assert ps.call_args.kwargs["info"] == main._PauseInfo("interrupt", None)
 
 
 def test_emit_merge_blocked_worktree_dirty_three_part_block(capsys) -> None:
@@ -114,34 +120,22 @@ def test_emit_merge_blocked_fallback_couldnt_merge(capsys) -> None:
     assert "git said:" not in out                       # fallback carries no git detail
 
 
-
-def test_handle_terminal_outcome_does_not_reprint_script_detail(capsys) -> None:
+def test_the_closing_block_does_not_reprint_script_detail(capsys) -> None:
     events = [
         {"type": "script_blocked",
-         "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
+         "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail",
+                     "exit": 3}},
+        {"type": "workflow_paused", "payload": {"reason": "script_blocked"}},
     ]
     with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change(events), SettledOutcome(status="paused", events=events), coord=None)
+        rc = _closing_block(
+            _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
+            coord=_NO_LEAVE, leave_state={})
     out = capsys.readouterr().out
-    assert "err-detail" not in out       # the exit recap no longer reprints script detail
+    assert "err-detail" not in out       # the exit recap never reprints script detail
     assert "out-detail" not in out
     ps.assert_called_once()              # only the paused summary is emitted
     assert rc == 1
-
-
-def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
-    note = "imp attempted 3 recovery passes and the merge still failed."
-    events = [{"type": "merge_blocked",
-               "payload": {"reason": "conflict", "base": "master",
-                           "detail": "merge conflict", "note": note}}]
-    with patch.object(main, "_emit_merge_blocked") as mb, \
-         patch.object(main, "_emit_paused_summary"):
-        main._handle_terminal_outcome(
-            _Change(events), SettledOutcome(status="merge_blocked", events=events),
-            coord=None)
-    mb.assert_called_once()
-    assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
 
 def test_emit_paused_summary_renders_agent_error_block(capsys) -> None:
@@ -496,71 +490,6 @@ def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
     assert "\x1b" not in out
 
 
-def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
-    class _Evt:
-        def is_set(self) -> bool:
-            return True
-
-    class _Coord:
-        leave_reason = "ctrl-d"
-        escalation_event = _Evt()
-
-    with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change([]), SettledOutcome(status="paused", events=[]), coord=_Coord())
-    assert rc == 1
-    ps.assert_called_once()
-    assert ps.call_args.kwargs["info"] == main._PauseInfo("ctrl-d", None)
-
-
-class _CtrlDCoord:
-    interrupted = True
-    leave_reason = "ctrl-d"
-
-    class _Evt:
-        def is_set(self) -> bool:
-            return True
-
-    escalation_event = _Evt()
-
-
-def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
-    # An in-session Ctrl-D leave prints the retained `> ` caret immediately
-    # above the (here mocked) pause banner.
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change([]), SettledOutcome(status="paused", events=[]), _CtrlDCoord())
-    assert rc == 1
-    ps.assert_called_once()
-    assert capsys.readouterr().out == "> Ctrl-D\n"   # keystroke shadow only (banner mocked out)
-
-
-class _SigtermCoord:
-    leave_reason = "sigterm"
-
-    class _Evt:
-        def is_set(self) -> bool:
-            return True
-
-    escalation_event = _Evt()
-
-
-def test_sigterm_leave_prints_no_caret_and_paused_display_head(monkeypatch, capsys) -> None:
-    # A signal leave renders NO caret line and a `paused · SIGTERM` head above the
-    # unchanged identity and resume lines.
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    rc = main._handle_terminal_outcome(
-        _Change([]), SettledOutcome(status="paused", events=[]), _SigtermCoord())
-    assert rc == 1
-    out = capsys.readouterr().out
-    lines = out.split("\n")
-    assert lines[0] == "paused · SIGTERM"                       # state-first head, no caret above
-    assert not out.startswith("> ")                            # signals get no caret shadow
-    assert lines[1] == "2026-06-12-run-x"                      # identity, bare id (untitled)
-    assert lines[2] == "resume: imp resume 2026-06-12-run-x"   # resume line unchanged
-
-
 def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(_Change([]), merged_base=None, intent="add a dark mode toggle")
@@ -570,23 +499,6 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
     assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
     assert "(unnamed)" not in out
     assert "\x1b[" not in out
-
-
-def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
-    events = [
-        {"type": "user_message",
-         "payload": {"subtype": "intent",
-                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
-        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
-    ]
-    captured: dict = {}
-    monkeypatch.setattr(
-        main, "_emit_completed",
-        lambda ch, *, merged_base, intent, commits: captured.update(intent=intent))
-    rc = main._handle_terminal_outcome(
-        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
-    assert rc == 0
-    assert captured["intent"] == "add a dark mode toggle"
 
 
 def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
@@ -620,47 +532,17 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
     assert "(unnamed)" not in out
 
 
-def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
-    # A pause that was not a Ctrl-D prompt leave retains no caret.
+def test_a_non_leave_pause_prints_no_caret(monkeypatch, capsys) -> None:
+    # AC 4c: the caret shadow belongs to the keystroke-leave row alone.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    events = [{"type": "workflow_paused", "payload": {"reason": "interrupt"}}]
     with patch.object(main, "_emit_paused_summary") as ps:
-        rc = main._handle_terminal_outcome(
-            _Change([]), SettledOutcome(status="paused", events=[]), coord=None)
+        rc = _closing_block(
+            _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
+            coord=_NO_LEAVE, leave_state={})
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == ""
-
-
-def test_handle_terminal_outcome_derives_merged_from_the_recorded_status(
-    monkeypatch,
-) -> None:
-    # No quest_merged event anywhere: the recorded status is the whole answer.
-    events = [{"type": "step_started", "payload": {"step": "s", "kind": "agent"}}]
-    captured: dict = {}
-    monkeypatch.setattr(
-        main, "_emit_completed",
-        lambda ch, *, merged_base, intent, commits: captured.update(base=merged_base))
-    rc = main._handle_terminal_outcome(
-        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
-    assert rc == 0
-    assert captured["base"] == "master"
-
-
-def test_handle_terminal_outcome_done_status_is_not_merged_despite_the_event(
-    monkeypatch,
-) -> None:
-    events = [
-        {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},
-        {"type": "workflow_completed", "payload": {}},
-    ]
-    captured: dict = {}
-    monkeypatch.setattr(
-        main, "_emit_completed",
-        lambda ch, *, merged_base, intent, commits: captured.update(base=merged_base))
-    rc = main._handle_terminal_outcome(
-        _Change(events), SettledOutcome(status="done", events=events), coord=None)
-    assert rc == 0
-    assert captured["base"] is None       # a done run completes without a merge
 
 
 _END_OF_RUN_WARNINGS = ["cache read failed", "cache read failed",
@@ -705,9 +587,9 @@ def _end_of_run_output(warnings: list[str], *, tty: bool) -> str:
         drv.on_event(e)
     drv.finish()
     with contextlib.redirect_stdout(out):
-        assert main._handle_terminal_outcome(
-            _Change(events), SettledOutcome(status="merged", events=events),
-            coord=None) == 0
+        assert _closing_block(
+            _Change(events), witness=_witness(*events), ending=StreamEnding.ENDED,
+            coord=_NO_LEAVE, leave_state={}) == 0
     return out.getvalue()
 
 
@@ -749,7 +631,7 @@ def test_exactly_one_blank_between_narrative_and_headline(
     assert last in rows[h - 2]            # …and it follows the LAST narrative line
 
 
-def test_handle_terminal_outcome_prints_the_commits_recorded_on_the_merge(
+def test_the_closing_block_prints_the_commits_recorded_on_the_merge(
     monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
@@ -759,8 +641,9 @@ def test_handle_terminal_outcome_prints_the_commits_recorded_on_the_merge(
                      "commits": [{"sha": _SHA_A, "subject": "first"},
                                  {"sha": _SHA_B, "subject": "second"}]}},
     ]
-    rc = main._handle_terminal_outcome(
-        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
+    rc = _closing_block(
+        _Change(events), witness=_witness(*events), ending=StreamEnding.ENDED,
+        coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
         "merged into master\n"
@@ -772,14 +655,15 @@ def test_handle_terminal_outcome_prints_the_commits_recorded_on_the_merge(
         "\n")
 
 
-def test_handle_terminal_outcome_prints_the_commits_recorded_on_a_plain_done(
+def test_the_closing_block_prints_the_commits_recorded_on_a_plain_done(
     monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     events = [{"type": "workflow_completed",
                "payload": {"commits": [{"sha": _SHA_B, "subject": "only"}]}}]
-    rc = main._handle_terminal_outcome(
-        _Change(events), SettledOutcome(status="done", events=events), coord=None)
+    rc = _closing_block(
+        _Change(events), witness=_witness(*events), ending=StreamEnding.ENDED,
+        coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
         "done · commits on imp/2026-06-12-run-x\n"
@@ -813,15 +697,15 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
     are one code path: both produce the block imp printed before this change."""
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     absent = [{"type": "workflow_completed", "payload": {}}]
-    assert main._handle_terminal_outcome(
-        _Change(absent), SettledOutcome(status="done", events=absent),
-        coord=None) == 0
+    assert _closing_block(
+        _Change(absent), witness=_witness(*absent), ending=StreamEnding.ENDED,
+        coord=_NO_LEAVE, leave_state={}) == 0
     no_key = capsys.readouterr().out
 
     empty = [{"type": "workflow_completed", "payload": {"commits": []}}]
-    assert main._handle_terminal_outcome(
-        _Change(empty), SettledOutcome(status="done", events=empty),
-        coord=None) == 0
+    assert _closing_block(
+        _Change(empty), witness=_witness(*empty), ending=StreamEnding.ENDED,
+        coord=_NO_LEAVE, leave_state={}) == 0
     assert capsys.readouterr().out == no_key
     assert no_key == ("done · commits on imp/2026-06-12-run-x\n"
                       "2026-06-12-run-x\n"
