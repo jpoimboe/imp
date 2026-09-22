@@ -8,7 +8,6 @@ import pytest
 
 from imp.cli.store import (
     LocalStore,
-    QuotaNeighboursUnsupported,
     SearchZones,
     make_store,
 )
@@ -121,17 +120,14 @@ async def test_proxy_store_quota_neighbours_matches_local(
 
 
 @pytest.mark.anyio
-async def test_a_daemon_that_does_not_know_the_op_is_its_own_condition(
+async def test_a_store_side_failure_surfaces_as_a_plain_runtime_error(
     tmp_path: Path,
 ) -> None:
     local = LocalStore(tmp_path)
     sock = str(tmp_path / "s.sock")
-    failure = {"kind": "unknown"}
 
     async def on_query(op: str, args: dict) -> object:
         if op == "quota_neighbours":
-            if failure["kind"] == "unknown":
-                raise ValueError(f"unknown store op {op!r}")   # pre-upgrade daemon
             raise OSError("archive unreadable")
         return run_query(local, op, args)
 
@@ -141,15 +137,9 @@ async def test_a_daemon_that_does_not_know_the_op_is_its_own_condition(
         tg.start_soon(session.serve)
         proxy = ProxyStore(sock)
 
-        with pytest.raises(QuotaNeighboursUnsupported):
-            await anyio.to_thread.run_sync(
-                proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
-
-        failure["kind"] = "broken"
         with pytest.raises(RuntimeError) as err:
             await anyio.to_thread.run_sync(
                 proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
-        assert not isinstance(err.value, QuotaNeighboursUnsupported)
         assert "archive unreadable" in str(err.value)
 
         await session.close()

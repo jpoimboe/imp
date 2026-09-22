@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import imp
+from imp.paths import SOURCE_ROOT_MARKER
 
 _SHIM_DIRNAME = "imp-shim"
 
@@ -43,6 +44,10 @@ def outer_imp_mismatch(control_root: Path) -> str | None:
     if not (expected_src / "imp" / "__init__.py").exists():
         return None
     running_src = Path(imp.__file__).resolve().parent.parent
+    marker = running_src / SOURCE_ROOT_MARKER
+    if marker.is_file():
+        # A snapshot's provenance: the operator reinstalls the tree it came from.
+        running_src = Path(marker.read_text().strip()).resolve()
     if running_src == expected_src:
         return None
     return (

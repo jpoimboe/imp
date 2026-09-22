@@ -41,7 +41,7 @@ def test_daemon_main_exits_layout_mismatch_code_and_prints_message(
 ) -> None:
     _seed_control(tmp_path)
     _seed_downgraded_home(tmp_path, "feat")
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == LAYOUT_MISMATCH_EXIT
     err = capsys.readouterr().err
     assert f"v{LAYOUT_VERSION + 1}" in err and f"v{LAYOUT_VERSION}" in err

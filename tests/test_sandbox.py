@@ -2293,6 +2293,41 @@ def test_resolve_policy_omits_workflow_overlay_when_quest_dir_unset(tmp_path):
     assert pol.readonly_overlays == ()
 
 
+def test_resolve_policy_bakes_pinned_src_overlay(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    (quest_dir / "pinned-src" / "3f9c1e2ab4d7").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    # The shared parent, never one snapshot: the rule must hold for every snapshot in
+    # the home, not only the one this run happens to own.
+    assert pol.readonly_overlays == (str(quest_dir / "pinned-src"),)
+    assert pol.allows_write(quest_dir / "pinned-src" / "3f9c1e2ab4d7" / "imp") is False
+    assert pol.allows_write(quest_dir / "progress.md") is True
+
+
+def test_pinned_src_overlay_is_emitted_after_the_quest_home_rw_bind(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    (quest_dir / "workflow").mkdir(parents=True)
+    (quest_dir / "pinned-src").mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert pol.readonly_overlays == (
+        str(quest_dir / "workflow"), str(quest_dir / "pinned-src"))
+    # Order in bind_plan is what makes the overlay win: the quest home is bound rw, so
+    # an ro bind emitted BEFORE it would be buried by last-covering-wins.
+    plan = pol.bind_plan()
+    assert plan.index((str(quest_dir / "pinned-src"), "ro")) > plan.index(
+        (str(quest_dir), "rw"))
+
+
 def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = project_state_dir(control) / "quests" / "abc"

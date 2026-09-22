@@ -12,6 +12,8 @@ import re
 from importlib.resources import files
 from pathlib import Path
 
+from imp.paths import SOURCE_ROOT_MARKER
+
 
 def is_bundled_workflow(name: str) -> bool:
     """True iff imp bundles a workflow named `name` (the 'managed' predicate)."""
@@ -65,7 +67,12 @@ def bundled_docs_dir() -> Path:
     relative to the install (editable-from-a-clone), mirroring
     bundled_skills_dir. Read in place — never copied into a quest snapshot, so
     a threshold agent can grep it in any project. Raises if absent."""
-    p = Path(str(files("imp.assets"))).parents[2] / "docs"
+    source_root = Path(str(files("imp.assets"))).parents[1]
+    marker = source_root / SOURCE_ROOT_MARKER
+    if marker.is_file():
+        # A snapshot holds no docs/: its provenance names the checkout that does.
+        source_root = Path(marker.read_text().strip())
+    p = source_root.parent / "docs"
     if not p.is_dir():
         raise RuntimeError(
             f"imp docs corpus not found at {p}; was the package installed "

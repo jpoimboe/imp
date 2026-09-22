@@ -21,7 +21,7 @@ def test_main_installs_stack_dumper_at_quest_dir(
     monkeypatch.setattr(daemon, "install_stack_dumper", lambda p: calls.append(p))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: object())
 
-    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "q"])
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "q"])
 
     assert rc == 0
     assert calls == [quest_dir / "stack-dump.txt"]

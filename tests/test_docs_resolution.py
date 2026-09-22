@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import imp.assets as assets
 from imp.assets import bundled_docs_dir
+from imp.paths import SOURCE_ROOT_MARKER
 
 
 def test_bundled_docs_dir_resolves_the_repo_corpus() -> None:
@@ -28,3 +32,22 @@ def test_docs_dir_resolves_install_relative_not_cwd(
     assert d != tmp_path / "docs"
     sample = next(d.rglob("*.md"))
     assert sample.read_text()
+
+
+def test_docs_resolve_through_a_snapshots_source_root_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A session daemon runs from <quest home>/pinned-src/<token>/, whose parent
+    # holds no docs/ — so the corpus is found through the snapshot's provenance
+    # marker, naming the checkout it was copied from.
+    checkout = tmp_path / "checkout"
+    (checkout / "docs").mkdir(parents=True)
+    (checkout / "docs" / "guide.md").write_text("# real corpus\n")
+    snapshot = tmp_path / "quest" / "pinned-src" / "abc123"
+    (snapshot / "imp" / "assets").mkdir(parents=True)
+    (snapshot / SOURCE_ROOT_MARKER).write_text(f"{checkout / 'src'}\n")
+    monkeypatch.setattr(
+        assets, "files", lambda package: snapshot / "imp" / "assets")
+
+    assert bundled_docs_dir() == checkout / "docs"
+    assert (bundled_docs_dir() / "guide.md").read_text() == "# real corpus\n"

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import imp
 from imp import __version__
 from imp.engine.shim import imp_shim_dir, outer_imp_mismatch, write_imp_shim
@@ -163,3 +165,44 @@ def test_outer_imp_mismatch_silent_through_a_symlinked_checkout(tmp_path: Path) 
     link.symlink_to(_CHECKOUT_ROOT, target_is_directory=True)
 
     assert outer_imp_mismatch(link) is None
+
+
+def _fake_snapshot(root: Path, *, source_root: Path) -> Path:
+    """A directory shaped like a published pin: an `imp` package plus provenance."""
+    snapshot = root / "pinned-src" / "tok"
+    (snapshot / "imp").mkdir(parents=True)
+    (snapshot / "imp" / "__init__.py").write_text("")
+    (snapshot / "source-root").write_text(f"{source_root}\n")
+    return snapshot
+
+
+def test_outer_imp_mismatch_silent_for_a_snapshot_of_this_checkout(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pinned run executes from <quest home>/pinned-src/<token>, which is never the
+    checkout's own src — so without provenance every imp-on-imp run would warn. The
+    marker names the tree the snapshot came from; that is what must be compared."""
+    snapshot = _fake_snapshot(tmp_path, source_root=_RUNNING_SRC)
+    monkeypatch.setattr(imp, "__file__", str(snapshot / "imp" / "__init__.py"))
+
+    assert outer_imp_mismatch(_CHECKOUT_ROOT) is None
+
+
+def test_outer_imp_mismatch_names_the_source_root_a_snapshot_came_from(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A snapshot taken from an unrelated install still warns — and names that install,
+    the operator error the warning exists for, not the snapshot it was copied into."""
+    checkout = tmp_path / "checkout"
+    (checkout / "src" / "imp").mkdir(parents=True)
+    (checkout / "src" / "imp" / "__init__.py").write_text("")
+    foreign_src = tmp_path / "site-packages"
+    (foreign_src / "imp").mkdir(parents=True)
+    snapshot = _fake_snapshot(tmp_path, source_root=foreign_src)
+    monkeypatch.setattr(imp, "__file__", str(snapshot / "imp" / "__init__.py"))
+
+    message = outer_imp_mismatch(checkout)
+
+    assert message is not None
+    assert message.startswith("outer imp mismatch: ")
+    assert str(foreign_src) in message
+    assert str(snapshot) not in message
+    assert str((checkout / "src").resolve()) in message

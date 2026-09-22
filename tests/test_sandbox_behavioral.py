@@ -1457,6 +1457,80 @@ def test_readonly_overlay_blocks_bash_write_to_tree() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_pinned_src_is_read_only_inside_a_writable_quest_home(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """The quest home is bound rw, so without this overlay an agent could rewrite the
+    source the daemon lazily imports mid-run and executes OUTSIDE the sandbox. The
+    snapshot must stay readable and executable while every write into it fails."""
+    root = _make_root("imp-test-pinned-ro-")
+    # .resolve(): write_imp_shim bakes a resolved path into the shim, which has to be
+    # the same string the bind covers.
+    quest_home = Path(tempfile.mkdtemp(prefix="imp-test-pinned-qh-")).resolve()
+    snapshot = quest_home / "pinned-src" / "3f9c1e2ab4d7"
+    pkg = snapshot / "imp"
+    (pkg / "cli").mkdir(parents=True)
+    (pkg / "__init__.py").write_text('__version__ = "9.9.9-pinned"\n')
+    (pkg / "cli" / "__init__.py").write_text("")
+    (pkg / "cli" / "main.py").write_text(
+        "import imp as _imp\n"
+        "def main() -> int:\n"
+        '    print(f"pinned imp {_imp.__version__} from {_imp.__file__}")\n'
+        "    return 0\n")
+    try:
+        base = _active_policy(root)
+        # PYTHONPATH names the REAL imp src so the shim's sys.path.insert(0, snapshot)
+        # has something to win against; without it the shadow assertion is vacuous.
+        real_src = str(Path(__file__).resolve().parents[1] / "src")
+        pol = dataclasses.replace(
+            base, quest_home=str(quest_home),
+            readonly_overlays=(str(quest_home / "pinned-src"),),
+            child_env=(*base.child_env, ("PYTHONPATH", real_src)))
+        ctx = _ctx(root, pol)
+
+        # The in-process mirror the file tools gate on agrees with the OS below.
+        assert pol.allows_write(quest_home / "progress.md") is True
+        assert pol.allows_write(snapshot / "x") is False
+
+        listing = _bash(ctx, f'ls "{quest_home}"')
+        assert listing["returncode"] == 0, listing
+        assert "pinned-src" in str(listing["stdout"]), listing
+
+        blocked = _bash(
+            ctx, f'touch "{quest_home}/pinned-src/blocked.txt" 2>&1; echo rc=$?')
+        assert "rc=0" not in str(blocked["stdout"]), blocked
+        assert not (quest_home / "pinned-src" / "blocked.txt").exists()
+
+        inside = _bash(ctx, f'touch "{snapshot}/x" 2>&1; echo rc=$?')
+        assert "rc=0" not in str(inside["stdout"]), inside
+        assert not (snapshot / "x").exists()
+
+        # Falsifier: the overlay is scoped to pinned-src, and the quest_home rw bind is
+        # really there — so the two failures above are the overlay, not a missing bind.
+        sibling = _bash(ctx, f'touch "{quest_home}/progress.md" 2>&1; echo rc=$?')
+        assert "rc=0" in str(sibling["stdout"]), sibling
+        assert (quest_home / "progress.md").exists()
+
+        readable = _bash(ctx, f'cat "{snapshot}/imp/__init__.py"')
+        assert readable["returncode"] == 0, readable
+        assert "9.9.9-pinned" in str(readable["stdout"]), readable
+
+        # String target: naming the module's own `imp` binding would orphan its noqa.
+        monkeypatch.setattr("imp.__file__", str(pkg / "__init__.py"))
+        shim_dir = write_imp_shim(quest_home)
+        assert f"sys.path.insert(0, {str(snapshot)!r})" in (shim_dir / "imp").read_text()
+
+        ran = _bash(ctx, f'"{shim_dir}/imp" 2>&1; echo rc=$?')
+        out = str(ran["stdout"])
+        assert "rc=0" in out, out
+        assert "pinned imp 9.9.9-pinned" in out, out
+        assert str(snapshot) in out, out      # snapshot bytes beat PYTHONPATH's real imp
+        # CPython silently skips bytecode it cannot write; the run still exits 0.
+        assert list(snapshot.rglob("__pycache__")) == []
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(quest_home, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # B10.10  Quest steps/ subtree + events.jsonl masked; artifacts/ stays readable
 # ---------------------------------------------------------------------------
