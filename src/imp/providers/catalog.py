@@ -265,6 +265,8 @@ MODEL_PRICES: dict[str, ModelPrices] = {
     # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
     # request at the same per-token rate as a 9k one. Cache writes are 2x input:
     # the claude path writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x.
+    # Opus 5.5 reads cache at 0.05x input, not the family's usual 0.1x.
+    "claude-opus-5-5": ModelPrices(4.00, 20.00, 0.20, 8.00),
     "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 10.00),
     "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 20.00),
     "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 10.00),
