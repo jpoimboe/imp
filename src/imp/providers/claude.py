@@ -454,9 +454,10 @@ class _RunState:
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
     # None until _run assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
-    # imp tools currently executing, keyed by captured_result_key. An entry lives
-    # ONLY while its call is in flight — every wrapper exit path resolves and pops
-    # it — so this dict is the in-flight set.
+    # imp tools currently executing, keyed by captured_result_key. Every entry is
+    # closed out: a returning wrapper resolves and pops it, a cancelled one
+    # completes it in place so the settle can still report it, and the settle pops
+    # whatever it reported.
     inflight: dict[str, _InFlight] = field(default_factory=dict)
     # Fillers withheld at the streaming append site, awaiting imp's own result.
     # Drained on every terminal path, so a withheld result is never dropped.
@@ -2095,8 +2096,9 @@ class ClaudeSession(ObserveSession):
             self._flush_turn_record()
             # Kills only: this branch RE-QUERIES with the same ctx, so closing the
             # namespace here would fail-close every later bash call. Ahead of the
-            # bounded await so a killed bash yields its real result inside the
-            # kill's own escalation instead of stalling the prompt for the bound.
+            # bounded await so a bash imp is still running yields its real result
+            # inside the kill's own escalation; a bash whose handler the SDK
+            # cancelled has already deregistered itself and is not reached here.
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
             # imp executed these tools itself; the SDK's account of them is hearsay.
