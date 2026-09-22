@@ -2478,11 +2478,11 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
 ) -> None:
     """AC 4a: a load failure that reaches main() wrapped in a BaseExceptionGroup
     is recorded as a config-classified error pause (error + workflow_paused
-    reason='config') so the foreground's _pause_reason classifies it as a
+    reason='config') so the foreground's run witness folds it into a
     `config error`; the quest is left cleanly paused and main exits 2, with no
     traceback printed."""
     import imp.remote.session.daemon as daemon
-    from imp.cli.main import _pause_reason
+    from imp.cli.session_terminal import RunWitness
     from imp.engine.errors import LoadError
     from tests.conftest import _seed_control
 
@@ -2506,9 +2506,13 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
     paused = [e for e in events if e["type"] == "workflow_paused"][-1]
     assert paused["payload"]["reason"] == "config"
 
-    info = _pause_reason(events)
-    assert info.base == "config"
-    assert "phases: required key missing" in info.cause
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    seen = witness.paused()
+    assert seen is not None and seen.info is not None
+    assert seen.info.base == "config"
+    assert "phases: required key missing" in seen.info.cause
 
     assert State.load(quest.state_dir).status == "paused"
     assert "Traceback (most recent call last):" not in capsys.readouterr().err

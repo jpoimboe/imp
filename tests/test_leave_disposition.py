@@ -211,7 +211,8 @@ def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
 ) -> None:
     _seed_control(tmp_path)
     ch = _titleless_draft_with_intent(tmp_path, "tl1", "when I hit save it crashed")
-    rc = m._print_leave_disposition(ch, {"disposition": "archive"})
+    rc = m._print_leave_disposition(
+        ch, {"disposition": "archive"}, intent="when I hit save it crashed")
     assert rc == 0
     out = capsys.readouterr().out
     assert "tl1 · > when I hit save it crashed · shelved" in out
@@ -223,7 +224,7 @@ def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
 ) -> None:
     _seed_control(tmp_path)
     ch = _titleless_draft_with_intent(tmp_path, "tl3", "make dark mode work")
-    rc = m._print_leave_disposition(ch, {"intent": "abandon"})
+    rc = m._print_leave_disposition(ch, {"intent": "abandon"}, intent="make dark mode work")
     assert rc == 0
     out = capsys.readouterr().out
     assert "tl3 · > make dark mode work · abandoned" in out
@@ -235,7 +236,7 @@ def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
 ) -> None:
     _seed_control(tmp_path)
     ch = _titleless_draft_with_intent(tmp_path, "tl4", "fix the login crash")
-    rc = m._print_leave_disposition(ch, {"send_failed": "1"})
+    rc = m._print_leave_disposition(ch, {"send_failed": "1"}, intent="fix the login crash")
     assert rc == 0
     out = capsys.readouterr().out
     assert "tl4 · > fix the login crash · left running" in out
@@ -252,3 +253,16 @@ def test_leave_disposition_titleless_no_prompt_shows_unnamed(
     out = capsys.readouterr().out
     assert "tl2 · (unnamed) · saved as draft" in out
     assert "> (unnamed)" not in out
+
+
+def test_leave_disposition_renders_the_intent_it_is_handed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = _titleless_draft_with_intent(tmp_path, "tl5", "the log's own intent")
+    rc = m._print_leave_disposition(
+        ch, {"disposition": "save"}, intent="what the client witnessed")
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tl5 · > what the client witnessed · saved as draft" in out
+    assert "the log's own intent" not in out     # the spine no longer re-reads the log

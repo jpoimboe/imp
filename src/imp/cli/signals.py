@@ -227,7 +227,7 @@ class InterruptCoordinator:
         self.leave_reason: str | None = None
         self._should_pause = False
         # Durable "an interrupt/leave gesture drove a pause this session" signal
-        # for the 130 exit code (_session_exit_code). Set alongside should_pause on
+        # for the 130 exit code (the closing block's remap). Set alongside should_pause on
         # a gesture; unlike should_pause it SURVIVES end_gesture_round (which clears
         # the live latch so the next ctrl-c is fresh), so a paused non-interactive
         # session still exits 130 after the prompt posts.
@@ -817,7 +817,7 @@ class InterruptCoordinator:
     @property
     def interrupted(self) -> bool:
         """Durable session-lifetime signal: an interrupt/leave gesture drove a
-        pause. Read by _session_exit_code for the 130 exit code; survives
+        pause. Read by the closing block's remap for the 130 exit code; survives
         end_gesture_round (unlike should_pause)."""
         return self._interrupted
 

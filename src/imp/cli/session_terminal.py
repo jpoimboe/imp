@@ -8,9 +8,11 @@ injected attach thunk), streams the daemon's events into a live event renderer
 (LiveDriver), forwards a local interrupt gesture as a control frame
 (SessionControls, without killing the client), and answers each bare-turn-end
 gate by soliciting one reply and sending it back as an input frame. It returns the
-StreamEnding its receive loop observed: ENDED when the daemon's end-of-run frame
-arrived, else CUT — the stream closed or faulted, or a deliberate leave cancelled
-the loop, with no end frame seen. The CLI flip
+StreamEnding its receive loop observed — ENDED when the daemon's end-of-run frame
+arrived, else CUT (the stream closed or faulted, or a deliberate leave cancelled
+the loop, with no end frame seen) — paired with the RunWitness folded from every
+event it rendered, which is what the caller's closing block is selected from.
+The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
 and the solicit callback, and replaces the in-process run_quest call in
 `imp new` / `imp resume` with this loop.
@@ -22,14 +24,16 @@ import functools
 import math
 import signal
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
 from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.store import _user_message_text
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.terminal_watchdog import WatchedStream, terminal_gone, watch_terminal
 from imp.engine.errors import LoadError, LoadErrors
@@ -41,7 +45,113 @@ from imp.remote.session.protocol import (
     SkillRequest,
 )
 
+if TYPE_CHECKING:
+    from imp.cli.main import _PauseInfo
+
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
+
+
+# The three segment-terminal events: _complete emits one of the first two and reaps
+# the home; _merge_blocked_pause emits the third and leaves it.
+_TERMINAL_EVENT_TYPES: frozenset[str] = frozenset(
+    {"quest_merged", "workflow_completed", "merge_blocked"})
+
+
+@dataclass(frozen=True)
+class TerminalOutcome:
+    """The one segment-terminal event witnessed, with the payload its block renders
+    from — `base` for a merge, `reason` / `detail` / `note` for a blocked one."""
+
+    type: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class WitnessedPause:
+    """A workflow_paused seen this segment. `info` is None when its reason folds to
+    nothing — `awaiting_user`, or a payload carrying no reason — which is the bare
+    `paused` block, not the absence of a pause."""
+
+    info: _PauseInfo | None
+
+
+class RunWitness:
+    """An O(1) fold over the events this client saw — never an accumulated list. Fed
+    every event, live and replayed, so a mid-run attach witnesses the whole run."""
+
+    def __init__(self) -> None:
+        self._intent: str | None = None
+        self._human_turn: str | None = None
+        self._paused: dict[str, Any] | None = None
+        self._paused_error: dict[str, Any] | None = None
+        self._pending_error: dict[str, Any] | None = None
+        self._terminal: TerminalOutcome | None = None
+
+    def note(self, event: dict[str, Any]) -> None:
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        if etype == "user_message":
+            self._note_user_message(payload)
+        elif etype == "workflow_paused":
+            self._paused = payload
+            self._paused_error = self._pending_error
+            self._pending_error = None
+        elif etype == "workflow_resumed":
+            # The replayed log is cumulative: a previous segment's ending is not this
+            # run's, and a stale merge_blocked would outrank a fresh pause.
+            self._paused = None
+            self._paused_error = None
+            self._terminal = None
+        elif etype == "step_started":
+            self._pending_error = None
+        elif etype == "error":
+            self._pending_error = payload
+        elif etype in _TERMINAL_EVENT_TYPES:
+            self._terminal = TerminalOutcome(type=str(etype), payload=payload)
+
+    def _note_user_message(self, payload: dict[str, Any]) -> None:
+        text = _user_message_text(payload).strip()
+        if not text:
+            return
+        if payload.get("subtype") == "intent":
+            self._intent = self._intent or text
+        else:
+            self._human_turn = self._human_turn or text
+
+    def intent(self) -> str | None:
+        """_resolve_intent's order: any intent-subtype message outranks the first
+        genuine human turn, even one that arrived earlier."""
+        return self._intent or self._human_turn
+
+    def paused(self) -> WitnessedPause | None:
+        """The outer option: None when no pause was witnessed this segment."""
+        if self._paused is None:
+            return None
+        return WitnessedPause(info=self._folded_reason())
+
+    def terminal(self) -> TerminalOutcome | None:
+        """The segment-terminal event witnessed, if any. One slot, so witnessing two
+        endings is unrepresentable."""
+        return self._terminal
+
+    def _folded_reason(self) -> _PauseInfo | None:
+        from imp.cli.main import _PauseInfo
+        paused = self._paused or {}
+        base = paused.get("interrupt_reason") or paused.get("reason")
+        if not base:
+            return None
+        # A your-turn park is an ordinary solicit: it has no reason to render.
+        if base == "awaiting_user":
+            return None
+        cause: str | None = None
+        error = self._paused_error
+        if error is not None:
+            detail = error.get("detail")
+            if isinstance(detail, dict) and detail.get("last_agent_text"):
+                cause = str(detail["last_agent_text"]).strip() or None
+            if cause is None and error.get("message"):
+                cause = str(error["message"]).strip() or None
+        return _PauseInfo(base=str(base), cause=cause)
 
 
 async def run_terminal_client(
@@ -59,14 +169,16 @@ async def run_terminal_client(
     provider: str | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
-) -> StreamEnding:
+) -> tuple[StreamEnding, RunWitness]:
     gate_send, gate_recv = anyio.create_memory_object_stream[tuple[str, bool]](
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
         max_buffer_size=math.inf)
     gate_state: dict[str, Any] = {"scope": None, "elsewhere": False}
+    witness = RunWitness()
 
     def _on_event(event: dict[str, Any]) -> None:
+        witness.note(event)
         if event.get("type") == "user_input_resolved":
             if not event.get("_replay"):
                 resolved_send.send_nowait(None)
@@ -330,4 +442,4 @@ async def run_terminal_client(
                         await client.send_control(
                             CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
             await client.aclose()
-    return ending
+    return ending, witness

@@ -3323,7 +3323,7 @@ async def test_terminal_client_reports_cut_ending_on_oversized_frame(
         async with anyio.create_task_group() as tg:
             await serve_raw_frames(
                 sock, good.encode("utf-8") + b"\n" + b"x" * (_MAX_FRAME + 1), tg)
-            ending = await run_terminal_client(
+            ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(),
                 coord=coord, solicit=_solicit, leave_mode="new")
             tg.cancel_scope.cancel()
@@ -3361,9 +3361,10 @@ async def test_terminal_client_reports_cut_when_a_leave_cancels_the_loop(
             tg.start_soon(server.serve)
 
             async def _client() -> None:
-                endings.append(await run_terminal_client(
+                ending, _witness = await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new"))
+                    coord=coord, solicit=_solicit, leave_mode="new")
+                endings.append(ending)
 
             tg.start_soon(_client)
             await wait_until(
@@ -3418,7 +3419,7 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
         async with anyio.create_task_group() as tg:
             # One frame, then the peer closes with no end frame: receive_events ends CUT.
             await serve_raw_frames(sock, good.encode("utf-8") + b"\n", tg)
-            ending = await run_terminal_client(
+            ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(), coord=coord,
                 solicit=_solicit, leave_mode="new", stream=watched)
             tg.cancel_scope.cancel()
@@ -3649,3 +3650,261 @@ async def test_stop_ack_ends_when_the_gate_is_answered_elsewhere(
             await raw.aclose()
 
     assert received == ["remote-answer"]
+
+
+def test_run_witness_intent_prefers_an_intent_message_over_an_earlier_human_turn() -> None:
+    from imp.cli.session_terminal import RunWitness
+    from imp.cli.store import _resolve_intent
+    events = [
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "yes, go ahead"}]}},
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
+    ]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    # The later intent-subtype message wins, exactly as _resolve_intent resolves it.
+    assert witness.intent() == "add a dark mode toggle"
+    assert witness.intent() == _resolve_intent(events)
+
+
+def test_run_witness_intent_falls_back_to_the_first_genuine_human_turn() -> None:
+    from imp.cli.session_terminal import RunWitness
+    from imp.cli.store import _resolve_intent
+    events = [
+        {"type": "step_started", "payload": {"step": "plan", "kind": "agent"}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "fix the login crash"}]}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "and the logout one"}]}},
+    ]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    assert witness.intent() == "fix the login crash"
+    assert witness.intent() == _resolve_intent(events)
+
+
+def test_run_witness_intent_ignores_an_empty_user_message() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    assert witness.intent() is None
+    witness.note({"type": "user_message", "payload": {"content": [
+        {"type": "text", "text": "   "}]}})
+    assert witness.intent() is None
+
+
+def test_run_witness_reports_no_pause_before_one_is_witnessed() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "step_started", "payload": {"step": "plan"}})
+    assert witness.paused() is None
+
+
+def test_run_witness_awaiting_user_pause_is_witnessed_with_no_renderable_reason() -> None:
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "workflow_paused", "payload": {"reason": "awaiting_user"}})
+    # The outer option says "a pause happened"; the inner None says "nothing to render".
+    assert witness.paused() == WitnessedPause(info=None)
+
+
+def test_run_witness_reasonless_pause_is_witnessed_with_no_renderable_reason() -> None:
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "workflow_paused", "payload": {}})
+    assert witness.paused() == WitnessedPause(info=None)
+
+
+def test_run_witness_pause_folds_the_causal_errors_agent_text() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "detail": {"last_agent_text": "API Error 400 — overloaded\ntrace"},
+        "message": "overloaded_error"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "api"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="api", cause="API Error 400 — overloaded\ntrace"))
+
+
+def test_run_witness_pause_falls_back_to_the_errors_message() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "internal boom"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="internal_error", cause="internal boom"))
+
+
+def test_run_witness_pause_drops_an_error_a_later_step_start_recovered() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "transient"}})
+    witness.note({"type": "step_started", "payload": {"step": "plan"}})
+    witness.note({"type": "workflow_paused", "payload": {
+        "reason": "interrupt", "interrupt_reason": "interrupt"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="interrupt", cause=None))
+
+
+def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # The two fields differ, and `reason` alone would fold to nothing — so this
+    # fails if the interrupt_reason term is ever dropped.
+    events = [{"type": "workflow_paused",
+               "payload": {"reason": "awaiting_user", "interrupt_reason": "ctrl-d"}}]
+    witness = RunWitness()
+    for event in events:
+        witness.note(event)
+    seen = witness.paused()
+    assert seen is not None
+    assert seen == WitnessedPause(info=_PauseInfo(base="ctrl-d", cause=None))
+
+
+def test_run_witness_keeps_the_terminal_event_it_saw() -> None:
+    from imp.cli.session_terminal import RunWitness, TerminalOutcome
+    witness = RunWitness()
+    witness.note({"type": "quest_merged",
+                  "payload": {"base": "master", "commit": "20d0d699"}})
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "master", "commit": "20d0d699"})
+
+
+def test_run_witness_reports_no_terminal_outcome_before_one_is_witnessed() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "step_completed", "payload": {"step": "plan"}})
+    assert witness.terminal() is None
+
+
+def test_run_witness_resume_clears_a_previous_segments_pause() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {"message": "overloaded"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "api"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    assert witness.paused() is None
+
+
+def test_run_witness_resume_clears_a_previous_segments_merge_blocked() -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked",
+                  "payload": {"reason": "conflict", "base": "main"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    assert witness.terminal() is None
+
+
+def test_run_witness_after_a_resume_reports_the_fresh_pause_only() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked", "payload": {"reason": "conflict"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "max_loops"}})
+    assert witness.terminal() is None
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="max_loops", cause=None))
+
+
+def test_run_witness_after_a_resume_reports_a_fresh_merge() -> None:
+    from imp.cli.session_terminal import RunWitness, TerminalOutcome
+    witness = RunWitness()
+    witness.note({"type": "merge_blocked", "payload": {"reason": "conflict"}})
+    witness.note({"type": "workflow_resumed", "payload": {}})
+    witness.note({"type": "quest_merged", "payload": {"base": "main", "commit": "abc"}})
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "main", "commit": "abc"})
+
+
+def test_run_witness_a_second_pause_does_not_inherit_the_first_pauses_cause() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # A terminated pause, then a fresh invocation the user ctrl-c'd. The second
+    # pause's segment carries no error, so the first one's cause must not leak.
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "detail": {"last_agent_text": "API Error 400 — tool use concurrency"}}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "terminated"}})
+    witness.note({"type": "workflow_paused", "payload": {
+        "reason": "interrupt", "interrupt_reason": "interrupt"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="interrupt", cause=None))
+
+
+def test_run_witness_pause_is_bare_when_the_error_carries_no_cause_fields() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    witness = RunWitness()
+    witness.note({"type": "error", "payload": {
+        "category": "internal", "kind": "ValueError"}})
+    witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="internal_error", cause=None))
+
+
+def test_run_witness_pause_keeps_only_the_final_attempts_error() -> None:
+    from imp.cli.main import _PauseInfo
+    from imp.cli.session_terminal import RunWitness, WitnessedPause
+    # A backoff burst: the last failed attempt is the one that contributes a cause.
+    witness = RunWitness()
+    for event in (
+        {"type": "step_started", "payload": {"step": "task-lead"}},
+        {"type": "error", "payload": {"detail": {"last_agent_text": "first blip"}}},
+        {"type": "step_started", "payload": {"step": "task-lead"}},
+        {"type": "error", "payload": {"detail": {"last_agent_text": "final failure"}}},
+        {"type": "workflow_paused", "payload": {"reason": "retry_ceiling"}},
+    ):
+        witness.note(event)
+    assert witness.paused() == WitnessedPause(
+        info=_PauseInfo(base="retry_ceiling", cause="final failure"))
+
+
+@pytest.mark.anyio
+async def test_terminal_client_returns_the_witness_of_the_events_it_rendered(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.session_terminal import TerminalOutcome
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    intent = encode_event({
+        "type": "user_message",
+        "payload": {"subtype": "intent",
+                    "content": [{"type": "text", "text": "add a dark mode toggle"}]}})
+    merged = encode_event({
+        "type": "quest_merged", "payload": {"base": "main", "commit": "abc123"}})
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await serve_raw_frames(
+                sock,
+                intent.encode("utf-8") + b"\n" + merged.encode("utf-8") + b"\n", tg)
+            ending, witness = await run_terminal_client(
+                attach=_attach, driver=_Driver(),
+                coord=coord, solicit=_solicit, leave_mode="new")
+            tg.cancel_scope.cancel()
+
+    assert ending is StreamEnding.CUT          # the peer closed with no end frame
+    assert witness.intent() == "add a dark mode toggle"
+    assert witness.terminal() == TerminalOutcome(
+        type="quest_merged", payload={"base": "main", "commit": "abc123"})

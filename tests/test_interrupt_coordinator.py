@@ -394,7 +394,7 @@ async def test_signal_pause_dispatches_to_innermost_runner_only() -> None:
 async def test_interrupted_flag_survives_end_gesture_round() -> None:
     """Regression: end_gesture_round clears the live gesture latch (should_pause)
     so the next ctrl-c is a fresh gesture, but must PRESERVE the durable
-    `interrupted` flag that _session_exit_code reads to return 130 for an
+    `interrupted` flag that the closing block's remap reads to return 130 for an
     interrupt-paused session."""
     coord = InterruptCoordinator()
     await coord.signal_pause(reason="ctrl-c")   # no runner attached: sets flags, returns
