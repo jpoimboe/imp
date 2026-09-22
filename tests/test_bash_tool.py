@@ -1,9 +1,11 @@
 # tests/test_bash_tool.py
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
+import time
 from pathlib import Path
 
 import anyio
@@ -16,6 +18,8 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, ToolAborted
 from imp.engine.sandbox import SandboxSpawn
 from imp.paths import project_state_dir
+from tests.async_wait import wait_until
+from tests.conftest import _pid_gone_or_zombie
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -478,6 +482,45 @@ def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
         assert len(killed_holder["killed"]) >= 1
 
     anyio.run(_scenario)
+
+
+def test_bash_cancelled_wrapper_kills_its_child(tmp_path: Path) -> None:
+    """quest fabe76's orphan: the finally deregisters either way, so the unwind must kill."""
+    from imp.agents.tools.context import descendant_pids
+
+    ctx = _ctx(tmp_path)
+    pids: list[int] = []
+    timing: dict[str, float] = {}
+    survivors: list[int] = []
+
+    async def _scenario() -> None:
+        async with anyio.create_task_group() as tg:
+            async def _runner() -> None:
+                await get_registry()["bash"].async_invoke(
+                    ctx, {"command": "sleep 60"})
+
+            async def _canceller() -> None:
+                await wait_until(lambda: bool(ctx.running_processes))
+                proc = ctx.running_processes[0]
+                pids.extend([proc.pid, *descendant_pids(proc.pid)])
+                timing["t0"] = time.monotonic()
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(_runner)
+            tg.start_soon(_canceller)
+        timing["elapsed"] = time.monotonic() - timing["t0"]
+        # The unwind signals but never reaps, so a pid is briefly a zombie.
+        with contextlib.suppress(TimeoutError):
+            await wait_until(
+                lambda: all(_pid_gone_or_zombie(p) for p in pids), backstop=20.0)
+        survivors.extend(p for p in pids if not _pid_gone_or_zombie(p))
+
+    anyio.run(_scenario)
+
+    assert survivors == [], (
+        "the cancelled bash wrapper deregistered its process without killing it")
+    assert ctx.running_processes == []
+    assert timing["elapsed"] < 5.0
 
 
 def test_bash_over_cap_spills_full_output_and_previews_head(tmp_path: Path) -> None:

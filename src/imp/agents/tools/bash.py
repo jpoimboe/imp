@@ -332,6 +332,16 @@ async def bash(
                 "out_path": os.path.relpath(new_out.resolve(), root),
                 "err_path": os.path.relpath(new_err.resolve(), root),
             }, ensure_ascii=False)
+    except BaseException:
+        # Cancellation (the SDK's, on Ctrl-C) reaches no other arm, and the finally
+        # below drops the registration regardless — so this is the last exit path
+        # that can still reach a child the wrapper is walking out on. Wait-free and
+        # shielded: a D-state child must not wedge the unwind. The deadline branch
+        # above LEAVES BY RETURN, so a promoted process never comes through here.
+        if proc.returncode is None:
+            with anyio.CancelScope(shield=True):
+                await kill_process_tree(proc, signal.SIGKILL)
+        raise
     finally:
         try:
             ctx.running_processes.remove(proc)
