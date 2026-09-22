@@ -80,14 +80,18 @@ def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
 
 
 # AC 13
-def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
+def test_an_unknown_reset_renders_the_percentage_alone() -> None:
     # Percentage-independent, now that the band gates nothing: calm and red alike.
     for pct, shown in ((92.0, "session 92%"), (34.0, "session 34%")):
         null_reset = _reading(QuotaWindow("5h", pct, None))
         assert _row(carrier=_carrier(null_reset, auth_mode="subscription")).endswith(shown)
 
+
+def test_a_past_reset_renders_no_field_at_any_level() -> None:
+    for pct in (92.0, 34.0):
         already_past = _reading(QuotaWindow("5h", pct, int(_NOW) - 10))
-        assert _row(carrier=_carrier(already_past, auth_mode="subscription")).endswith(shown)
+        row = _row(carrier=_carrier(already_past, auth_mode="subscription"))
+        assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
 
 
 # AC 10
@@ -227,3 +231,49 @@ def test_a_provider_less_activity_still_renders_the_carriers_group() -> None:
     metered = _row(activity=chrome, carrier=_carrier(provider="anthropic"),
                    cost=RowUsage(dollars=4.21, priced=1))
     assert metered.endswith(" $4.21") and "session" not in metered
+
+
+def test_a_fully_expired_reading_renders_no_field() -> None:
+    dead = _reading(QuotaWindow("5h", 101.0, int(_NOW) - 60))
+    row = _row(carrier=_carrier(dead, auth_mode="subscription"))
+    # Byte-identical to the no-reading row: no placeholder, no trailing padding.
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
+    assert quota_field(dead, now_epoch=_NOW, color=False, over_bg=False) is None
+
+
+def test_a_partially_expired_reading_keeps_its_live_window() -> None:
+    mixed = _reading(QuotaWindow("5h", 101.0, int(_NOW) - 60),
+                     QuotaWindow("7d", 7.0, int(_NOW) + 430000))
+    row = _row(carrier=_carrier(mixed, auth_mode="subscription"))
+    assert row.endswith("claude · week 7% (5d left)")
+    assert "session" not in row
+
+
+def test_the_expiry_boundary_is_exact() -> None:
+    at_reset = _reading(QuotaWindow("5h", 34.0, int(_NOW)))
+    assert quota_field(at_reset, now_epoch=_NOW, color=False, over_bg=False) is None
+
+    one_second_left = _reading(QuotaWindow("5h", 34.0, int(_NOW) + 1))
+    live = quota_field(one_second_left, now_epoch=_NOW, color=False, over_bg=False)
+    assert live is not None
+    assert live[1] == "session 34% (1m left)"
+
+
+def test_a_live_over_limit_reading_is_untouched() -> None:
+    over = _reading(QuotaWindow("5h", 101.0, int(_NOW) + 2400))
+    assert _row(carrier=_carrier(over, auth_mode="subscription")).endswith(
+        "session 101% (40m left)")
+    colored = quota_field(over, now_epoch=_NOW, color=True, over_bg=False)
+    assert colored is not None
+    assert "\x1b[31m101%" in colored[1]
+
+
+def test_the_prelaunch_row_expires_against_the_wall_clock() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+
+    stale = _reading(QuotaWindow("5h", 101.0, 1_000_000_000))   # 2001-09-09 UTC
+    row = compose_prelaunch_position_row(
+        phase="implement phase", plan=None, step_label=None,
+        model="claude-opus-5", quest_id=None, title="", color=False,
+        width=200, carrier=_carrier(stale, auth_mode="subscription"), cost=None)
+    assert row == "implement phase · claude-opus-5"
