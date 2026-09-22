@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import enum
 import functools
 import io
 import json
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
     from imp.cli.live_status import LiveStatus
     from imp.cli.quota_column import QuotaColumn, QuotaFallback
     from imp.cli.render_summary import StepRow
-    from imp.cli.session_run import SettledOutcome
     from imp.cli.store import SearchHit, Store, _Row
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.quest import Quest
@@ -245,11 +243,6 @@ def _emit_completed(quest: Quest, *, merged_base: str | None,
     print()
 
 
-class _PauseBanner(enum.Enum):
-    """Sentinel: latest segment ended without a pause; its reason is stale."""
-    STALE = enum.auto()
-
-
 # Single source: error pause-reason base token -> user-facing label; covers all _POLICY.
 _ERROR_LABELS: dict[str, str] = {
     "terminated": "agent error",
@@ -340,68 +333,6 @@ class _PauseInfo:
     cause: str | None
 
 
-def _pause_reason(events: list[dict[str, Any]]) -> _PauseInfo | _PauseBanner | None:
-    """The terminal pause's structured reason (a _PauseInfo) for the headline.
-
-    The last workflow_paused reason (interrupt_reason wins, mirroring
-    _h_workflow_paused), plus the full cause text from the error that drove that
-    pause (the error's detail.last_agent_text, else its message — the full cause
-    text, multi-line allowed; the renderer splits its first line as the red
-    summary from the remaining body lines). The event log is cumulative across
-    resume, so only an error with no intervening step_started before the pause
-    contributes a cause — a recovered transient error followed by a step_started
-    is dropped, and only the causal error (same invocation, no step start after
-    it) reaches the pause. An interrupt pause with no error in its segment
-    renders the bare reason, even when an earlier segment terminated. Returns
-    _PauseBanner.STALE when the latest segment ended without its own
-    segment-terminal event — a resume with no workflow_paused (or, for a
-    draft, conversation_saved) after it — so the stored reason is a fossil;
-    _pause_facts then classifies it — the unexpected-death banner only when
-    daemon.stderr holds a crash traceback (e.g. a workflow LoadError at daemon
-    startup), otherwise a calm interrupt. A resumed draft that never paused
-    before parking has no workflow_paused at all; the resume alone is enough to
-    arm the check. Builds only from existing event fields — no hardcoded kind."""
-    paused: dict[str, Any] | None = None
-    paused_error: dict[str, Any] | None = None
-    pending_error: dict[str, Any] | None = None
-    resume_pending = False
-    for e in events:
-        t = e.get("type")
-        if t == "workflow_paused":
-            paused = e.get("payload") or {}
-            paused_error = pending_error
-            pending_error = None
-            resume_pending = False
-        elif t == "workflow_resumed":
-            resume_pending = True
-        elif t == "conversation_saved":
-            resume_pending = False
-        elif t == "step_started":
-            pending_error = None
-        elif t == "error":
-            pending_error = e.get("payload") or {}
-    if resume_pending:
-        return _PauseBanner.STALE
-    if paused is None:
-        return None
-    base = paused.get("interrupt_reason") or paused.get("reason")
-    if not base:
-        return None
-    # A genuine your-turn park is a normal solicit, not an interrupt: surface no
-    # reason, so the trailing status line shows the bare `paused` tail rather than
-    # a reason. Scoped to awaiting_user; STALE / error-cause paths untouched.
-    if base == "awaiting_user":
-        return None
-    cause: str | None = None
-    if paused_error is not None:
-        d = paused_error.get("detail")
-        if isinstance(d, dict) and d.get("last_agent_text"):
-            cause = str(d["last_agent_text"]).strip() or None
-        if cause is None and paused_error.get("message"):
-            cause = str(paused_error["message"]).strip() or None
-    return _PauseInfo(base=str(base), cause=cause)
-
-
 def _pause_is_error(info: _PauseInfo | None) -> bool:
     """A pause is an error (red block) exactly when its base token is a key in the
     label map. Everything else — interrupt, deliberate-leave triggers, a your-turn
@@ -467,30 +398,6 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
     except OSError:
         return False
     return _DAEMON_CRASH_MARKER in text
-
-
-def _pause_facts(
-    quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str, _PauseInfo | None, str | None]:
-    from imp.cli.store import _resolve_intent
-    name = quest.id
-    events = list(quest.event_log().read())
-    opening = _resolve_intent(events)
-    if leave_trigger is not None:
-        # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, quest.id, _PauseInfo(leave_trigger, None), opening
-    reason_val = _pause_reason(events)
-    if reason_val is _PauseBanner.STALE:
-        if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
-            info: _PauseInfo | None = _PauseInfo(
-                "crash", f"see {quest.quest_dir / 'daemon.stderr'}")
-        else:
-            # A resumed-without-pause segment with no crash traceback is a clean
-            # deliberate detach — render the calm interrupt reason, no pointer.
-            info = _PauseInfo("interrupt", None)
-    else:
-        info = reason_val
-    return name, quest.title, quest.id, info, opening
 
 
 def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
@@ -632,41 +539,6 @@ def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
     print()
 
 
-def _handle_terminal_outcome(
-    quest: Quest, outcome: SettledOutcome, coord: Any,
-) -> int:
-    """Render a settled run's terminal outcome and return its rc; re-resolves nothing
-    (never re-reads state.json or re-derives the settled outcome)."""
-    from imp.cli.store import _resolve_intent
-    if outcome.completed:
-        merged = outcome.status == "merged"
-        _emit_completed(quest,
-                        merged_base=quest.base_branch if merged else None,
-                        intent=_resolve_intent(outcome.events),
-                        commits=_recorded_commits(outcome.events, merged=merged))
-        return 0
-    if outcome.status == "merge_blocked":
-        mb_reason: str | None = None
-        mb_detail: str | None = None
-        mb_note: str | None = None
-        for ev in outcome.events:
-            if ev.get("type") == "merge_blocked":
-                payload = ev.get("payload") or {}
-                mb_reason = payload.get("reason")
-                mb_detail = payload.get("detail")
-                mb_note = payload.get("note")
-        _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note,
-                            intent=_resolve_intent(outcome.events))
-        return 1  # friendly block already carries the resume command; skip redundant summary
-    trigger = _leave_trigger(coord)
-    _name, _title, _token, info, opening = _pause_facts(quest, trigger)
-    if trigger is not None:
-        _emit_leave_pause(quest, trigger, intent=opening)
-    else:
-        _emit_paused_summary(quest, info=info, intent=opening)
-    return 1
-
-
 def _print_leave_disposition(
     quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
 ) -> int | None:
@@ -708,15 +580,6 @@ def _print_leave_disposition(
         print()
         return 0
     return None
-
-
-def _session_exit_code(quest: Quest, coord: Any) -> int:
-    from imp.cli.session_run import resolve_settled_outcome
-    outcome = resolve_settled_outcome(quest)
-    rc = _handle_terminal_outcome(quest, outcome, coord)
-    if not outcome.completed and coord.interrupted:
-        return 130
-    return rc
 
 
 def _project_root() -> Path:
