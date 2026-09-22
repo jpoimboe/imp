@@ -5,10 +5,10 @@ Live tests carry `@pytest.mark.live(<provider>)` and run only under
 live_skip_reason / provider_available below). A selected provider whose
 toolchain or credentials are absent skips (not fails) at collection.
 
-The claude check resolves the CLI the SDK itself spawns -- its bundled
-binary, then PATH, then the SDK's fixed locations -- not whatever `claude`
-happens to be on PATH, which the SDK never consults. It is a presence check:
-resolution only, no spawn.
+The claude check resolves the CLI the SDK would find on its own -- its bundled
+binary, then PATH, then the SDK's fixed locations. It is a presence check:
+resolution only, no spawn. imp pins cli_path to the PATH `claude`, so a test
+that takes a real turn gates on path_claude_skip_reason() as well.
 
 A test that only launches a provider's CLI, with no model turn, belongs here
 too: the launch itself is the live dependency. Measured on the claude CLI
@@ -113,6 +113,15 @@ def provider_available(provider: str) -> str | None:
             "(set OPENAI_API_KEY or create ~/.openai-key)"
         )
     raise ValueError(f"unknown provider: {provider!r}")
+
+
+def path_claude_skip_reason() -> str | None:
+    """The complement of provider_available("claude"), which resolves the SDK's own
+    binary rather than the PATH one imp pins. Presence only, never a version check:
+    failing against a too-old PATH binary is a signal, not an environment fault."""
+    if shutil.which("claude") is None:
+        return "no `claude` on PATH (imp pins the SDK's cli_path to it)"
+    return None
 
 
 def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | None:

@@ -82,8 +82,9 @@ def _empty_path(monkeypatch, tmp_path):
 
 
 def test_provider_available_claude_resolves_the_sdk_binary(monkeypatch, tmp_path):
-    """The SDK spawns its bundled copy and never consults the PATH `claude`, so a host
-    that has the SDK and no PATH claude must still run the claude live lane."""
+    """The shared gate resolves the binary the SDK would find on its own, so a host
+    with the SDK and no PATH claude still enters the claude live lane — the
+    turn-taking tests add path_claude_skip_reason() on top."""
     import tests._live as live
     _empty_path(monkeypatch, tmp_path)
     # A path that was never created: the check resolves the binary, it must neither
@@ -105,6 +106,26 @@ def test_provider_available_claude_missing_everywhere(monkeypatch, tmp_path):
     assert live.provider_available("claude") == (
         "claude CLI not found (neither the SDK's bundled binary nor PATH)"
     )
+
+
+def test_path_claude_skip_reason_none_when_path_has_a_claude(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live.shutil, "which", lambda _name: "/usr/local/bin/claude")
+    assert live.path_claude_skip_reason() is None
+
+
+def test_path_claude_skip_reason_names_path_when_absent(monkeypatch, tmp_path):
+    """The complement of the shared gate, not a duplicate of it: the SDK resolves
+    its bundled binary here, so provider_available passes — while imp's cli_path
+    would come up empty, which is what this gate reports."""
+    import tests._live as live
+    _empty_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        SubprocessCLITransport, "_find_cli", lambda _self: "/bundled/claude")
+    assert live.provider_available("claude") is None
+    reason = live.path_claude_skip_reason()
+    assert reason is not None
+    assert "PATH" in reason and "claude" in reason
 
 
 def test_provider_available_codex_binary_only(monkeypatch):
@@ -948,3 +969,18 @@ def test_cc_deny_posture_probes_skip_without_the_flag():
     assert "test_deny_posture_probe_is_live SKIPPED" in combined
     assert "2 skipped" in combined
     assert "live test — pass --run-live to run" in combined
+
+
+def test_high_tier_live_turn_skips_without_a_path_claude(monkeypatch, tmp_path):
+    """With no `claude` on PATH the high-tier turn test skips rather than failing
+    against the SDK's bundled binary. The gate is the test body's first
+    statement, so nothing is spawned and no model is reached."""
+    import asyncio
+
+    from tests.test_claude_high_tier_live import (
+        test_high_tier_default_completes_a_real_turn as turn_test,
+    )
+    _empty_path(monkeypatch, tmp_path)
+    with pytest.raises(pytest.skip.Exception) as exc:
+        asyncio.run(turn_test(tmp_path))
+    assert "PATH" in str(exc.value)

@@ -2365,6 +2365,8 @@ class ClaudeAgentRunner:
         thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier)
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
+            # The SDK prefers its own bundled CLI, which trails the models and 400s.
+            cli_path=shutil.which("claude"),
             betas=cast(list[SdkBeta], list(info.betas)),
             include_partial_messages=True,
             max_buffer_size=_CLI_LINE_BUFFER_BYTES,

@@ -12,6 +12,7 @@ from imp.providers.catalog import (
 
 
 def test_anthropic_rates_match_the_published_table() -> None:
+    assert prices_for("claude-opus-5-5") == ModelPrices(4.00, 20.00, 0.20, 8.00)
     assert prices_for("claude-opus-5") == ModelPrices(5.00, 25.00, 0.50, 10.00)
     assert prices_for("claude-fable-5") == ModelPrices(10.00, 50.00, 1.00, 20.00)
     assert prices_for("claude-opus-4-8") == ModelPrices(5.00, 25.00, 0.50, 10.00)
@@ -44,8 +45,8 @@ def test_cache_write_takes_the_1_25x_premium_on_astra_and_5_6() -> None:
 def test_anthropic_cache_write_takes_the_one_hour_ttl_2x_premium() -> None:
     # The claude path writes 1-hour-TTL cache entries, billed at 2x input —
     # not the 5-minute TTL's 1.25x. Every alias must agree with its dated id.
-    for model in ("claude-opus-5", "claude-fable-5", "claude-opus-4-8",
-                  "claude-sonnet-4-6", "claude-haiku-4-5",
+    for model in ("claude-opus-5-5", "claude-opus-5", "claude-fable-5",
+                  "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5",
                   "opus", "sonnet", "haiku"):
         prices = prices_for(model)
         assert prices.cache_write == pytest.approx(prices.input * 2.0), model
@@ -75,6 +76,18 @@ def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
     assert prices_for("gpt-5.4-mini-20261201").long_context_threshold is None
 
 
+def test_opus_5_5_prices_do_not_fall_through_to_opus_5() -> None:
+    # Without its own row, prices_for's longest-prefix fallback would bill 5.5
+    # at claude-opus-5's rates: $5/$25 input/output and 2.5x the cache read.
+    row = prices_for("claude-opus-5-5")
+    assert row is not None
+    assert row == prices_for("claude-opus-5-5[1m]")
+    assert row != prices_for("claude-opus-5")
+    assert (row.input, row.output) == (4.00, 20.00)
+    # Cache reads are 0.05x input on this model, not the family's usual 0.1x.
+    assert row.cache_read == pytest.approx(row.input * 0.05)
+
+
 def test_an_unknown_model_resolves_to_no_prices() -> None:
     assert prices_for("gpt-9-imaginary") is None
     assert prices_for("") is None
@@ -86,9 +99,9 @@ def test_only_the_surcharged_models_carry_a_long_context_threshold() -> None:
     for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
                   "gpt-5.6", "gpt-5.5", "gpt-5.4"):
         assert prices_for(model).long_context_threshold == 272_000
-    for model in ("gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "claude-opus-5",
-                  "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6",
-                  "claude-haiku-4-5"):
+    for model in ("gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "claude-opus-5-5",
+                  "claude-opus-5", "claude-fable-5", "claude-opus-4-8",
+                  "claude-sonnet-4-6", "claude-haiku-4-5"):
         assert prices_for(model).long_context_threshold is None
 
 

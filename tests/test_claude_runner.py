@@ -2877,11 +2877,39 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
     assert opts.model == "opus"
 
 
-def test_high_tier_floor_defaults_to_opus_1m() -> None:
+def test_build_options_pins_the_cli_to_the_path_claude(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    looked_up: list[str] = []
+
+    def fake_which(name: str) -> str | None:
+        looked_up.append(name)
+        return "/fake/bin/claude"
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    runner = ClaudeAgentRunner(model_name="claude-opus-5-5")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    # The SDK prefers its own bundled CLI, so this names the binary imp runs.
+    assert opts.cli_path == "/fake/bin/claude"
+    assert "claude" in looked_up
+
+
+def test_build_options_leaves_cli_path_none_when_path_has_no_claude(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    runner = ClaudeAgentRunner(model_name="claude-opus-5-5")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    # Still reachable despite _env_check: provider_from_model rebuilds a persisted
+    # claude pair without it. None is the SDK's default, so no branch is needed.
+    assert opts.cli_path is None
+
+
+def test_high_tier_floor_defaults_to_opus_5_5() -> None:
     from imp.providers import BUILTIN_FLOOR
     tiers = BUILTIN_FLOOR["claude"].tier_defaults
     assert tiers is not None
-    assert tiers["high"] == "claude-opus-5[1m]"
+    # The bare id, not `[1m]`: 5.5's 1M window is native, so the suffix buys
+    # nothing on either auth path.
+    assert tiers["high"] == "claude-opus-5-5"
 
 
 @pytest.mark.anyio

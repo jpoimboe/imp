@@ -224,7 +224,7 @@ def test_events_compact_renders_context_occupancy_per_provider_shape(
                      "context_tokens": 159_842,
                      "raw": {"content": [{"type": "text", "text": "one"}]}}},
         {"type": "agent_message", "agent_id": "step:build/coder",
-         "payload": {"provider": "claude", "model": "claude-opus-5",
+         "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
                      "stop_reason": "end_turn",
                      "usage": {"input_tokens": 10, "output_tokens": 2},
                      "context_tokens": 137_000, "context_window": 1_000_000,
@@ -233,8 +233,8 @@ def test_events_compact_renders_context_occupancy_per_provider_shape(
     ]
     _make_live_quest(tmp_path, "ccc333", events)
     out = _run(monkeypatch, tmp_path, "events", "ccc333", "--all", "--full")
-    assert "ctx=159842/160000 (99.9%)" in out    # catalog window, its handoff limit
-    assert "ctx=137000/200000 (68.5%)" in out    # reported window, its handoff limit
+    assert "ctx=159842/200000 (79.9%)" in out    # catalog window, its handoff limit
+    assert "ctx=137000/200000 (68.5%)" in out    # reported window beats sonnet's 160000
 
 
 _CODEX_EVENTS = [

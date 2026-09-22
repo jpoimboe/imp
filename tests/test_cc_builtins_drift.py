@@ -1,6 +1,6 @@
 """Security guard: no built-in escapes imp's deny posture — the CLI-free half.
 
-The probes that spawn the bundled CLI are in
+The probes that spawn the PATH `claude` CLI are in
 tests/test_cc_builtins_drift_live.py behind the `live` marker; their shared
 machinery is tests/cc_probe.py. What stays here needs no CLI, so the
 no-green-from-a-dead-probe property is checked on every fast-gate lap.

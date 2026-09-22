@@ -39,7 +39,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
         tier_defaults={
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
-            "high": "claude-opus-5[1m]",
+            "high": "claude-opus-5-5",
         },
         env_var="ANTHROPIC_API_KEY",
         auth_hint="set ANTHROPIC_API_KEY",
@@ -59,7 +59,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
         tier_defaults={
             "low": "claude-haiku-4-5",
             "medium": "claude-sonnet-4-6",
-            "high": "claude-opus-5[1m]",
+            "high": "claude-opus-5-5",
         },
         env_var=None,  # CLI-authenticated (claude login); no env var
         auth_hint="run `claude login`",
