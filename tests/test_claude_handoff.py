@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from dataclasses import replace
@@ -340,6 +341,22 @@ def _slow_write_tool(started: asyncio.Event) -> Tool:
         await asyncio.sleep(0.2)
         (ctx.project_root / path).write_text(content)
         return f"wrote {len(content)} bytes to {path}"
+
+    return Tool(name="write_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"},
+                                             "content": {"type": "string"}},
+                              "required": ["path", "content"]},
+                fn=_fn)
+
+
+def _wedged_write_tool(started: asyncio.Event) -> Tool:
+    """A tool that never finishes on its own — the only way out is the SDK
+    cancelling the handler task, which is what the CLI does on Ctrl-C."""
+    async def _fn(ctx: Any, path: str, content: str) -> str:
+        started.set()
+        await asyncio.sleep(3600)
+        return "unreachable"
 
     return Tool(name="write_file", description="",
                 input_schema={"type": "object",
@@ -872,9 +889,17 @@ def _steer_script() -> tuple[list[Any], list[Any]]:
     return before_result, after_steer
 
 
-async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
+async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str, *,
+                     cancel_in_flight: bool = False,
+                     marks: list[float] | None = None) -> Any:
     """Drive a Ctrl-C steer whose interrupt lands while one of imp's own tools is
-    mid-flight, and return the live client once the run has finished."""
+    mid-flight, and return the live client once the run has finished.
+
+    cancel_in_flight models the CLI cancelling the outstanding tools/call: the
+    dispatched tool never finishes on its own and its task is cancelled before the
+    fake's stream is released, so the cancellation precedes the SDK's filler the way
+    it does in production. marks collects (interrupt, steer solicit) timestamps.
+    """
     from imp.cli.signals import InterruptCoordinator
     from tests.cc_fakes import CooperativeClient
 
@@ -890,11 +915,22 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
             # complete_step. Only the first lands mid-tool.
             if "call" not in holder:
                 runner = holder["runner"]
-                wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                    runner._ctx, runner._state, _passthrough)
+                tool = (_wedged_write_tool(started) if cancel_in_flight
+                        else _slow_write_tool(started))
+                wrapped = _wrap_one("write_file", tool, runner._ctx,
+                                    runner._state, _passthrough)
                 holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
                 await started.wait()
+                if cancel_in_flight:
+                    holder["call"].cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await holder["call"]
             await super().interrupt()
+
+    def _user_input(_prompt: str) -> str:
+        if marks is not None:
+            marks.append(time.monotonic())
+        return reply
 
     def factory(opts: Any) -> Any:
         c = DispatchingCooperativeClient(opts, after_steer=after_steer,
@@ -904,7 +940,7 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
 
     runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
-        user_input_fn=lambda _prompt: reply)
+        user_input_fn=_user_input)
     holder["runner"] = runner
     inv = replace(_inv(tmp_path, log), coordinator=coord)
     coord.attach_runner(runner.interrupt)
@@ -918,9 +954,12 @@ async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
         if "c" in holder and holder["c"].queries:
             break
         await asyncio.sleep(0.01)
+    if marks is not None:
+        marks.append(time.monotonic())
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=60)
-    await holder["call"]
+    with contextlib.suppress(asyncio.CancelledError):
+        await holder["call"]
     return holder["c"]
 
 
@@ -979,6 +1018,36 @@ async def test_steer_empty_reply_carries_the_increment_before_the_nudge(
     assert q.startswith("[imp] This turn was interrupted")
     assert "- write_file: wrote 1 bytes to scratch" in q
     assert q.endswith(RESUME_CONTINUE_NUDGE)
+
+
+@pytest.mark.anyio
+async def test_steer_returns_promptly_when_the_handler_is_cancelled(
+        tmp_path: Path) -> None:
+    """The fabe76 hang end to end: the CLI cancels the in-flight tools/call, so the
+    wrapper unwinds on CancelledError and nothing can ever complete its future. The
+    prompt must not wait out the 30 s bound — and all three corrections must still
+    land, with imp's uncertainty body in place of the client's filler."""
+    log = InMemoryEventLog()
+    marks: list[float] = []
+    client = await _run_steer(tmp_path, log, "never mind",
+                              cancel_in_flight=True, marks=marks)
+
+    assert len(marks) >= 2
+    assert marks[1] - marks[0] < 2.0
+
+    uncertain = (
+        "imp interrupted this turn; this call was still running and its outcome "
+        "was not recorded. Verify the current state before relying on it.")
+    events = list(log.read())
+    assert REJECTION not in json.dumps(events)
+    assert [(e["payload"]["id"], e["payload"]["content"], e["payload"]["error"])
+            for e in events if e["type"] == "tool_result"] == [
+        ("u1", uncertain, True)]
+    assert [e["payload"]["id"] for e in events
+            if e["type"] == "tool_call"].count("u1") == 1
+    assert client.queries[-1] == correction_increment([
+        _InFlightOutcome(key="k", name="write_file", content=uncertain,
+                         is_error=True)]) + "never mind"
 
 
 @pytest.mark.anyio

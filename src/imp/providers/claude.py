@@ -394,6 +394,11 @@ class _InFlight:
     name: str
     future: asyncio.Future[tuple[str, bool]]
 
+    def complete(self, content: str, *, is_error: bool) -> None:
+        # a shared key lets a second wrapper reach an entry another already completed
+        if not self.future.done():
+            self.future.set_result((content, is_error))
+
 
 @dataclass(frozen=True, slots=True)
 class _InFlightOutcome:
@@ -464,7 +469,18 @@ class _RunState:
     def resolve_inflight(self, key: str, content: str, *, is_error: bool) -> None:
         entry = self.inflight.pop(key, None)
         if entry is not None:
-            entry.future.set_result((content, is_error))
+            entry.complete(content, is_error=is_error)
+
+    def abandon_inflight(self, key: str) -> None:
+        """Complete a call whose wrapper left without a result, KEEPING the entry.
+
+        Popping here would be wrong twice over: the SDK's filler for this call has
+        not streamed yet, so withhold_inflight would stop withholding it, and the
+        settle would have nothing left to report to the model.
+        """
+        entry = self.inflight.get(key)
+        if entry is not None:
+            entry.complete(unresolved_tool_result_content(entry.name), is_error=True)
 
     def withhold_inflight(
         self, call: ToolUseBlock | None, filler: _ToolResultContent, *,
@@ -946,6 +962,12 @@ def _wrap_one(
             raise_if_suspended(exc)
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
+        except BaseException:
+            # CancelledError — the SDK cancelling this handler — misses both arms
+            # above, and nothing else can ever complete the entry.
+            if inflight_key is not None:
+                state.abandon_inflight(inflight_key)
+            raise
 
     # task: posture+width gated (Decision 5 / §2). read_only tools: width-only
     # honest readOnlyHint. Everything else wraps unannotated.

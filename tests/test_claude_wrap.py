@@ -7,14 +7,17 @@ complete_step args, dispatches task, surfaces errors as is_error responses.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import ImagePart, QuestContext, TextPart
+from imp.agents.runner import ImagePart, QuestContext, TextPart, ToolUseBlock
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -23,7 +26,12 @@ from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import captured_result_key
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import _RunState, _wrap_one
+from imp.providers.claude import (
+    INFLIGHT_RESULT_BOUND_S,
+    _RunState,
+    _settle_inflight,
+    _wrap_one,
+)
 
 
 @pytest.fixture
@@ -1036,3 +1044,86 @@ async def test_wrap_task_over_cap_result_spills_and_records_the_wrapped_body(
     assert results[0]["payload"]["content"] == body        # recorded == returned
     minted = results[0]["payload"]["id"]
     assert (tmp_path / "tool-results" / minted).read_text(encoding="utf-8") == big
+
+
+_WEDGED_ARGS = {"path": "scratch", "content": "x"}
+
+# transcript.py's _UNRESOLVED_SENTENCE, verbatim — the body a call with no
+# recorded outcome is reported with.
+UNCERTAIN = (
+    "imp interrupted this turn; this call was still running and its outcome was "
+    "not recorded. Verify the current state before relying on it."
+)
+
+
+def _wedged_write_tool(started: asyncio.Event) -> Tool:
+    """Never finishes on its own: the only way out is a cancelled handler task."""
+    async def _fn(ctx: Any, path: str, content: str) -> str:
+        started.set()
+        await asyncio.sleep(3600)
+        return "unreachable"
+
+    return Tool(name="write_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"},
+                                             "content": {"type": "string"}},
+                              "required": ["path", "content"]},
+                fn=_fn)
+
+
+async def _cancel_a_call_in_flight(
+    tmp_path: Path, state: _RunState,
+) -> tuple[asyncio.Task[Any], str]:
+    """Dispatch a wedged write_file through the wrapper, wait until it is really in
+    flight, then cancel the handler task the way the CLI's notifications/cancelled
+    does, draining the CancelledError. Returns the task and its in-flight key."""
+    started = asyncio.Event()
+    wrapped = _wrap_one("write_file", _wedged_write_tool(started), _ctx(tmp_path),
+                        state, _passthrough_decorator)
+    task = asyncio.create_task(wrapped(dict(_WEDGED_ARGS)))
+    await asyncio.wait_for(started.wait(), timeout=10)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    return task, captured_result_key("write_file", _WEDGED_ARGS)
+
+
+@pytest.mark.anyio
+async def test_a_cancelled_wrapper_lets_the_settle_report_it_at_once(
+        tmp_path: Path) -> None:
+    """quest fabe76: the SDK cancels the handler mid-call, CancelledError misses
+    both `except` arms, and the settle then waits out its whole bound on a future
+    nothing can complete — 30.026 s of `stopping…` before the steer prompt."""
+    assert INFLIGHT_RESULT_BOUND_S == 30.0
+    state = _RunState()
+    task, key = await _cancel_a_call_in_flight(tmp_path, state)
+
+    # The arm re-raises: the handler really is cancelled, not answered.
+    assert task.cancelled() is True
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    t0 = time.monotonic()
+    settled = await asyncio.wait_for(
+        _settle_inflight(state, INFLIGHT_RESULT_BOUND_S), timeout=10)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 1.0
+    assert [(s.key, s.name, s.content, s.is_error) for s in settled] == [
+        (key, "write_file", UNCERTAIN, True)]
+
+
+@pytest.mark.anyio
+async def test_a_cancelled_wrapper_still_withholds_the_sdks_filler(
+        tmp_path: Path) -> None:
+    """The entry has to outlive the cancellation: the SDK's rejection filler for the
+    same call streams after it, and a filler that is not withheld is journaled
+    verbatim as that call's result."""
+    state = _RunState()
+    _task, key = await _cancel_a_call_in_flight(tmp_path, state)
+
+    assert state.withhold_inflight(
+        ToolUseBlock(id="u1", name="mcp__imp__write_file",
+                     input=dict(_WEDGED_ARGS)),
+        "the SDK's rejection filler", journaled=False) is True
+    assert [w.key for w in state.withheld] == [key]
