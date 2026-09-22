@@ -44,8 +44,8 @@ if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.quota_column import QuotaColumn, QuotaFallback
-    from imp.cli.render_summary import StepRow
-    from imp.cli.store import SearchHit, Store, _Row
+    from imp.cli.render_summary import StepRow, SummaryHeader
+    from imp.cli.store import QuestCard, SearchHit, Store, _Row
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.quest import Quest
     from imp.engine.state import State
@@ -1893,12 +1893,64 @@ def _card_pause_token(status: str, pause_reason: str | None) -> str | None:
     return pause_reason if status in ("paused", "error") else None
 
 
-def _quest_card(control: Path, quest_id: str, *, now: datetime,
-                color: bool) -> list[str]:
-    from imp.cli.store import _INFLIGHT, make_store
-    card = make_store(control).quest_card(quest_id)
-    if card is None:
-        return []
+class _CardLedger(NamedTuple):
+    """What the card folds in from the run ledger: the `run:` value and the table
+    minus its run header line."""
+
+    run: str
+    body: list[str]
+
+
+def _run_field(summary: list[StepRow], header: SummaryHeader,
+               quota: QuotaColumn | QuotaFallback | None) -> str:
+    """The `run:` value: the ledger's own total row on one line. ` weekly*` marks a
+    resolved gauge cell, which is a share of a window rather than money."""
+    from imp.cli.quota_column import NO_FIGURE, QuotaColumn
+    from imp.cli.render_summary import (
+        _dur_text,
+        _fmt_tokens,
+        summary_totals,
+        total_cell,
+    )
+    work, total = summary_totals(summary, header.total_seconds, header.exclusions)
+    charge = total_cell(summary, quota)
+    if isinstance(quota, QuotaColumn) and charge != NO_FIGURE:
+        charge = f"{charge} weekly*"
+    return (f"{_dur_text(work)} · {_fmt_tokens(total.input_total)} in"
+            f" · {_fmt_tokens(total.output)} out · {charge}")
+
+
+def _card_ledger(store: Store, card: QuestCard, *, color: bool,
+                 width: int) -> _CardLedger | int | None:
+    """None when the quest has recorded no step rows yet — the card is then what it
+    was before these fields existed. 2 propagates `_attribute_quota`'s unreachable
+    store, which must print no card at all."""
+    from imp.cli.render_summary import (
+        SummaryHeader,
+        build_summary,
+        exclusion_spans,
+        render_summary,
+        summary_total,
+    )
+    events = store.get_events(card.quest_id) or []
+    rows = build_summary(events)
+    if not rows:
+        return None
+    header = SummaryHeader(workflow=card.workflow, quest_id=card.quest_id,
+                           status=card.status, total_seconds=summary_total(events),
+                           exclusions=exclusion_spans(events))
+    view = _attribute_quota(store, card.quest_id, events, rows)
+    if isinstance(view, int):
+        return view
+    return _CardLedger(
+        run=_run_field(rows, header, view),
+        body=render_summary(rows, header=header, color=color, width=width,
+                            quota=view, header_line=False))
+
+
+def _quest_card(card: QuestCard, *, now: datetime, color: bool,
+                ledger: _CardLedger | None) -> list[str]:
+    from imp.cli.store import _INFLIGHT
     lines = [
         _card_field("id:", card.quest_id, 15, color=color),
         _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
@@ -1923,6 +1975,9 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         15, color=color))
     lines.append(_card_field(
         "last activity:", quest_row.relative_age(card.last, now=now), 15, color=color))
+    if ledger is not None:
+        lines.append(_card_field("run:", ledger.run, 15, color=color))
+        lines.append(_card_field("workflow:", card.workflow, 15, color=color))
     if card.base_branch:
         lines.append(_card_field("base_branch:", card.base_branch, 15, color=color))
     if card.parent:
@@ -1947,15 +2002,27 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
+    if ledger is not None:
+        lines.append("")
+        lines.append(pal.ansi("ledger:", "dim", enabled=color))
+        lines.extend(ledger.body)
     return lines
 
 
 def _detail_card(control: Path, quest_id: str, *, now: datetime,
-                 color: bool) -> list[str]:
+                 color: bool) -> list[str] | int:
+    from imp.cli.store import make_store
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         return _backlog_card(meta, control, now=now, color=color)
-    return _quest_card(control, quest_id, now=now, color=color)
+    store = make_store(control)
+    card = store.quest_card(quest_id)
+    if card is None:
+        return []
+    ledger = _card_ledger(store, card, color=color, width=_term_width())
+    if isinstance(ledger, int):
+        return ledger
+    return _quest_card(card, now=now, color=color, ledger=ledger)
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
@@ -2101,10 +2168,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
             _page_or_print(json.dumps(card, indent=2).splitlines(),
                            no_pager=args.no_pager)
             return 0
-        _page_or_print(
-            _detail_card(control, quest_id, now=datetime.now(UTC),
-                         color=should_use_color(sys.stdout)),
-            no_pager=args.no_pager, trailing_blank=True)
+        lines = _detail_card(control, quest_id, now=datetime.now(UTC),
+                             color=should_use_color(sys.stdout))
+        if isinstance(lines, int):
+            return lines
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     data = make_store(control).get_artifact(quest_id, resource)
     if data is None:
