@@ -2657,8 +2657,6 @@ def _attribute_quota(
         rows_units,
         units_by_row,
     )
-    from imp.cli.store import QuotaNeighboursUnsupported
-
     span = run_span(events)
     if span is None:
         return None
@@ -2670,8 +2668,6 @@ def _attribute_quota(
     try:
         neighbours = store.quota_neighbours(
             quest_id, *(when.isoformat() for when in span))
-    except QuotaNeighboursUnsupported:
-        return quota_view(None, providers=subject.providers)
     except (OSError, RuntimeError, ValueError) as exc:
         _emit_cli_error("cannot reach the quest store for quota attribution "
                         f"(quota_neighbours): {exc}")

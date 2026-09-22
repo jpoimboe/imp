@@ -6,7 +6,6 @@ import pytest
 
 from imp.cli.quota_column import (
     FOOTNOTE,
-    SESSION_PREDATES,
     QuotaColumn,
     QuotaFallback,
     quota_view,
@@ -90,13 +89,6 @@ def test_filtering_to_one_provider_leaves_one_unprefixed_legend() -> None:
                             QuotaWithheld("codex", Withheld.NO_TRACKED_USAGE)),
                       providers=("claude",))
     assert view == QuotaFallback((_RESET,))
-
-
-def test_a_session_predating_the_op_falls_back_with_its_own_legend() -> None:
-    assert quota_view(None, providers=("claude",)) == QuotaFallback(
-        (SESSION_PREDATES,))
-    assert SESSION_PREDATES == ("quota unavailable; this quest's session "
-                                "predates the quota column")
 
 
 @pytest.mark.parametrize("reason,legend", [

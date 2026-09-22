@@ -21,8 +21,6 @@ from imp.cli.quota_share import (
 
 FOOTNOTE = ("* estimated to ±1 point of the weekly gauge; usage outside imp "
             "during the run skews it high")
-SESSION_PREDATES = ("quota unavailable; this quest's session predates the "
-                    "quota column")
 NO_FIGURE = "—"
 
 _WITHHELD: dict[Withheld, str] = {
@@ -81,16 +79,12 @@ class QuotaFallback:
     legends: tuple[str, ...]
 
 
-def quota_view(attribution: QuotaAttribution | None, *,
+def quota_view(attribution: QuotaAttribution, *,
                providers: tuple[str, ...]) -> QuotaColumn | QuotaFallback:
-    """`attribution is None` is a quest whose daemon predates the op.
-
-    Only the gauges this run's own steps drew on are its own: the weekly window
-    is account-global, so a neighbour sampling it reports providers this run
-    never touched, and a run is mixed by what it ran, not by what it overlapped.
-    A provider the run touched keeps its gauge even at a zero draw."""
-    if attribution is None:
-        return QuotaFallback((SESSION_PREDATES,))
+    """Only the gauges this run's own steps drew on are its own: the weekly
+    window is account-global, so a neighbour sampling it reports providers this
+    run never touched, and a run is mixed by what it ran, not by what it
+    overlapped. A provider the run touched keeps its gauge even at a zero draw."""
     gauges = tuple(g for g in attribution.gauges if g.provider in providers)
     if any(isinstance(g, QuotaFigure) for g in gauges):
         return QuotaColumn(gauges)
