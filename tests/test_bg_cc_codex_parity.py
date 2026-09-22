@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from pathlib import Path
 
 import anyio
@@ -18,7 +17,7 @@ import pytest
 from imp.paths import project_state_dir
 from imp.providers import claude as cc_mod
 from imp.providers.claude import ClaudeAgentRunner
-from tests.async_wait import wait_until
+from tests.async_wait import wait_pgid_gone, wait_until
 from tests.test_bg_spawn import _cleanup
 from tests.test_build_tools_wait_for_user import _Inv
 
@@ -132,8 +131,7 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
         await coord.signal_pause()
         await asyncio.wait_for(task, timeout=3)
 
-        with pytest.raises(ProcessLookupError):
-            os.killpg(out["pid"], 0)
+        await wait_pgid_gone(out["pid"])
         bp = runner._ctx.background_processes[out["id"]]
         assert bp.status == "killed" and bp.kill_reason == "interrupted"
     finally:
@@ -224,8 +222,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
 
         # run()'s finally must have called terminate_background_processes
         assert bg_pid is not None
-        with pytest.raises(ProcessLookupError):
-            os.killpg(bg_pid, 0)
+        await wait_pgid_gone(bg_pid)
         assert bg_id is not None
         bp = runner._ctx.background_processes[bg_id]
         assert bp.status == "killed" and bp.kill_reason == "interrupted"
@@ -258,8 +255,7 @@ def test_codex_interrupt_tears_down_background(tmp_path: Path) -> None:
         try:
             runner._process_owner.acknowledge()
             await runner.interrupt()
-            with pytest.raises(ProcessLookupError):
-                os.killpg(out["pid"], 0)
+            await wait_pgid_gone(out["pid"])
             bp = ctx.background_processes[out["id"]]
             assert bp.status == "killed" and bp.kill_reason == "interrupted"
         finally:
