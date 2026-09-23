@@ -32,3 +32,9 @@ async def save_and_exit(ctx: Any) -> str:
     # tool never returns to the agent.
     await anyio.sleep_forever()
     raise AssertionError("unreachable")  # anyio 4.8: sleep_forever is -> None
+
+
+async def request_save_and_park(ctx: Any) -> None:
+    ctx.coordinator.request_save()
+    # CONTROL_SAVE cancels the run, which unwinds this park.
+    await anyio.sleep_forever()

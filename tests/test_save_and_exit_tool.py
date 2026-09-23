@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
@@ -8,6 +9,7 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.save_and_exit import request_save_and_park
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -87,3 +89,12 @@ async def test_requires_coordinator(tmp_path: Path) -> None:
     tool = get_registry()["save_and_exit"]
     with pytest.raises(RuntimeError):
         await tool.async_invoke(ctx, {})
+
+
+@pytest.mark.anyio
+async def test_request_save_and_park_requests_once_then_parks() -> None:
+    coord = _FakeCoord()
+    with anyio.move_on_after(0.1) as cancel_scope:
+        await request_save_and_park(SimpleNamespace(coordinator=coord))
+    assert cancel_scope.cancelled_caught
+    assert coord.calls == [None]
