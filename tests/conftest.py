@@ -65,18 +65,19 @@ _LIVE_TEST_TIMEOUT = 240
 # much of it is used. Independent of _LIVE_TEST_TIMEOUT (different rationale)
 # though it currently shares the value.
 _IMPTY_E2E_TIMEOUT = 240
-# The session-daemon/socket test family (test_session_daemon.py,
-# test_session_run.py, test_session_attach.py) drives a faked run_fn over a real
-# AF_UNIX socket — no provider stream. Under `-n auto` oversubscription pure
-# scheduling starvation can push a structurally-sound test past the global
-# timeout = 60 (signal method, pyproject.toml) and SIGALRM kills it. Grant this
-# family the same generous liveness ceiling the live/impty families get; at 2x
-# the 120s inner HANG_BACKSTOP the inner backstop trips first on a genuine
-# deadlock and the outer cap only ever catches a true hang. Scoped to these
-# three evidence-based files — other test_session_*.py keep the 60s cap.
+# The session-socket test family (test_session_daemon.py, test_session_run.py,
+# test_session_attach.py, test_agent_save_session.py) drives a session run over
+# a real AF_UNIX socket. Under `-n auto` oversubscription pure scheduling
+# starvation can push a structurally-sound test past the global timeout = 60
+# (signal method, pyproject.toml) and SIGALRM kills it. Grant this family the
+# same generous liveness ceiling the live/impty families get; at 2x the 120s
+# inner HANG_BACKSTOP the inner backstop trips first on a genuine deadlock and
+# the outer cap only ever catches a true hang. Scoped to these files — other
+# test_session_*.py keep the 60s cap.
 _SESSION_SOCKET_TEST_TIMEOUT = 240
 _SESSION_SOCKET_TEST_FILES = frozenset({
     "test_session_daemon.py", "test_session_run.py", "test_session_attach.py",
+    "test_agent_save_session.py",
 })
 # These files' group-liveness probes go through wait_pgid_gone, whose 120 s
 # HANG_BACKSTOP is unreachable under the global timeout = 60 (signal method,
