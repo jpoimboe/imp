@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+import contextlib
+import json
+from dataclasses import dataclass, replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
+import tests.cc_fakes as cc
 from imp.agents.agent_loop import run_agent_loop
 from imp.agents.loop_items import SaveRequested
 from imp.cli.signals import InterruptCoordinator
+from imp.engine.abandon import save_as_draft
+from imp.engine.quest import Quest
+from imp.engine.state import State
+from imp.providers.claude import ClaudeAgentRunner, ClaudeSession
 from imp.providers.observe_session import ObserveSession
 from tests.async_wait import HANG_BACKSTOP
+from tests.conftest import _seed_control
+from tests.test_claude_runner import _inv as _claude_inv
 
 
 @pytest.fixture
@@ -34,6 +45,95 @@ def _coordinator(hook: _SaveHook) -> InterruptCoordinator:
     coord = InterruptCoordinator()
     coord.set_save_hook(hook)
     return coord
+
+
+SAVED = "Saved. The session closes at the end of this turn."
+
+
+def _draft(tmp_path: Path) -> Quest:
+    _seed_control(tmp_path)
+    return Quest.create_draft(tmp_path, title="X", quest_id="sv1", base_branch="main")
+
+
+def _log(quest: Quest) -> list[dict[str, Any]]:
+    return list(quest.event_log().read())
+
+
+@dataclass
+class _Saved:
+    calls: list[str | None]
+    yielded: list[dict[str, Any]]
+    continued: list[str]
+
+
+async def _run_until_saved(runner: Any, inv: Any, quest: Quest) -> _Saved:
+    """Run a top-level step until the save hook cancels it, then land the daemon's save."""
+    hook = _SaveHook()
+    continued: list[str] = []
+
+    def _continue(last_text: str) -> tuple[str, bool]:
+        continued.append(last_text)
+        hook.scope.cancel()  # a missed checkpoint fails fast instead of hanging
+        return ("keep going", False)
+
+    inv = replace(inv, quest=quest, quest_state=State.load(quest.state_dir),
+                  coordinator=_coordinator(hook), event_log=quest.event_log(),
+                  events_path=quest.events_path, continuation_fn=_continue)
+    yielded: list[dict[str, Any]] = []
+    with anyio.fail_after(HANG_BACKSTOP), hook.scope:
+        async for ev in runner.run(inv):
+            yielded.append(ev)
+    assert hook.scope.cancelled_caught
+    save_as_draft(quest)
+    return _Saved(hook.calls,
+                  [e for e in yielded if e["type"] != "tool_heartbeat"], continued)
+
+
+def _assert_saved_after_the_turn(quest: Quest, tool_use_id: str) -> None:
+    events = _log(quest)
+    types = [e["type"] for e in events]
+    assert types.count("agent_message") == 1
+    assert not any("LATER TURN" in json.dumps(e["payload"]) for e in events)
+    call = next(i for i, e in enumerate(events)
+                if e["type"] == "tool_call" and e["payload"]["id"] == tool_use_id)
+    res = next(i for i, e in enumerate(events)
+               if e["type"] == "tool_result" and e["payload"]["id"] == tool_use_id)
+    assert events[call]["payload"]["name"] == "save_and_exit"
+    assert events[res]["payload"]["content"] == SAVED
+    assert events[res]["payload"]["error"] is False
+    assert types.index("agent_message") < call < res < types.index("conversation_saved")
+    assert types[-1] == "conversation_saved"
+
+
+def _raw_label(raw: Any) -> str:
+    kind = getattr(raw, "type", None) or type(raw).__name__
+    return f"{kind}:{getattr(getattr(raw, 'item', None), 'tool', '') or ''}"
+
+
+def _trace_session(
+    monkeypatch: pytest.MonkeyPatch, cls: type[ObserveSession], quest: Quest,
+) -> list[str]:
+    """Record each raw message consumed, and the log tail when SaveRequested is yielded."""
+    trace: list[str] = []
+    real_items, real_events = cls._message_to_items, cls.events
+
+    async def items(self: Any, raw: Any) -> Any:
+        trace.append(_raw_label(raw))
+        async with contextlib.aclosing(real_items(self, raw)) as agen:  # type: ignore[type-var]
+            async for item in agen:
+                yield item
+
+    async def events(self: Any) -> Any:
+        async with contextlib.aclosing(real_events(self)) as agen:  # type: ignore[type-var]
+            async for item in agen:
+                if isinstance(item, SaveRequested):
+                    tail = [e["type"] for e in _log(quest)][-2:]
+                    trace.append(f"SaveRequested after {','.join(tail)}")
+                yield item
+
+    monkeypatch.setattr(cls, "_message_to_items", items)
+    monkeypatch.setattr(cls, "events", events)
+    return trace
 
 
 class _SavingObserve(ObserveSession):
@@ -98,3 +198,31 @@ async def test_observe_checkpoint_requests_one_save_then_parks() -> None:
     assert hook.calls == [None]
     assert yielded == []
     assert continued == []
+
+
+@pytest.mark.anyio
+async def test_claude_saves_after_the_logged_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _draft(tmp_path)
+    trace = _trace_session(monkeypatch, ClaudeSession, quest)
+    # The fake bypasses the tool host, so it scripts the tool's result text.
+    scripted = [
+        cc.assistant(cc.text("setting this aside"),
+                     cc.tool_use("s1", "save_and_exit", {})),
+        cc.user(cc.tool_result("s1", SAVED)),
+        cc.assistant(cc.text("LATER TURN")),
+        cc.result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: cc.FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    inv = _claude_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"}))
+    saved = await _run_until_saved(runner, inv, quest)
+    assert trace == ["AssistantMessage:", "UserMessage:",
+                     "SaveRequested after tool_call,tool_result"]
+    assert saved.calls == [None]
+    assert saved.yielded == []
+    assert saved.continued == []
+    _assert_saved_after_the_turn(quest, "s1")

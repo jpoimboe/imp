@@ -433,6 +433,7 @@ class _RunState:
     """
     complete_step_called: bool = False
     complete_step_args: dict[str, Any] = field(default_factory=dict)
+    save_and_exit_logged: bool = False
     runtime_errors: list[str] = field(default_factory=list)
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
     # When a tool raises FatalToolError the wrapper captures (tool, message)
@@ -1422,6 +1423,11 @@ class ClaudeSession(ObserveSession):
         st = self.runner._state
         return st.complete_step_args if st is not None else {}
 
+    @property
+    def _save_result_logged(self) -> bool:
+        st = self.runner._state
+        return bool(st and st.save_and_exit_logged)
+
     async def _enter(self) -> None:
         invocation = self.invocation
         runner = self.runner
@@ -2003,6 +2009,9 @@ class ClaudeSession(ObserveSession):
                                 agent_id=aid, block=b,
                                 duration_ms=state.tool_durations.pop(
                                     b.tool_use_id, None))
+                            if (pend is not None and pend.name == "save_and_exit"
+                                    and not b.is_error):
+                                state.save_and_exit_logged = True
                         if pend is not None:
                             pend.is_error = b.is_error
                             pend.result_preview = \
