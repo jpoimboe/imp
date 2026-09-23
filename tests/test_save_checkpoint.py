@@ -11,6 +11,7 @@ import anyio
 import pytest
 
 import tests.cc_fakes as cc
+import tests.codex_fakes as cx
 from imp.agents.agent_loop import run_agent_loop
 from imp.agents.loop_items import SaveRequested
 from imp.cli.signals import InterruptCoordinator
@@ -18,10 +19,13 @@ from imp.engine.abandon import save_as_draft
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers.claude import ClaudeAgentRunner, ClaudeSession
+from imp.providers.codex_runner import CodexAgentRunner, CodexSession
 from imp.providers.observe_session import ObserveSession
 from tests.async_wait import HANG_BACKSTOP
 from tests.conftest import _seed_control
 from tests.test_claude_runner import _inv as _claude_inv
+from tests.test_codex_runner_happy_path import _build_invocation as _codex_inv
+from tests.test_codex_runner_happy_path import _seed_auth
 
 
 @pytest.fixture
@@ -226,3 +230,36 @@ async def test_claude_saves_after_the_logged_result(
     assert saved.yielded == []
     assert saved.continued == []
     _assert_saved_after_the_turn(quest, "s1")
+
+
+@pytest.mark.anyio
+async def test_codex_saves_after_the_logged_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _draft(tmp_path)
+    _seed_auth(tmp_path)
+    trace = _trace_session(monkeypatch, CodexSession, quest)
+    # The fake bypasses the tool host, so it scripts the tool's result text.
+    scripted = [[
+        cx.thread_started("thr-1"),
+        cx.agent_message("setting this aside"),
+        cx.mcp_started("save_and_exit", item_id="s1"),
+        cx.mcp_call(name="save_and_exit", result=SAVED, item_id="s1"),
+        cx.agent_message("LATER TURN"),
+        cx.turn_completed(input_tokens=100, output_tokens=50),
+    ]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: cx.FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    saved = await _run_until_saved(runner, _codex_inv(tmp_path), quest)
+    assert "item.started:save_and_exit" in trace
+    assert trace[-2:] == ["item.completed:save_and_exit",
+                          "SaveRequested after tool_call,tool_result"]
+    assert saved.calls == [None]
+    assert saved.yielded == []
+    assert saved.continued == []
+    _assert_saved_after_the_turn(quest, "s1")
+    # The MCP server shut down gracefully despite the cancelled run.
+    server = runner._server_handle.task
+    assert server.done() and not server.cancelled()

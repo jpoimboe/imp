@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import anyio
+
 from imp.agents.agent_loop import run_agent_loop
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.loop_items import Error
@@ -251,6 +253,10 @@ class CodexSession(ObserveSession):
     def _complete_step_args(self) -> dict[str, Any]:
         return self._proc_state.get("complete_step_args") or {}
 
+    @property
+    def _save_result_logged(self) -> bool:
+        return bool(self._proc_state.get("save_and_exit_logged"))
+
     async def _enter(self) -> None:
         invocation = self.invocation
         runner = self.runner
@@ -309,7 +315,7 @@ class CodexSession(ObserveSession):
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": {},
-            "complete_step_called": False, "auth_mode": auth_mode,
+            "complete_step_called": False, "save_and_exit_logged": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
             "quota_reading": None,
             "turn_output_tokens": None,
@@ -883,13 +889,15 @@ class CodexAgentRunner:
                 if self._stderr_sink is not None:
                     self._stderr_sink.close()
                 if self._impty_handle is not None:
-                    with contextlib.suppress(Exception):
+                    # A leave control cancels the run; the MCP servers must still be reaped.
+                    with contextlib.suppress(Exception), anyio.CancelScope(shield=True):
                         await self._impty_handle.shutdown()
                 if self._impty_driver is not None:
                     with contextlib.suppress(Exception):
                         self._impty_driver.close()
                 if self._server_handle is not None:
-                    await self._server_handle.shutdown()
+                    with anyio.CancelScope(shield=True):
+                        await self._server_handle.shutdown()
                 if self._codex_home is not None:
                     # A provisioned codex_home implies _enter reached auth setup,
                     # so canonical_auth is set (both stashed before codex_home).
@@ -1226,6 +1234,8 @@ def process_event(
                         tool_use_id=call_id, content=content, is_error=is_error,
                     ),
                 )
+            if name == "save_and_exit" and not is_error:
+                state["save_and_exit_logged"] = True
             if name == "complete_step":
                 # Fallback capture from the RAW codex item args. When the
                 # in-process wrapper's RunState capture ran, the consume loop's
