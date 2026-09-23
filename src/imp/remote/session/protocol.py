@@ -8,7 +8,8 @@ load request), "control" (an interrupt/detach/abandon/save/archive/discard
 action), "set-lease" (toggle this attachment's keep-alive lease), or "query"
 (a read-only introspection query). Daemon -> client frames are "event"
 (wrapping one curated engine event), "result" (the reply to a query), or
-"end" (a bare marker: the run is over, disk and archive are authoritative).
+"end" (the end-of-run marker, naming the leave control that ended the run
+when one did; disk and archive are authoritative).
 Encoders return a line WITHOUT a trailing newline; the caller frames it
 (matching remote/daemon/protocol.py:make_hello)."""
 from __future__ import annotations
@@ -90,10 +91,20 @@ ClientMessage = Attach | Input | Control | SetLease | SkillRequest | Query
 
 FRAME_END = "end"
 
+# A tuple, not a set: membership is by ==, so an unhashable wire value is a ValueError.
+LEAVE_DISPOSITIONS = (CONTROL_SAVE, CONTROL_ABANDON, CONTROL_ARCHIVE, CONTROL_DISCARD)
+
 
 @dataclass(frozen=True, slots=True)
 class EndOfRun:
-    """The end-of-run marker: the run is over, disk and archive are authoritative."""
+    """The end-of-run marker: the run is over, disk and archive are authoritative.
+    `disposition` is the leave control that ended it, None when the run concluded itself."""
+
+    disposition: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.disposition is not None and self.disposition not in LEAVE_DISPOSITIONS:
+            raise ValueError(f"unknown end disposition {self.disposition!r}")
 
 
 END_OF_RUN = EndOfRun()
@@ -137,8 +148,11 @@ def encode_result_error(message: str) -> str:
     return json.dumps({"kind": "result", "ok": False, "error": message})
 
 
-def encode_end() -> str:
-    return json.dumps({"kind": FRAME_END})
+def encode_end(end: EndOfRun = END_OF_RUN) -> str:
+    payload: dict[str, Any] = {"kind": FRAME_END}
+    if end.disposition is not None:
+        payload["disposition"] = end.disposition
+    return json.dumps(payload)
 
 
 def _clip_strings(value: Any, limit: int) -> Any:
@@ -217,7 +231,8 @@ def parse_stream_frame(line: str) -> dict[str, Any] | EndOfRun:
     """One daemon->client stream frame: the wrapped event, or the end-of-run marker."""
     obj = _as_object(line)
     if obj.get("kind") == FRAME_END:
-        return END_OF_RUN
+        disposition = obj.get("disposition")
+        return END_OF_RUN if disposition is None else EndOfRun(disposition)
     return _event_of(obj)
 
 

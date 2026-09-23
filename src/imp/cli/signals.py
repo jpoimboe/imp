@@ -586,7 +586,7 @@ class InterruptCoordinator:
 
     def set_save_hook(self, fn: Any) -> None:
         """Register the daemon's save-and-exit trigger (SessionServer.request_save).
-        Fired by the save_and_exit tool to route a clean pause through CONTROL_SAVE."""
+        Fired at the save checkpoint, once the save_and_exit tool's result is logged."""
         self._save_hook = fn
 
     def set_force_forward_hook(self, fn: Any) -> None:

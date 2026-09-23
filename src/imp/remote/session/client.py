@@ -58,8 +58,11 @@ class SessionClient:
             raise
         self._stream = stream
 
-    async def receive_events(self) -> StreamEnding:
-        """ENDED means the end frame arrived; the socket stays open — the caller must close it."""
+    async def receive_events(
+        self, on_end: Callable[[EndOfRun], None] | None = None,
+    ) -> StreamEnding:
+        """ENDED means the end frame arrived (and was handed to `on_end`, when given);
+        the socket stays open — the caller must close it."""
         if self._stream is None:
             raise RuntimeError("call connect() before receive_events()")
         buf = BufferedByteReceiveStream(self._stream)
@@ -72,6 +75,8 @@ class SessionClient:
                     anyio.DelimiterNotFound, ValueError):
                 return StreamEnding.CUT
             if isinstance(frame, EndOfRun):
+                if on_end is not None:
+                    on_end(frame)
                 return StreamEnding.ENDED
             # Outside the try: a renderer bug must surface as a traceback, not as EOS.
             self._on_event(frame)

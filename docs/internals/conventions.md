@@ -84,9 +84,11 @@ styles its own line.
   `_emit_daemon_died`. Apart from the startup check, which fires before any
   stream exists, the closing block picks among them from what the client folded
   off the run's own event stream, never from a state it did not observe: an
-  `end` frame that carried no outcome is the daemon-died block, a stream cut
-  before anything could be witnessed is the lost-connection block. The exit code
-  carries the error signal for scripts.
+  `end` frame carrying a leave disposition renders that leave's closing block
+  (the one the client prints for its own leave), an `end` frame that carried no
+  outcome is the daemon-died block, a stream cut before anything could be
+  witnessed is the lost-connection block. The exit code carries the error signal
+  for scripts.
 - **Non-quest CLI usage/lookup errors → one `imp:` message.** Bad arguments, no such
   quest, unknown command, and similar usage errors emit one
   `imp: <message>` on **stderr** via `_emit_cli_error`, which centralizes the

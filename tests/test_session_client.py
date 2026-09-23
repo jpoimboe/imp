@@ -11,6 +11,7 @@ from imp.remote.session.protocol import (
     _MAX_FRAME,
     CONTROL_INTERRUPT,
     Attach,
+    EndOfRun,
     SkillRequest,
     encode_end,
     encode_event,
@@ -146,6 +147,23 @@ async def test_receive_events_reports_ended_on_the_end_frame(tmp_path: Path) -> 
         assert ending is StreamEnding.ENDED
         # the events ahead of the marker still reached the renderer
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_receive_events_hands_the_end_frame_to_on_end(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    ends: list[EndOfRun] = []
+    async with anyio.create_task_group() as tg:
+        await serve_raw_frames(
+            sock, (encode_end(EndOfRun("save")) + "\n").encode("utf-8"), tg)
+        await client.connect()
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            ending = await client.receive_events(on_end=ends.append)
+        assert ending is StreamEnding.ENDED
+        assert ends == [EndOfRun("save")]
         await client.aclose()
         tg.cancel_scope.cancel()
 

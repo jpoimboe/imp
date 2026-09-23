@@ -78,9 +78,14 @@ class ObserveSession:
     def cancelled(self) -> bool:
         return bool(self.runner._cancel)
 
+    # Set by the subclass once a non-error save_and_exit result is logged.
+    @property
+    def _save_result_logged(self) -> bool:
+        return False
+
     # --- the per-turn item stream ---------------------------------------
     async def events(self) -> AsyncIterator[Any]:
-        from imp.agents.loop_items import DependencyWaited, EndOfTurn, Error
+        from imp.agents.loop_items import DependencyWaited, EndOfTurn, Error, SaveRequested
         from imp.providers import errors as perr
         if self._pending_terminal is not None:
             pending, self._pending_terminal = self._pending_terminal, None
@@ -101,6 +106,9 @@ class ObserveSession:
                     # Before _is_terminal: that is where a captured complete_step
                     # becomes the step's output, and a waiting turn has no output.
                     yield DependencyWaited(deps=tuple(self.ctx.dependency_wait))
+                    return
+                if self._save_result_logged:
+                    yield SaveRequested()
                     return
                 if await self._is_terminal(raw):
                     # LoopGuard single-feed: a no-complete_step terminal turn is fed

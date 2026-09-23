@@ -48,8 +48,13 @@ class DependencyWaited:
     deps: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class SaveRequested:
+    pass
+
+
 Item = (Thinking | Warning | ToolRequested | AwaitingToolResults | EndOfTurn
-        | Error | DependencyWaited)
+        | Error | DependencyWaited | SaveRequested)
 
 
 class Session(Protocol):

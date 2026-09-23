@@ -14,6 +14,7 @@ from imp.agents.loop_items import (
     DependencyWaited,
     EndOfTurn,
     Error,
+    SaveRequested,
     Thinking,
     ToolRequested,
     Warning,
@@ -26,6 +27,7 @@ from imp.agents.output_guard import (
     validate_output_or_nudge,
 )
 from imp.agents.runner import ToolUseBlock
+from imp.agents.tools.save_and_exit import request_save_and_park
 
 
 async def run_agent_loop(
@@ -59,7 +61,7 @@ async def run_agent_loop(
                 if isinstance(item, ToolRequested):
                     tool_reqs.append(item)
                     continue
-                if isinstance(item, (AwaitingToolResults, EndOfTurn)):
+                if isinstance(item, (AwaitingToolResults, EndOfTurn, SaveRequested)):
                     boundary = item
                     break
 
@@ -67,6 +69,10 @@ async def run_agent_loop(
             # events() ended with no boundary item -> the in-flight request was
             # cancelled; fall through to the interrupted error below.
             break
+
+        if isinstance(boundary, SaveRequested):
+            await request_save_and_park(session.ctx)
+            return
 
         # One post-response heartbeat per turn, matching the unconditional pulse
         # the old loops emitted after the model call (anthropic.py:803) BEFORE the
