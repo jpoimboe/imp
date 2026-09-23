@@ -46,6 +46,7 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
 from imp.agents.tools.context import suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
+from imp.agents.tools.save_and_exit import request_save_and_park
 from imp.agents.tools.spill import wrap_task_result
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
@@ -371,6 +372,13 @@ async def _dispatch_one_task_inline(
     elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
 
 
+def _save_result_logged(
+    tool_uses: list[ToolUseBlock], tool_results: list[ToolResultBlock],
+) -> bool:
+    save_ids = {tu.id for tu in tool_uses if tu.name == "save_and_exit"}
+    return any(b.tool_use_id in save_ids and not b.is_error for b in tool_results)
+
+
 async def dispatch_turn_tool_uses(
     *,
     ctx: Any,
@@ -391,7 +399,9 @@ async def dispatch_turn_tool_uses(
     turn's tool_results are reordered to document order. Yields one tool_heartbeat
     per processed tu plus any terminal event dict (the caller yields it and
     stops). SubagentSuspended / AwaitingUserInput propagate (terminal — no
-    heartbeat; the generator ends by raising)."""
+    heartbeat; the generator ends by raising). A batch holding a non-error
+    save_and_exit result ends at the save checkpoint: request the save and
+    park until cancelled."""
     if max_parallel_tasks() == 1:
         # Kill switch (Decision 5): inline document-order path, no task group —
         # today's shapes exactly. Each tu (task and non-task) dispatches
@@ -411,6 +421,8 @@ async def dispatch_turn_tool_uses(
                     yield terminal
                     return
             yield {"type": "tool_heartbeat", "payload": {}}
+        if _save_result_logged(tool_uses, tool_results):
+            await request_save_and_park(ctx)
         return
 
     task_tus = [tu for tu in tool_uses if tu.name == "sub_agent"]
@@ -435,3 +447,5 @@ async def dispatch_turn_tool_uses(
         yield {"type": "tool_heartbeat", "payload": {}}
 
     _reorder_results_to_document_order(tool_results, tool_uses)
+    if _save_result_logged(tool_uses, tool_results):
+        await request_save_and_park(ctx)

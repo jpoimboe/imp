@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.save_and_exit import request_save_and_park
+from imp.agents.tools.save_and_exit import request_save_and_park, save_and_exit
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -56,17 +56,15 @@ def test_save_and_exit_registered() -> None:
     assert tool.input_schema.get("properties", {}) == {}
 
 
-@pytest.mark.anyio
-async def test_requests_clean_save_and_does_not_materialize(tmp_path: Path) -> None:
+def test_returns_its_result_without_requesting_save(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     q = _draft(tmp_path, "s1")
     coord = _FakeCoord()
-    tool = get_registry()["save_and_exit"]
-    # The tool parks forever; move_on_after unwinds it after the request lands.
-    with anyio.move_on_after(0.1) as cancel_scope:
-        await tool.async_invoke(_ctx(q, coordinator=coord), {})
-    assert cancel_scope.cancelled_caught
-    assert coord.calls == [None]
+    # One send() runs the body to completion: it never awaits.
+    with pytest.raises(StopIteration) as stop:
+        save_and_exit(_ctx(q, coordinator=coord)).send(None)
+    assert stop.value.value == "Saved. The session closes at the end of this turn."
+    assert coord.calls == []
     assert q.materialized is False
 
 

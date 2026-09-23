@@ -22,16 +22,10 @@ async def save_and_exit(ctx: Any) -> str:
     if ctx.quest_state is None:
         raise RuntimeError(
             "save_and_exit is only available to top-level quest steps")
-    coord = ctx.coordinator
-    if coord is None:
+    if ctx.coordinator is None:
         raise RuntimeError(
             "save_and_exit requires an interactive session coordinator")
-    coord.request_save()
-    # CONTROL_SAVE cancels the serve scope, which unwinds this parked task; the
-    # daemon then runs save_as_draft post-lock. Parking is the only exit — the
-    # tool never returns to the agent.
-    await anyio.sleep_forever()
-    raise AssertionError("unreachable")  # anyio 4.8: sleep_forever is -> None
+    return "Saved. The session closes at the end of this turn."
 
 
 async def request_save_and_park(ctx: Any) -> None:

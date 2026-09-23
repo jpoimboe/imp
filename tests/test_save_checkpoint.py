@@ -10,19 +10,24 @@ from typing import Any
 import anyio
 import pytest
 
+import tests.anthropic_fakes as af
 import tests.cc_fakes as cc
 import tests.codex_fakes as cx
 from imp.agents.agent_loop import run_agent_loop
 from imp.agents.loop_items import SaveRequested
+from imp.agents.parallel import reset_parallelism_cache
+from imp.agents.tools.save_and_exit import save_and_exit
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.abandon import save_as_draft
 from imp.engine.quest import Quest
-from imp.engine.state import State
+from imp.engine.state import InMemoryEventLog, State
+from imp.providers.anthropic import AnthropicAgentRunner, AnthropicSession
 from imp.providers.claude import ClaudeAgentRunner, ClaudeSession
 from imp.providers.codex_runner import CodexAgentRunner, CodexSession
 from imp.providers.observe_session import ObserveSession
 from tests.async_wait import HANG_BACKSTOP
 from tests.conftest import _seed_control
+from tests.test_anthropic_runner import _inv as _anthropic_inv
 from tests.test_claude_runner import _inv as _claude_inv
 from tests.test_codex_runner_happy_path import _build_invocation as _codex_inv
 from tests.test_codex_runner_happy_path import _seed_auth
@@ -116,19 +121,24 @@ def _raw_label(raw: Any) -> str:
 
 def _trace_session(
     monkeypatch: pytest.MonkeyPatch, cls: type[ObserveSession], quest: Quest,
+    *, body_before: str | None = None,
 ) -> list[str]:
-    """Record each raw message consumed, and the log tail when SaveRequested is yielded."""
+    """Record each raw message the session consumes, and the log tail when it
+    yields SaveRequested. `body_before` runs the real tool body once, first."""
     trace: list[str] = []
     real_items, real_events = cls._message_to_items, cls.events
 
     async def items(self: Any, raw: Any) -> Any:
-        trace.append(_raw_label(raw))
-        async with contextlib.aclosing(real_items(self, raw)) as agen:  # type: ignore[type-var]
+        label = _raw_label(raw)
+        if label == body_before and not any(t.startswith("body: ") for t in trace):
+            trace.append(f"body: {await save_and_exit(self.ctx)}")
+        trace.append(label)
+        async with contextlib.aclosing(real_items(self, raw)) as agen:
             async for item in agen:
                 yield item
 
     async def events(self: Any) -> Any:
-        async with contextlib.aclosing(real_events(self)) as agen:  # type: ignore[type-var]
+        async with contextlib.aclosing(real_events(self)) as agen:
             async for item in agen:
                 if isinstance(item, SaveRequested):
                     tail = [e["type"] for e in _log(quest)][-2:]
@@ -209,7 +219,8 @@ async def test_claude_saves_after_the_logged_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _draft(tmp_path)
-    trace = _trace_session(monkeypatch, ClaudeSession, quest)
+    trace = _trace_session(monkeypatch, ClaudeSession, quest,
+                           body_before="AssistantMessage:")
     # The fake bypasses the tool host, so it scripts the tool's result text.
     scripted = [
         cc.assistant(cc.text("setting this aside"),
@@ -224,7 +235,7 @@ async def test_claude_saves_after_the_logged_result(
             opts, scripted_messages=scripted))
     inv = _claude_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"}))
     saved = await _run_until_saved(runner, inv, quest)
-    assert trace == ["AssistantMessage:", "UserMessage:",
+    assert trace == [f"body: {SAVED}", "AssistantMessage:", "UserMessage:",
                      "SaveRequested after tool_call,tool_result"]
     assert saved.calls == [None]
     assert saved.yielded == []
@@ -238,7 +249,8 @@ async def test_codex_saves_after_the_logged_result(
 ) -> None:
     quest = _draft(tmp_path)
     _seed_auth(tmp_path)
-    trace = _trace_session(monkeypatch, CodexSession, quest)
+    trace = _trace_session(monkeypatch, CodexSession, quest,
+                           body_before="item.started:save_and_exit")
     # The fake bypasses the tool host, so it scripts the tool's result text.
     scripted = [[
         cx.thread_started("thr-1"),
@@ -253,7 +265,7 @@ async def test_codex_saves_after_the_logged_result(
         client_factory=lambda options=None: cx.FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = tmp_path / "auth.json"
     saved = await _run_until_saved(runner, _codex_inv(tmp_path), quest)
-    assert "item.started:save_and_exit" in trace
+    assert trace.index(f"body: {SAVED}") + 1 == trace.index("item.started:save_and_exit")
     assert trace[-2:] == ["item.completed:save_and_exit",
                           "SaveRequested after tool_call,tool_result"]
     assert saved.calls == [None]
@@ -263,3 +275,71 @@ async def test_codex_saves_after_the_logged_result(
     # The MCP server shut down gracefully despite the cancelled run.
     server = runner._server_handle.task
     assert server.done() and not server.cancelled()
+
+
+@pytest.fixture(params=["partitioned", "kill_switch"])
+def dispatch_branch(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> Any:
+    if request.param == "kill_switch":
+        monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    else:
+        monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    yield request.param
+    reset_parallelism_cache()
+
+
+def _save_then_complete() -> af.FakeAsyncAnthropic:
+    return af.FakeAsyncAnthropic([
+        af.response(af.text("setting this aside"),
+                    af.tool_use("s1", "save_and_exit", {})),
+        af.response(af.text("LATER TURN"),
+                    af.tool_use("c1", "complete_step", {"status": "Success"})),
+    ])
+
+
+@pytest.mark.anyio
+async def test_push_saves_after_the_dispatched_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dispatch_branch: str,
+) -> None:
+    quest = _draft(tmp_path)
+    sent: list[Any] = []
+    monkeypatch.setattr(AnthropicSession, "send_tool_results",
+                        lambda self, results: sent.append(results))
+    fake = _save_then_complete()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = _anthropic_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"}))
+    saved = await _run_until_saved(runner, inv, quest)
+    assert saved.calls == [None]
+    assert saved.yielded == []
+    assert sent == []
+    assert saved.continued == []
+    assert len(fake.messages.calls) == 1
+    _assert_saved_after_the_turn(quest, "s1")
+
+
+@pytest.mark.anyio
+async def test_push_errored_save_result_does_not_save(
+    tmp_path: Path, dispatch_branch: str,
+) -> None:
+    hook = _SaveHook()
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=_save_then_complete)
+    # No quest_state: the tool's top-level-step guard raises, an error result.
+    inv = replace(
+        _anthropic_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"}),
+                       event_log=log),
+        coordinator=_coordinator(hook))
+    yielded: list[dict[str, Any]] = []
+    # hook.scope: a regressed is_error guard fails fast instead of parking until the backstop.
+    with anyio.fail_after(HANG_BACKSTOP), hook.scope:
+        async for ev in runner.run(inv):
+            yielded.append(ev)
+    assert hook.calls == []
+    assert [e["type"] for e in yielded if e["type"] != "tool_heartbeat"] == ["agent_result"]
+    result = next(e for e in log.read()
+                  if e["type"] == "tool_result" and e["payload"]["id"] == "s1")
+    assert result["payload"]["error"] is True
