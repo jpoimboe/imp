@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import signal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
 import imp.agents.tools.context as tool_context
+import imp.providers.claude as claude_provider
+from imp.engine.state import InMemoryEventLog
 from imp.providers.anthropic import AnthropicAgentRunner
+from imp.providers.claude import ClaudeAgentRunner
+from imp.providers.claude_config_dir import materialize_fresh_config_dir
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic
 from tests.async_wait import HANG_BACKSTOP
+from tests.cc_fakes import FakeClaudeSDKClient
 from tests.openai_fakes import FakeResponsesClient
 from tests.test_anthropic_runner import _inv as _anthropic_inv
+from tests.test_claude_runner import _inv as _claude_inv
 from tests.test_openai_runner import _inv as _openai_inv
 
 
@@ -90,4 +98,88 @@ async def test_openai_leave_cancel_completes_teardown(
                                client_factory=lambda: fake)
     await _leave_mid_run(runner, _openai_inv(tmp_path), entered)
     assert fake.closed
+    assert len(torn_down) == 1
+
+
+_STDERR_PROBE = "claude: Warning: leave-teardown probe\n"
+
+
+class _ParkedClaudeClient(FakeClaudeSDKClient):
+    """Writes a stderr warning, then parks mid-turn until cancelled."""
+
+    def __init__(self, opts: Any, entered: anyio.Event, process: Any = None) -> None:
+        super().__init__(opts, scripted_messages=[])
+        self._entered = entered
+        self._transport = SimpleNamespace(_process=process)
+
+    async def receive_response(self) -> Any:
+        self.opts.stderr(_STDERR_PROBE)
+        self._entered.set()
+        await anyio.Event().wait()
+        yield  # unreachable; makes this an async generator
+
+
+class _Proc:
+    pid = 4242
+    reaped = False
+
+    async def wait(self) -> int:
+        await anyio.sleep(0)
+        self.reaped = True
+        return 0
+
+
+@pytest.mark.anyio
+async def test_claude_leave_cancel_completes_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, torn_down: list[Any],
+) -> None:
+    made: list[Path] = []
+
+    def _materialize() -> Path:
+        made.append(materialize_fresh_config_dir())
+        return made[-1]
+
+    monkeypatch.setattr(claude_provider, "materialize_fresh_config_dir", _materialize)
+    entered = anyio.Event()
+    clients: list[_ParkedClaudeClient] = []
+
+    def factory(opts: Any) -> _ParkedClaudeClient:
+        clients.append(_ParkedClaudeClient(opts, entered))
+        return clients[-1]
+
+    log = InMemoryEventLog()
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    await _leave_mid_run(runner, _claude_inv(tmp_path, event_log=log), entered)
+    fake = clients[0]
+    assert fake.closed
+    assert runner._client_ctx is None
+    warnings = [e["payload"]["message"] for e in log.read() if e["type"] == "runner_warning"]
+    assert warnings == ["claude stderr: Warning: leave-teardown probe"]
+    assert len(made) == 1
+    assert not made[0].exists()
+    assert runner._config_dir is None
+    assert len(torn_down) == 1
+    with anyio.fail_after(HANG_BACKSTOP):
+        await runner.interrupt()
+    assert fake.interrupts == 0
+
+
+@pytest.mark.anyio
+async def test_claude_leave_cancel_reaps_cut_short_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, torn_down: list[Any],
+) -> None:
+    signals: list[tuple[int, int]] = []
+
+    async def _record(process: Any, sig: int) -> None:
+        signals.append((process.pid, sig))
+
+    monkeypatch.setattr(claude_provider, "kill_process_group", _record)
+    entered = anyio.Event()
+    proc = _Proc()
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: _ParkedClaudeClient(opts, entered, process=proc))
+    await _leave_mid_run(runner, _claude_inv(tmp_path), entered)
+    assert signals == [(4242, signal.SIGTERM)]
+    assert proc.reaped
     assert len(torn_down) == 1
