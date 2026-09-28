@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
+
 # ── Responses API fakes ──────────────────────────────────────────────────────
 
 @dataclass
@@ -118,3 +120,8 @@ class FakeResponsesClient:
                  stream_events: int = 0) -> None:
         self.responses = _FakeResponses(
             responses, default_response, stream_events=stream_events)
+        self.closed = False
+
+    async def close(self) -> None:
+        await anyio.sleep(0)
+        self.closed = True

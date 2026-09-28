@@ -8,9 +8,12 @@ import pytest
 
 import imp.agents.tools.context as tool_context
 from imp.providers.anthropic import AnthropicAgentRunner
+from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic
 from tests.async_wait import HANG_BACKSTOP
+from tests.openai_fakes import FakeResponsesClient
 from tests.test_anthropic_runner import _inv as _anthropic_inv
+from tests.test_openai_runner import _inv as _openai_inv
 
 
 @pytest.fixture
@@ -72,5 +75,19 @@ async def test_anthropic_leave_cancel_completes_teardown(
     runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
                                   client_factory=lambda: fake)
     await _leave_mid_run(runner, _anthropic_inv(tmp_path), entered)
+    assert fake.closed
+    assert len(torn_down) == 1
+
+
+@pytest.mark.anyio
+async def test_openai_leave_cancel_completes_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, torn_down: list[Any],
+) -> None:
+    entered = anyio.Event()
+    fake = FakeResponsesClient([])
+    monkeypatch.setattr(fake.responses, "stream", lambda **_kw: _BlockedStream(entered))
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    await _leave_mid_run(runner, _openai_inv(tmp_path), entered)
     assert fake.closed
     assert len(torn_down) == 1
