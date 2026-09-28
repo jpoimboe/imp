@@ -262,12 +262,13 @@ def fake_codex_rollout_readings(monkeypatch: pytest.MonkeyPatch) -> list[Rollout
 
 @pytest.fixture(autouse=True)
 def _stub_provider_api_keys(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """Stub provider env vars only if not already set. Live provider tests get
     the real credentials through (the collection gate handles the "no auth"
     case); ordinary tests get the stub so module-level provider construction
-    works.
+    works. Ordinary tests also get an isolated CODEX_HOME so no test touches
+    the real ~/.codex/auth.json or triggers a live token refresh.
 
     Live provider tests spawn subprocesses (or the claude provider's
     nested `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it
@@ -280,6 +281,7 @@ def _stub_provider_api_keys(
     name = Path(request.node.fspath).name
     if "_live" in name and not name.startswith("test_live_"):
         return
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex-isolated"))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     if not os.environ.get("OPENAI_API_KEY"):

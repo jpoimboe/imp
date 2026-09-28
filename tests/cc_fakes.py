@@ -21,6 +21,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+import anyio
+
 
 @dataclass
 class FakeTextBlock:
@@ -165,6 +167,7 @@ class FakeClaudeSDKClient:
         return self
 
     async def __aexit__(self, *_exc: Any) -> bool:
+        await anyio.sleep(0)
         self.closed = True
         return False
 

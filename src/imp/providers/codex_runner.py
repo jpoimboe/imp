@@ -875,60 +875,60 @@ class CodexAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
-            self._process_owner.acknowledge()
-            # Two nested finally blocks preserve the old structure's exception
-            # isolation: the former _run_loop teardown is the inner block; the
-            # former run() bg teardown is the outer finally, so it STILL runs even
-            # if the (unguarded) teardown_codex_home raises. Within the inner block
-            # the impty shutdown/close are Exception-suppressed, and persist_rollout
-            # is wrapped so a rollout-IO failure never skips the auth-shredding
-            # teardown_codex_home.
-            try:
-                if self._stderr_token is not None:
-                    current_stderr_sink.reset(self._stderr_token)
-                if self._stderr_sink is not None:
-                    self._stderr_sink.close()
-                if self._impty_handle is not None:
-                    # A leave control cancels the run; the MCP servers must still be reaped.
-                    with contextlib.suppress(Exception), anyio.CancelScope(shield=True):
-                        await self._impty_handle.shutdown()
-                if self._impty_driver is not None:
-                    with contextlib.suppress(Exception):
-                        self._impty_driver.close()
-                if self._server_handle is not None:
-                    with anyio.CancelScope(shield=True):
+            # A leave control cancels the run; teardown must still complete.
+            with anyio.CancelScope(shield=True):
+                self._process_owner.acknowledge()
+                # Two nested finally blocks preserve the old structure's exception
+                # isolation: the former _run_loop teardown is the inner block; the
+                # former run() bg teardown is the outer finally, so it STILL runs even
+                # if the (unguarded) teardown_codex_home raises. Within the inner block
+                # the impty shutdown/close are Exception-suppressed, and persist_rollout
+                # is wrapped so a rollout-IO failure never skips the auth-shredding
+                # teardown_codex_home.
+                try:
+                    if self._stderr_token is not None:
+                        current_stderr_sink.reset(self._stderr_token)
+                    if self._stderr_sink is not None:
+                        self._stderr_sink.close()
+                    if self._impty_handle is not None:
+                        with contextlib.suppress(Exception):
+                            await self._impty_handle.shutdown()
+                    if self._impty_driver is not None:
+                        with contextlib.suppress(Exception):
+                            self._impty_driver.close()
+                    if self._server_handle is not None:
                         await self._server_handle.shutdown()
-                if self._codex_home is not None:
-                    # A provisioned codex_home implies _enter reached auth setup,
-                    # so canonical_auth is set (both stashed before codex_home).
-                    assert self._canonical_auth is not None
-                    # Own codex's native rollout across the pause BEFORE teardown
-                    # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure
-                    # must not skip the auth-shredding teardown below. A later
-                    # resume that finds no persisted rollout fails loudly in
-                    # restore_rollout.
-                    tid = self._proc_state.get("thread_id")
-                    if tid:
-                        from imp.providers.codex_rollout import persist_rollout
-                        try:
-                            persist_rollout(
-                                codex_home=self._codex_home, thread_id=tid,
-                                transcript_dir=invocation.transcript_dir)
-                        except Exception as exc:  # persist must not skip teardown
-                            _logger.warning(
-                                "codex: rollout persist failed (resume may be "
-                                "unavailable): %s", exc)
-                    teardown_codex_home(
-                        codex_home=self._codex_home, mode=self._auth_mode,
-                        canonical_path=self._canonical_auth)
-            finally:
-                if self._ctx is not None:
-                    # None guard: _ctx is assigned mid-_enter (after preflight).
-                    # run()'s OWN finally — an abandoned session generator only
-                    # GC-finalizes (PEP 525), so bg teardown must not depend on it.
-                    from imp.agents.tools.context import teardown_tool_context
-                    with contextlib.suppress(Exception):
-                        await teardown_tool_context(self._ctx)
+                    if self._codex_home is not None:
+                        # A provisioned codex_home implies _enter reached auth setup,
+                        # so canonical_auth is set (both stashed before codex_home).
+                        assert self._canonical_auth is not None
+                        # Own codex's native rollout across the pause BEFORE teardown
+                        # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure
+                        # must not skip the auth-shredding teardown below. A later
+                        # resume that finds no persisted rollout fails loudly in
+                        # restore_rollout.
+                        tid = self._proc_state.get("thread_id")
+                        if tid:
+                            from imp.providers.codex_rollout import persist_rollout
+                            try:
+                                persist_rollout(
+                                    codex_home=self._codex_home, thread_id=tid,
+                                    transcript_dir=invocation.transcript_dir)
+                            except Exception as exc:  # persist must not skip teardown
+                                _logger.warning(
+                                    "codex: rollout persist failed (resume may be "
+                                    "unavailable): %s", exc)
+                        teardown_codex_home(
+                            codex_home=self._codex_home, mode=self._auth_mode,
+                            canonical_path=self._canonical_auth)
+                finally:
+                    if self._ctx is not None:
+                        # None guard: _ctx is assigned mid-_enter (after preflight).
+                        # run()'s OWN finally — an abandoned session generator only
+                        # GC-finalizes (PEP 525), so bg teardown must not depend on it.
+                        from imp.agents.tools.context import teardown_tool_context
+                        with contextlib.suppress(Exception):
+                            await teardown_tool_context(self._ctx)
 
     def _canonical_auth_path(self) -> Path:
         """The canonical codex `auth.json` — honors $CODEX_HOME (fallback

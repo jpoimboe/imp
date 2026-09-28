@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
+
 from imp.agents.agent_loop import run_agent_loop
 from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
 from imp.agents.loop_guard import (
@@ -2455,42 +2457,44 @@ class ClaudeAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
-            if self._state is not None:
-                # Last chance: a fatal tool error, a cancel and an SDK close with no
-                # ResultMessage all return before _is_terminal, so this is the only
-                # point every run passes through. A no-op once a drain has run.
-                _restore_withheld_results(session.elog, session.aid, self._state)
-            if self._ctx is not None:
-                # None guard: _ctx is assigned mid-_run_loop; the finally runs
-                # with None when _run_loop raises BEFORE the assignment (the
-                # error arm yields, then this fires). An aclose before the
-                # first pull never enters the body at all. Lives in run()'s
-                # OWN finally (not _run_loop's): an abandoned inner generator
-                # only GC-finalizes (PEP 525), so _run_loop's finally is not
-                # aclose-deterministic.
-                from imp.agents.tools.context import teardown_tool_context
-                with contextlib.suppress(Exception):
-                    await teardown_tool_context(self._ctx)
-            # run()'s finally explicitly exits the client context manager
-            # (graceful disconnect) then reaps the transport group as a safety
-            # net, and drops the stale handle so a late interrupt() is a no-op
-            # rather than disconnecting a dead client.
-            if self._impty_driver is not None:
-                with contextlib.suppress(Exception):
-                    self._impty_driver.close()
-                self._impty_driver = None
-            if self._client_ctx is not None:
-                with contextlib.suppress(Exception):
-                    await self._client_ctx.__aexit__(None, None, None)
-                self._client_ctx = None
-            if self._client is not None:
-                await _reap_transport_group(self._client)
-            self._client = None
-            if self._stderr_sink is not None:
-                self._stderr_sink.close()
-            if self._config_dir is not None:
-                shutil.rmtree(self._config_dir, ignore_errors=True)
-                self._config_dir = None
+            # A leave control cancels the run; teardown must still complete.
+            with anyio.CancelScope(shield=True):
+                if self._state is not None:
+                    # Last chance: a fatal tool error, a cancel and an SDK close with no
+                    # ResultMessage all return before _is_terminal, so this is the only
+                    # point every run passes through. A no-op once a drain has run.
+                    _restore_withheld_results(session.elog, session.aid, self._state)
+                if self._ctx is not None:
+                    # None guard: _ctx is assigned mid-_run_loop; the finally runs
+                    # with None when _run_loop raises BEFORE the assignment (the
+                    # error arm yields, then this fires). An aclose before the
+                    # first pull never enters the body at all. Lives in run()'s
+                    # OWN finally (not _run_loop's): an abandoned inner generator
+                    # only GC-finalizes (PEP 525), so _run_loop's finally is not
+                    # aclose-deterministic.
+                    from imp.agents.tools.context import teardown_tool_context
+                    with contextlib.suppress(Exception):
+                        await teardown_tool_context(self._ctx)
+                # run()'s finally explicitly exits the client context manager
+                # (graceful disconnect) then reaps the transport group as a safety
+                # net, and drops the stale handle so a late interrupt() is a no-op
+                # rather than disconnecting a dead client.
+                if self._impty_driver is not None:
+                    with contextlib.suppress(Exception):
+                        self._impty_driver.close()
+                    self._impty_driver = None
+                if self._client_ctx is not None:
+                    with contextlib.suppress(Exception):
+                        await self._client_ctx.__aexit__(None, None, None)
+                    self._client_ctx = None
+                if self._client is not None:
+                    await _reap_transport_group(self._client)
+                self._client = None
+                if self._stderr_sink is not None:
+                    self._stderr_sink.close()
+                if self._config_dir is not None:
+                    shutil.rmtree(self._config_dir, ignore_errors=True)
+                    self._config_dir = None
 
     def _interrupted(self) -> bool:
         """Read the cancel flag through a call so mypy doesn't narrow it to a
