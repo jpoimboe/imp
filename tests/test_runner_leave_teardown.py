@@ -14,13 +14,17 @@ from imp.engine.state import InMemoryEventLog
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude import ClaudeAgentRunner
 from imp.providers.claude_config_dir import materialize_fresh_config_dir
+from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic
 from tests.async_wait import HANG_BACKSTOP
 from tests.cc_fakes import FakeClaudeSDKClient
+from tests.codex_fakes import FakeCodex
 from tests.openai_fakes import FakeResponsesClient
 from tests.test_anthropic_runner import _inv as _anthropic_inv
 from tests.test_claude_runner import _inv as _claude_inv
+from tests.test_codex_runner_happy_path import _build_invocation as _codex_inv
+from tests.test_codex_runner_happy_path import _seed_auth
 from tests.test_openai_runner import _inv as _openai_inv
 
 
@@ -182,4 +186,54 @@ async def test_claude_leave_cancel_reaps_cut_short_transport(
     await _leave_mid_run(runner, _claude_inv(tmp_path), entered)
     assert signals == [(4242, signal.SIGTERM)]
     assert proc.reaped
+    assert len(torn_down) == 1
+
+
+class _ParkedCodexEvents:
+    """A codex turn stream that parks mid-turn until cancelled."""
+
+    def __init__(self, entered: anyio.Event) -> None:
+        self._entered = entered
+
+    def __aiter__(self) -> _ParkedCodexEvents:
+        return self
+
+    async def __anext__(self) -> Any:
+        self._entered.set()
+        await anyio.Event().wait()
+        raise StopAsyncIteration  # unreachable
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _ParkedCodexThread:
+    def __init__(self, entered: anyio.Event) -> None:
+        self._entered = entered
+
+    async def run_streamed(self, _prompt: Any, _options: Any = None) -> Any:
+        return SimpleNamespace(events=_ParkedCodexEvents(self._entered))
+
+
+class _ParkedCodex(FakeCodex):
+    def __init__(self, entered: anyio.Event) -> None:
+        super().__init__()
+        self._entered = entered
+
+    def start_thread(self, options: Any = None) -> Any:
+        self.start_thread_calls.append(options)
+        return _ParkedCodexThread(self._entered)
+
+
+@pytest.mark.anyio
+async def test_codex_leave_cancel_completes_teardown(
+    tmp_path: Path, torn_down: list[Any],
+) -> None:
+    _seed_auth(tmp_path)
+    entered = anyio.Event()
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: _ParkedCodex(entered))
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    await _leave_mid_run(runner, _codex_inv(tmp_path, event_log=InMemoryEventLog()), entered)
     assert len(torn_down) == 1
