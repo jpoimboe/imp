@@ -2,7 +2,45 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from imp.agents.prompts import build_context, render_prompt
+from imp.assets import bundled_workflow_dir
+from imp.engine.loader import load_workflow
+from imp.engine.state import InMemoryEventLog
+
 PARTIALS = Path("src/imp/assets/partials")
+
+GRILL_PARA = (
+    "**Grill the design.** Scope a build by interviewing the user relentlessly until "
+    "you share understanding. Map the design as a tree — each decision branches into "
+    "the decisions that hang off it — and put one decision per turn, only once its "
+    "prerequisites are settled. End each turn on one plainly stated question and your "
+    "recommended answer. Facts findable in the codebase or docs are looked up, never "
+    "asked — finish that research before asking a question that hangs on it; "
+    "decisions are the user's — put each to them. The grill is done when every branch "
+    "is visited and nothing is silently assumed. With no human attached, take your "
+    "recommended answers and proceed."
+)
+APPROACHES_PARA = (
+    "**Propose 2\u20133 approaches.** Where the direction is open, put 2\u20133 concrete "
+    "options with trade-offs and your recommendation to the user as one grill question."
+)
+ENUMERATE_SENTENCE = (
+    "A batch of related values — every label on one surface, "
+    "say — is one grill question: show the actual values with recommended defaults for the "
+    "user to correct. What is banned is the *unenumerated deferral* —"
+)
+
+
+def _render_agent(workflow: str, agent: str) -> str:
+    wf_dir = bundled_workflow_dir(workflow)
+    body = load_workflow(wf_dir).agents[agent].prompt_template_source
+    out = render_prompt(body, build_context(
+        quest_title="t", event_log=InMemoryEventLog(), quest_id="abc",
+        quest_home=".imp/quests/abc", opening="add a dark-mode toggle",
+        vars={"auto_merge": False}), workflow_dir=wf_dir)
+    return " ".join(out.split())
 
 
 def test_spec_design_principles_carries_judgment_lens_only() -> None:
@@ -39,8 +77,8 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     assert "Research before you converge" in text
     assert '{% include "partials/delegate-exploration.md" %}' in text
     assert "no cost gating" in text
-    # propose 2-3 + design-then-approve in sections
-    assert "present it in sections" in text
+    # the design is grilled, not approved in sections
+    assert "**Grill the design.**" in text
     # build-or-save gate
     assert "build now" in text.lower()
     assert "imp resume <id>" in text
@@ -77,11 +115,13 @@ def test_brainstorm_dialogue_carries_cleanup_proposal_beat() -> None:
     assert "Propose it even when it reaches code this quest wouldn't otherwise touch" in text
     assert "not an open-ended repo audit" in text
     assert "they shouldn't have to think to ask" in text
-    # Placement: after the delegate-exploration include, before the Propose 2-3 beat.
+    # Placement: after the delegate-exploration include, then the grill beat, then
+    # the Propose 2-3 beat.
     idx_include = text.index('{% include "partials/delegate-exploration.md" %}')
     idx_beat = text.index("**Propose the cleanup the quest reveals.**")
-    idx_approaches = text.index("**Propose 2")
-    assert idx_include < idx_beat < idx_approaches
+    idx_grill = text.index("**Grill the design.**")
+    idx_approaches = text.index("**Propose 2\u20133 approaches.**")
+    assert idx_include < idx_beat < idx_grill < idx_approaches
     # It is a plain discipline paragraph, not a blockquote.
     assert "> **Propose the cleanup the quest reveals.**" not in text
 
@@ -136,7 +176,7 @@ def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     assert "within normal noise" not in text
 
 
-def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:
+def test_brainstorm_dialogue_carries_enumeration_and_grill_default() -> None:
     text = (PARTIALS / "brainstorm-dialogue.md").read_text()
     # (a) enumerate-before-commit for user-visible outcomes
     assert "Enumerate before committing" in text
@@ -149,12 +189,9 @@ def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:
     # (c) confirmed values are written into the spec verbatim
     assert "Enumerated values are spec content" in text
     assert "into the spec verbatim" in text
-    # (d) on-request grill mode; prose-batch pacing stated as the default
-    assert "Grill mode on request" in text
-    assert "Prose-batch pacing is the default" in text
-    assert "one-question-at-a-time" in text
-    assert "recommended answer" in text
-    assert "looked up, never asked" in text
+    # (d) grilling is the default; the on-request mode and prose-batch default are gone
+    assert "Grill mode on request" not in text
+    assert "Prose-batch pacing is the default" not in text
     # The grill copy must not collide with the case-exact ban other tests pin.
     assert "One question at a time" not in text
 
@@ -300,4 +337,34 @@ def test_brainstorm_mockup_copy_pastes_the_terminal_and_renders_the_web() -> Non
     # Still inside the surface-inventory beat it qualifies, before the next beat.
     assert flat.index("**Walk the whole surface.**") < flat.index(sentences)
     assert flat.index(sentences) < flat.index("**Revise, don't restate.**")
+
+
+@pytest.mark.parametrize(("workflow", "agent"), [
+    ("default", "threshold"),
+    ("minimal", "front-door"),
+])
+def test_front_door_prompts_grill_by_default(workflow: str, agent: str) -> None:
+    flat = _render_agent(workflow, agent)
+    # AC1: the new pacing copy, verbatim.
+    assert GRILL_PARA in flat
+    assert APPROACHES_PARA in flat
+    assert ENUMERATE_SENTENCE in flat
+    # AC2: the retired pacing copy is gone.
+    assert "Grill mode on request" not in flat
+    assert "Prose-batch pacing is the default" not in flat
+    assert "design-then-approve" not in flat.lower()
+    assert "present it in sections" not in flat
+    assert (
+        "Prose batches with recommended defaults the user corrects remain the pacing "
+        "default"
+    ) not in flat
+    # AC4: the seeded scoping bullet and the final readback speak of the grill.
+    assert "then grill the design to convergence and write the spec" in flat
+    assert "Once the grill has converged" in flat
+
+
+@pytest.mark.parametrize("agent", ["threshold", "finalize"])
+def test_one_question_rule_still_renders(agent: str) -> None:
+    # AC5b: the shared live-gate rule stays in both default-workflow gates.
+    assert "One question at a time" in _render_agent("default", agent)
 
