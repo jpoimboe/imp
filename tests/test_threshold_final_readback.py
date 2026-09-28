@@ -28,5 +28,6 @@ def test_final_readback_present_and_consolidated(tmp_path: Path) -> None:
     for token in ("goal", "scope", "decision", "acceptance"):
         assert token in block
     assert "end your turn once asking" in block
-    assert "not another round" in block
+    assert "once the grill has converged" in block
+    assert "section-by-section" not in block
     assert "trivial" in block

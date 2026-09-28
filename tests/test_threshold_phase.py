@@ -183,7 +183,8 @@ def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
     low = out.lower()
     # dialogue conduct expanded from brainstorm-dialogue
     assert "one question at a time" in low
-    assert "present it in sections" in out
+    assert "**Grill the design.**" in out
+    assert "present it in sections" not in out
     assert "build now" in low
     assert "final readback before committing" in low
     # design lens expanded from spec-design-principles

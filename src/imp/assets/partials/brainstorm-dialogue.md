@@ -8,12 +8,11 @@ How you open depends on whether you were handed an opening request:
   This message selects a hat — it is **not** axiomatically a build request. Read it
   and respond in kind:
   - **Scoping a quest** (a sentence of build intent) → the brainstorm hat: explore
-    the codebase, then brainstorm normally (propose 2–3 approaches, follow-ups,
-    design-then-approve, write the spec). A one-line intent is not a draft — full
-    brainstorming. When the message **names a spec file** in the tree, do **not**
-    re-brainstorm from scratch — read it and run the staleness/verify pass per
-    threshold's **Reading a referenced spec file** section, which decides proceed
-    vs. surface-and-yield.
+    the codebase, then grill the design to convergence and write the spec. A one-line
+    intent is not a draft — full brainstorming. When the message **names a spec file**
+    in the tree, do **not** re-brainstorm from scratch — read it and run the
+    staleness/verify pass per threshold's **Reading a referenced spec file** section,
+    which decides proceed vs. surface-and-yield.
   - **A question about imp** → answer it directly and end your turn to yield; no build.
   - **State of some work** (e.g. "where does X stand?") → take the scout hat and
     report on the existing work.
@@ -72,20 +71,24 @@ Propose it even when it reaches code this quest wouldn't otherwise touch; bound 
 what you notice while scoping *this* quest, not an open-ended repo audit. It stays a
 proposal the user accepts or declines — they shouldn't have to think to ask.
 
-**Propose 2–3 approaches.** Before locking in a direction, offer 2–3 concrete options
-with trade-offs and your recommendation. Let them confirm.
+**Grill the design.** Scope a build by interviewing the user relentlessly until you share
+understanding. Map the design as a tree — each decision branches into the decisions that
+hang off it — and put one decision per turn, only once its prerequisites are settled. End
+each turn on one plainly stated question and your recommended answer. Facts findable in
+the codebase or docs are looked up, never asked — finish that research before asking a
+question that hangs on it; decisions are the user's — put each to them. The grill is done
+when every branch is visited and nothing is silently assumed. With no human attached,
+take your recommended answers and proceed.
 
-**Design-then-approve.** Once you understand what to build, present the design (scaled to
-complexity — a few sentences for simple things, more if nuanced) and confirm before
-writing the spec. When it's non-trivial, present it in sections and confirm each by
-ending your turn rather than presenting the whole at once; small designs confirm in a
-single pass.
+**Propose 2–3 approaches.** Where the direction is open, put 2–3 concrete options with
+trade-offs and your recommendation to the user as one grill question.
 
 **Enumerate before committing.** Any design element with a user-visible outcome — labels,
 colors, visibility, layout — must have its concrete values enumerated to the user
-before the spec is written. Prose batches with recommended defaults the user corrects
-remain the pacing default; what is banned is the *unenumerated deferral* — "I'll audit
-the YAML and fill in the labels later" is not a decision the implementation may inherit.
+before the spec is written. A batch of related values — every label on one surface,
+say — is one grill question: show the actual values with recommended defaults for the
+user to correct. What is banned is the *unenumerated deferral* — "I'll audit the YAML
+and fill in the labels later" is not a decision the implementation may inherit.
 Batch the defaults, but show the actual values.
 
 > **Enumerate copy verbatim.** Every fixed string — anything a human will see (labels, messages, error/diagnostic/log output) and any LLM prompt text — has its exact wording shown to the user before the spec is written, not just its intent.
@@ -112,17 +115,10 @@ inventory only for the parts the correction actually moves.
 into the spec verbatim — the label table, the color assignments, the per-element
 after-states. Plans implement pinned values; they never re-derive them.
 
-**Grill mode on request.** Prose-batch pacing is the default. When the user asks to be
-grilled, switch to relentless one-question-at-a-time until you share understanding: walk
-each branch of the design tree, resolving dependencies one at a time, one question per
-turn, each carrying your recommended answer. Facts findable in the codebase are
-looked up, never asked; decisions are the user's — put each to them.
-
-**Final readback before committing.** Once the brainstorm has converged, before you write
+**Final readback before committing.** Once the grill has converged, before you write
 and commit the spec, present **one** consolidated summary of the design — Goal, Scope,
 the key decisions made, and the acceptance criteria in brief — then
 end your turn once asking whether it all sounds right. Incorporate any correction, then write and commit.
-This is a single final confirmation, not another round of section-by-section design.
 **Skip this readback entirely** on a `trivial` quest (it asked no questions and made no
 design choices). When the run has no human to confirm, skip it there too and write +
 commit directly — yielding to a human is only for when you genuinely need one.

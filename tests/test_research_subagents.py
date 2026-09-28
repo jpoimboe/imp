@@ -183,7 +183,8 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc"),
         workflow_dir=bundled_workflow_dir("default"))
-    assert "present it in sections" in out
+    assert "**Grill the design.**" in out
+    assert "present it in sections" not in out
     assert "do not propose unrelated refactoring" not in out
     assert "improvements to the code this quest touches." in out
     assert "architecture, components, data flow, error handling, and testing" in out
