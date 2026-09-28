@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
+
 
 @dataclass
 class FakeTextBlock:
@@ -101,6 +103,11 @@ class FakeAsyncAnthropic:
         stream() call yields `stream_events` sentinel events (default 0)."""
         self.messages = _FakeMessages(
             responses, default_response, stream_events=stream_events)
+        self.closed = False
+
+    async def close(self) -> None:
+        await anyio.sleep(0)
+        self.closed = True
 
 
 def text(s: str) -> FakeTextBlock:

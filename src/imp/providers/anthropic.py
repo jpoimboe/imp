@@ -417,7 +417,7 @@ class AnthropicAgentRunner:
         Real `anthropic.AsyncAnthropic` owns an httpx pool; without explicit
         close() the pool's async teardown can race with pytest-anyio's
         per-test loop teardown and surface "Event loop is closed" errors in
-        later tests. Test fakes don't expose `.close()` — skip safely.
+        later tests. Test doubles without `.close()` are skipped.
         """
         import contextlib
         if self._client is None:
@@ -456,15 +456,17 @@ class AnthropicAgentRunner:
                 yield perr.make_error_event(classified)
                 return
         finally:
-            if self._ctx is not None:
-                # None guard: self._ctx is None-initialized and assigned mid-open,
-                # AFTER the _build_tools/check_web_capability raise sites — the
-                # finally runs with None when the generator is aclosed before its
-                # first pull or those early raises fire.
-                from imp.agents.tools.context import teardown_tool_context
-                with contextlib.suppress(Exception):
-                    await teardown_tool_context(self._ctx)
-            await self._close_client()
+            # A leave control cancels the run; teardown must still complete.
+            with anyio.CancelScope(shield=True):
+                if self._ctx is not None:
+                    # None guard: self._ctx is None-initialized and assigned mid-open,
+                    # AFTER the _build_tools/check_web_capability raise sites — the
+                    # finally runs with None when the generator is aclosed before its
+                    # first pull or those early raises fire.
+                    from imp.agents.tools.context import teardown_tool_context
+                    with contextlib.suppress(Exception):
+                        await teardown_tool_context(self._ctx)
+                await self._close_client()
 
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_tool_processes
