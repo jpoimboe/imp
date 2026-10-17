@@ -78,9 +78,10 @@ def test_capture_empty_log_still_emits_boundary(tmp_path: Path) -> None:
 def test_capture_unreadable_log_still_emits_boundary(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
+    p = tmp_path / "nope.jsonl"
+    p.mkdir()  # exists but unreadable as a file; chmod 000 is bypassed under root
     with caplog.at_level(logging.WARNING):
-        lines = ReplaySnapshot.capture(
-            tmp_path / "nope.jsonl").wire_bytes().decode().splitlines()
+        lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
     assert [parse_event(ln) for ln in lines] == [{"type": "replay_complete"}]
     assert any("replay" in r.message.lower() for r in caplog.records)
 

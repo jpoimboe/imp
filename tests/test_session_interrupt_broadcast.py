@@ -33,6 +33,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
     )
     State(id=quest_id, step=None, step_attempt=0, status="paused").save(
         quest.state_dir)
+    quest.events_path.touch()
     return quest
 
 
