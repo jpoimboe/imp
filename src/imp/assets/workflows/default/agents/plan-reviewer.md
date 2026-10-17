@@ -97,6 +97,9 @@ implementations:
   `verify` gate runs after every plan and will reject it. Establish this by
   reading — the callers a rename orphans, the assertions an edit invalidates —
   never by reconstructing; the gate is the backstop that makes missing one cheap.
+  Include the project's guard tests — tests that scan the tree for forbidden
+  patterns or usages: a prescribed test or edit a guard would fail is the same
+  **Major**.
 
 ## Backstop: record an unrecorded scope-out
 
