@@ -25,7 +25,13 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_event,
 )
-from imp.remote.session.socket_server import DropReason, PumpItem, SessionSocket, _Client
+from imp.remote.session.socket_server import (
+    AttachRefused,
+    DropReason,
+    PumpItem,
+    SessionSocket,
+    _Client,
+)
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
@@ -425,6 +431,36 @@ async def test_set_lease_frame_mutates_only_issuing_client(tmp_path: Path) -> No
         assert len(changes) == 2   # on_lease_change fired once per live lease mutation
         await a.aclose()
         await b.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_a_refused_attach_is_closed_with_no_frame_and_no_detach(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    detaches: list[None] = []
+    session = SessionSocket(
+        sock,
+        on_attach=lambda _hello, _send: AttachRefused.HISTORY_GONE,
+        on_detach=lambda: detaches.append(None),
+    )
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach_leased(sock, "c1", True)
+        received = b""
+        with anyio.fail_after(HANG_BACKSTOP), contextlib.suppress(anyio.EndOfStream):
+            while True:
+                received += await client.receive()
+        assert received == b""             # EOF with zero frames: no replay, no end frame
+        assert session.attached_count == 0
+        assert session.leased_count == 0
+        session.broadcast({"type": "agent_result", "payload": {}})
+        session.enqueue_end()               # nothing left registered to reach
+        assert detaches == []               # a refused attach was never an attach
+        await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()
 
