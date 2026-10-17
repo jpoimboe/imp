@@ -216,8 +216,9 @@ def _termination_from_result(
 
     Detection keys on is_error / exit code, never on the wording, so a usage
     limit reports regardless of its exact phrasing. The substring classifier is
-    only the last-resort labeler: a recognized quota/auth keeps its type;
-    anything else is the generic TerminatedError."""
+    only the last-resort labeler: a recognized quota/auth keeps its type, except
+    that an out-of-band 401/403 is always a retryable AuthError; anything else is
+    the generic TerminatedError."""
     is_error = bool(getattr(sdk_msg, "is_error", False))
     exit_code = diag.get("exit")
     nonzero_exit = isinstance(exit_code, int) and exit_code != 0
@@ -246,8 +247,10 @@ def _termination_from_result(
             f"claude: tool use concurrency (api_error_status={status})")
     if labeled is None and isinstance(status, int) and 500 <= status < 600:
         labeled = perr.NetworkError(f"claude: api_error_status={status}")
-    if labeled is None and status in (401, 403):
-        labeled = perr.AuthError(f"claude: api_error_status={status}")
+    if status in (401, 403) and not isinstance(labeled, perr.AuthError):
+        # A server status outranks prose, which alone reads as a local credential-clear.
+        labeled = perr.AuthError(
+            str(labeled) if labeled is not None else f"claude: api_error_status={status}")
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if labeled is None and status == 429:
         labeled = perr.RateLimitError(f"claude: api_error_status={status}")

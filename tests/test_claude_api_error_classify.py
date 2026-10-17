@@ -403,3 +403,30 @@ def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None
         sdk, "API Error: 400 messages: tool use concurrency", {})
     assert term.category == "network"
     assert not isinstance(term, perr.TerminatedError)
+
+
+INCIDENT_AUTH_PROSE = (
+    "Failed to authenticate: OAuth token revoked. Please log in again or contact "
+    "your administrator.")
+
+
+def test_server_status_overrides_terminal_auth_prose() -> None:
+    # Auth prose alone reads as a local credential-clear, but an
+    # out-of-band 401/403 proves the server rejected the request.
+    for status in (401, 403):
+        term = _termination_from_result(
+            result(is_error=True, api_error_status=status), INCIDENT_AUTH_PROSE, {})
+        assert isinstance(term, perr.AuthError), status
+        assert not isinstance(term, perr.AuthTerminalError)
+        assert term.category == "auth"
+        assert getattr(term, "kind", "") == f"http_{status}"
+        assert str(term) == f"claude CLI: {INCIDENT_AUTH_PROSE}"
+        assert term.detail["api_error_status"] == status
+        assert term.detail["last_agent_text"] == INCIDENT_AUTH_PROSE
+
+
+def test_auth_prose_without_a_server_status_stays_terminal() -> None:
+    term = _termination_from_result(
+        result(is_error=True, api_error_status=None), INCIDENT_AUTH_PROSE, {})
+    assert isinstance(term, perr.AuthTerminalError)
+    assert term.category == "auth_terminal"
