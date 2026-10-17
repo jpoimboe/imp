@@ -62,6 +62,7 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
     gate_emitted = anyio.Event()
 
     events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")
     server = SessionServer(sock, events_path=events_path)
     await server.open()
 

@@ -623,6 +623,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
     from imp.engine.state import JsonlEventLog
 
     events_path = tmp_path / "events.jsonl"
+    events_path.touch()
     sock = str(tmp_path / "s.sock")
     log = JsonlEventLog(events_path)
     release = anyio.Event()

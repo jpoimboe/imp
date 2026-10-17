@@ -57,6 +57,11 @@ class DropReason(Enum):
     WRITE_FAILURE = "write_failure"
 
 
+class AttachRefused(Enum):
+    """on_attach verdict: the run's history is gone; close without sending a frame."""
+    HISTORY_GONE = "history_gone"
+
+
 @dataclass
 class ReplaySnapshot:
     """On-disk event prefix re-framed for the wire; capture() must be called synchronously."""
@@ -79,6 +84,8 @@ class ReplaySnapshot:
                         break
                     framed.append(
                         (encode_event({**record, "_replay": True}) + "\n").encode("utf-8"))
+        except FileNotFoundError:
+            raise  # history gone: the caller refuses the attach
         except OSError:
             _log.warning(
                 "replay: cannot read %s; client gets the live stream only",
@@ -107,7 +114,8 @@ class SessionSocket:
         path: str,
         *,
         on_attach: Callable[
-            [Attach, Callable[[dict[str, Any]], None]], ReplaySnapshot | None
+            [Attach, Callable[[dict[str, Any]], None]],
+            ReplaySnapshot | AttachRefused | None,
         ] | None = None,
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str, str | None], None] | None = None,
@@ -308,15 +316,22 @@ class SessionSocket:
             send, recv = anyio.create_memory_object_stream[PumpItem](
                 max_buffer_size=self._client_buffer)
             async with anyio.create_task_group() as ctg:
-                client = _Client(
+                attaching = _Client(
                     stream=stream, send=send, scope=ctg.cancel_scope,
                     leased=hello.lease)
-                client.pump_done = anyio.Event()
-                self._clients.add(client)
-                snapshot: ReplaySnapshot | None = None
+                attaching.pump_done = anyio.Event()
+                # Registered before on_attach so its lease bookkeeping sees this client.
+                self._clients.add(attaching)
+                snapshot: ReplaySnapshot | AttachRefused | None = None
                 if self._on_attach is not None:
                     snapshot = self._on_attach(
-                        hello, lambda ev: self._send_one(client, ev))
+                        hello, lambda ev: self._send_one(attaching, ev))
+                if isinstance(snapshot, AttachRefused):
+                    self._clients.discard(attaching)
+                    send.close()
+                    recv.close()
+                    return
+                client = attaching
                 if snapshot is not None:
                     raw = snapshot.wire_bytes()
                     if raw:

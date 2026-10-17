@@ -12,7 +12,7 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import _MAX_FRAME, encode_attach, parse_event
 from imp.remote.session.server import SessionServer
-from imp.remote.session.socket_server import ReplaySnapshot
+from imp.remote.session.socket_server import AttachRefused, ReplaySnapshot
 from tests.async_wait import HANG_BACKSTOP
 
 
@@ -78,9 +78,10 @@ def test_capture_empty_log_still_emits_boundary(tmp_path: Path) -> None:
 def test_capture_unreadable_log_still_emits_boundary(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
+    p = tmp_path / "nope.jsonl"
+    p.mkdir()  # exists but unreadable as a file; chmod 000 is bypassed under root
     with caplog.at_level(logging.WARNING):
-        lines = ReplaySnapshot.capture(
-            tmp_path / "nope.jsonl").wire_bytes().decode().splitlines()
+        lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
     assert [parse_event(ln) for ln in lines] == [{"type": "replay_complete"}]
     assert any("replay" in r.message.lower() for r in caplog.records)
 
@@ -103,6 +104,27 @@ def test_on_attach_pulse_returns_snapshot_of_current_disk(tmp_path: Path) -> Non
 def test_on_attach_pulse_without_events_path_returns_none(tmp_path: Path) -> None:
     server = SessionServer(str(tmp_path / "s.sock"))
     assert server._on_attach_pulse(None, lambda _e: None) is None
+
+
+def test_on_attach_pulse_refuses_once_the_log_is_gone(tmp_path: Path) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"), events_path=tmp_path / "events.jsonl")
+    server.set_pending_prompt(
+        {"type": "awaiting_user_input", "payload": {"prompt": "q"}})
+    sent: list[dict[str, Any]] = []
+    assert server._on_attach_pulse(None, sent.append) is AttachRefused.HISTORY_GONE
+    assert sent == []   # a refused client is not re-sent the pending prompt
+
+
+def test_on_attach_pulse_serves_only_the_boundary_for_an_unreadable_log(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "events.jsonl"
+    server = SessionServer(str(tmp_path / "s.sock"), events_path=p)
+    p.mkdir()  # exists but unreadable as a file: not "history gone"
+    snap = server._on_attach_pulse(None, lambda _e: None)
+    assert isinstance(snap, ReplaySnapshot)
+    assert [parse_event(ln) for ln in snap.wire_bytes().decode().splitlines()] == [
+        {"type": "replay_complete"}]
 
 
 @pytest.fixture
