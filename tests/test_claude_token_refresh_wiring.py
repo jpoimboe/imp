@@ -617,3 +617,70 @@ async def test_an_unreadable_spawn_expiry_passes_none_and_probes(
     assert [e["payload"] for e in refreshes] == [
         {"outcome": "not_applicable"},
         {"outcome": "refreshed", "expires_at": NOW + 3600 * 1000}]
+
+
+INCIDENT_AUTH_PROSE = (
+    "Failed to authenticate: OAuth token revoked. Please log in again or contact "
+    "your administrator.")
+
+
+@pytest.mark.anyio
+async def test_server_401_under_auth_prose_probes_and_sees_the_rotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The out-of-band 401 outranks the prose, so the probe runs and a peer
+    rotation retries fast instead of pausing for a re-login."""
+    (tmp_path / "art").mkdir()
+    calls = _probe_seam(
+        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.SKIPPED_ROTATED))
+
+    log = InMemoryEventLog()
+    events = [ev async for ev in _run_scripted(tmp_path, log, [
+        chrome(INCIDENT_AUTH_PROSE), result(is_error=True, api_error_status=401)])]
+
+    assert calls == [(False, None), (True, None)]
+    errs = [e for e in events if e["type"] == "error"]
+    assert [e["payload"]["category"] for e in errs] == ["auth"]
+    assert errs[0]["payload"]["kind"] == "token_rotated"
+    assert errs[0]["payload"]["detail"]["api_error_status"] == 401
+    assert errs[0]["payload"]["message"] == f"claude CLI: {INCIDENT_AUTH_PROSE}"
+
+
+@pytest.mark.anyio
+async def test_server_401_under_auth_prose_with_a_dead_grant_pauses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "art").mkdir()
+    calls = _probe_seam(
+        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
+
+    log = InMemoryEventLog()
+    events = [ev async for ev in _run_scripted(tmp_path, log, [
+        chrome(INCIDENT_AUTH_PROSE), result(is_error=True, api_error_status=401)])]
+
+    # The probe ran: the terminal verdict comes from the dead grant, not the prose.
+    assert calls == [(False, None), (True, None)]
+    errs = [e for e in events if e["type"] == "error"]
+    assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
+    assert errs[0]["payload"]["kind"] == "AuthTerminalError"
+    assert errs[0]["payload"]["message"] == (
+        "claude: OAuth refresh token is dead; run `claude login`")
+
+
+@pytest.mark.anyio
+async def test_server_401_under_auth_prose_with_a_live_grant_stays_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "art").mkdir()
+    calls = _probe_seam(
+        monkeypatch, tmp_path,
+        ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000))
+
+    log = InMemoryEventLog()
+    events = [ev async for ev in _run_scripted(tmp_path, log, [
+        chrome(INCIDENT_AUTH_PROSE), result(is_error=True, api_error_status=401)])]
+
+    assert calls == [(False, None), (True, None)]
+    errs = [e for e in events if e["type"] == "error"]
+    assert [e["payload"]["category"] for e in errs] == ["auth"]
+    assert errs[0]["payload"]["kind"] == "http_401"
