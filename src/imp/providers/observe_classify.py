@@ -12,7 +12,8 @@ from imp.providers import errors as perr
 from imp.providers.quota import QuotaReading
 
 # Prose Anthropic emits locally after clearing the saved credentials: terminal,
-# unless the same scan carries a routable status code (see _match_error_prose).
+# unless server evidence overturns it — a routable code in the same scan (see
+# _match_error_prose) or the ResultMessage's api_error_status (_termination_from_result).
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
@@ -102,7 +103,9 @@ def _match_error_prose(
     patterns locally after clearing the saved credentials, without sending a
     request, so no retry can heal them. A routable "API Error: <code>" in the
     same scan is proof a request reached the server and came back, so the prose
-    is a server rejection and routes on the code instead. A codeless
+    is a server rejection and routes on the code instead. The ResultMessage's
+    out-of-band api_error_status is server evidence too; this text-only scan
+    cannot see it, so _termination_from_result applies it. A codeless
     "API Error:" is a transport failure — the request never arrived — so it
     cannot overturn the terminal reading, and neither can a matched-but-unrouted
     code (a 3xx), which no branch below would route.
