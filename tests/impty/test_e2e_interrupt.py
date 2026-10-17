@@ -15,6 +15,7 @@ from tests.impty.e2e_support import (
     _MINIMAL_CONFIG,
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
+    _flock_free,
     _git,
     _poll,
     can_pty,
@@ -146,6 +147,10 @@ def test_sigint_during_subagent_hands_back_and_resumes(tmp_path: Path) -> None:
     assert "imp events " in body                          # runnable recovery command
     assert "--agent sub:" in body                         # scoped to this one child
     assert "transcript.jsonl" not in body                 # no sandbox-masked path
+
+    # The client exits 130 before its daemon tears down; resuming early hits the dying daemon.
+    assert _poll(lambda: _flock_free(quest_home / "lock"), timeout=E2E_POLL_TIMEOUT), \
+        "paused run's daemon never released the quest lock"
 
     # Resume continues the interrupt-paused step and runs to completion: the quest
     # recovers with the handback already in the parent's transcript (exit 0).
