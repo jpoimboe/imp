@@ -84,6 +84,8 @@ class ReplaySnapshot:
                         break
                     framed.append(
                         (encode_event({**record, "_replay": True}) + "\n").encode("utf-8"))
+        except FileNotFoundError:
+            raise  # history gone: the caller refuses the attach
         except OSError:
             _log.warning(
                 "replay: cannot read %s; client gets the live stream only",

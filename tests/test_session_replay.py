@@ -12,7 +12,7 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import _MAX_FRAME, encode_attach, parse_event
 from imp.remote.session.server import SessionServer
-from imp.remote.session.socket_server import ReplaySnapshot
+from imp.remote.session.socket_server import AttachRefused, ReplaySnapshot
 from tests.async_wait import HANG_BACKSTOP
 
 
@@ -104,6 +104,27 @@ def test_on_attach_pulse_returns_snapshot_of_current_disk(tmp_path: Path) -> Non
 def test_on_attach_pulse_without_events_path_returns_none(tmp_path: Path) -> None:
     server = SessionServer(str(tmp_path / "s.sock"))
     assert server._on_attach_pulse(None, lambda _e: None) is None
+
+
+def test_on_attach_pulse_refuses_once_the_log_is_gone(tmp_path: Path) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"), events_path=tmp_path / "events.jsonl")
+    server.set_pending_prompt(
+        {"type": "awaiting_user_input", "payload": {"prompt": "q"}})
+    sent: list[dict[str, Any]] = []
+    assert server._on_attach_pulse(None, sent.append) is AttachRefused.HISTORY_GONE
+    assert sent == []   # a refused client is not re-sent the pending prompt
+
+
+def test_on_attach_pulse_serves_only_the_boundary_for_an_unreadable_log(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "events.jsonl"
+    server = SessionServer(str(tmp_path / "s.sock"), events_path=p)
+    p.mkdir()  # exists but unreadable as a file: not "history gone"
+    snap = server._on_attach_pulse(None, lambda _e: None)
+    assert isinstance(snap, ReplaySnapshot)
+    assert [parse_event(ln) for ln in snap.wire_bytes().decode().splitlines()] == [
+        {"type": "replay_complete"}]
 
 
 @pytest.fixture

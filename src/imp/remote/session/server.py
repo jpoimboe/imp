@@ -34,6 +34,7 @@ from imp.remote.session.protocol import (
     SkillRequest,
 )
 from imp.remote.session.socket_server import (
+    AttachRefused,
     DropReason,
     InputPayload,
     ReplaySnapshot,
@@ -390,11 +391,14 @@ class SessionServer:
 
     def _on_attach_pulse(
         self, _attach: Any, send_one: Callable[[dict[str, Any]], None],
-    ) -> ReplaySnapshot | None:
+    ) -> ReplaySnapshot | AttachRefused | None:
+        snapshot: ReplaySnapshot | None = None
+        if self._events_path is not None:
+            try:
+                snapshot = ReplaySnapshot.capture(self._events_path)
+            except FileNotFoundError:
+                return AttachRefused.HISTORY_GONE  # a terminal run reaped the home
         self._pulse_attach_change()
-        snapshot = (
-            ReplaySnapshot.capture(self._events_path)
-            if self._events_path is not None else None)
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
         # Seed the transient marker to a client attaching while the override is live.
