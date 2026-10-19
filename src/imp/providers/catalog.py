@@ -286,6 +286,7 @@ class LongContextSurcharge:
 
 
 _OPENAI_LONG_CONTEXT = LongContextSurcharge(272_000, 2.0, 1.5)
+_HAIKU_5_5_LONG_CONTEXT = LongContextSurcharge(100_000, 5.0, 5.0)
 
 
 @dataclass(frozen=True)
@@ -301,19 +302,24 @@ class ModelPrices:
 
 # input, output, cache read, cache write — USD per million tokens.
 MODEL_PRICES: dict[str, ModelPrices] = {
-    # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
-    # request at the same per-token rate as a 9k one. Cache writes are 2x input:
-    # the claude path writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x.
-    # Opus 5.5 reads cache at 0.05x input, not the family's usual 0.1x.
+    # Anthropic: 4.6-and-later bill a 900k request at the same per-token rate as a
+    # 9k one, except Haiku 5.5, the one model with a long-context tier (every rate
+    # 5x above a 100k-token prompt). Cache writes are 2x input: the claude path
+    # writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x. Opus 5.5 and Sonnet
+    # 5.5 read cache at 0.05x input, not the family's usual 0.1x. The bare aliases
+    # price as the 5.5 models they resolve to. Sources: platform.claude.com model
+    # overview pages for Opus/Sonnet/Haiku 5.5 (fetched 2026-10-16).
     "claude-opus-5-5": ModelPrices(4.00, 20.00, 0.20, 8.00),
+    "claude-sonnet-5-5": ModelPrices(2.00, 10.00, 0.10, 4.00),
+    "claude-haiku-5-5": ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_LONG_CONTEXT),
     "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 10.00),
     "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 20.00),
     "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 10.00),
     "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 6.00),
     "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 2.00),
-    "opus": ModelPrices(5.00, 25.00, 0.50, 10.00),
-    "sonnet": ModelPrices(3.00, 15.00, 0.30, 6.00),
-    "haiku": ModelPrices(1.00, 5.00, 0.10, 2.00),
+    "opus": ModelPrices(4.00, 20.00, 0.20, 8.00),
+    "sonnet": ModelPrices(2.00, 10.00, 0.10, 4.00),
+    "haiku": ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_LONG_CONTEXT),
     # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
     # plain input rate everywhere else. Sol's rate is promotional through
     # 2026-11-21.
