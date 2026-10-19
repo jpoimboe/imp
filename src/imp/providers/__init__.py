@@ -37,8 +37,8 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "anthropic": BuiltinFloor(
         module="anthropic",
         tier_defaults={
-            "low": "claude-haiku-4-5",
-            "medium": "claude-sonnet-4-6",
+            "low": "claude-haiku-5-5",
+            "medium": "claude-sonnet-5-5",
             "high": "claude-opus-5-5",
         },
         env_var="ANTHROPIC_API_KEY",
@@ -57,8 +57,8 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "claude": BuiltinFloor(
         module="claude",
         tier_defaults={
-            "low": "claude-haiku-4-5",
-            "medium": "claude-sonnet-4-6",
+            "low": "claude-haiku-5-5",
+            "medium": "claude-sonnet-5-5",
             "high": "claude-opus-5-5",
         },
         env_var=None,  # CLI-authenticated (claude login); no env var
