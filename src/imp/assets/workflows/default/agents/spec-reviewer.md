@@ -83,6 +83,9 @@ checklist — do the real reasoning:
   something about the code, check it against the project's guard tests — tests that
   scan the tree for forbidden patterns or usages. A criterion a guard would fail is
   unmeetable as written: **Major**.
+- **Explore broadly before judging.** Open the code, tests, and guard/lint tests the
+  spec's changes and acceptance criteria touch, including ones the spec does not
+  mention, and use what you find.
 
 Use your judgement, but classify against the severity rules below exactly — don't let a
 "read it as a whole" lens talk you out of blocking a genuine gap.

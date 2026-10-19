@@ -884,6 +884,12 @@ _GUARD_TEST_BULLET = (
     "fail is unmeetable as written: **Major**."
 )
 
+_EXPLORE_BROADLY_BULLET = (
+    "- **Explore broadly before judging.** Open the code, tests, and guard/lint tests "
+    "the spec's changes and acceptance criteria touch, including ones the spec does "
+    "not mention, and use what you find."
+)
+
 
 def test_spec_reviewer_calibration_reports_honest_severity() -> None:
     body = _normalized_prompt("spec-reviewer")
@@ -895,11 +901,11 @@ def test_spec_reviewer_calibration_reports_honest_severity() -> None:
     assert "Approve (non-blocking) unless" not in body
 
 
-def test_spec_reviewer_checks_guard_tests_as_last_how_to_review_bullet() -> None:
+def test_spec_reviewer_guard_test_then_explore_bullets_close_how_to_review() -> None:
     body = _normalized_prompt("spec-reviewer")
     assert (
-        "Flag either direction's gap as blocking. " + _GUARD_TEST_BULLET
-        + " Use your judgement, but classify"
+        "Flag either direction's gap as blocking. " + _GUARD_TEST_BULLET + " "
+        + _EXPLORE_BROADLY_BULLET + " Use your judgement, but classify"
     ) in body
 
 
