@@ -51,7 +51,7 @@ from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers.base import Provider
-from imp.providers.catalog import ANTHROPIC, model_info
+from imp.providers.catalog import ANTHROPIC, limits_for, model_info
 from imp.providers.message_parsers import _parse_anthropic_message
 from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
@@ -118,18 +118,24 @@ def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
     raise exc
 
 
-def _anthropic_thinking_posture(tier: str | None) -> dict[str, Any]:
-    """Per-tier thinking/output_config request kwargs, pinned identically across
-    providers. Empty for low/None (thinking off, the prior default); adaptive at
-    effort 'high' for medium/high so both thinking tiers run one fixed posture.
-    `display: "summarized"` keeps thinking text readable for imp's thinking events.
+def _anthropic_thinking_posture(tier: str | None, model: str) -> dict[str, Any]:
+    """Per-tier thinking/output_config request kwargs, pinned identically to the
+    claude provider. medium/high run adaptive at effort 'high'; low runs adaptive
+    at effort 'low' on an adaptive_only `model` and sends nothing (thinking off)
+    on any other; None sends nothing. `display: "summarized"` keeps thinking text
+    readable for imp's thinking events.
     """
+    info = limits_for("anthropic", model)
     if tier in ("medium", "high"):
-        return {
-            "thinking": {"type": "adaptive", "display": "summarized"},
-            "output_config": {"effort": "high"},
-        }
-    return {}
+        effort = "high"
+    elif tier == "low" and info is not None and info.adaptive_only:
+        effort = "low"
+    else:
+        return {}
+    return {
+        "thinking": {"type": "adaptive", "display": "summarized"},
+        "output_config": {"effort": effort},
+    }
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -534,7 +540,8 @@ class AnthropicSession(PushSession):
             # tool_choice must compose disable_parallel_tool_use deliberately.
             tool_choice={"type": "auto", "disable_parallel_tool_use": False},
         )
-        create_kwargs.update(_anthropic_thinking_posture(self.invocation.tier))
+        create_kwargs.update(_anthropic_thinking_posture(
+            self.invocation.tier, self.runner.model))
         if self._web_headers:
             create_kwargs["extra_headers"] = self._web_headers
         # N4 race note: if interrupt() lands AFTER cancelled() passes but BEFORE

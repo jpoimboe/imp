@@ -618,16 +618,22 @@ def correction_increment(settled: Sequence[_InFlightOutcome]) -> str:
 
 
 def _cc_thinking_posture(
-    tier: str | None,
+    tier: str | None, model: str,
 ) -> tuple[ThinkingConfig | None, EffortLevel | None]:
     """Per-tier (thinking, effort) for ClaudeAgentOptions, imp-owned so the
     spawned claude's posture never re-floats to the subscriber/GrowthBook
     default. medium/high run adaptive at effort 'high' (matching the anthropic
-    provider); low is thinking-off (haiku supports neither adaptive nor effort);
-    an untiered/legacy invocation keeps the claude-p default (no pin)."""
+    provider). low depends on `model`: an adaptive_only one (CC can't turn its
+    thinking off) runs adaptive at effort 'low'; any other, uncatalogued
+    included, is thinking-off. An untiered/legacy invocation keeps the claude-p
+    default (no pin)."""
     if tier in ("medium", "high"):
         return {"type": "adaptive", "display": "summarized"}, "high"
     if tier == "low":
+        from imp.providers.catalog import limits_for
+        info = limits_for("claude", model)
+        if info is not None and info.adaptive_only:
+            return {"type": "adaptive", "display": "summarized"}, "low"
         return {"type": "disabled"}, None
     return None, None
 
@@ -2376,7 +2382,7 @@ class ClaudeAgentRunner:
         env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
         # Per-call MCP wall clock: pinned to 24h so no host value caps an imp tool call.
         env["MCP_TOOL_TIMEOUT"] = "86400000"
-        thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier)
+        thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier, self.model)
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             # The SDK prefers its own bundled CLI, which trails the models and 400s.
