@@ -79,6 +79,13 @@ checklist — do the real reasoning:
   **A broad AC over a narrow Scope** — an acceptance criterion no Scope item owns —
   is a **blocking inconsistency (Major)**, not a per-claim verification pass; a Scope
   item no AC tests is the same. Flag either direction's gap as blocking.
+- **Check what the tree already forbids.** When an acceptance criterion asserts
+  something about the code, check it against the project's guard tests — tests that
+  scan the tree for forbidden patterns or usages. A criterion a guard would fail is
+  unmeetable as written: **Major**.
+- **Explore broadly before judging.** Open the code, tests, and guard/lint tests the
+  spec's changes and acceptance criteria touch, including ones the spec does not
+  mention, and use what you find.
 
 Use your judgement, but classify against the severity rules below exactly — don't let a
 "read it as a whole" lens talk you out of blocking a genuine gap.
@@ -93,7 +100,7 @@ Classify each finding against the canonical severity rubric:
 
 ## Calibration
 
-Strict but fair. Flag only issues that would cause real problems during implementation planning: a missing section, a direct contradiction, or a requirement open to two interpretations. Minor wording, stylistic preference, and "less detailed than I'd prefer" are Minor or Nit, not blocking.
+Report every defect you find, at its honest severity. A wrong or unverifiable claim, a contradiction, an acceptance criterion that cannot be met or would mislead a verifier, a decision the builder would have to invent, or a gap that would force rework later is **Major** — don't lower it because the fix looks small or a later step might catch it. Only wording, style, and "less detailed than I'd prefer" are Minor or Nit.
 
 A load-bearing claim about existing code (a file path, a current behavior, a function or type name) you cannot verify against the actual source is **Major**, not Minor: a spec built on a false premise is a wrong implementation, however cleanly it reads. Verify before you approve.
 
@@ -106,8 +113,6 @@ constraint, or approach the conversation explicitly settled — that the spec
 silently drops or contradicts is **Major**: a reversed decision becomes a wrong
 implementation however cleanly the spec reads. Check the spec against the
 recorded dialogue, not your assumption of what was decided.
-
-Approve (non-blocking) unless there are serious gaps that would lead to a flawed implementation.
 
 The Decisions summary may carry review markers — "*(decided during review)*" and
 "*(user-confirmed during review)*". These are an **expected** part of the spec's

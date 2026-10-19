@@ -89,7 +89,7 @@ _LIVE_TEST_FILES := \
   tests/test_codex_context_reading_live.py \
   tests/test_parallel_elicitation_live.py \
   tests/test_cc_builtins_drift_live.py \
-  tests/test_claude_high_tier_live.py
+  tests/test_claude_tier_defaults_live.py
 
 .PHONY: test-live
 test-live: require-venv ## Run tests needing a real provider (--run-live); providers whose toolchain/creds are present run, the rest skip.

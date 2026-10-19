@@ -1,5 +1,6 @@
-"""One real claude turn at BUILTIN_FLOOR's `high` model, driven through
-ClaudeAgentRunner.run against a live claude (client_factory=None).
+"""One real claude turn at each BUILTIN_FLOOR tier model, driven through
+ClaudeAgentRunner.run against a live claude (client_factory=None) with that
+tier's own thinking posture.
 
 The binary matters as much as the model here. imp pins cli_path to the `claude` on
 PATH, and the server refuses a model the CLI is too old to serve with a 400
@@ -27,8 +28,8 @@ from tests.conftest import _init_repo
 
 pytestmark = pytest.mark.live("claude")
 
-# The floor itself, not a copy: this test follows wherever the default moves.
-_HIGH_TIER_MODEL = BUILTIN_FLOOR["claude"].tier_defaults["high"]
+# The floor itself, not a copy: this test follows wherever the defaults move.
+_TIER_DEFAULTS = BUILTIN_FLOOR["claude"].tier_defaults
 
 _NUDGE_TEXT = (
     "Your turn ended without calling complete_step. There is no human to "
@@ -51,7 +52,8 @@ def _one_nudge():
     return _cont
 
 
-def _inv(tmp_path: Path) -> AgentInvocation:
+def _inv(tmp_path: Path, tier: str, model: str,
+         event_log: InMemoryEventLog) -> AgentInvocation:
     agent_def = AgentDef(
         name="pinger", description="",
         tools=frozenset({"complete_step"}), subagents=(),
@@ -66,7 +68,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
     )
     return AgentInvocation(
         agent_def=agent_def,
-        provider_name="claude", model_name=_HIGH_TIER_MODEL,
+        provider_name="claude", model_name=model, tier=tier,
         # imp's production completion instruction verbatim, as agent_run.py sends it.
         system_prompt=(
             completion_instruction(agent_def.output_schema)
@@ -83,7 +85,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",
-        event_log=InMemoryEventLog(),
+        event_log=event_log,
     )
 
 
@@ -93,19 +95,29 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_high_tier_default_completes_a_real_turn(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tier", ["low", "medium", "high"])
+async def test_tier_default_completes_a_real_turn(tier: str, tmp_path: Path) -> None:
     reason = path_claude_skip_reason()
     if reason is not None:
         pytest.skip(reason)
     _init_repo(tmp_path)
-    runner = ClaudeAgentRunner(model_name=_HIGH_TIER_MODEL)
+    model = _TIER_DEFAULTS[tier]
+    log = InMemoryEventLog()
+    runner = ClaudeAgentRunner(model_name=model)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, tier, model, log))]
 
     errors = [e for e in events if e["type"] == "error"]
     assert not errors, (
-        f"the high-tier default {_HIGH_TIER_MODEL} failed a real turn through the "
+        f"the {tier}-tier default {model} failed a real turn through the "
         f"`claude` on PATH. A `claude_code_version_too_old` message means that "
         f"binary cannot serve this model — upgrade it.\n{errors}")
     assert events[-1]["type"] == "agent_result", events[-1]
     assert events[-1]["payload"]["status"] == "Success", events[-1]
+    if tier in ("low", "medium"):
+        # The served id, recorded per agent_message; a dated suffix is tolerated.
+        served = [e["payload"]["model"] for e in log.read()
+                  if e["type"] == "agent_message"]
+        assert served, f"no agent_message recorded for the {tier}-tier turn"
+        assert all(m.startswith(model) for m in served), (
+            f"the {tier}-tier turn was served by {served}, not {model}")

@@ -6,7 +6,9 @@ from pathlib import Path
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude import ClaudeAgentRunner
+from imp.providers.claude import ClaudeAgentRunner, _cc_thinking_posture
+
+_ADAPTIVE = {"type": "adaptive", "display": "summarized"}
 
 
 def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:
@@ -85,3 +87,38 @@ def test_untiered_invocation_leaves_posture_unpinned(tmp_path: Path) -> None:
     )
     assert opts.thinking is None
     assert opts.effort is None
+
+
+def test_low_tier_on_an_adaptive_only_model_runs_adaptive_at_low_effort() -> None:
+    # CC rewrites `--thinking disabled` to adaptive on these, so imp pins low effort.
+    for model in ("claude-haiku-5-5", "claude-haiku-5-5-20261007", "haiku"):
+        assert _cc_thinking_posture("low", model) == (_ADAPTIVE, "low"), model
+
+
+def test_low_tier_on_other_models_disables_thinking() -> None:
+    for model in ("claude-haiku-4-5", "claude-sonnet-4-6"):
+        assert _cc_thinking_posture("low", model) == ({"type": "disabled"}, None), model
+    # An uncatalogued model is treated as thinking-optional.
+    assert _cc_thinking_posture("low", "mystery-model") == ({"type": "disabled"}, None)
+
+
+def test_medium_and_high_tiers_run_adaptive_at_high_effort_on_any_model() -> None:
+    for tier in ("medium", "high"):
+        for model in ("claude-haiku-5-5", "claude-haiku-4-5", "mystery-model"):
+            assert _cc_thinking_posture(tier, model) == (_ADAPTIVE, "high"), (tier, model)
+
+
+def test_untiered_posture_is_unpinned_on_any_model() -> None:
+    for model in ("claude-haiku-5-5", "claude-haiku-4-5"):
+        assert _cc_thinking_posture(None, model) == (None, None), model
+
+
+def test_low_tier_posture_keys_on_the_runner_model(tmp_path: Path) -> None:
+    # The invocation names claude-sonnet-4-5 (thinking-optional); the runner's
+    # adaptive-only model is the one sent, so it decides the posture.
+    runner = ClaudeAgentRunner("claude-haiku-5-5")
+    opts = runner._build_options(
+        _invocation(tmp_path, tier="low"), mcp_server=object(), tool_names=["bash"]
+    )
+    assert opts.thinking == _ADAPTIVE
+    assert opts.effort == "low"

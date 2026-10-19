@@ -866,3 +866,60 @@ def test_front_door_requires_a_read_before_speaking_about_the_project(tmp_path) 
     assert "orient only when you are about" not in fd
     # And the copy actually reaches the agent this partial is rendered into.
     assert paragraph in _render_agent("threshold", tmp_path)
+
+
+_HONEST_SEVERITY_PARAGRAPH = (
+    "Report every defect you find, at its honest severity. A wrong or unverifiable "
+    "claim, a contradiction, an acceptance criterion that cannot be met or would "
+    "mislead a verifier, a decision the builder would have to invent, or a gap that "
+    "would force rework later is **Major** — don't lower it because the fix looks "
+    "small or a later step might catch it. Only wording, style, and \"less detailed "
+    "than I'd prefer\" are Minor or Nit."
+)
+
+_GUARD_TEST_BULLET = (
+    "- **Check what the tree already forbids.** When an acceptance criterion asserts "
+    "something about the code, check it against the project's guard tests — tests "
+    "that scan the tree for forbidden patterns or usages. A criterion a guard would "
+    "fail is unmeetable as written: **Major**."
+)
+
+_EXPLORE_BROADLY_BULLET = (
+    "- **Explore broadly before judging.** Open the code, tests, and guard/lint tests "
+    "the spec's changes and acceptance criteria touch, including ones the spec does "
+    "not mention, and use what you find."
+)
+
+
+def test_spec_reviewer_calibration_reports_honest_severity() -> None:
+    body = _normalized_prompt("spec-reviewer")
+    assert _HONEST_SEVERITY_PARAGRAPH in body
+    assert (body.index("## Calibration") < body.index(_HONEST_SEVERITY_PARAGRAPH)
+            < body.index("## Output"))
+    # The lenient lines newer models obeyed literally are gone, not softened.
+    assert "Strict but fair" not in body
+    assert "Approve (non-blocking) unless" not in body
+
+
+def test_spec_reviewer_guard_test_then_explore_bullets_close_how_to_review() -> None:
+    body = _normalized_prompt("spec-reviewer")
+    assert (
+        "Flag either direction's gap as blocking. " + _GUARD_TEST_BULLET + " "
+        + _EXPLORE_BROADLY_BULLET + " Use your judgement, but classify"
+    ) in body
+
+
+def test_spec_reviewer_calibration_stays_single_spaced() -> None:
+    src = _agent_prompt("spec-reviewer")
+    calibration = src[src.index("## Calibration"):src.index("## Output")]
+    assert "\n\n\n" not in calibration
+
+
+def test_plan_reviewer_green_bullet_includes_guard_tests() -> None:
+    body = _normalized_prompt("plan-reviewer")
+    assert (
+        "the gate is the backstop that makes missing one cheap. Include the "
+        "project's guard tests — tests that scan the tree for forbidden patterns or "
+        "usages: a prescribed test or edit a guard would fail is the same **Major**. "
+        "## Backstop: record an unrecorded scope-out"
+    ) in body

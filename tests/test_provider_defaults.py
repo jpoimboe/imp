@@ -141,8 +141,8 @@ def test_importing_the_package_registers_nothing() -> None:
 _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
     "anthropic": (
         {
-            "low": "claude-haiku-4-5",
-            "medium": "claude-sonnet-4-6",
+            "low": "claude-haiku-5-5",
+            "medium": "claude-sonnet-5-5",
             "high": "claude-opus-5-5",
         },
         "ANTHROPIC_API_KEY",
@@ -153,8 +153,8 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
     ),
     "claude": (
         {
-            "low": "claude-haiku-4-5",
-            "medium": "claude-sonnet-4-6",
+            "low": "claude-haiku-5-5",
+            "medium": "claude-sonnet-5-5",
             "high": "claude-opus-5-5",
         },
         None,

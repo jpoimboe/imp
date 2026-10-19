@@ -31,11 +31,19 @@ class ModelInfo:
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     supports_vision: bool = True
+    # Thinking can't be turned off through Claude Code: it rewrites `--thinking disabled`
+    # to adaptive.
+    adaptive_only: bool = False
 
 
 CLAUDE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
+    # Sonnet/Haiku 5.5: 1M is native; the bracketed sonnet form is a real CLI id kept
+    # resolvable for configs that spell it. Haiku 5.5 has no [1m] form.
+    "claude-haiku-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-sonnet-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-sonnet-5-5[1m]": ModelInfo(window=1_000_000, adaptive_only=True),
     "claude-haiku-4-5": ModelInfo(window=200_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000),
     "claude-opus-4-8": ModelInfo(window=1_000_000),
@@ -47,8 +55,8 @@ CLAUDE: dict[str, ModelInfo] = {
     # every request ("Custom betas are only available for API key users").
     "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
     # Opus 5.5: the 1M window is native, so neither form needs a beta opt-in.
-    "claude-opus-5-5": ModelInfo(window=1_000_000),
-    "claude-opus-5-5[1m]": ModelInfo(window=1_000_000),
+    "claude-opus-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-opus-5-5[1m]": ModelInfo(window=1_000_000, adaptive_only=True),
     # Opus 5: window-only, mirroring the opus-4-8 entries. The bracketed form is
     # a real CLI model id passed through as-is (no cli_model/betas indirection).
     "claude-opus-5": ModelInfo(window=1_000_000),
@@ -57,9 +65,10 @@ CLAUDE: dict[str, ModelInfo] = {
     # real CLI model id passed through as-is (no cli_model/betas indirection).
     "claude-fable-5": ModelInfo(window=1_000_000),
     "claude-fable-5[1m]": ModelInfo(window=1_000_000),
-    "haiku": ModelInfo(window=200_000),
-    "sonnet": ModelInfo(window=200_000),
-    "opus": ModelInfo(window=200_000),
+    # The bare aliases resolve to the 5.5 models.
+    "haiku": ModelInfo(window=1_000_000, adaptive_only=True),
+    "sonnet": ModelInfo(window=1_000_000, adaptive_only=True),
+    "opus": ModelInfo(window=1_000_000, adaptive_only=True),
 }
 
 ANTHROPIC: dict[str, ModelInfo] = {
@@ -76,11 +85,13 @@ ANTHROPIC: dict[str, ModelInfo] = {
     ),
     # Opus 5.5: 1M is native, so no context-1m beta on either form; cli_model
     # only strips the bracket the raw API rejects.
-    "claude-opus-5-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    "claude-opus-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
     "claude-opus-5-5[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=128_000,
         cli_model="claude-opus-5-5",
+        adaptive_only=True,
     ),
     # Opus 5: 128k output cap (2026-07-23 rollout doubles opus-4.8's 64k). The
     # [1m] alias is handled as above: cli_model strips the bracket the raw API
@@ -102,12 +113,28 @@ ANTHROPIC: dict[str, ModelInfo] = {
         betas=("context-1m-2025-08-07",),
     ),
     "claude-fable-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    # Sonnet/Haiku 5.5: 1M native, so the [1m] form only needs cli_model to strip the
+    # bracket. Haiku 5.5 has no [1m] form.
+    "claude-haiku-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "claude-sonnet-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "claude-sonnet-5-5[1m]": ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-sonnet-5-5",
+        adaptive_only=True,
+    ),
     "claude-haiku-4-5": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-opus-4-8": ModelInfo(window=1_000_000, max_output_tokens=64_000),
-    "haiku": ModelInfo(window=200_000, max_output_tokens=32_000),
-    "sonnet": ModelInfo(window=200_000, max_output_tokens=32_000),
-    "opus": ModelInfo(window=200_000, max_output_tokens=64_000),
+    # The bare aliases resolve to the 5.5 models.
+    "haiku": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "sonnet": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "opus": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
 }
 
 OPENAI: dict[str, ModelInfo] = {
@@ -246,48 +273,63 @@ def sdk_context_threshold_crossed(
     return context_tokens >= limit
 
 
-LONG_CONTEXT_BREAKPOINT = 272_000
 WEB_SEARCH_USD_PER_REQUEST = 0.01  # $10 per 1,000 requests
 
 
 @dataclass(frozen=True)
+class LongContextSurcharge:
+    """Above `threshold` prompt tokens the WHOLE request is repriced: every prompt
+    bucket at `prompt_mult`, output at `output_mult`."""
+    threshold: int
+    prompt_mult: float
+    output_mult: float
+
+
+_OPENAI_LONG_CONTEXT = LongContextSurcharge(272_000, 2.0, 1.5)
+_HAIKU_5_5_LONG_CONTEXT = LongContextSurcharge(100_000, 5.0, 5.0)
+
+
+@dataclass(frozen=True)
 class ModelPrices:
-    """USD per million tokens, one rate per billing bucket.
-    `long_context_threshold` is the prompt-token breakpoint above which the
-    WHOLE request is surcharged; None means never surcharged."""
+    """USD per million tokens, one rate per billing bucket; `long_context` None
+    means never surcharged."""
     input: float
     output: float
     cache_read: float
     cache_write: float
-    long_context_threshold: int | None = None
+    long_context: LongContextSurcharge | None = None
 
 
 # input, output, cache read, cache write — USD per million tokens.
 MODEL_PRICES: dict[str, ModelPrices] = {
-    # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
-    # request at the same per-token rate as a 9k one. Cache writes are 2x input:
-    # the claude path writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x.
-    # Opus 5.5 reads cache at 0.05x input, not the family's usual 0.1x.
+    # Anthropic: 4.6-and-later bill a 900k request at the same per-token rate as a
+    # 9k one, except Haiku 5.5, the one model with a long-context tier (every rate
+    # 5x above a 100k-token prompt). Cache writes are 2x input: the claude path
+    # writes 1-hour-TTL entries, not the 5-minute TTL's 1.25x. Opus 5.5 and Sonnet
+    # 5.5 read cache at 0.05x input, not the family's usual 0.1x. The bare aliases
+    # price as the 5.5 models they resolve to. Sources: platform.claude.com model
+    # overview pages for Opus/Sonnet/Haiku 5.5 (fetched 2026-10-16).
     "claude-opus-5-5": ModelPrices(4.00, 20.00, 0.20, 8.00),
+    "claude-sonnet-5-5": ModelPrices(2.00, 10.00, 0.10, 4.00),
+    "claude-haiku-5-5": ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_LONG_CONTEXT),
     "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 10.00),
     "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 20.00),
     "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 10.00),
     "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 6.00),
     "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 2.00),
-    "opus": ModelPrices(5.00, 25.00, 0.50, 10.00),
-    "sonnet": ModelPrices(3.00, 15.00, 0.30, 6.00),
-    "haiku": ModelPrices(1.00, 5.00, 0.10, 2.00),
+    "opus": ModelPrices(4.00, 20.00, 0.20, 8.00),
+    "sonnet": ModelPrices(2.00, 10.00, 0.10, 4.00),
+    "haiku": ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_LONG_CONTEXT),
     # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
     # plain input rate everywhere else. Sol's rate is promotional through
     # 2026-11-21.
-    "gpt-6-astra": ModelPrices(
-        10.00, 50.00, 1.00, 12.50, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-6-astra": ModelPrices(10.00, 50.00, 1.00, 12.50, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, _OPENAI_LONG_CONTEXT),
     "gpt-5.4-mini": ModelPrices(0.75, 4.50, 0.075, 0.75),
     "gpt-5.3-codex": ModelPrices(1.75, 14.00, 0.175, 1.75),
     "gpt-5": ModelPrices(1.25, 10.00, 0.125, 1.25),
@@ -352,17 +394,17 @@ def cost_usd(model: str | None, usage: BillingUsage,
     `prompt_tokens` is the caller's own occupancy reading for the long-context
     surcharge — the record's prompt sum on openai, `context_tokens` on a codex
     usage patch. None is never surcharged: the alternative codex signal
-    over-reads by several multiples, so absent evidence must not become a 2x
-    charge.
+    over-reads by several multiples, so absent evidence must not become a
+    surcharge.
     """
     prices = prices_for(model)
     if prices is None:
         return None
-    surcharged = (prices.long_context_threshold is not None
-                  and prompt_tokens is not None
-                  and prompt_tokens > prices.long_context_threshold)
-    prompt_mult = 2.0 if surcharged else 1.0
-    output_mult = 1.5 if surcharged else 1.0
+    prompt_mult = output_mult = 1.0
+    surcharge = prices.long_context
+    if (surcharge is not None and prompt_tokens is not None
+            and prompt_tokens > surcharge.threshold):
+        prompt_mult, output_mult = surcharge.prompt_mult, surcharge.output_mult
     return ((usage.fresh_input * prices.input * prompt_mult
              + usage.cached_input * prices.cache_read * prompt_mult
              + usage.cache_write * prices.cache_write * prompt_mult

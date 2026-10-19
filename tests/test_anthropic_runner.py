@@ -22,7 +22,7 @@ from imp.agents.transcript import RESUME_DURABILITY_NOTE, Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.anthropic import AnthropicAgentRunner
+from imp.providers.anthropic import AnthropicAgentRunner, _anthropic_thinking_posture
 from tests._events import control_events
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
 
@@ -1167,7 +1167,7 @@ async def test_low_tier_request_omits_thinking_and_output_config(tmp_path: Path)
     fake = FakeAsyncAnthropic([response(
         tool_use("c1", "complete_step", {"status": "Success"}),
     )])
-    runner = AnthropicAgentRunner(model_name="haiku",
+    runner = AnthropicAgentRunner(model_name="claude-haiku-4-5",
                                   client_factory=lambda: fake)
     inv = dataclasses.replace(_inv(tmp_path), tier="low")
     async for _ in runner.run(inv):
@@ -1185,12 +1185,57 @@ async def test_none_tier_request_omits_thinking_and_output_config(tmp_path: Path
     )])
     runner = AnthropicAgentRunner(model_name="sonnet",
                                   client_factory=lambda: fake)
-    # _inv() leaves tier unset (None); None is treated as low (posture off).
+    # _inv() leaves tier unset (None); an untiered request pins no posture.
     async for _ in runner.run(_inv(tmp_path)):
         pass
     call = fake.messages.calls[0]
     assert "thinking" not in call
     assert "output_config" not in call
+
+
+_LOW_ADAPTIVE = {
+    "thinking": {"type": "adaptive", "display": "summarized"},
+    "output_config": {"effort": "low"},
+}
+_HIGH_ADAPTIVE = {
+    "thinking": {"type": "adaptive", "display": "summarized"},
+    "output_config": {"effort": "high"},
+}
+
+
+def test_anthropic_low_tier_posture_depends_on_the_model() -> None:
+    for model in ("claude-haiku-5-5", "claude-haiku-5-5-20261007", "haiku"):
+        assert _anthropic_thinking_posture("low", model) == _LOW_ADAPTIVE, model
+    for model in ("claude-haiku-4-5", "claude-sonnet-4-6", "mystery-model"):
+        assert _anthropic_thinking_posture("low", model) == {}, model
+
+
+def test_anthropic_medium_high_and_untiered_posture_ignore_the_model() -> None:
+    for model in ("claude-haiku-5-5", "claude-haiku-4-5"):
+        assert _anthropic_thinking_posture("medium", model) == _HIGH_ADAPTIVE, model
+        assert _anthropic_thinking_posture("high", model) == _HIGH_ADAPTIVE, model
+        assert _anthropic_thinking_posture(None, model) == {}, model
+
+
+@pytest.mark.anyio
+async def test_low_tier_request_posture_keys_on_the_runner_model(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-haiku-5-5",
+                                  client_factory=lambda: fake)
+    # _inv()'s model_name is claude-sonnet-4-6 (thinking-optional): the runner's
+    # model is the one sent, so it decides the posture.
+    inv = dataclasses.replace(_inv(tmp_path), tier="low")
+    assert inv.model_name == "claude-sonnet-4-6"
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert call["model"] == "claude-haiku-5-5"
+    assert call["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert call["output_config"] == {"effort": "low"}
 
 
 @pytest.mark.anyio
@@ -1199,7 +1244,7 @@ async def test_request_max_tokens_from_catalog_opus(tmp_path: Path) -> None:
     fake = FakeAsyncAnthropic([response(
         tool_use("c1", "complete_step", {"status": "Success"}),
     )])
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path)):
         pass
@@ -1227,7 +1272,7 @@ async def test_step_context_audit_records_catalog_max_tokens(tmp_path: Path) -> 
         tool_use("c1", "complete_step", {"status": "Success"}),
     )])
     log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path, event_log=log)):
         pass
@@ -1246,13 +1291,13 @@ async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> 
                "output_tokens_details": {"thinking_tokens": 5000}},
     )])
     log = InMemoryEventLog()
-    # Use the "opus" alias (catalog max_output_tokens=64000) rather than a dated
+    # Use claude-opus-4-8 (catalog max_output_tokens=64000) rather than a dated
     # id: a dated id misses the ANTHROPIC alias table and falls through to
-    # _DEFAULT's 32000, which coincidentally equals sonnet's ceiling — so the
-    # max_tokens assertion could not distinguish catalog-value-flowed-through from
-    # default-used. 64000 is distinct from the 32000 default, making the field
+    # _DEFAULT's 32000, which coincidentally equals claude-sonnet-4-6's ceiling — so
+    # the max_tokens assertion could not distinguish catalog-value-flowed-through
+    # from default-used. 64000 is distinct from the 32000 default, making the field
     # genuinely falsifiable.
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log), tier="high")
     async for _ in runner.run(inv):
@@ -1263,7 +1308,7 @@ async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> 
     assert trunc[0]["agent_id"] == "step:p/s"
     assert trunc[0]["payload"] == {
         "tier": "high",
-        "model": "opus",
+        "model": "claude-opus-4-8",
         "max_tokens": 64000,
         "output_tokens": 64000,
         "thinking_tokens": 5000,

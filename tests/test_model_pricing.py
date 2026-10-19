@@ -3,12 +3,17 @@ from __future__ import annotations
 import pytest
 
 from imp.providers.catalog import (
+    MODEL_PRICES,
     BillingUsage,
+    LongContextSurcharge,
     ModelPrices,
     cost_usd,
     prices_for,
     web_search_request_count,
 )
+
+_OPENAI_SURCHARGE = LongContextSurcharge(272_000, 2.0, 1.5)
+_HAIKU_5_5_SURCHARGE = LongContextSurcharge(100_000, 5.0, 5.0)
 
 
 def test_anthropic_rates_match_the_published_table() -> None:
@@ -18,16 +23,20 @@ def test_anthropic_rates_match_the_published_table() -> None:
     assert prices_for("claude-opus-4-8") == ModelPrices(5.00, 25.00, 0.50, 10.00)
     assert prices_for("claude-sonnet-4-6") == ModelPrices(3.00, 15.00, 0.30, 6.00)
     assert prices_for("claude-haiku-4-5") == ModelPrices(1.00, 5.00, 0.10, 2.00)
+    assert prices_for("claude-sonnet-5-5") == ModelPrices(2.00, 10.00, 0.10, 4.00)
+    assert prices_for("claude-haiku-5-5") == ModelPrices(
+        0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_SURCHARGE)
 
 
 def test_openai_rates_match_the_published_table() -> None:
-    assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, 272_000)
-    assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, 272_000)
-    assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, 272_000)
-    assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, 272_000)
-    assert prices_for("gpt-5.6") == ModelPrices(4.00, 20.00, 0.40, 5.00, 272_000)
-    assert prices_for("gpt-5.5") == ModelPrices(5.00, 30.00, 0.50, 5.00, 272_000)
-    assert prices_for("gpt-5.4") == ModelPrices(2.50, 15.00, 0.25, 2.50, 272_000)
+    s = _OPENAI_SURCHARGE
+    assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, s)
+    assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, s)
+    assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, s)
+    assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, s)
+    assert prices_for("gpt-5.6") == ModelPrices(4.00, 20.00, 0.40, 5.00, s)
+    assert prices_for("gpt-5.5") == ModelPrices(5.00, 30.00, 0.50, 5.00, s)
+    assert prices_for("gpt-5.4") == ModelPrices(2.50, 15.00, 0.25, 2.50, s)
     assert prices_for("gpt-5.4-mini") == ModelPrices(0.75, 4.50, 0.075, 0.75)
     assert prices_for("gpt-5.3-codex") == ModelPrices(1.75, 14.00, 0.175, 1.75)
     assert prices_for("gpt-5") == ModelPrices(1.25, 10.00, 0.125, 1.25)
@@ -45,7 +54,8 @@ def test_cache_write_takes_the_1_25x_premium_on_astra_and_5_6() -> None:
 def test_anthropic_cache_write_takes_the_one_hour_ttl_2x_premium() -> None:
     # The claude path writes 1-hour-TTL cache entries, billed at 2x input —
     # not the 5-minute TTL's 1.25x. Every alias must agree with its dated id.
-    for model in ("claude-opus-5-5", "claude-opus-5", "claude-fable-5",
+    for model in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
+                  "claude-opus-5", "claude-fable-5",
                   "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5",
                   "opus", "sonnet", "haiku"):
         prices = prices_for(model)
@@ -58,10 +68,13 @@ def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
     assert prices_for("claude-opus-5[1m]") == prices_for("claude-opus-5")
     assert prices_for("claude-haiku-4-5-20251001") == prices_for("claude-haiku-4-5")
     assert prices_for("claude-sonnet-4-6-20250219") == sonnet
-    # the bare aliases price identically to their dated ids
-    assert prices_for("sonnet") == sonnet
-    assert prices_for("haiku") == prices_for("claude-haiku-4-5")
-    assert prices_for("opus") == prices_for("claude-opus-4-8")
+    # the bare aliases price as the 5.5 models they resolve to
+    assert prices_for("sonnet") == prices_for("claude-sonnet-5-5")
+    assert prices_for("haiku") == prices_for("claude-haiku-5-5")
+    assert prices_for("opus") == prices_for("claude-opus-5-5")
+    # 5.5 date-stamped and bracketed ids resolve to their own rows
+    assert prices_for("claude-haiku-5-5-20261007") == prices_for("claude-haiku-5-5")
+    assert prices_for("claude-sonnet-5-5[1m]") == prices_for("claude-sonnet-5-5")
     # exact table keys resolve directly
     assert prices_for("gpt-5.6-sol").input == 4.00
     assert prices_for("gpt-5.4-mini").input == 0.75
@@ -73,7 +86,7 @@ def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
     assert prices_for("gpt-5.6-20261201").input == 4.00
     # `gpt-5.4-mini` must not collapse onto the capped `gpt-5.4`
     assert prices_for("gpt-5.4-mini-20261201") == prices_for("gpt-5.4-mini")
-    assert prices_for("gpt-5.4-mini-20261201").long_context_threshold is None
+    assert prices_for("gpt-5.4-mini-20261201").long_context is None
 
 
 def test_opus_5_5_prices_do_not_fall_through_to_opus_5() -> None:
@@ -95,14 +108,32 @@ def test_an_unknown_model_resolves_to_no_prices() -> None:
     assert prices_for("unknown-model[1m]") is None
 
 
-def test_only_the_surcharged_models_carry_a_long_context_threshold() -> None:
+def test_only_the_surcharged_models_carry_a_long_context_surcharge() -> None:
     for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
                   "gpt-5.6", "gpt-5.5", "gpt-5.4"):
-        assert prices_for(model).long_context_threshold == 272_000
+        assert prices_for(model).long_context == _OPENAI_SURCHARGE, model
+    for model in ("claude-haiku-5-5", "haiku"):
+        assert prices_for(model).long_context == _HAIKU_5_5_SURCHARGE, model
     for model in ("gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "claude-opus-5-5",
+                  "claude-sonnet-5-5", "opus", "sonnet",
                   "claude-opus-5", "claude-fable-5", "claude-opus-4-8",
                   "claude-sonnet-4-6", "claude-haiku-4-5"):
-        assert prices_for(model).long_context_threshold is None
+        assert prices_for(model).long_context is None, model
+
+
+def test_model_prices_has_no_bare_threshold_field() -> None:
+    assert "long_context_threshold" not in ModelPrices.__dataclass_fields__
+
+
+def test_the_surcharge_uses_the_row_s_own_threshold_and_multipliers(monkeypatch) -> None:
+    monkeypatch.setitem(MODEL_PRICES, "test-model", ModelPrices(
+        1.00, 2.00, 0.50, 4.00, LongContextSurcharge(1_000, 3.0, 5.0)))
+    usage = BillingUsage(fresh_input=1_000_000, cached_input=1_000_000,
+                         cache_write=1_000_000, output=1_000_000)
+    # At the threshold: $1 + $0.50 + $4 + $2 = $7.50.
+    assert cost_usd("test-model", usage, prompt_tokens=1_000) == pytest.approx(7.5)
+    # Above it: 3 * ($1 + $0.50 + $4) + 5 * $2 = $26.50.
+    assert cost_usd("test-model", usage, prompt_tokens=1_001) == pytest.approx(26.5)
 
 
 # 1000 fresh / 2000 cached / 3000 cache write / 4000 output, priced by hand
@@ -126,6 +157,36 @@ _MIXED = BillingUsage(fresh_input=1000, cached_input=2000,
 def test_every_openai_model_prices_the_hand_worked_fixture(
         model: str, expected: float) -> None:
     assert cost_usd(model, _MIXED) == pytest.approx(expected, rel=1e-12)
+
+
+def test_bare_aliases_carry_the_5_5_rates() -> None:
+    assert prices_for("opus") == ModelPrices(4.00, 20.00, 0.20, 8.00)
+    assert prices_for("sonnet") == ModelPrices(2.00, 10.00, 0.10, 4.00)
+    assert prices_for("haiku") == ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_SURCHARGE)
+
+
+def test_sonnet_5_5_reads_cache_at_a_twentieth_of_input() -> None:
+    row = prices_for("claude-sonnet-5-5")
+    assert row.cache_read == pytest.approx(row.input * 0.05)
+
+
+def test_haiku_5_5_reprices_every_bucket_5x_above_100k() -> None:
+    for model in ("claude-haiku-5-5", "claude-haiku-5-5-20261007", "haiku"):
+        # Standard, per million: 1000*$0.10 + 2000*$0.01 + 3000*$0.20 + 4000*$0.50
+        #   = $0.00272.
+        assert cost_usd(model, _MIXED, prompt_tokens=100_000) == pytest.approx(0.00272)
+        assert cost_usd(model, _MIXED) == pytest.approx(0.00272)
+        # Surcharged: every bucket, output included, at 5x = $0.0136.
+        assert cost_usd(model, _MIXED, prompt_tokens=100_001) == pytest.approx(0.0136)
+
+
+def test_sonnet_and_opus_5_5_bill_base_rates_at_900k() -> None:
+    # Sonnet 5.5: 1000*$2 + 2000*$0.10 + 3000*$4 + 4000*$10 per million = $0.0542.
+    assert cost_usd("claude-sonnet-5-5", _MIXED,
+                    prompt_tokens=900_000) == pytest.approx(0.0542)
+    # Opus 5.5: 1000*$4 + 2000*$0.20 + 3000*$8 + 4000*$20 per million = $0.1084.
+    assert cost_usd("claude-opus-5-5", _MIXED,
+                    prompt_tokens=900_000) == pytest.approx(0.1084)
 
 
 def test_cached_input_is_not_billed_at_the_fresh_rate() -> None:

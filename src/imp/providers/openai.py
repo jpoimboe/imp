@@ -119,10 +119,10 @@ def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
 
 
 def _openai_reasoning_posture(tier: str | None) -> dict[str, Any]:
-    """Per-tier Responses `reasoning` kwargs, mirroring
-    anthropic._anthropic_thinking_posture: medium/high run at effort 'high',
-    low/None send nothing (the model's own default). Pinned imp-side so a run's
-    posture does not re-float with an API default.
+    """Per-tier Responses `reasoning` kwargs: medium/high run at effort 'high'
+    (as on the anthropic provider), low/None send nothing (the model's own
+    default). Pinned imp-side so a run's posture does not re-float with an API
+    default.
 
     Note the ceiling: GPT-5.6 Sol exposes a 'max' effort above 'high', but the
     Responses effort ladder imp targets here stops at 'high', so `high` and

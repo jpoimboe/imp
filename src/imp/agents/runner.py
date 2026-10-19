@@ -214,9 +214,10 @@ class AgentInvocation:
     # the model as the `task` tool's optional `tier` enum. () = feature off.
     tiers: tuple[str, ...] = ()
     # The tier label this invocation resolved against ("low"|"medium"|"high"), so
-    # a provider can set a per-tier posture (e.g. claude disables extended
-    # thinking on "low" to match anthropic). None = no tier label (legacy/test, or
-    # a subagent inheriting the parent's provider/model without an explicit tier).
+    # a provider can set a per-tier posture (e.g. "low" turns thinking off, or runs
+    # it at low effort on a model whose thinking can't be turned off). None = no
+    # tier label (legacy/test, or a subagent inheriting the parent's provider/model
+    # without an explicit tier).
     tier: str | None = None
     # Nesting bound's threading path: dispatch_task sets the child's depth to
     # parent + 1 and refuses past MAX_SUBAGENT_DEPTH. A field WITHOUT this
