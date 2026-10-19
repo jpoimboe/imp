@@ -971,16 +971,16 @@ def test_cc_deny_posture_probes_skip_without_the_flag():
     assert "live test — pass --run-live to run" in combined
 
 
-def test_high_tier_live_turn_skips_without_a_path_claude(monkeypatch, tmp_path):
-    """With no `claude` on PATH the high-tier turn test skips rather than failing
-    against the SDK's bundled binary. The gate is the test body's first
+def test_tier_default_live_turn_skips_without_a_path_claude(monkeypatch, tmp_path):
+    """With no `claude` on PATH the tier-default turn test skips rather than
+    failing against the SDK's bundled binary. The gate is the test body's first
     statement, so nothing is spawned and no model is reached."""
     import asyncio
 
-    from tests.test_claude_high_tier_live import (
-        test_high_tier_default_completes_a_real_turn as turn_test,
+    from tests.test_claude_tier_defaults_live import (
+        test_tier_default_completes_a_real_turn as turn_test,
     )
     _empty_path(monkeypatch, tmp_path)
     with pytest.raises(pytest.skip.Exception) as exc:
-        asyncio.run(turn_test(tmp_path))
+        asyncio.run(turn_test("low", tmp_path))
     assert "PATH" in str(exc.value)
