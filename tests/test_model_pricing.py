@@ -3,12 +3,16 @@ from __future__ import annotations
 import pytest
 
 from imp.providers.catalog import (
+    MODEL_PRICES,
     BillingUsage,
+    LongContextSurcharge,
     ModelPrices,
     cost_usd,
     prices_for,
     web_search_request_count,
 )
+
+_OPENAI_SURCHARGE = LongContextSurcharge(272_000, 2.0, 1.5)
 
 
 def test_anthropic_rates_match_the_published_table() -> None:
@@ -21,13 +25,14 @@ def test_anthropic_rates_match_the_published_table() -> None:
 
 
 def test_openai_rates_match_the_published_table() -> None:
-    assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, 272_000)
-    assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, 272_000)
-    assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, 272_000)
-    assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, 272_000)
-    assert prices_for("gpt-5.6") == ModelPrices(4.00, 20.00, 0.40, 5.00, 272_000)
-    assert prices_for("gpt-5.5") == ModelPrices(5.00, 30.00, 0.50, 5.00, 272_000)
-    assert prices_for("gpt-5.4") == ModelPrices(2.50, 15.00, 0.25, 2.50, 272_000)
+    s = _OPENAI_SURCHARGE
+    assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, s)
+    assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, s)
+    assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, s)
+    assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, s)
+    assert prices_for("gpt-5.6") == ModelPrices(4.00, 20.00, 0.40, 5.00, s)
+    assert prices_for("gpt-5.5") == ModelPrices(5.00, 30.00, 0.50, 5.00, s)
+    assert prices_for("gpt-5.4") == ModelPrices(2.50, 15.00, 0.25, 2.50, s)
     assert prices_for("gpt-5.4-mini") == ModelPrices(0.75, 4.50, 0.075, 0.75)
     assert prices_for("gpt-5.3-codex") == ModelPrices(1.75, 14.00, 0.175, 1.75)
     assert prices_for("gpt-5") == ModelPrices(1.25, 10.00, 0.125, 1.25)
@@ -73,7 +78,7 @@ def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
     assert prices_for("gpt-5.6-20261201").input == 4.00
     # `gpt-5.4-mini` must not collapse onto the capped `gpt-5.4`
     assert prices_for("gpt-5.4-mini-20261201") == prices_for("gpt-5.4-mini")
-    assert prices_for("gpt-5.4-mini-20261201").long_context_threshold is None
+    assert prices_for("gpt-5.4-mini-20261201").long_context is None
 
 
 def test_opus_5_5_prices_do_not_fall_through_to_opus_5() -> None:
@@ -95,14 +100,29 @@ def test_an_unknown_model_resolves_to_no_prices() -> None:
     assert prices_for("unknown-model[1m]") is None
 
 
-def test_only_the_surcharged_models_carry_a_long_context_threshold() -> None:
+def test_only_the_surcharged_models_carry_a_long_context_surcharge() -> None:
     for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
                   "gpt-5.6", "gpt-5.5", "gpt-5.4"):
-        assert prices_for(model).long_context_threshold == 272_000
+        assert prices_for(model).long_context == _OPENAI_SURCHARGE, model
     for model in ("gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "claude-opus-5-5",
                   "claude-opus-5", "claude-fable-5", "claude-opus-4-8",
                   "claude-sonnet-4-6", "claude-haiku-4-5"):
-        assert prices_for(model).long_context_threshold is None
+        assert prices_for(model).long_context is None, model
+
+
+def test_model_prices_has_no_bare_threshold_field() -> None:
+    assert "long_context_threshold" not in ModelPrices.__dataclass_fields__
+
+
+def test_the_surcharge_uses_the_row_s_own_threshold_and_multipliers(monkeypatch) -> None:
+    monkeypatch.setitem(MODEL_PRICES, "test-model", ModelPrices(
+        1.00, 2.00, 0.50, 4.00, LongContextSurcharge(1_000, 3.0, 5.0)))
+    usage = BillingUsage(fresh_input=1_000_000, cached_input=1_000_000,
+                         cache_write=1_000_000, output=1_000_000)
+    # At the threshold: $1 + $0.50 + $4 + $2 = $7.50.
+    assert cost_usd("test-model", usage, prompt_tokens=1_000) == pytest.approx(7.5)
+    # Above it: 3 * ($1 + $0.50 + $4) + 5 * $2 = $26.50.
+    assert cost_usd("test-model", usage, prompt_tokens=1_001) == pytest.approx(26.5)
 
 
 # 1000 fresh / 2000 cached / 3000 cache write / 4000 output, priced by hand

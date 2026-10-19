@@ -246,20 +246,30 @@ def sdk_context_threshold_crossed(
     return context_tokens >= limit
 
 
-LONG_CONTEXT_BREAKPOINT = 272_000
 WEB_SEARCH_USD_PER_REQUEST = 0.01  # $10 per 1,000 requests
 
 
 @dataclass(frozen=True)
+class LongContextSurcharge:
+    """Above `threshold` prompt tokens the WHOLE request is repriced: every prompt
+    bucket at `prompt_mult`, output at `output_mult`."""
+    threshold: int
+    prompt_mult: float
+    output_mult: float
+
+
+_OPENAI_LONG_CONTEXT = LongContextSurcharge(272_000, 2.0, 1.5)
+
+
+@dataclass(frozen=True)
 class ModelPrices:
-    """USD per million tokens, one rate per billing bucket.
-    `long_context_threshold` is the prompt-token breakpoint above which the
-    WHOLE request is surcharged; None means never surcharged."""
+    """USD per million tokens, one rate per billing bucket; `long_context` None
+    means never surcharged."""
     input: float
     output: float
     cache_read: float
     cache_write: float
-    long_context_threshold: int | None = None
+    long_context: LongContextSurcharge | None = None
 
 
 # input, output, cache read, cache write — USD per million tokens.
@@ -280,14 +290,13 @@ MODEL_PRICES: dict[str, ModelPrices] = {
     # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
     # plain input rate everywhere else. Sol's rate is promotional through
     # 2026-11-21.
-    "gpt-6-astra": ModelPrices(
-        10.00, 50.00, 1.00, 12.50, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, LONG_CONTEXT_BREAKPOINT),
-    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-6-astra": ModelPrices(10.00, 50.00, 1.00, 12.50, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, _OPENAI_LONG_CONTEXT),
+    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, _OPENAI_LONG_CONTEXT),
+    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, _OPENAI_LONG_CONTEXT),
     "gpt-5.4-mini": ModelPrices(0.75, 4.50, 0.075, 0.75),
     "gpt-5.3-codex": ModelPrices(1.75, 14.00, 0.175, 1.75),
     "gpt-5": ModelPrices(1.25, 10.00, 0.125, 1.25),
@@ -352,17 +361,17 @@ def cost_usd(model: str | None, usage: BillingUsage,
     `prompt_tokens` is the caller's own occupancy reading for the long-context
     surcharge — the record's prompt sum on openai, `context_tokens` on a codex
     usage patch. None is never surcharged: the alternative codex signal
-    over-reads by several multiples, so absent evidence must not become a 2x
-    charge.
+    over-reads by several multiples, so absent evidence must not become a
+    surcharge.
     """
     prices = prices_for(model)
     if prices is None:
         return None
-    surcharged = (prices.long_context_threshold is not None
-                  and prompt_tokens is not None
-                  and prompt_tokens > prices.long_context_threshold)
-    prompt_mult = 2.0 if surcharged else 1.0
-    output_mult = 1.5 if surcharged else 1.0
+    prompt_mult = output_mult = 1.0
+    surcharge = prices.long_context
+    if (surcharge is not None and prompt_tokens is not None
+            and prompt_tokens > surcharge.threshold):
+        prompt_mult, output_mult = surcharge.prompt_mult, surcharge.output_mult
     return ((usage.fresh_input * prices.input * prompt_mult
              + usage.cached_input * prices.cache_read * prompt_mult
              + usage.cache_write * prices.cache_write * prompt_mult
