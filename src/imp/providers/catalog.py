@@ -31,11 +31,19 @@ class ModelInfo:
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     supports_vision: bool = True
+    # Thinking can't be turned off through Claude Code: it rewrites `--thinking disabled`
+    # to adaptive.
+    adaptive_only: bool = False
 
 
 CLAUDE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
+    # Sonnet/Haiku 5.5: 1M is native; the bracketed sonnet form is a real CLI id kept
+    # resolvable for configs that spell it. Haiku 5.5 has no [1m] form.
+    "claude-haiku-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-sonnet-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-sonnet-5-5[1m]": ModelInfo(window=1_000_000, adaptive_only=True),
     "claude-haiku-4-5": ModelInfo(window=200_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000),
     "claude-opus-4-8": ModelInfo(window=1_000_000),
@@ -47,8 +55,8 @@ CLAUDE: dict[str, ModelInfo] = {
     # every request ("Custom betas are only available for API key users").
     "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
     # Opus 5.5: the 1M window is native, so neither form needs a beta opt-in.
-    "claude-opus-5-5": ModelInfo(window=1_000_000),
-    "claude-opus-5-5[1m]": ModelInfo(window=1_000_000),
+    "claude-opus-5-5": ModelInfo(window=1_000_000, adaptive_only=True),
+    "claude-opus-5-5[1m]": ModelInfo(window=1_000_000, adaptive_only=True),
     # Opus 5: window-only, mirroring the opus-4-8 entries. The bracketed form is
     # a real CLI model id passed through as-is (no cli_model/betas indirection).
     "claude-opus-5": ModelInfo(window=1_000_000),
@@ -57,9 +65,10 @@ CLAUDE: dict[str, ModelInfo] = {
     # real CLI model id passed through as-is (no cli_model/betas indirection).
     "claude-fable-5": ModelInfo(window=1_000_000),
     "claude-fable-5[1m]": ModelInfo(window=1_000_000),
-    "haiku": ModelInfo(window=200_000),
-    "sonnet": ModelInfo(window=200_000),
-    "opus": ModelInfo(window=200_000),
+    # The bare aliases resolve to the 5.5 models.
+    "haiku": ModelInfo(window=1_000_000, adaptive_only=True),
+    "sonnet": ModelInfo(window=1_000_000, adaptive_only=True),
+    "opus": ModelInfo(window=1_000_000, adaptive_only=True),
 }
 
 ANTHROPIC: dict[str, ModelInfo] = {
@@ -76,11 +85,13 @@ ANTHROPIC: dict[str, ModelInfo] = {
     ),
     # Opus 5.5: 1M is native, so no context-1m beta on either form; cli_model
     # only strips the bracket the raw API rejects.
-    "claude-opus-5-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    "claude-opus-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
     "claude-opus-5-5[1m]": ModelInfo(
         window=1_000_000,
         max_output_tokens=128_000,
         cli_model="claude-opus-5-5",
+        adaptive_only=True,
     ),
     # Opus 5: 128k output cap (2026-07-23 rollout doubles opus-4.8's 64k). The
     # [1m] alias is handled as above: cli_model strips the bracket the raw API
@@ -102,12 +113,28 @@ ANTHROPIC: dict[str, ModelInfo] = {
         betas=("context-1m-2025-08-07",),
     ),
     "claude-fable-5": ModelInfo(window=1_000_000, max_output_tokens=128_000),
+    # Sonnet/Haiku 5.5: 1M native, so the [1m] form only needs cli_model to strip the
+    # bracket. Haiku 5.5 has no [1m] form.
+    "claude-haiku-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "claude-sonnet-5-5": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "claude-sonnet-5-5[1m]": ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-sonnet-5-5",
+        adaptive_only=True,
+    ),
     "claude-haiku-4-5": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-opus-4-8": ModelInfo(window=1_000_000, max_output_tokens=64_000),
-    "haiku": ModelInfo(window=200_000, max_output_tokens=32_000),
-    "sonnet": ModelInfo(window=200_000, max_output_tokens=32_000),
-    "opus": ModelInfo(window=200_000, max_output_tokens=64_000),
+    # The bare aliases resolve to the 5.5 models.
+    "haiku": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "sonnet": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
+    "opus": ModelInfo(
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True),
 }
 
 OPENAI: dict[str, ModelInfo] = {

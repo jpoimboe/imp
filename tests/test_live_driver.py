@@ -1802,8 +1802,8 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
 
 def test_context_bar_renders_a_ten_cell_block_gauge_and_the_token_tail() -> None:
     from imp.cli.live_driver import context_bar
-    # sonnet: 200k window -> a 160k limit; 26000/160000 = 0.1625 -> two cells.
-    bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
+    # claude-sonnet-4-6: 200k window -> a 160k limit; 26000/160000 = 0.1625 -> two cells.
+    bar = context_bar("anthropic", "claude-sonnet-4-6", 26000, color=False, over_bg=False)
     assert bar == "██░░░░░░░░ 26k/160k"
 
 

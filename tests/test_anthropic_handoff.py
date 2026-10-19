@@ -32,7 +32,7 @@ def _invocation(tmp_path: Path,
                 log: InMemoryEventLog | None = None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent("w", tools={"complete_step", "write_file"}),
-        provider_name="anthropic", model_name="sonnet",
+        provider_name="anthropic", model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(title="T", project_root=tmp_path,
@@ -55,7 +55,7 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
         response(text("# handoff from provider"),
                  tool_use("u2", "write_file", {"path": "scratch2.txt", "content": "y"})),
     ])
-    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
     events = [e async for e in runner.run(_invocation(tmp_path))]
 
@@ -77,7 +77,7 @@ async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
                  usage={"input_tokens": 100_000}),
         response(tool_use("c1", "complete_step", {"status": "Success"})),
     ])
-    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
     events = [e async for e in runner.run(_invocation(tmp_path))]
 
@@ -105,7 +105,7 @@ async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
         # Turn 2: agent replies with empty text and no tool (tool-less site 1).
         response(text(""), stop_reason="end_turn"),
     ])
-    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
     events = [e async for e in runner.run(_invocation(tmp_path))]
 
@@ -128,7 +128,7 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
         # Turn 2: agent responds to the handoff instruction with TEXT and no tool.
         response(text("Understood, stopping here."), stop_reason="end_turn"),
     ])
-    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
     events = [e async for e in runner.run(_invocation(tmp_path))]
 
@@ -156,7 +156,7 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
         response(text("HANDOFF-SENTINEL: where I left off"),
                  stop_reason="end_turn"),
     ])
-    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
     events = [e async for e in runner.run(_invocation(tmp_path, log))]
 

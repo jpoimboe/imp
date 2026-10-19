@@ -38,9 +38,9 @@ def test_anthropic_catalog_opus_1m_entry() -> None:
     assert info.betas == ("context-1m-2025-08-07",)
 
 
-def test_claude_catalog_opus_entry_is_plain_200k() -> None:
+def test_claude_catalog_opus_entry_is_plain_1m() -> None:
     info = model_info(CLAUDE, "opus")
-    assert info.window == 200_000
+    assert info.window == 1_000_000
     assert info.betas == ()
     assert info.cli_model is None
 
@@ -53,25 +53,25 @@ def test_unknown_alias_yields_conservative_default() -> None:
 
 
 def test_other_providers_seed_their_windows() -> None:
-    assert model_info(ANTHROPIC, "opus").window == 200_000
+    assert model_info(ANTHROPIC, "opus").window == 1_000_000
     assert model_info(OPENAI, "gpt-5.5").window == 1_050_000
 
 
 def test_context_threshold_crossed_fires_at_the_handoff_limit() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # sonnet's 200k window -> a 160k limit (80% binds below the 200k ceiling).
+    # claude-sonnet-4-6's 200k window -> a 160k limit (80% binds below the 200k ceiling).
     assert context_threshold_crossed(
-        {"input_tokens": 160_000}, "anthropic", "sonnet") is True
+        {"input_tokens": 160_000}, "anthropic", "claude-sonnet-4-6") is True
     assert context_threshold_crossed(
-        {"input_tokens": 170_000}, "anthropic", "sonnet") is True
+        {"input_tokens": 170_000}, "anthropic", "claude-sonnet-4-6") is True
 
 
 def test_context_threshold_crossed_not_below_the_limit() -> None:
     from imp.providers.catalog import context_threshold_crossed
     assert context_threshold_crossed(
-        {"input_tokens": 159_999}, "anthropic", "sonnet") is False
+        {"input_tokens": 159_999}, "anthropic", "claude-sonnet-4-6") is False
     assert context_threshold_crossed(
-        {"input_tokens": 150_000}, "anthropic", "sonnet") is False
+        {"input_tokens": 150_000}, "anthropic", "claude-sonnet-4-6") is False
 
 
 def test_context_threshold_crossed_sums_cache_tokens() -> None:
@@ -79,7 +79,7 @@ def test_context_threshold_crossed_sums_cache_tokens() -> None:
     # 100000 + 60000 + 5000 = 165000 >= the 160k limit.
     assert context_threshold_crossed(
         {"input_tokens": 100_000, "cache_read_input_tokens": 60_000,
-         "cache_creation_input_tokens": 5_000}, "anthropic", "sonnet") is True
+         "cache_creation_input_tokens": 5_000}, "anthropic", "claude-sonnet-4-6") is True
 
 
 def test_context_threshold_crossed_unknown_model_or_provider_never_fires() -> None:
@@ -92,8 +92,8 @@ def test_context_threshold_crossed_unknown_model_or_provider_never_fires() -> No
 
 def test_context_threshold_crossed_without_usage_never_fires() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    assert context_threshold_crossed(None, "anthropic", "sonnet") is False
-    assert context_threshold_crossed({}, "anthropic", "sonnet") is False
+    assert context_threshold_crossed(None, "anthropic", "claude-sonnet-4-6") is False
+    assert context_threshold_crossed({}, "anthropic", "claude-sonnet-4-6") is False
 
 
 def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
@@ -168,10 +168,12 @@ def test_context_tokens_from_usage_empty_is_zero() -> None:
 
 
 def test_anthropic_max_output_tokens_per_model() -> None:
-    # Opus class is the 64000 baseline; sonnet/haiku class is 32000.
-    assert model_info(ANTHROPIC, "opus").max_output_tokens == 64_000
-    assert model_info(ANTHROPIC, "sonnet").max_output_tokens == 32_000
-    assert model_info(ANTHROPIC, "haiku").max_output_tokens == 32_000
+    # 4.x: opus 64000, sonnet/haiku 32000; the bare aliases follow 5.5's 128000.
+    assert model_info(ANTHROPIC, "claude-opus-4-8").max_output_tokens == 64_000
+    assert model_info(ANTHROPIC, "claude-sonnet-4-6").max_output_tokens == 32_000
+    assert model_info(ANTHROPIC, "claude-haiku-4-5").max_output_tokens == 32_000
+    for alias in ("opus", "sonnet", "haiku"):
+        assert model_info(ANTHROPIC, alias).max_output_tokens == 128_000, alias
 
 
 def test_default_max_output_tokens_constant_is_32000() -> None:
@@ -269,15 +271,15 @@ def test_claude_catalog_has_opus_5_5_entries() -> None:
     # conservative default), window-only like the opus-5 entries above.
     assert "claude-opus-5-5" in CLAUDE
     assert "claude-opus-5-5[1m]" in CLAUDE
-    assert CLAUDE["claude-opus-5-5"] == ModelInfo(window=1_000_000)
-    assert CLAUDE["claude-opus-5-5[1m]"] == ModelInfo(window=1_000_000)
+    assert CLAUDE["claude-opus-5-5"] == ModelInfo(window=1_000_000, adaptive_only=True)
+    assert CLAUDE["claude-opus-5-5[1m]"] == ModelInfo(window=1_000_000, adaptive_only=True)
 
 
 def test_anthropic_catalog_has_opus_5_5_entries() -> None:
     # Plain: native 1M window, 128k output cap, no cli_model/betas indirection.
     assert "claude-opus-5-5" in ANTHROPIC
     assert ANTHROPIC["claude-opus-5-5"] == ModelInfo(
-        window=1_000_000, max_output_tokens=128_000
+        window=1_000_000, max_output_tokens=128_000, adaptive_only=True
     )
     # 1M: the raw API rejects the bracketed form, so cli_model strips it — but
     # 5.5's 1M window is native, so no context-1m beta rides along.
@@ -286,6 +288,7 @@ def test_anthropic_catalog_has_opus_5_5_entries() -> None:
         window=1_000_000,
         max_output_tokens=128_000,
         cli_model="claude-opus-5-5",
+        adaptive_only=True,
     )
     assert ANTHROPIC["claude-opus-5-5[1m]"].betas == ()
     # The same values through the resolver an agent run actually calls.
@@ -409,7 +412,7 @@ def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     assert claude_1m.window == 1_000_000
     claude_opus = limits_for("claude", "opus")
     assert claude_opus is not None
-    assert claude_opus.window == 200_000
+    assert claude_opus.window == 1_000_000
 
 
 def test_limits_for_longest_prefix_covers_dated_ids() -> None:
@@ -492,3 +495,49 @@ def test_the_400k_window_models_hand_off_at_the_ceiling() -> None:
         info = OPENAI[alias]
         assert info.window == 400_000
         assert handoff_limit(info.window) == 200_000
+
+
+_ADAPTIVE_ONLY = {
+    "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-sonnet-5-5",
+    "claude-sonnet-5-5[1m]", "claude-haiku-5-5", "opus", "sonnet", "haiku",
+}
+
+
+def test_adaptive_only_is_exactly_the_5_5_generation_and_the_bare_aliases() -> None:
+    for catalog in (CLAUDE, ANTHROPIC):
+        assert {k for k, v in catalog.items() if v.adaptive_only} == _ADAPTIVE_ONLY
+    assert not any(v.adaptive_only for v in OPENAI.values())
+    assert ModelInfo().adaptive_only is False
+    for provider in ("claude", "anthropic"):
+        assert limits_for(provider, "claude-haiku-5-5").adaptive_only is True
+        assert limits_for(provider, "claude-haiku-5-5-20261007").adaptive_only is True
+        assert limits_for(provider, "claude-haiku-4-5").adaptive_only is False
+        assert limits_for(provider, "claude-sonnet-4-6").adaptive_only is False
+
+
+def test_claude_catalog_has_sonnet_and_haiku_5_5_entries() -> None:
+    expected = ModelInfo(window=1_000_000, adaptive_only=True)
+    for key in ("claude-sonnet-5-5", "claude-sonnet-5-5[1m]", "claude-haiku-5-5",
+                "haiku", "sonnet", "opus"):
+        assert key in CLAUDE, key
+        assert limits_for("claude", key) == expected, key
+    # Haiku 5.5 has no [1m] form.
+    assert "claude-haiku-5-5[1m]" not in CLAUDE
+    # The 4.x entries stay as they were.
+    assert CLAUDE["claude-haiku-4-5"] == ModelInfo(window=200_000)
+    assert CLAUDE["claude-sonnet-4-6"] == ModelInfo(window=200_000)
+
+
+def test_anthropic_catalog_has_sonnet_and_haiku_5_5_entries() -> None:
+    expected = ModelInfo(window=1_000_000, max_output_tokens=128_000, adaptive_only=True)
+    for key in ("claude-sonnet-5-5", "claude-haiku-5-5", "haiku", "sonnet", "opus"):
+        assert key in ANTHROPIC, key
+        assert limits_for("anthropic", key) == expected, key
+    # The raw API rejects the bracketed form: cli_model strips it; 1M is native, so no beta.
+    assert limits_for("anthropic", "claude-sonnet-5-5[1m]") == ModelInfo(
+        window=1_000_000, max_output_tokens=128_000,
+        cli_model="claude-sonnet-5-5", adaptive_only=True)
+    assert limits_for("anthropic", "claude-sonnet-5-5[1m]").cli_model == "claude-sonnet-5-5"
+    assert "claude-haiku-5-5[1m]" not in ANTHROPIC
+    assert ANTHROPIC["claude-haiku-4-5"] == ModelInfo(window=200_000, max_output_tokens=32_000)
+    assert ANTHROPIC["claude-sonnet-4-6"] == ModelInfo(window=200_000, max_output_tokens=32_000)

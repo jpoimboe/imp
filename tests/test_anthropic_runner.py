@@ -1199,7 +1199,7 @@ async def test_request_max_tokens_from_catalog_opus(tmp_path: Path) -> None:
     fake = FakeAsyncAnthropic([response(
         tool_use("c1", "complete_step", {"status": "Success"}),
     )])
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path)):
         pass
@@ -1227,7 +1227,7 @@ async def test_step_context_audit_records_catalog_max_tokens(tmp_path: Path) -> 
         tool_use("c1", "complete_step", {"status": "Success"}),
     )])
     log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path, event_log=log)):
         pass
@@ -1246,13 +1246,13 @@ async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> 
                "output_tokens_details": {"thinking_tokens": 5000}},
     )])
     log = InMemoryEventLog()
-    # Use the "opus" alias (catalog max_output_tokens=64000) rather than a dated
+    # Use claude-opus-4-8 (catalog max_output_tokens=64000) rather than a dated
     # id: a dated id misses the ANTHROPIC alias table and falls through to
-    # _DEFAULT's 32000, which coincidentally equals sonnet's ceiling — so the
-    # max_tokens assertion could not distinguish catalog-value-flowed-through from
-    # default-used. 64000 is distinct from the 32000 default, making the field
+    # _DEFAULT's 32000, which coincidentally equals claude-sonnet-4-6's ceiling — so
+    # the max_tokens assertion could not distinguish catalog-value-flowed-through
+    # from default-used. 64000 is distinct from the 32000 default, making the field
     # genuinely falsifiable.
-    runner = AnthropicAgentRunner(model_name="opus",
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8",
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log), tier="high")
     async for _ in runner.run(inv):
@@ -1263,7 +1263,7 @@ async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> 
     assert trunc[0]["agent_id"] == "step:p/s"
     assert trunc[0]["payload"] == {
         "tier": "high",
-        "model": "opus",
+        "model": "claude-opus-4-8",
         "max_tokens": 64000,
         "output_tokens": 64000,
         "thinking_tokens": 5000,
