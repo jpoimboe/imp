@@ -367,7 +367,8 @@ async def test_dangling_tool_use_repair_claude(tmp_path: Path) -> None:
     assert not any(e["type"] == "error"
                    and e["payload"].get("kind") == "transcript_invalid"
                    for e in driven.control)
-    assert created[0].opts.resume == resume_session_id("step:p/s")
+    assert created[0].opts.resume is None
+    assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
     # DANGLING native resume STREAMS a synth tool_result for t1.
     streamed = created[0].queries[0]
     assert streamed[0]["message"]["content"][0]["type"] == "tool_result"

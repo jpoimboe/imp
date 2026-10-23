@@ -120,10 +120,10 @@ def test_build_options_isolates_config_dir_for_fresh(tmp_path: Path) -> None:
 def test_build_options_drops_suppression_flags_when_no_config_dir(
     tmp_path: Path,
 ) -> None:
-    """A config_dir=None build (native resume) no longer adds the history
-    suppression flags: claude-p stays off ~/.claude via the SDK's own
-    materialized temp dir, not CLAUDE_CODE_SKIP_PROMPT_HISTORY /
-    --no-session-persistence. Both must be absent and extra_args must be {}."""
+    """A config_dir=None build adds no history suppression flags: claude-p stays
+    off ~/.claude via the imp-made config dir every disposition passes, not
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY / --no-session-persistence. Both must be
+    absent and extra_args must be {}."""
     runner = ClaudeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]

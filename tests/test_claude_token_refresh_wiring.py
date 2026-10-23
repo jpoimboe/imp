@@ -126,7 +126,7 @@ async def test_native_resume_refreshes_without_materializing(
     inv = _inv(tmp_path, log)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
     # Seed a resume-eligible transcript: assistant text tail + trailing plain-text
-    # user turn drives the native-resume disposition (config_dir stays None).
+    # user turn drives the native-resume disposition (a claude-resume-* dir, not a fresh one).
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
@@ -363,8 +363,8 @@ async def test_fresh_spawn_records_the_post_refresh_canonical_expiry(
 async def test_native_resume_records_the_canonical_expiry_too(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No ephemeral config dir is materialized on this path (_config_dir stays
-    None), and the expiry is recorded anyway."""
+    """No fresh config dir is materialized on this path (it gets a bare
+    claude-resume-* dir instead), and the expiry is recorded anyway."""
     (tmp_path / "art").mkdir()
     canonical = tmp_path / "canonical"
     _write_canonical(canonical, NOW + 7200 * 1000)
@@ -395,8 +395,41 @@ async def test_native_resume_records_the_canonical_expiry_too(
         model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
     events = [ev async for ev in runner.run(inv)]
 
-    assert materialized == []                               # native path: no config copy
+    assert materialized == []                               # native path: no fresh config dir
     assert events[-1]["type"] == "agent_result"            # no exception swallowed
+    assert runner._spawn_token_expiry == NOW + 7200 * 1000
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_resume_records_the_post_reply_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resume dir copies the token after the reply wait; the recorded expiry
+    must match it, or a peer's mid-wait refresh reads as a rotation at 401 time."""
+    (tmp_path / "art").mkdir()
+    canonical = tmp_path / "canonical"
+    _write_canonical(canonical, NOW + 3600 * 1000)
+    _canonical_env(monkeypatch, canonical)
+    monkeypatch.setattr(claude, "refresh_canonical_token",
+                        lambda *_a, **_k: ctr.RefreshOutcome(ctr.SKIPPED_FRESH))
+
+    def _reply(_prompt: str) -> str:
+        _write_canonical(canonical, NOW + 7200 * 1000)  # a peer refreshes mid-wait
+        return "keep going"
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
+
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_complete_step_client,
+        user_input_fn=_reply)
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_result"
     assert runner._spawn_token_expiry == NOW + 7200 * 1000
 
 
@@ -444,7 +477,7 @@ def _expiry_reads(monkeypatch: pytest.MonkeyPatch,
 async def test_rotation_race_on_native_resume_stays_retryable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The incident's shape: a 401 on a native-resume spawn (no ephemeral config
+    """The incident's shape: a 401 on a native-resume spawn (no fresh config
     dir) whose canonical expiry moved after the spawn started. The forced probe
     runs, reports the race from under the lock, and the error stays retryable auth."""
     (tmp_path / "art").mkdir()
@@ -482,7 +515,7 @@ async def test_rotation_race_on_native_resume_stays_retryable(
             o, scripted_messages=[chrome(PROSE_401), result()]))
     events = [ev async for ev in runner.run(inv)]
 
-    assert materialized == []                      # native path: config_dir stays None
+    assert materialized == []                      # native path: no fresh config dir
     assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     assert reads == [NOW + 3600 * 1000]            # only the spawn-time read happened
     errs = [e for e in events if e["type"] == "error"]

@@ -1682,7 +1682,8 @@ async def test_resume_without_stored_session_passes_native_session_state(tmp_pat
     # the store is reconstructed and the resume id is set; session_id stays None.
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     # SEND_TO_LLM now KEEPS the trailing tool_result turn below resume_base (a
     # completed-call boundary, not an unanswered prompt), so it folds into the
     # loaded session: 3 turns are reconstructed and the last is the tool_result
@@ -1954,7 +1955,7 @@ def _seed_complete_step_resume(
 @pytest.mark.anyio
 async def test_complete_step_tail_with_feedback_native_resumes(tmp_path: Path) -> None:
     """The complete_step-tail + retry_feedback shape no longer forces replay: it
-    takes the native path (opts.resume set, session_id unset)."""
+    takes the native path (--resume via extra_args, session_id unset)."""
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
@@ -1967,7 +1968,8 @@ async def test_complete_step_tail_with_feedback_native_resumes(tmp_path: Path) -
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
-    assert created[0].opts.resume == resume_session_id("step:p/s")
+    assert created[0].opts.resume is None
+    assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert created[0].opts.session_id is None
 
 
@@ -2046,7 +2048,8 @@ async def test_complete_step_tail_no_feedback_kicks_with_redo_nudge(tmp_path: Pa
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
-    assert created[0].opts.resume == resume_session_id("step:p/s")
+    assert created[0].opts.resume is None
+    assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert _user_text_blob(created[0].queries[0]).strip() == RESUME_REDO_NUDGE
 
 
@@ -2090,7 +2093,8 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")  # native path, not replay
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")  # native path, not replay
     blob = _user_text_blob(created[0].queries[0])
     # Only the human reply kicks the resumed turn.
     assert "keep going" in blob
@@ -2221,7 +2225,8 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     # Native resume reached completion — NOT the transcript_invalid abort.
     assert events[-1]["type"] == "agent_result"
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # The dangling r2 read is repaired by a STREAMED synth tool_result.
     streamed = created[0].queries[0]
@@ -2241,13 +2246,15 @@ def test_build_options_carries_resume(tmp_path: Path) -> None:
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(
         _inv(tmp_path), object(), ["complete_step"], resume="rid-123")
-    assert opts.resume == "rid-123"
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == "rid-123"
 
 
 def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
     assert opts.resume is None
+    assert "resume" not in opts.extra_args
 
 
 @pytest.mark.anyio
@@ -2298,7 +2305,8 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
     # Native resume sends ONLY the post-resume reply turn, not replayed history.
@@ -2351,7 +2359,8 @@ async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path)
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     assert isinstance(opts.session_store, ImpSessionStore)
     # The no-store branch reconstructed and persisted the 4 pre-resume turns.
@@ -2412,7 +2421,8 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
     # The trailing tool_result is a completed-call boundary, so it FOLDS into the
@@ -2468,12 +2478,15 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
 
     runner = ClaudeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
-    [ev async for ev in runner.run(inv)]
+    events = [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    # Fresh-stream disposition: no resume= handed to claude-p (unlike the native
-    # elif branch, which sets resume=resume_session_id(aid)).
+    # Fresh-stream disposition: no --resume, a fresh dir, and no resume-dir fill
+    # (which would crash on the store the overwrite just emptied).
+    assert events[-1]["type"] == "agent_result"
     assert opts.resume is None
+    assert "resume" not in opts.extra_args
+    assert Path(opts.env["CLAUDE_CONFIG_DIR"]).name.startswith("claude-fresh-")
     # The whole-body overwrite emptied the accumulated store — nothing to resume.
     assert await store.load(skey) is None
     # The full history streams ONCE as the fresh delta (one copy of the dispatch).
@@ -2534,6 +2547,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
 
         # Fresh-stream disposition (Task 2): no resume= onto the emptied store.
         assert created[0].opts.resume is None
+        assert "resume" not in created[0].opts.extra_args
         # The store is truncated to the empty message prefix — it never grows.
         assert await store.load(skey) is None
         # The streamed delta is exactly one copy of the history each respawn.
@@ -2601,7 +2615,8 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     # delta would deadlock). claude-p pairs the dangling t1 from its loaded session
     # — imp injects no synthetic tool_result. Live acceptance: the SEND_TO_LLM
     # round-trip in tests/test_resume_all_shapes_live.py.
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
@@ -2653,7 +2668,8 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # SEND_TO_LLM STREAMS the trailing user interrupt marker to kick the turn;
     # claude-p pairs the dangling t1 from its (reconstructed) loaded session.
@@ -2721,7 +2737,8 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
         and e["payload"].get("kind") == "transcript_invalid"
         for e in events)
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1
     # to kick the next turn — an empty delta would deadlock (claude-p never
@@ -2787,7 +2804,8 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
         and e["payload"].get("kind") == "transcript_invalid"
         for e in events)
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1.
     streamed = created[0].queries[0]
@@ -3507,7 +3525,8 @@ async def test_no_store_native_sets_standard_tool_mode(tmp_path: Path) -> None:
 
     opts = created[0].opts
     # Confirm this really is the native path (reconstructed, not replay fallback).
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     # Standard tool mode is the default on every path: the env knob is set.
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
 
@@ -3553,7 +3572,8 @@ async def test_native_resume_sets_standard_tool_mode(tmp_path: Path) -> None:
 
     opts = created[0].opts
     # Confirm this really is the native path.
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     # Standard tool mode is imp's default on every path, including native
     # resume: the env knob is set.
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
@@ -3604,7 +3624,8 @@ async def test_complete_step_tail_native_resumes_with_store_body(
 
     opts = created[0].opts
     # complete_step tail now NATIVE-resumes (native_resume=True).
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # Standard tool mode is imp's default on every path, native resume included.
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
@@ -3644,12 +3665,16 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
 
     opts = created[0].opts
     # Native disposition: claude-p loads the rebuilt session.
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     assert opts.session_store is not None
-    # No ephemeral replay home was materialized (native leaves config_dir None,
-    # so no CLAUDE_CONFIG_DIR is set and there is nothing to tear down).
-    assert not opts.env.get("CLAUDE_CONFIG_DIR")
+    # Native resume runs under an imp-made dir in the quest scratch root, torn down after.
+    from imp.engine.env import quest_scratch_root
+    cfg = Path(opts.env["CLAUDE_CONFIG_DIR"])
+    assert cfg.parent == quest_scratch_root()
+    assert cfg.name.startswith("claude-resume-")
+    assert not cfg.exists()
     # No "unreconstructable" fallback warning is emitted.
     assert [e for e in log.read() if e["type"] == "runner_warning"] == []
 
@@ -3703,7 +3728,8 @@ async def test_balance_on_resume_send_to_llm_tail_native_resumes(
 
     opts = created[0].opts
     # Native path: claude-p loads its own session — no stream-json replay, no 400.
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_store is not None
     # Standard tool mode is imp's default on every path, native resume included.
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
@@ -3752,7 +3778,8 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
     [ev async for ev in runner.run(inv)]
 
     # Native resume (no replay): the loaded session is resumed by id.
-    assert created[0].opts.resume == resume_session_id("step:p/s")
+    assert created[0].opts.resume is None
+    assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert created[0].opts.session_id is None
     # The handback rides the streamed delta.
     blob = _user_text_blob(created[0].queries[0])
@@ -3797,7 +3824,8 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     # The trailing tool_result is a completed-call boundary, so it folds into the
     # reconstructed session: 3 turns, ending on the tool_result (not streamed as a
