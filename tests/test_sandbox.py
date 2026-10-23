@@ -579,6 +579,29 @@ def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
     assert str(home / ".aws") not in pol.secret_dirs
 
 
+def test_resolve_policy_masks_symlinked_secrets_at_their_real_path(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    real_dir = home / "dotfiles" / "claude"
+    real_dir.mkdir(parents=True)
+    (real_dir / ".credentials.json").write_text("x")
+    (home / ".claude").symlink_to(real_dir)
+    real_file = home / "dotfiles" / "token"
+    real_file.write_text("x")
+    (home / "token-link").symlink_to(real_file)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=("token-link",)),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert str(real_dir.resolve()) in pol.secret_dirs
+    assert str(home / ".claude") not in pol.secret_dirs
+    assert str(real_file.resolve()) in pol.secret_files
+    assert str(home / "token-link") not in pol.secret_files
+    assert not pol.allows_read((real_dir / ".credentials.json").resolve())
+    assert not pol.allows_read(real_file.resolve())
+
+
 def test_resolve_policy_masks_runtime_dir(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",

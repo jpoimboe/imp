@@ -202,6 +202,22 @@ def test_home_credential_stores_are_masked_but_claude_json_stays_readable(
     assert str(kept["stdout"]).strip() == "PROJECT_LIST", kept
 
 
+def test_symlinked_credential_store_is_masked_and_spawn_succeeds(control: Path) -> None:
+    home = control / "home"
+    real = home / "dotfiles" / "claude"
+    secrets = {real / ".credentials.json": "LINKED_RT_SECRET"}
+    _write_secrets(secrets)
+    (home / ".claude").symlink_to(real)
+    worktree, policy = _quest_policy(control, "pa1")
+    ctx = _ctx(worktree, policy)
+
+    alive = _bash(ctx, "echo alive")
+    assert alive["returncode"] == 0 and str(alive["stdout"]).strip() == "alive", alive
+    _assert_masked(ctx, policy, secrets)
+    via_link = _bash(ctx, f"cat {shlex.quote(str(home / '.claude' / '.credentials.json'))}")
+    assert "LINKED_RT_SECRET" not in str(via_link["stdout"]), via_link
+
+
 def test_env_relocated_credential_stores_are_masked(
     control: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

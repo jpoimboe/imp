@@ -976,10 +976,12 @@ def with_scratch_slot(policy: SandboxPolicy, slot: str) -> SandboxPolicy:
 
 
 # Code-default secret denylist (spec B.3). Paths are home-relative; resolve_policy
-# joins them onto the home dir and keeps only those that exist. /run/user/$UID is
-# added separately (it masks live agent sockets, H2). secret_files are masked with
-# --ro-bind /dev/null; everything else is a directory --tmpfs. ~/.claude.json is
-# deliberately left readable: the per-run claude config dirs copy it anyway.
+# joins them onto the home dir and keeps only those that exist, masked at their
+# symlink-resolved real path (bwrap can't mount on a symlink; the file tools check
+# resolved paths). /run/user/$UID is added separately (it masks live agent
+# sockets, H2). secret_files are masked with --ro-bind /dev/null; everything else
+# is a directory --tmpfs. ~/.claude.json is deliberately left readable: the
+# per-run claude config dirs copy it anyway.
 _DEFAULT_SECRET_DIRS = (
     ".ssh", ".aws", ".gnupg", ".kube", ".config/gcloud", ".config/gh",
     ".config/containers", ".local/share/keyrings", ".claude", ".codex",
@@ -1276,16 +1278,18 @@ def resolve_policy(
     # stores $CLAUDE_CONFIG_DIR/$CODEX_HOME relocate (each classified dir-vs-file by an
     # actual stat); + /run/user/$UID. Applied uniformly for every agent — the
     # disposable-tree capability no longer suppresses them.
-    secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
-    secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
+    secret_dirs = [os.path.realpath(d) for d in
+                   _existing([str(home / d) for d in _DEFAULT_SECRET_DIRS])]
+    secret_files = [os.path.realpath(f) for f in
+                    _existing([str(home / f) for f in _DEFAULT_SECRET_FILES])]
     configured = [Path(e) if e.startswith("/") else home / e for e in cfg.secret_paths]
     configured += [Path(environ[var]).absolute()
                    for var, _ in PROVIDER_AUTH_ENV if environ.get(var)]
     for p in configured:
         if p.is_dir():
-            secret_dirs.append(str(p))
+            secret_dirs.append(os.path.realpath(p))
         elif p.exists():
-            secret_files.append(str(p))
+            secret_files.append(os.path.realpath(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
     # Re-mask the current quest's OWN footguns by fixed name (self-owned, always-
