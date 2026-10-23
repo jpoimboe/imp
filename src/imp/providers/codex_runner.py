@@ -932,7 +932,7 @@ class CodexAgentRunner:
 
     def _canonical_auth_path(self) -> Path:
         """The canonical codex `auth.json` — honors $CODEX_HOME (fallback
-        ~/.codex), matching codex_token_refresh._canonical_dir so the pre-spawn
+        ~/.codex), matching codex_token_refresh.canonical_dir so the pre-spawn
         refresh freshens exactly the file seed_auth reads from. Test seam: a
         runner attribute overrides this for the auth fixture tests."""
         override = getattr(self, "_canonical_auth_override", None)

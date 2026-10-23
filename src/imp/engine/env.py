@@ -185,6 +185,23 @@ def ensure_quest_tmp_dir(tmp_dir: Path) -> None:
         d.chmod(0o700)
 
 
+# Each provider's credential-dir env var and its subdir in the shared staged copy.
+PROVIDER_AUTH_ENV: tuple[tuple[str, str], ...] = (
+    ("CLAUDE_CONFIG_DIR", "claude"), ("CODEX_HOME", "codex"))
+
+
+def provider_auth_dir() -> Path:
+    """The shared access-token-only credentials copy every active sandbox binds read-only,
+    beside the quest scratch dirs under the masked imp-<uid> root."""
+    return Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "provider-auth"
+
+
+def ensure_provider_auth_dir(root: Path) -> None:
+    """Create `root` and its per-provider subdirs at 0o700 — a bwrap bind source."""
+    for _, sub in PROVIDER_AUTH_ENV:
+        ensure_quest_tmp_dir(root / sub)
+
+
 def engine_env(
     *, project_root: Path, quest_id: str, quest_title: str,
     quest_dir: Path | None = None,

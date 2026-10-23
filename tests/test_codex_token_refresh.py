@@ -295,9 +295,9 @@ def _env(base: Path, **extra: str) -> dict[str, str]:
 def test_canonical_dir_honors_codex_home_and_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert ctr._canonical_dir({"CODEX_HOME": str(tmp_path)}) == tmp_path
+    assert ctr.canonical_dir({"CODEX_HOME": str(tmp_path)}) == tmp_path
     monkeypatch.setattr(ctr.Path, "home", staticmethod(lambda: tmp_path))
-    assert ctr._canonical_dir({}) == tmp_path / ".codex"
+    assert ctr.canonical_dir({}) == tmp_path / ".codex"
 
 
 def test_missing_file_is_not_applicable(tmp_path: Path) -> None:
