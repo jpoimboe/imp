@@ -62,6 +62,8 @@ from imp.engine.sandbox import (
 )
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
+from imp.providers.claude_config_dir import fill_resume_config_dir, make_config_dir
+from imp.providers.claude_session_store import resume_session_id, session_store_for
 from impty import TerminalSession
 from impty.driver import ImptyDriver
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
@@ -3526,6 +3528,54 @@ def test_the_own_scratch_dir_survives_the_mask_and_the_step_wipe() -> None:
         w3 = _bash(ctx, 'echo post-wipe > "$TMPDIR/after.txt" && echo ok')
         assert w3["returncode"] == 0, w3
         assert (scratch / "after.txt").read_text().strip() == "post-wipe"
+    finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_resume_config_dir_is_hidden_from_other_quests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quest A's claude-resume-* dir (OAuth copy + transcript) is unreachable from
+    quest B, by bash and by the in-process read_file, and nothing lands in temp."""
+    root = _make_root()
+    parent = _scratch_parent()
+    quest_a, quest_b = parent / "questa", parent / "questb"
+    quest_a.mkdir(parents=True)
+    quest_b.mkdir()
+    src = tmp_path / "auth-src"
+    src.mkdir()
+    (src / ".credentials.json").write_text(json.dumps(
+        {"claudeAiOauth": {"accessToken": "QUEST_A_TOKEN", "refreshToken": "r"}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(src))
+    monkeypatch.setenv("IMP_QUEST_TMP", str(quest_a))
+    store = session_store_for(tmp_path / "step")
+    sid = resume_session_id("step:a/s")
+    key = {"project_key": "-proj", "session_id": sid}
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "go"}}])
+    cfg = make_config_dir("claude-resume-")
+    try:
+        anyio.run(fill_resume_config_dir, cfg, store, "-proj", sid)
+        creds = cfg / ".credentials.json"
+        assert cfg.parent == quest_a
+        assert "QUEST_A_TOKEN" in creds.read_text()        # guard: the host side holds it
+
+        ctx = _ctx(root, _active_policy(
+            root, quest_tmp_dir=str(quest_b), quest_tmp_mask=str(parent)))
+        ls = _bash(ctx, f"ls -A {shlex.quote(str(cfg))}")
+        assert ls["returncode"] != 0, ls
+        cat = _bash(ctx, f"cat {shlex.quote(str(creds))}")
+        assert cat["returncode"] != 0, cat
+        assert "QUEST_A_TOKEN" not in str(cat["stdout"]), cat
+
+        async def _read() -> str:
+            return await get_registry()["read_file"].async_invoke(ctx, {"path": str(creds)})
+        with pytest.raises(PermissionDenied):
+            anyio.run(_read)
+
+        assert not [n for n in os.listdir(tempfile.gettempdir())
+                    if n.startswith("claude-resume-")]
     finally:
         shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
