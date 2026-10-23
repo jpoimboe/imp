@@ -51,7 +51,7 @@ from imp.agents.tools.context import (
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
-from imp.providers._openai_schema import to_openai_strict
+from imp.providers._openai_schema import has_free_form_object, to_openai_strict
 from imp.providers.base import Provider
 from imp.providers.message_parsers import _parse_responses_message
 from imp.providers.push_session import PushSession
@@ -176,14 +176,15 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
 
 
 def _responses_tool_schema(t: Tool) -> dict[str, Any]:
-    """Responses function-tool entry: flat shape (no nested `function` wrapper),
-    strict mode on. Replaces _openai_tool_schema at the Task 17 flip."""
+    """Responses function-tool entry: flat shape (no nested `function` wrapper).
+    Strict unless the schema has a free-form object, which strict can't express."""
+    params = to_openai_strict(t.input_schema)
     return {
         "type": "function",
         "name": t.name,
         "description": t.description,
-        "parameters": to_openai_strict(t.input_schema),
-        "strict": True,
+        "parameters": params,
+        "strict": not has_free_form_object(params),
     }
 
 
@@ -427,9 +428,10 @@ class OpenAISession(PushSession):
                     prompt_cache_key=_prompt_cache_key(
                         self.invocation.quest_context.id, self.aid),
                     # §4: enable parallel tool calls so multiple `task` tus can
-                    # arrive in one turn. Tools stay strict:True; the weakened
-                    # parallel-turn schema guarantee is backstopped by imp's
-                    # invoke-time arg validation (is_error on malformed input).
+                    # arrive in one turn. Strict mode's schema guarantee weakens
+                    # on parallel turns (and is off for free-form-object tools);
+                    # a tool that raises on bad args yields is_error, and
+                    # complete_step args still go through output validation.
                     parallel_tool_calls=True,
                     **_openai_reasoning_posture(self.invocation.tier),
                 ) as stream:

@@ -19,6 +19,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
@@ -183,6 +184,40 @@ def test_responses_tool_schema_is_flat() -> None:
         )
     )
     assert nullable, f"note not nullable: {note_prop}"
+
+
+def test_responses_tool_schema_object_field_drops_strict() -> None:
+    tool = make_complete_step_tool(OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="data", type="object", required=True),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    ))
+    wrapped = _responses_tool_schema(tool)
+    assert wrapped["strict"] is False
+    assert wrapped["parameters"]["properties"]["data"] == {
+        "type": "object", "additionalProperties": True}
+
+
+def test_responses_tool_schema_no_arg_tool_stays_strict_and_closed() -> None:
+    tool = Tool(name="noop", description="d",
+                input_schema={"type": "object", "properties": {}},
+                fn=lambda ctx: "")
+    wrapped = _responses_tool_schema(tool)
+    assert wrapped["strict"] is True
+    assert wrapped["parameters"] == {
+        "type": "object", "properties": {}, "required": [],
+        "additionalProperties": False}
+
+
+def test_responses_tool_schema_edit_file_is_open_and_non_strict() -> None:
+    wrapped = _responses_tool_schema(get_registry()["edit_file"])
+    assert wrapped["strict"] is False
+    edits = wrapped["parameters"]["properties"]["edits"]
+    array = next(s for s in edits["anyOf"] if s.get("type") == "array")
+    assert array["items"] == {"type": "object", "additionalProperties": True}
 
 
 def test_round_trip_two_turn_conversation() -> None:
