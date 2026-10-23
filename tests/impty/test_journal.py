@@ -94,6 +94,14 @@ def _records(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
+def _read_or_empty(path: Path) -> bytes:
+    # Journal._rotate renames the segment away before reopening it, so it can be briefly absent.
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return b""
+
+
 def _fail_writes_to(suffix: str) -> Callable[[Any, bytes], None]:
     """A _write_all that raises on one of the two files, as a full disk would."""
     real = impty.journal._write_all
@@ -477,7 +485,7 @@ def test_rotation_happens_on_the_real_drain_path(
     with TerminalSession(
         [sys.executable, "-c", _FLOOD_CHILD, "16"], journal=Journal(tmp_path, 1),
     ):
-        assert _poll(lambda: b"TAIL-SENTINEL" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+        assert _poll(lambda: b"TAIL-SENTINEL" in _read_or_empty(raw), timeout=_JOURNAL_POLL)
     assert (tmp_path / "pty-1.raw.1").exists()
     rots = [r for r in _records(tmp_path / "pty-1.jsonl") if r["ev"] == "rotate"]
     assert len(rots) >= 2
