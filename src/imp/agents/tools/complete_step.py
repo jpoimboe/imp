@@ -50,14 +50,12 @@ def _build_schema(output: OutputSchema) -> dict[str, Any]:
 
 
 def _normalize_anthropic_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Pydantic emits keys (`title`, `$defs`, optional `additionalProperties: true`)
-    that Anthropic's tool-schema validator may not accept. Strip the noise and
-    force `additionalProperties: false` so the LLM can't fabricate extra keys.
-
-    Recursive — covers nested object properties.
+    """Strip Pydantic noise (`title`, `$defs`). Free-form (`additionalProperties: true`)
+    object nodes stay open; all other object nodes are closed (`additionalProperties:
+    false`) so the LLM can't fabricate keys. Recursive over object properties.
     """
     out = {k: v for k, v in schema.items() if k not in ("title", "$defs")}
-    if out.get("type") == "object":
+    if out.get("type") == "object" and out.get("additionalProperties") is not True:
         out["additionalProperties"] = False
         props = out.get("properties") or {}
         out["properties"] = {k: _normalize_anthropic_schema(v) for k, v in props.items()}

@@ -28,6 +28,7 @@ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude import (
     INFLIGHT_RESULT_BOUND_S,
+    _make_sdk_tools,
     _RunState,
     _settle_inflight,
     _wrap_one,
@@ -108,6 +109,36 @@ async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) 
     await wrapped({"status": "Success", "spec_path": "docs/my-spec.md"})
     assert state.complete_step_args == {
         "status": "Success", "spec_path": "docs/my-spec.md"}
+
+
+@pytest.mark.anyio
+async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: Path) -> None:
+    """Real SDK decorator + MCP server: its input validation must accept a nested dict."""
+    from claude_agent_sdk import create_sdk_mcp_server
+    from mcp.types import CallToolRequest, CallToolRequestParams
+
+    state = _RunState()
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="data", type="object", required=True),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    sdk_tools = _make_sdk_tools(
+        {"complete_step": make_complete_step_tool(schema)}, _ctx(tmp_path), state)
+    server = create_sdk_mcp_server(name="imp", tools=sdk_tools)["instance"]
+    args = {"status": "Success", "data": {"k": 1, "nested": {"x": [1]}}}
+
+    res = await server.request_handlers[CallToolRequest](CallToolRequest(
+        method="tools/call",
+        params=CallToolRequestParams(name="complete_step", arguments=args),
+    ))
+
+    result = res.root
+    assert result.isError is False, result.content
+    assert state.complete_step_args == args
 
 
 @pytest.mark.anyio
