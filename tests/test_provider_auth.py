@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import stat
@@ -14,8 +15,14 @@ import filelock
 import pytest
 
 from imp.engine.env import ensure_provider_auth_dir, provider_auth_dir
+from imp.providers import claude_token_refresh as claude_ctr
+from imp.providers import codex_token_refresh as codex_ctr
 from imp.providers import provider_auth as pa
-from imp.providers.provider_auth import stage_provider_auth
+from imp.providers.provider_auth import (
+    freshness_window_ms,
+    refresh_and_stage,
+    stage_provider_auth,
+)
 
 NOW = 2_000_000_000_000            # ms; every call takes now_ms explicitly
 HOUR_MS = 3_600_000
@@ -395,3 +402,371 @@ def test_a_waiting_reconcile_reads_canonical_only_once_it_holds_the_lock(
     assert not worker.is_alive()
     assert _staged(target, "claude/.credentials.json")["claudeAiOauth"][
         "accessToken"] == "claude-at-replaced"
+
+
+CODEX_ROTATED = _jwt(FAR // 1000 + 86_400, "codex-rotated")
+
+
+class Http:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.mode = {"claude": "ok", "codex": "ok"}
+
+    def hit(self, name: str, module: Any) -> None:
+        self.calls.append(name)
+        if self.mode[name] == "invalid":
+            raise module.RefreshInvalidGrant()
+        if self.mode[name] == "transient":
+            raise module.RefreshTransientError("stub")
+
+
+@pytest.fixture
+def http(monkeypatch: pytest.MonkeyPatch) -> Http:
+    h = Http()
+
+    def _claude(refresh_token: str) -> dict[str, Any]:
+        h.hit("claude", claude_ctr)
+        return {"access_token": "claude-at-rotated", "refresh_token": "claude-rt-rotated",
+                "expires_in": 8 * 3600}
+
+    def _codex(refresh_token: str) -> dict[str, Any]:
+        h.hit("codex", codex_ctr)
+        return {"id_token": None, "access_token": CODEX_ROTATED,
+                "refresh_token": "codex-rt-rotated"}
+
+    monkeypatch.setattr(claude_ctr, "_request_refresh", _claude)
+    monkeypatch.setattr(codex_ctr, "_request_refresh", _codex)
+    return h
+
+
+def _spy_outcomes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    seen: list[tuple[str, str]] = []
+    for name, module in (("claude", claude_ctr), ("codex", codex_ctr)):
+        def _wrapped(*a: Any, _real: Any = module.refresh_canonical_token,
+                     _name: str = name, **kw: Any) -> Any:
+            out = _real(*a, **kw)
+            seen.append((_name, out.outcome))
+            return out
+        monkeypatch.setattr(module, "refresh_canonical_token", _wrapped)
+    return seen
+
+
+def _run_check(canon: Canon, target: Path, **over: Any) -> list[str]:
+    kw: dict[str, Any] = {"now_ms": NOW, "window_ms": WINDOW, "env": canon.env,
+                          "target": target, **over}
+    return refresh_and_stage(**kw)
+
+
+def _make_near(canon: Canon, provider: str) -> str:
+    """Put `provider`'s canonical token inside the window; returns its access token."""
+    if provider == "claude":
+        canon.write_claude(expires_at=NEAR)
+        return "claude-at"
+    access = _jwt(NEAR // 1000, "codex-near")
+    canon.write_codex(access=access)
+    return access
+
+
+def _staged_access(target: Path, provider: str) -> str:
+    if provider == "claude":
+        return _staged(target, "claude/.credentials.json")["claudeAiOauth"]["accessToken"]
+    return _staged(target, "codex/auth.json")["tokens"]["access_token"]
+
+
+def test_window_is_the_slow_gate_timeout_plus_five_minutes() -> None:
+    assert freshness_window_ms(3600) == WINDOW
+    assert freshness_window_ms(None) == 600_000
+
+
+def test_fresh_tokens_and_an_equal_copy_mean_no_http_and_no_rewrite(
+    canon: Canon, target: Path, http: Http,
+) -> None:
+    assert _run_check(canon, target) == []
+    before = _freeze_mtimes(target)
+    assert _run_check(canon, target) == []
+    assert http.calls == []
+    assert _mtimes(target) == before
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_a_token_inside_the_window_is_force_refreshed_and_restaged(
+    canon: Canon, target: Path, http: Http, provider: str,
+) -> None:
+    _make_near(canon, provider)
+
+    assert _run_check(canon, target, window_ms=freshness_window_ms(3600)) == []
+
+    assert http.calls == [provider]
+    if provider == "claude":
+        assert _staged_access(target, "claude") == "claude-at-rotated"
+        canonical = json.loads((canon.claude / ".credentials.json").read_text())
+        assert canonical["claudeAiOauth"]["refreshToken"] == "claude-rt-rotated"
+    else:
+        assert _staged_access(target, "codex") == CODEX_ROTATED
+        assert _staged(target, "codex/auth.json")["tokens"]["refresh_token"] == ""
+        canonical = json.loads((canon.codex / "auth.json").read_text())
+        assert canonical["tokens"]["refresh_token"] == "codex-rt-rotated"
+
+
+def test_a_missing_copy_is_staged_without_http(canon: Canon, target: Path, http: Http) -> None:
+    assert not target.exists()
+    assert _run_check(canon, target) == []
+    assert http.calls == []
+    assert _staged_access(target, "claude") == "claude-at"
+    assert _staged(target, "codex/auth.json")["tokens"]["refresh_token"] == ""
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_a_peer_rotation_under_the_refresh_lock_is_skipped_and_its_token_staged(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch, provider: str,
+) -> None:
+    module = claude_ctr if provider == "claude" else codex_ctr
+    _make_near(canon, provider)
+    peer_codex = _jwt(FAR // 1000, "codex-peer")
+    real_lock = module._token_lock
+
+    @contextlib.contextmanager
+    def _peer_rotates_first(lock_path: Path, *, timeout: float) -> Any:
+        if provider == "claude":
+            canon.write_claude(access="claude-at-peer", refresh="claude-rt-peer")
+        else:
+            canon.write_codex(access=peer_codex, refresh="codex-rt-peer")
+        with real_lock(lock_path, timeout=timeout):
+            yield
+
+    monkeypatch.setattr(module, "_token_lock", _peer_rotates_first)
+    outcomes = _spy_outcomes(monkeypatch)
+
+    assert _run_check(canon, target) == []
+
+    assert outcomes == [(provider, "skipped_rotated")]
+    assert http.calls == []
+    expected = "claude-at-peer" if provider == "claude" else peer_codex
+    assert _staged_access(target, provider) == expected
+
+
+def test_a_replaced_canonical_is_restaged_without_http(
+    canon: Canon, target: Path, http: Http,
+) -> None:
+    _run_check(canon, target)
+    relogin_codex = _jwt(FAR // 1000, "codex-relogin")
+    canon.write_claude(access="claude-at-relogin")
+    canon.write_codex(access=relogin_codex)
+
+    assert _run_check(canon, target) == []
+
+    assert http.calls == []
+    assert _staged_access(target, "claude") == "claude-at-relogin"
+    assert _staged_access(target, "codex") == relogin_codex
+
+
+@pytest.mark.parametrize("change", ["deleted", "apikey"])
+def test_a_codex_logout_or_api_key_switch_unstages_the_copy(
+    canon: Canon, target: Path, http: Http, change: str,
+) -> None:
+    _run_check(canon, target)
+    assert (target / "codex/auth.json").is_file()
+    if change == "deleted":
+        (canon.codex / "auth.json").unlink()
+    else:
+        canon.write_codex(auth_mode="apikey")
+
+    assert _run_check(canon, target) == []
+
+    assert not (target / "codex/auth.json").exists()
+    assert http.calls == []
+
+
+def test_an_unreadable_expiry_triggers_no_refresh(
+    canon: Canon, target: Path, http: Http,
+) -> None:
+    no_exp = _jwt(None, "codex-no-exp")
+    canon.write_claude(expires_at=None)
+    canon.write_codex(access=no_exp)
+
+    assert _run_check(canon, target) == []
+
+    assert http.calls == []
+    claude = _staged(target, "claude/.credentials.json")["claudeAiOauth"]
+    assert claude["accessToken"] == "claude-at"
+    assert "expiresAt" not in claude
+    assert _staged_access(target, "codex") == no_exp
+
+
+@pytest.mark.parametrize(("provider", "mode", "reason"), [
+    ("claude", "invalid", "sign-in expired; log in again"),
+    ("claude", "transient", "refresh failed; retrying next step"),
+    ("codex", "invalid", "sign-in expired; log in again"),
+    ("codex", "transient", "refresh failed; retrying next step"),
+])
+def test_a_refresh_failure_warns_and_still_stages(
+    canon: Canon, target: Path, http: Http, provider: str, mode: str, reason: str,
+) -> None:
+    access = _make_near(canon, provider)
+    http.mode[provider] = mode
+
+    assert _run_check(canon, target) == [
+        f"couldn't refresh {provider} credentials for sandboxed tools: {reason}"]
+
+    assert http.calls == [provider]
+    assert _staged_access(target, provider) == access
+
+
+def test_not_applicable_refreshes_stay_silent(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canon.write_claude(expires_at=NEAR)
+    canon.write_codex(access=_jwt(NEAR // 1000, "codex-near"), refresh="")
+    outcomes = _spy_outcomes(monkeypatch)
+
+    assert _run_check(canon, target, env={**canon.env, "ANTHROPIC_API_KEY": "sk-ant"}) == []
+
+    assert http.calls == []
+    assert outcomes == [("codex", "not_applicable")]
+
+
+def test_a_claude_login_without_a_refresh_token_stays_silent(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canon.write_claude(refresh="", expires_at=NEAR)
+    outcomes = _spy_outcomes(monkeypatch)
+
+    assert _run_check(canon, target) == []
+
+    assert http.calls == []
+    assert outcomes == [("claude", "not_applicable")]
+
+
+@pytest.mark.parametrize("expires_at, refreshes", [(NOW + WINDOW, True), (NOW + WINDOW + 1, False)])
+def test_the_window_edge_is_inclusive_and_the_refresh_is_forced_against_the_seen_expiry(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+    expires_at: int, refreshes: bool,
+) -> None:
+    canon.write_claude(expires_at=expires_at)
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    real = claude_ctr.refresh_canonical_token
+
+    def _spy(*a: Any, **kw: Any) -> Any:
+        calls.append((a, kw))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(claude_ctr, "refresh_canonical_token", _spy)
+
+    assert _run_check(canon, target, window_ms=freshness_window_ms(3600)) == []
+
+    if refreshes:
+        assert len(calls) == 1
+        assert calls[0][1]["force"] is True
+        assert calls[0][1]["spawn_expires_at"] == NOW + WINDOW
+        assert http.calls == ["claude"]
+    else:
+        assert calls == []
+        assert http.calls == []
+
+
+@pytest.mark.parametrize("exp", [float("inf"), float("nan")])
+def test_a_non_finite_codex_jwt_exp_is_treated_as_unreadable(
+    canon: Canon, target: Path, http: Http, exp: float,
+) -> None:
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"exp": exp, "tag": "x"}).encode()).rstrip(b"=").decode()
+    access = f"{header}.{payload}.sig"
+    canon.write_codex(access=access)
+
+    assert _run_check(canon, target) == []
+
+    assert http.calls == []
+    assert _staged_access(target, "codex") == access
+
+
+def test_both_refresh_modules_share_their_failure_outcome_strings() -> None:
+    assert codex_ctr.FAILED_INVALID_GRANT == claude_ctr.FAILED_INVALID_GRANT
+    assert codex_ctr.FAILED_TRANSIENT == claude_ctr.FAILED_TRANSIENT
+
+
+def test_an_api_key_codex_login_stages_nothing_and_warns_nothing(
+    canon: Canon, target: Path, http: Http,
+) -> None:
+    canon.write_codex(auth_mode="apikey")
+    assert _run_check(canon, target) == []
+    assert not (target / "codex/auth.json").exists()
+
+
+def test_a_held_staging_lock_warns_and_leaves_the_copy(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_check(canon, target)
+    before = {rel: (target / rel).read_bytes() for rel in STAGED}
+    canon.write_claude(access="claude-at-new")
+    monkeypatch.setattr(pa, "_STAGE_LOCK_TIMEOUT", 0.2)
+
+    with filelock.FileLock(str(target.with_name("provider-auth.lock"))):
+        assert _run_check(canon, target) == [STAGE_WARNING]
+
+    assert {rel: (target / rel).read_bytes() for rel in STAGED} == before
+
+
+def test_an_unresolvable_home_warns_instead_of_failing_the_check(
+    target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", _no_home)
+    for module in (claude_ctr, codex_ctr):
+        monkeypatch.setattr(module, "canonical_expires_at", lambda *, env: None)
+
+    assert refresh_and_stage(now_ms=NOW, window_ms=WINDOW, env={}, target=target) == [
+        STAGE_WARNING]
+
+
+def test_a_failing_write_warns_and_leaves_the_copy(
+    canon: Canon, target: Path, http: Http, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_check(canon, target)
+    before = {rel: (target / rel).read_bytes() for rel in STAGED}
+    canon.write_claude(access="claude-at-new")
+
+    def _disk_full(path: Path, content: bytes) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(pa, "_atomic_write", _disk_full)
+
+    assert _run_check(canon, target) == [STAGE_WARNING]
+    assert {rel: (target / rel).read_bytes() for rel in STAGED} == before
+
+
+def test_the_check_stages_from_a_read_only_staged_copy(
+    canon: Canon, target: Path, tmp_path: Path, http: Http,
+) -> None:
+    # A nested imp's canonical is the outer imp's read-only staged copy.
+    canon.write_claude(expires_at=NEAR)
+    canon.write_codex(access=_jwt(NEAR // 1000, "codex-near"))
+    outer = tmp_path / "outer" / "provider-auth"
+    _stage(outer, canon.env)
+    nested_env = {"CLAUDE_CONFIG_DIR": str(outer / "claude"),
+                  "CODEX_HOME": str(outer / "codex")}
+    listings = {d: sorted(p.name for p in (outer / d).iterdir()) for d in ("claude", "codex")}
+    for d in ("claude", "codex"):
+        (outer / d).chmod(0o500)
+    try:
+        assert refresh_and_stage(
+            now_ms=NOW, window_ms=WINDOW, env=nested_env, target=target) == []
+        assert {d: sorted(p.name for p in (outer / d).iterdir())
+                for d in ("claude", "codex")} == listings
+    finally:
+        for d in ("claude", "codex"):
+            (outer / d).chmod(0o700)
+    assert http.calls == []
+    for rel in STAGED:
+        assert (target / rel).read_bytes() == (outer / rel).read_bytes(), rel
+
+
+def test_a_bind_source_that_cannot_be_created_propagates(
+    canon: Canon, tmp_path: Path, http: Http,
+) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    with pytest.raises(OSError):
+        _run_check(canon, blocker / "provider-auth")

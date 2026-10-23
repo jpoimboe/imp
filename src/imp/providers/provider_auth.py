@@ -14,17 +14,55 @@ from typing import Any
 
 import filelock
 
+from imp.engine.env import ensure_provider_auth_dir
 from imp.providers import claude_token_refresh, codex_token_refresh
 from imp.providers.codex_config import detect_auth_mode, redacted_auth_json
 
 _STAGE_LOCK_TIMEOUT = 30.0   # the refresh modules' _LOCK_TIMEOUT
+_UNSET_SLOW_TIMEOUT_S = 300   # run-verify.sh's fallback for an unset test_cmd_slow_timeout
+_WINDOW_SLACK_S = 300
+_PROVIDERS = (("claude", claude_token_refresh), ("codex", codex_token_refresh))
+# Both refresh modules use these outcome strings.
+_REFRESH_FAILURES = {
+    claude_token_refresh.FAILED_INVALID_GRANT: "sign-in expired; log in again",
+    claude_token_refresh.FAILED_TRANSIENT: "refresh failed; retrying next step",
+}
+_STAGE_WARNING = "couldn't update the credentials copy for sandboxed tools; retrying next step"
+
+
+def freshness_window_ms(slow_timeout_s: int | None) -> int:
+    """How long a canonical token must outlive a dispatch: the slow gate plus 5 min."""
+    base = _UNSET_SLOW_TIMEOUT_S if slow_timeout_s is None else slow_timeout_s
+    return (base + _WINDOW_SLACK_S) * 1000
+
+
+def refresh_and_stage(
+    *, now_ms: int, window_ms: int, env: Mapping[str, str], target: Path,
+) -> list[str]:
+    """Force-refresh each canonical token expiring within `window_ms`, then reconcile the
+    staged copy. Returns one warning per failure; only provisioning `target` raises."""
+    ensure_provider_auth_dir(target)
+    warnings: list[str] = []
+    for name, module in _PROVIDERS:
+        expires_at = module.canonical_expires_at(env=env)
+        if expires_at is None or expires_at - now_ms > window_ms:
+            continue
+        outcome = module.refresh_canonical_token(
+            now_ms, env=env, force=True, spawn_expires_at=expires_at).outcome
+        if (reason := _REFRESH_FAILURES.get(outcome)) is not None:
+            warnings.append(f"couldn't refresh {name} credentials for sandboxed tools: {reason}")
+    try:
+        stage_provider_auth(target, env=env)
+    except (OSError, RuntimeError):
+        warnings.append(_STAGE_WARNING)
+    return warnings
 
 
 def stage_provider_auth(target: Path, *, env: Mapping[str, str]) -> None:
     """Make `target` (already provisioned) equal the projection of the canonical
     credentials. Canonical is read under the lock, so a reconcile never stages a copy
-    older than a peer's. Raises OSError (filelock.Timeout included); each staged file
-    stays whole."""
+    older than a peer's. Raises OSError (filelock.Timeout included) or RuntimeError (no
+    resolvable home); each staged file stays whole."""
     with _stage_lock(target):
         # Every writer holds the lock, so a leftover temp file is a crash orphan.
         for provider, _ in _PROVIDERS:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import math
 import os
 import stat
 import tempfile
@@ -56,6 +57,8 @@ def _jwt_exp_ms(access_token: object) -> int | None:
         return None
     exp = payload.get("exp")
     if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        return None
+    if isinstance(exp, float) and not math.isfinite(exp):
         return None
     return int(exp) * 1000
 
