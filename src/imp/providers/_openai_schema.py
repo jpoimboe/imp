@@ -7,9 +7,11 @@ OpenAI's strict mode (spec §6.14) requires:
   2. Every property name in `required`.
   3. Optionals expressed as nullable: `{"type": ["<orig>", "null"]}`.
 
-The complete_step schema already satisfies (1) thanks to
-`agents.tools.complete_step._normalize_anthropic_schema`. This module adds
-(2) and (3) without re-deriving (1) — the transform is idempotent.
+The transform applies all three to every object node except free-form ones
+(`additionalProperties: true`, Pydantic's form for `dict`), which it leaves
+untouched. Strict mode cannot express an open object, so a tool whose schema
+contains one must be sent non-strict (`has_free_form_object`). The transform
+is idempotent.
 
 `required` discipline: imp's `OutputSchema` tracks `required: bool` per
 field. The complete_step schema reflects that via JSON schema's `required:
@@ -25,7 +27,8 @@ from typing import Any
 
 
 def to_openai_strict(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return a new schema satisfying OpenAI strict mode.
+    """Return a new schema satisfying OpenAI strict mode, except that free-form
+    object nodes are left open.
 
     Original `required` is preserved structurally — every property gets added
     to `required`, but properties that were *not* in the original `required`
@@ -35,7 +38,24 @@ def to_openai_strict(schema: dict[str, Any]) -> dict[str, Any]:
     return _walk(deepcopy(schema))
 
 
+def has_free_form_object(schema: Any) -> bool:
+    if isinstance(schema, dict):
+        return _is_free_form(schema) or any(
+            has_free_form_object(v) for v in schema.values())
+    if isinstance(schema, list):
+        return any(has_free_form_object(v) for v in schema)
+    return False
+
+
+def _is_free_form(node: dict[str, Any]) -> bool:
+    t = node.get("type")
+    is_object = t == "object" or (isinstance(t, list) and "object" in t)
+    return is_object and node.get("additionalProperties") is True
+
+
 def _walk(node: dict[str, Any]) -> dict[str, Any]:
+    if _is_free_form(node):
+        return node
     if node.get("type") == "object":
         return _walk_object(node)
     # Non-object types: recurse into items / anyOf / oneOf in case they

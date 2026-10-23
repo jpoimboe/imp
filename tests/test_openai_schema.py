@@ -7,7 +7,7 @@ each rule the strict-mode spec enforces.
 
 from __future__ import annotations
 
-from imp.providers._openai_schema import to_openai_strict
+from imp.providers._openai_schema import has_free_form_object, to_openai_strict
 
 
 def test_required_property_unchanged() -> None:
@@ -118,6 +118,43 @@ def test_complete_step_schema_round_trip() -> None:
     for opt in ("note", "count"):
         prop = strict["properties"][opt]
         assert _is_nullable(prop), f"{opt} not nullable: {prop}"
+
+
+def test_free_form_object_fields_stay_open() -> None:
+    """Required and optional `object` fields stay open; any object validates."""
+    from pathlib import Path
+
+    import jsonschema
+
+    from imp.agents.tools.complete_step import make_complete_step_tool
+    from imp.engine.types import OutputField, OutputSchema, SourceLoc
+
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="data", type="object", required=True),
+            OutputField(name="extra", type="object", required=False),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    out = to_openai_strict(make_complete_step_tool(schema).input_schema)
+    free = {"type": "object", "additionalProperties": True}
+    assert out["properties"]["data"] == free
+    assert out["properties"]["extra"]["anyOf"][0] == free
+    assert out["additionalProperties"] is False
+    assert set(out["required"]) == {"data", "extra"}
+    nested = {"k": 1, "nested": {"x": [1]}}
+    jsonschema.validate({"data": nested, "extra": nested}, out)
+
+
+def test_widened_free_form_object_still_detected() -> None:
+    """An optional bare free-form node widened by `_nullable` is still free-form."""
+    out = to_openai_strict({
+        "type": "object",
+        "properties": {"opts": {"type": "object", "additionalProperties": True,
+                                "default": {}}},
+    })
+    assert out["properties"]["opts"]["additionalProperties"] is True
+    assert has_free_form_object(out)
 
 
 def test_optional_enum_gets_null_appended() -> None:

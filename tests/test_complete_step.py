@@ -3,9 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import jsonschema
 import pytest
 
-from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
+from imp.agents.tools.complete_step import (
+    StepComplete,
+    _normalize_anthropic_schema,
+    make_complete_step_tool,
+)
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
 
@@ -58,3 +63,45 @@ def test_field_description_threads_into_tool_schema() -> None:
     assert props["outcome"]["description"] == "one-line outcome + disposition"
     # A field with no description carries no description key.
     assert "description" not in props["status"]
+
+
+_NESTED = {"k": 1, "nested": {"x": [1]}}
+
+
+def _object_schema() -> OutputSchema:
+    return OutputSchema(
+        fields=(
+            OutputField(name="data", type="object", required=True),
+            OutputField(name="extra", type="object", required=False),
+        ),
+        source=SourceLoc(file=Path("agent.md"), line=1),
+    )
+
+
+def test_object_fields_accept_any_object() -> None:
+    s = make_complete_step_tool(_object_schema()).input_schema
+    jsonschema.validate({"data": _NESTED, "extra": _NESTED}, s)
+
+
+def test_object_fields_still_reject_unknown_top_level_key() -> None:
+    s = make_complete_step_tool(_object_schema()).input_schema
+    assert s["additionalProperties"] is False
+    with pytest.raises(jsonschema.ValidationError, match="Additional properties"):
+        jsonschema.validate({"data": _NESTED, "bogus": 1}, s)
+
+
+def test_normalize_keeps_free_form_open_and_closes_the_rest() -> None:
+    out = _normalize_anthropic_schema({
+        "type": "object", "title": "Args",
+        "properties": {
+            "free": {"type": "object", "additionalProperties": True, "title": "Free"},
+            "shut": {"type": "object", "title": "Shut"},
+        },
+    })
+    assert out == {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "free": {"type": "object", "additionalProperties": True},
+            "shut": {"type": "object", "additionalProperties": False, "properties": {}},
+        },
+    }
