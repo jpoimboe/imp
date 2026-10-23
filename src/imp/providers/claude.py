@@ -20,12 +20,15 @@ runners:
 
 History isolation, by config dir. claude-p (CC 2.x) writes an `ai-title` session
 stub to its `CLAUDE_CONFIG_DIR`/projects/ on every spawn; imp keeps that off the
-real `~/.claude` by controlling where that dir points. Fresh and stream-json
-replay both run against an imp-materialized ephemeral `CLAUDE_CONFIG_DIR`
-(`materialize_fresh_config_dir`, removed in `run()`'s finally) — a throwaway sink
-whose stub is discarded on cleanup. Native resume is the only disposition that
-leaves `config_dir = None`; it runs under the SDK's own materialized temp dir.
-No disposition writes to the real `~/.claude`. Imp persists its own transcripts.
+real `~/.claude` by controlling where that dir points. Every disposition runs
+against an imp-made ephemeral `CLAUDE_CONFIG_DIR` under the quest scratch root,
+removed in `run()`'s finally. Fresh and stream-json replay seed it up front
+(`materialize_fresh_config_dir`). Native resume creates it bare
+(`make_config_dir`), fills it with redacted auth and the store's session just
+before the spawn (`fill_resume_config_dir`), and passes `--resume` via
+extra_args — never `options.resume`, which makes the SDK materialize its own
+temp dir in host /tmp. No disposition writes to the real `~/.claude`. Imp
+persists its own transcripts.
 """
 
 from __future__ import annotations
@@ -113,7 +116,11 @@ from imp.engine.drivers import driver_allowed_tools
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_BUILTIN_TOOLS
 from imp.providers.base import Provider
-from imp.providers.claude_config_dir import materialize_fresh_config_dir
+from imp.providers.claude_config_dir import (
+    fill_resume_config_dir,
+    make_config_dir,
+    materialize_fresh_config_dir,
+)
 from imp.providers.claude_session_store import (
     message_to_session_records,
     resume_session_id,
@@ -1543,14 +1550,16 @@ class ClaudeSession(ObserveSession):
         fresh_stream = shape_native_eligible and resume_base == 0
         native_resume = shape_native_eligible
         _pre_spawn_token_refresh(elog, aid)
-        runner._spawn_token_expiry = canonical_expires_at()
         config_dir: Path | None = None
+        resume_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
             runner._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (
                 store, resume_session_id(aid), None)
         elif native_resume:
+            resume_dir = config_dir = make_config_dir("claude-resume-")
+            runner._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (
                 store, None, resume_session_id(aid))
         if mcp_server is not None:
@@ -1709,6 +1718,11 @@ class ClaudeSession(ObserveSession):
         self._flush_lock = asyncio.Lock()
         state.flush_llm_group = self._flush_llm_group
 
+        runner._spawn_token_expiry = canonical_expires_at()
+        if resume_dir is not None:
+            # Not earlier: the store now holds the projection and any reply wait is over.
+            await fill_resume_config_dir(
+                resume_dir, store, skey["project_key"], skey["session_id"])
         # One client lifetime = one id; store id is UUID5(agent_id), cannot split cumulative series.
         self._session_id = uuid.uuid4().hex
         client_ctx = self.runner._build_client(opts)
@@ -2297,7 +2311,7 @@ class ClaudeAgentRunner:
         # _run_loop from invocation.transcript_dir; wired into the SDK via the
         # `stderr` callback so a CLI exit-1 carries its cause. None until built.
         self._stderr_sink: Any = None
-        # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
+        # imp-made ephemeral CLAUDE_CONFIG_DIR (every disposition); run()'s finally removes it
         self._config_dir: Path | None = None
         # canonical expiry this spawn started from; a different value at 401 time
         # means a peer rotated the token underneath us
@@ -2361,11 +2375,11 @@ class ClaudeAgentRunner:
         }
         extra_args: dict[str, Any] = {}
         if config_dir is not None:
-            # imp-isolated home (fresh + replay); the batcher resolves
-            # projects_dir from this env. Native resume passes config_dir=None and
-            # relies on the SDK's own materialized temp dir, so no history-related
-            # env/args are added here.
+            # imp-isolated home (every disposition); the batcher reads projects_dir from it.
             env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        if resume is not None:
+            # Never options.resume: the SDK would then mkdtemp its own dir in host /tmp.
+            extra_args["resume"] = resume
         # Standard tool mode is imp's single mode for every path (fresh and
         # resume): declare the MCP tools up front. claude-p's default ToolSearch
         # deferral would cost an extra LLM round-trip on each step's first MCP
@@ -2417,7 +2431,6 @@ class ClaudeAgentRunner:
             extra_args=extra_args,
             session_store=session_store,
             session_id=session_id,
-            resume=resume,
         )
 
     def _build_client(self, opts: Any) -> Any:

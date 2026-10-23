@@ -368,7 +368,8 @@ async def test_bare_error_turn_keeps_the_retry_warm(tmp_path: Path) -> None:
 
     opts = created[0].opts
     # Native warm resume, NOT the fresh-stream respawn that resume_base == 0 picks.
-    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.resume is None
+    assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
 
     # The store survives with the delivered assistant turn in it.
