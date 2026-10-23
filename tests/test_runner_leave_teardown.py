@@ -189,6 +189,40 @@ async def test_claude_leave_cancel_reaps_cut_short_transport(
     assert len(torn_down) == 1
 
 
+@pytest.mark.anyio
+async def test_claude_leave_cancel_removes_the_resume_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, torn_down: list[Any],
+) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "auth-src"))
+    (tmp_path / "art").mkdir()
+    inv = _claude_inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
+    t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
+    entered = anyio.Event()
+    clients: list[_ParkedClaudeClient] = []
+    existed: list[bool] = []
+
+    def factory(opts: Any) -> _ParkedClaudeClient:
+        existed.append(Path(opts.env["CLAUDE_CONFIG_DIR"]).is_dir())
+        clients.append(_ParkedClaudeClient(opts, entered))
+        return clients[-1]
+
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    await _leave_mid_run(runner, inv, entered)
+
+    cfg = Path(clients[0].opts.env["CLAUDE_CONFIG_DIR"])
+    assert cfg.name.startswith("claude-resume-")
+    assert existed == [True]
+    assert not cfg.exists()
+    assert runner._config_dir is None
+
+
 class _ParkedCodexEvents:
     """A codex turn stream that parks mid-turn until cancelled."""
 
