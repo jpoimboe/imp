@@ -982,6 +982,64 @@ def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     assert str(home / ".mytoken") in pol.secret_files
 
 
+def test_resolve_policy_masks_the_provider_credential_stores_but_not_claude_json(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".codex").mkdir()
+    (home / ".claude.json").write_text("{}")
+    (home / ".claude.json.backup").write_text("{}")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={}, available=True,
+    )
+    assert str(home / ".claude") in pol.secret_dirs
+    assert str(home / ".codex") in pol.secret_dirs
+    assert not pol.allows_read(home / ".claude" / ".credentials.json")
+    assert not pol.allows_read(home / ".claude" / "projects" / "x.jsonl")
+    assert not pol.allows_read(home / ".codex" / "auth.json")
+    assert pol.allows_read(home / ".claude.json")
+    assert pol.allows_read(home / ".claude.json.backup")
+
+
+def test_resolve_policy_masks_env_relocated_credential_stores_by_kind(tmp_path, monkeypatch):
+    control, wt = _layout(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "alt-claude").mkdir()
+    codex_file = tmp_path / "codex-home-file"
+    codex_file.write_text("x")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=tmp_path / "home"), engine_env_result={},
+        # A relative value resolves against imp's cwd, the way the provider CLIs read it.
+        environ={"CLAUDE_CONFIG_DIR": "alt-claude", "CODEX_HOME": str(codex_file)},
+        available=True,
+    )
+    claude_dir = Path.cwd() / "alt-claude"
+    assert str(claude_dir) in pol.secret_dirs
+    assert str(codex_file) in pol.secret_files
+    assert str(codex_file) not in pol.secret_dirs
+    assert not pol.allows_read(claude_dir / ".credentials.json")
+    assert not pol.allows_read(codex_file)
+
+
+def test_resolve_policy_ignores_unset_empty_or_missing_env_credential_stores(tmp_path):
+    control, wt = _layout(tmp_path)
+    cfg = SandboxConfig(home=tmp_path / "home")
+    baseline = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=cfg,
+        engine_env_result={}, environ={}, available=True,
+    )
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=cfg, engine_env_result={},
+        # "" must not become Path("").absolute() == cwd, an existing dir.
+        environ={"CLAUDE_CONFIG_DIR": str(tmp_path / "gone"), "CODEX_HOME": ""},
+        available=True,
+    )
+    assert pol.secret_dirs == baseline.secret_dirs
+    assert pol.secret_files == baseline.secret_files
+
+
 def test_resolve_policy_writable_caches_override_replaces_defaults(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"

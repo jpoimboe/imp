@@ -978,10 +978,11 @@ def with_scratch_slot(policy: SandboxPolicy, slot: str) -> SandboxPolicy:
 # Code-default secret denylist (spec B.3). Paths are home-relative; resolve_policy
 # joins them onto the home dir and keeps only those that exist. /run/user/$UID is
 # added separately (it masks live agent sockets, H2). secret_files are masked with
-# --ro-bind /dev/null; everything else is a directory --tmpfs.
+# --ro-bind /dev/null; everything else is a directory --tmpfs. ~/.claude.json is
+# deliberately left readable: the per-run claude config dirs copy it anyway.
 _DEFAULT_SECRET_DIRS = (
     ".ssh", ".aws", ".gnupg", ".kube", ".config/gcloud", ".config/gh",
-    ".config/containers", ".local/share/keyrings",
+    ".config/containers", ".local/share/keyrings", ".claude", ".codex",
 )
 _DEFAULT_SECRET_FILES = (
     ".docker/config.json", ".config/containers/auth.json", ".netrc",
@@ -1271,14 +1272,16 @@ def resolve_policy(
     cache_names = cfg.writable_caches or _DEFAULT_CACHES
     caches = _existing([str(home / c) for c in cache_names])
 
-    # Secret dirs/files: code defaults + config secret_paths (each classified
-    # dir-vs-file by an actual stat); + /run/user/$UID. Applied uniformly for
-    # every agent — the disposable-tree capability no longer suppresses them.
+    # Secret dirs/files: code defaults + config secret_paths + the provider credential
+    # stores $CLAUDE_CONFIG_DIR/$CODEX_HOME relocate (each classified dir-vs-file by an
+    # actual stat); + /run/user/$UID. Applied uniformly for every agent — the
+    # disposable-tree capability no longer suppresses them.
     secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
     secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
-    for extra in cfg.secret_paths:
-        is_abs = extra.startswith("/")
-        p = Path(extra) if is_abs else (home / extra)
+    configured = [Path(e) if e.startswith("/") else home / e for e in cfg.secret_paths]
+    configured += [Path(environ[var]).absolute()
+                   for var, _ in PROVIDER_AUTH_ENV if environ.get(var)]
+    for p in configured:
         if p.is_dir():
             secret_dirs.append(str(p))
         elif p.exists():

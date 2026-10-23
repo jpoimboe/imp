@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from imp.agents.tools.context import ToolContext
 from imp.engine import worktree as wt
 from imp.engine.env import ensure_provider_auth_dir, provider_auth_dir
 from imp.engine.sandbox import (
@@ -112,6 +113,22 @@ def _stage_copy(tmp_path: Path) -> Path:
     return target
 
 
+def _write_secrets(secrets: dict[Path, str]) -> None:
+    for path, secret in secrets.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(secret)
+
+
+def _assert_masked(
+    ctx: ToolContext, policy: SandboxPolicy, secrets: dict[Path, str],
+) -> None:
+    for path, secret in secrets.items():
+        out = _bash(ctx, f"cat {shlex.quote(str(path))}")
+        assert out["returncode"] != 0, (path, out)
+        assert secret not in str(out["stdout"]), (path, out)
+        assert not policy.allows_read(path), path
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_sandbox_reads_the_staged_copy_but_cannot_write_it(
     kind: str, control: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -159,3 +176,45 @@ def test_a_spawn_mints_a_missing_copy_dir(
     assert out["returncode"] == 0, out
     for d in (target, target / "claude", target / "codex"):
         assert stat.S_IMODE(d.stat().st_mode) == 0o700
+
+
+def test_home_credential_stores_are_masked_but_claude_json_stays_readable(
+    control: Path,
+) -> None:
+    home = control / "home"
+    secrets = {
+        home / ".claude" / ".credentials.json": "CLAUDE_RT_SECRET",
+        home / ".claude" / "projects" / "x.jsonl": "TRANSCRIPT_SECRET",
+        home / ".claude" / "settings.json": "SETTINGS_SECRET",
+        home / ".codex" / "auth.json": "CODEX_RT_SECRET",
+    }
+    _write_secrets(secrets)
+    (home / ".claude.json").write_text("PROJECT_LIST")
+    worktree, policy = _quest_policy(control, "pa1")
+    ctx = _ctx(worktree, policy)
+
+    _assert_masked(ctx, policy, secrets)
+    for store in (home / ".claude", home / ".codex"):
+        listing = _bash(ctx, f"ls -A {shlex.quote(str(store))}")
+        assert listing["returncode"] == 0, listing
+        assert str(listing["stdout"]).strip() == "", listing
+    kept = _bash(ctx, f"cat {shlex.quote(str(home / '.claude.json'))}")
+    assert str(kept["stdout"]).strip() == "PROJECT_LIST", kept
+
+
+def test_env_relocated_credential_stores_are_masked(
+    control: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alt_claude, alt_codex = tmp_path / "alt-claude", tmp_path / "alt-codex"
+    secrets = {
+        alt_claude / ".credentials.json": "ALT_CLAUDE_RT_SECRET",
+        alt_claude / "projects" / "x.jsonl": "ALT_TRANSCRIPT_SECRET",
+        alt_claude / "settings.json": "ALT_SETTINGS_SECRET",
+        alt_codex / "auth.json": "ALT_CODEX_RT_SECRET",
+    }
+    _write_secrets(secrets)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(alt_claude))
+    monkeypatch.setenv("CODEX_HOME", str(alt_codex))
+    worktree, policy = _quest_policy(control, "pa1")
+
+    _assert_masked(_ctx(worktree, policy), policy, secrets)
