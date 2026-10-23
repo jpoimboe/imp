@@ -59,9 +59,12 @@ from typing import Any, overload
 
 from imp.engine.env import (
     HEADLESS_ENV,
+    PROVIDER_AUTH_ENV,
+    ensure_provider_auth_dir,
     ensure_quest_tmp_dir,
     merge_pythonpath_prefix,
     overlay_engine_env,
+    provider_auth_dir,
     quest_var_tmp_root,
 )
 from imp.engine.shim import imp_shim_dir
@@ -125,6 +128,7 @@ class SandboxPolicy:
     quest_tmp_dir: str = ""
     quest_tmp_mask: str = ""   # tmpfs over the scratch ROOT (parent of quest_tmp_dir); "" → none
     session_socket_ro: str = ""  # ro re-expose of THIS quest's own session socket ("" → none)
+    provider_auth_ro: str = ""  # ro re-expose of the shared provider-auth/ copy ("" → none)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -140,17 +144,19 @@ class SandboxPolicy:
         and ALL consumers pick it up; the argv-parity test enforces no drift. The
         home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
         then the per-quest scratch block: a tmpfs over the scratch ROOT
-        (quest_tmp_mask) FIRST, then its two re-exposes on top — quest_tmp_dir rw at
-        its own real path (the dir TMPDIR points at) and session_socket_ro, THIS
-        quest's own session socket, ro. The tmpfs must precede both or last-wins
-        buries the quest's own $TMPDIR and its control socket. Scratch-root
-        invariant: after the whole plan applies, the exposed set under the scratch
-        root is EXACTLY this quest's own scratch dir, its own session socket, plus
-        any path a LATER bind (worktree_block, quest_home, the git binds,
+        (quest_tmp_mask) FIRST, then its three re-exposes on top — quest_tmp_dir rw
+        at its own real path (the dir TMPDIR points at), session_socket_ro, THIS
+        quest's own session socket, ro, and provider_auth_ro, the provider-auth/
+        credentials copy every quest shares (access tokens only; CLAUDE_CONFIG_DIR
+        and CODEX_HOME point into it), ro. The tmpfs must precede all three or
+        last-wins buries them. Scratch-root invariant: after the whole plan
+        applies, the exposed set under the scratch root is EXACTLY this quest's own
+        scratch dir, its own session socket, the shared read-only provider-auth/,
+        plus any path a LATER bind (worktree_block, quest_home, the git binds,
         writable_caches, extra_readable/extra_writable) re-exposes under that root
-        — no policy places one there today. Every sibling quest's scratch dir, its
-        staged provider credentials and its control socket are gone from the
-        namespace, as is the remote-control socket.
+        — no policy places one there today. Every sibling quest's scratch dir (with
+        its per-run provider config dirs) and its control socket are gone from the
+        namespace, as are the remote-control socket and provider-auth.lock.
         Host /tmp OUTSIDE that root gets no covering bind and stays on the read-only
         floor. Then the per-quest read-write /var/tmp scratch bind
         (emitted only when quest_var_tmp_dir is set; empty → no /var/tmp bind, host
@@ -198,9 +204,10 @@ class SandboxPolicy:
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             *([(self.quest_tmp_mask, "mask_dir")] if self.quest_tmp_mask else []),
-            # Both re-exposes are binds: each pins the inode it resolved at namespace creation.
+            # All three re-exposes are binds: each pins the inode it resolved at namespace creation.
             *([(self.quest_tmp_dir, "rw")] if self.quest_tmp_dir else []),
             *([(self.session_socket_ro, "ro")] if self.session_socket_ro else []),
+            *([(self.provider_auth_ro, "ro")] if self.provider_auth_ro else []),
             *([("/var/tmp", "rw")] if self.quest_var_tmp_dir else []),
             *worktree_block,
             (self.git_common_dir, "rw"),
@@ -849,8 +856,9 @@ class SandboxNamespace:
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     """Ready a frozen policy for THIS spawn: re-create imp's own re-exposed ref
-    directories and BOTH scratch bind sources — the /tmp leaf and, when set, the
-    /var/tmp one — and drop any mask/ro-bind path that has since vanished. Each
+    directories, BOTH scratch bind sources — the /tmp leaf and, when set, the
+    /var/tmp one — and the shared provider-auth/ bind source with its claude/ and
+    codex/ subdirs, and drop any mask/ro-bind path that has since vanished. Each
     scratch leaf is a --bind source, so one that does not exist yet (a per-agent slot
     dir, or the quest leaf after a step wipe) would abort bwrap setup rather than
     degrade; this hook runs ahead of every keeper open, so minting both here covers
@@ -910,6 +918,8 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         # The bwrap SOURCE for the namespace /var/tmp, and --bind, not --bind-try: a
         # per-agent slot leaf is created nowhere else, so its absence would abort setup.
         ensure_quest_tmp_dir(Path(policy.quest_var_tmp_dir))
+    if policy.provider_auth_ro:
+        ensure_provider_auth_dir(Path(policy.provider_auth_ro))
     home_layer = policy.home_layer
     if policy.overlay_root is not None:
         root = Path(policy.overlay_root.path)
@@ -1306,6 +1316,7 @@ def resolve_policy(
     # SAME value is the bind source below — one derivation, two uses.
     quest_tmp = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / quest_id
     quest_tmp_mask = str(quest_tmp.parent)
+    provider_auth = str(provider_auth_dir())
     session_socket_ro = str(session_sock) if session_sock.exists() else ""
     var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
@@ -1338,10 +1349,12 @@ def resolve_policy(
         quest_tmp_dir=str(quest_tmp),
         quest_tmp_mask=quest_tmp_mask,
         session_socket_ro=session_socket_ro,
+        provider_auth_ro=provider_auth,
         quest_var_tmp_dir=quest_var_tmp_dir,
         child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,
             session_socket=str(session_sock), tmpdir=str(quest_tmp),
+            provider_auth=provider_auth,
             shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
         network=cfg.network,
         note="",
@@ -1359,7 +1372,7 @@ def _inactive(*, note: str) -> SandboxPolicy:
 def _build_child_env(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
-    shim_dir: str = "", tmpdir: str = "",
+    shim_dir: str = "", tmpdir: str = "", provider_auth: str = "",
 ) -> tuple[tuple[str, str], ...]:
     """The child environment (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative; PYTHONPATH is the single deliberate non-IMP_ exception — the
@@ -1370,8 +1383,10 @@ def _build_child_env(
     paths pass through verbatim.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
-    its value in place (first-seen position, last value wins). TMPDIR (the per-quest
-    scratch dir) is assigned last so it wins over any ambient or env_passthrough value.
+    its value in place (first-seen position, last value wins). CLAUDE_CONFIG_DIR and
+    CODEX_HOME (into the shared read-only provider-auth/ copy) and TMPDIR (the
+    per-quest scratch dir) are assigned last so they win over any ambient or
+    env_passthrough value.
     """
     d: dict[str, str] = {}
     for k in _GENERIC_ENV:
@@ -1394,6 +1409,9 @@ def _build_child_env(
         d["IMP_SESSION_SOCKET"] = session_socket
     if shim_dir:
         d["PATH"] = (shim_dir + os.pathsep + d["PATH"]) if d.get("PATH") else shim_dir
+    if provider_auth:
+        for var, sub in PROVIDER_AUTH_ENV:
+            d[var] = str(Path(provider_auth) / sub)
     if tmpdir:
         d["TMPDIR"] = tmpdir   # per-quest scratch; last → wins over ambient/env_passthrough
     return tuple(d.items())

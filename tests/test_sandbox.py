@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import imp.engine.sandbox as sandbox_mod
-from imp.engine.env import engine_env
+from imp.engine.env import engine_env, provider_auth_dir
 from imp.engine.sandbox import (
     KEEPER_PAYLOAD,
     SANDBOX_SPAWN_MAX_ATTEMPTS,
@@ -3267,6 +3267,8 @@ def test_the_scratch_block_docstrings_describe_the_mask_and_the_re_exposes():
     assert ("the exposed set under the scratch root is EXACTLY this quest's own "
             "scratch dir, its own session socket") in plan_doc
     assert "plus any path a LATER bind" in plan_doc
+    assert ("its own session socket, the shared read-only provider-auth/, plus any "
+            "path a LATER bind") in plan_doc
     prepare_doc = _flat_doc(sb.prepare_spawn_policy)
     assert "session_socket_ro churns the same way and is pruned with them" in prepare_doc
     assert "only the session daemon can bind it" in prepare_doc
@@ -3811,3 +3813,70 @@ def test_isolated_subagent_policy_reaches_the_quest_spike_dir(tmp_path, monkeypa
     assert pol.allows_write(spike) is True
     assert pol.allows_read(spike / "probe.py") is True
     assert pol.allows_read(quest_dir.resolve() / "steps" / "s.jsonl") is False
+
+
+def test_provider_auth_is_re_exposed_read_only_through_the_scratch_mask():
+    p = _policy(quest_tmp_mask="/tmp/imp-1000", quest_tmp_dir="/tmp/imp-1000/abc",
+                session_socket_ro="/tmp/imp-1000/abc.sock",
+                provider_auth_ro="/tmp/imp-1000/provider-auth",
+                secret_dirs=("/home/u/.ssh",))
+    plan = p.bind_plan()
+    auth = plan.index(("/tmp/imp-1000/provider-auth", "ro"))
+    assert plan.index(("/tmp/imp-1000", "mask_dir")) < auth
+    assert plan.index(("/tmp/imp-1000/abc", "rw")) < auth
+    assert plan.index(("/tmp/imp-1000/abc.sock", "ro")) < auth
+    assert auth < plan.index(("/home/u/.ssh", "mask_dir"))
+    staged = Path("/tmp/imp-1000/provider-auth/claude/.credentials.json")
+    assert p.allows_read(staged)
+    assert not p.allows_write(staged)
+    assert not p.allows_read(Path("/tmp/imp-1000/provider-auth.lock"))
+    assert _parse_argv_binds(_argv("x", cwd="/wt", policy=p, engine_env={})) == plan
+
+
+def test_resolve_policy_exposes_provider_auth_over_any_ambient_value(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(env_passthrough=("CLAUDE_CONFIG_DIR", "CODEX_HOME")),
+        engine_env_result={},
+        environ={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/home/u/.claude-alt",
+                 "CODEX_HOME": "/home/u/.codex-alt"},
+        available=True,
+    )
+    staged = provider_auth_dir()
+    assert pol.provider_auth_ro == str(staged)
+    assert (str(staged), "ro") in pol.bind_plan()
+    env = dict(pol.child_env)
+    assert env["CLAUDE_CONFIG_DIR"] == str(staged / "claude")
+    assert env["CODEX_HOME"] == str(staged / "codex")
+    keys = [k for k, _ in pol.child_env]
+    assert len(keys) == len(set(keys))
+
+
+def test_with_scratch_slot_keeps_the_provider_auth_exposure():
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc", quest_tmp_mask="/tmp/imp-1000",
+                  provider_auth_ro="/tmp/imp-1000/provider-auth",
+                  child_env=(("CLAUDE_CONFIG_DIR", "/tmp/imp-1000/provider-auth/claude"),
+                             ("TMPDIR", "/tmp/imp-1000/abc")))
+    slotted = with_scratch_slot(pol, "explorer-1")
+    assert ("/tmp/imp-1000/provider-auth", "ro") in slotted.bind_plan()
+    assert dict(slotted.child_env)["CLAUDE_CONFIG_DIR"] == "/tmp/imp-1000/provider-auth/claude"
+
+
+def test_prepare_spawn_policy_mints_the_provider_auth_bind_source(tmp_path):
+    staged = tmp_path / "imp-1000" / "provider-auth"
+    prepared = prepare_spawn_policy(_policy(provider_auth_ro=str(staged)))
+    assert prepared.provider_auth_ro == str(staged)
+    for d in (staged, staged / "claude", staged / "codex"):
+        assert d.stat().st_mode & 0o777 == 0o700
+
+
+def test_an_inactive_policy_exposes_no_provider_auth(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(enabled=False), engine_env_result={},
+        environ={"PATH": "/usr/bin"}, available=True)
+    assert pol.provider_auth_ro == ""
+    prepare_spawn_policy(pol)
+    assert not provider_auth_dir().exists()
