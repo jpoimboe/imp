@@ -32,7 +32,7 @@ import subprocess
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 # ── render_config_toml ──────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ def detect_auth_mode(
 
     A misread sends a user down the wrong credential path (copy-in vs API-key
     write). Caller routes:
-      - "chatgpt" → copy the canonical auth.json into CODEX_HOME.
+      - "chatgpt" → seed CODEX_HOME with canonical minus its refresh token.
       - "apikey"  → write a fresh 0600 auth.json into CODEX_HOME from the key.
       - None      → raise an `auth` ProviderError before thread options are built.
     """
@@ -199,20 +199,32 @@ def detect_auth_mode(
 
 # ── seed_auth ────────────────────────────────────────────────────────────────
 
+def redacted_auth_json(auth: Mapping[str, Any]) -> bytes:
+    """`auth` with `tokens.refresh_token` blanked (codex rejects a missing key) and any
+    `OPENAI_API_KEY` nulled."""
+    redacted = dict(auth)
+    if "OPENAI_API_KEY" in redacted:
+        redacted["OPENAI_API_KEY"] = None
+    tokens = auth.get("tokens")
+    if isinstance(tokens, dict):
+        redacted["tokens"] = {**tokens, "refresh_token": ""}
+    return json.dumps(redacted, indent=2, sort_keys=True).encode("utf-8")
+
+
 def seed_auth(
     *, mode: AuthMode, canonical_path: Path, codex_home: Path,
     env: Mapping[str, str],
 ) -> Path:
     """Seed a `0600 auth.json` into `codex_home` per the auth mode.
 
-    - "chatgpt": copy the canonical file in (so the CLI sees a real
-      ChatGPT-login auth bundle). imp keeps canonical fresh pre-spawn; this
-      copy is a throwaway shredded at teardown.
+    - "chatgpt": canonical with its refresh token blanked and any API key
+      nulled, so a sandboxed process reading CODEX_HOME never sees them. imp keeps
+      canonical fresh pre-spawn; this copy is a throwaway shredded at teardown.
     - "apikey": write a minimal auth.json carrying the env key.
     """
     target = codex_home / "auth.json"
     if mode == "chatgpt":
-        shutil.copyfile(canonical_path, target)
+        target.write_bytes(redacted_auth_json(json.loads(canonical_path.read_text())))
     else:
         key = env.get("OPENAI_API_KEY", "")
         target.write_text(json.dumps({
@@ -258,7 +270,7 @@ def teardown_codex_home(
     """Tear down a per-run CODEX_HOME: shred `auth.json` (best-effort,
     unconditional) then remove the dir tree.
 
-    imp keeps the canonical token fresh pre-spawn, so the copied-in CODEX_HOME
+    imp keeps the canonical token fresh pre-spawn, so the seeded CODEX_HOME
     credential is a pure throwaway — there is no rotated token to reconcile
     back to canonical here. `mode` / `canonical_path` are retained for
     call-site compatibility; teardown no longer branches on them.
