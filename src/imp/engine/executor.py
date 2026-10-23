@@ -55,6 +55,7 @@ from imp.engine.env import (
     Undecided,
     engine_env,
     ensure_quest_tmp_dir,
+    provider_auth_dir,
 )
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import ArchiveMismatch, LoadError, summarize_exception
@@ -122,6 +123,7 @@ from imp.engine.types import (
 from imp.providers.claude_token_refresh import login_expires_at, login_expiry_warning
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.memory import load_memory_snapshot
+from imp.providers.provider_auth import freshness_window_ms, refresh_and_stage
 from imp.providers.resolve import ProviderUnavailable, provider_from_model, resolve_run
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
@@ -398,6 +400,17 @@ def _wipe_step_scratch(quest: Quest) -> None:
             shutil.rmtree(child, ignore_errors=True)
         else:
             child.unlink(missing_ok=True)
+
+
+async def _refresh_provider_auth(config: Any, log: EventLog) -> None:
+    """Keep the shared sandbox credentials copy fresh for this dispatch. Off the loop: up
+    to two locked token refreshes plus the staging lock. A failure warns, never fails."""
+    messages = await anyio.to_thread.run_sync(functools.partial(
+        refresh_and_stage, now_ms=int(time.time() * 1000),
+        window_ms=freshness_window_ms(config.test_cmd_slow_timeout),
+        env=os.environ, target=provider_auth_dir()))
+    for message in messages:
+        _emit(log, "runner_warning", {"message": message}, agent_id=None)
 
 
 def _reconcile_provider(
@@ -679,6 +692,8 @@ async def run_quest(
             # (b) A switch armed during a non-agent step or between steps: no
             # agent invocation may run on the fled vendor after the arm.
             _reconcile_provider(quest, state, workflow, on_event)
+            if sandbox_policy.active:
+                await _refresh_provider_auth(config, log)
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
