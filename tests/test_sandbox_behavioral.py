@@ -50,6 +50,7 @@ from imp.agents.tools.context import (
 )
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine import worktree as wt
+from imp.engine.env import ensure_provider_auth_dir, provider_auth_dir
 from imp.engine.sandbox import (
     SandboxConfig,
     SandboxNamespace,
@@ -64,6 +65,7 @@ from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
 from imp.providers.claude_config_dir import fill_resume_config_dir, make_config_dir
 from imp.providers.claude_session_store import resume_session_id, session_store_for
+from imp.providers.provider_auth import stage_provider_auth
 from impty import TerminalSession
 from impty.driver import ImptyDriver
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
@@ -117,6 +119,12 @@ def _var_tmp_parent() -> Path:
         tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp")) / f"imp-{os.getuid()}"
 
 
+def _shimless_path() -> str:
+    return os.pathsep.join(
+        p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+        if "imp-shim" not in p) or "/usr/bin:/bin"
+
+
 def _active_policy(worktree: Path, *, home: Path | None = None,
                    secret_dirs: tuple[str, ...] = (),
                    quest_tmp_dir: str = "",
@@ -148,9 +156,7 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         secret_dirs=secret_dirs,
         secret_files=(),
         child_env=(
-            ("PATH", os.pathsep.join(
-                p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
-                if "imp-shim" not in p) or "/usr/bin:/bin"),
+            ("PATH", _shimless_path()),
             ("HOME", str(_home)),
             *([("TMPDIR", quest_tmp_dir)] if quest_tmp_dir else ()),
         ),
@@ -204,7 +210,6 @@ def _make_overlay_root() -> Path:
 
 
 def _overlay_home(base: Path, home: Path, *,
-                  secret_dirs: tuple[str, ...] = (),
                   writable_caches: tuple[str, ...] = ()):
     """Active policy whose EVERY spawn mints its own COW-overlay layer under a
     per-step overlay root, exactly as a real spawn does (the bash tool calls
@@ -214,7 +219,7 @@ def _overlay_home(base: Path, home: Path, *,
     (policy, cleanup); cleanup removes the whole overlay root."""
     wt = base / "worktree"
     wt.mkdir(exist_ok=True)
-    base_pol = _active_policy(wt, home=home, secret_dirs=secret_dirs)
+    base_pol = _active_policy(wt, home=home)
     layer, overlay_root, cleanup = make_home_layer(
         str(home), root=base / "ovl", userxattr=OVERLAY_MODE)
     pol = dataclasses.replace(
@@ -1186,9 +1191,10 @@ def test_overlay_home_faithful_isolated_and_masked() -> None:
     # AC 1: a real home file (.gitconfig) reads through the overlay lower; a new
     #       $HOME write is readable in-step but leaves the real home unchanged
     #       (captured in the discarded upper).
-    # AC 5: ~/.claude is readable (model auth intact).
-    # AC 3 (overlay mode): a secret dir (.ssh) is masked to empty — proving the
-    #       overlay home bind is emitted BEFORE the secret masks.
+    # Masks and the provider-auth/ bind/env come from resolve_policy's production
+    # defaults: ~/.claude and ~/.ssh are masked over the overlay (the home bind is
+    # emitted BEFORE the secret masks), and only the staged access-token copy at
+    # $CLAUDE_CONFIG_DIR is readable.
     # home + worktree are siblings under a base no bind_plan bind covers, so the
     # worktree rw bind does not shadow the overlay (see _overlay_home).
     root = _make_overlay_root()
@@ -1196,26 +1202,47 @@ def test_overlay_home_faithful_isolated_and_masked() -> None:
         home = root / "home"
         home.mkdir()
         (home / ".gitconfig").write_text("[user]\n\tname = Real Dev\n")
-        (home / ".claude").mkdir()
-        (home / ".claude" / "creds.json").write_text("MODEL_TOKEN_XYZ\n")
+        claude = home / ".claude"
+        claude.mkdir()
+        (claude / "creds.json").write_text("MODEL_TOKEN_XYZ\n")
+        (claude / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {
+            "accessToken": "STAGED_ACCESS_XYZ", "refreshToken": "REFRESH_SECRET_XYZ"}}))
         ssh = home / ".ssh"
         ssh.mkdir()
         (ssh / "id_rsa").write_text("SUPER_SECRET_KEY\n")
+        target = provider_auth_dir()
+        ensure_provider_auth_dir(target)
+        stage_provider_auth(target, env={
+            "CLAUDE_CONFIG_DIR": str(claude), "CODEX_HOME": str(home / ".codex")})
 
-        pol, cleanup = _overlay_home(root, home, secret_dirs=(str(ssh),))
+        wt = root / "worktree"
+        # resolve_policy always tmpfs-masks .git/worktrees, and the spawn prune keeps it.
+        (wt / ".git" / "worktrees").mkdir(parents=True)
+        base_pol = resolve_policy(
+            worktree=wt, control_root=wt, quest_id="ovl", cfg=SandboxConfig(home=home),
+            engine_env_result={},
+            environ={**os.environ, "HOME": str(home), "PATH": _shimless_path()},
+            available=True)
+        layer, overlay_root, cleanup = make_home_layer(
+            str(home), root=root / "ovl", userxattr=OVERLAY_MODE)
+        pol = dataclasses.replace(base_pol, home_layer=layer, overlay_root=overlay_root)
         try:
-            ctx = _ctx(Path(pol.worktree), pol)
+            assert dict(pol.child_env)["CLAUDE_CONFIG_DIR"] == str(target / "claude")
+            ctx = _ctx(wt, pol)
             r = _bash(
                 ctx,
                 'cat "$HOME/.gitconfig"; echo "==C=="; '
-                'cat "$HOME/.claude/creds.json"; echo "==S=="; '
+                'cat "$HOME/.claude/creds.json" 2>&1; echo "==A=="; '
+                'cat "$CLAUDE_CONFIG_DIR/.credentials.json"; echo "==S=="; '
                 'cat "$HOME/.ssh/id_rsa" 2>&1; echo "==W=="; '
                 'echo NEWCONTENT > "$HOME/scratch.txt" && cat "$HOME/scratch.txt"')
             out = r["stdout"]
-            assert "Real Dev" in out                 # AC1: real home read-through
-            assert "MODEL_TOKEN_XYZ" in out          # AC5: .claude readable
-            assert "SUPER_SECRET_KEY" not in out     # AC3: .ssh masked in overlay
-            assert "NEWCONTENT" in out               # AC1: write+readback in step
+            assert "Real Dev" in out                  # AC1: real home read-through
+            assert "MODEL_TOKEN_XYZ" not in out       # ~/.claude masked over the overlay
+            assert "STAGED_ACCESS_XYZ" in out         # the staged copy is readable
+            assert "REFRESH_SECRET_XYZ" not in out    # ...and holds no refresh token
+            assert "SUPER_SECRET_KEY" not in out      # .ssh masked over the overlay
+            assert "NEWCONTENT" in out                # AC1: write+readback in step
             # AC1: the write was captured in the discarded upper — real home untouched.
             assert not (home / "scratch.txt").exists()
         finally:
