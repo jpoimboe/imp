@@ -289,6 +289,20 @@ def _stub_provider_api_keys(
 
 
 @pytest.fixture(autouse=True)
+def _stub_provider_auth_check(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No-op the per-dispatch sandbox credentials check: HOME is not isolated, so the
+    real one would read, and could refresh, the real ~/.claude login. Live tests keep
+    it, keyed like _stub_provider_api_keys."""
+    name = Path(request.node.fspath).name
+    if "_live" in name and not name.startswith("test_live_"):
+        return
+    import imp.engine.executor as _executor
+    monkeypatch.setattr(_executor, "refresh_and_stage", lambda **_kw: [])
+
+
+@pytest.fixture(autouse=True)
 def _reset_theme() -> Generator[None, None, None]:
     """Pin the active color theme to `ansi` around every test. `palette` keeps
     the active theme in module-global state, and any test that runs the CLI

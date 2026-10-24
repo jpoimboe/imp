@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import math
 import os
 import stat
 import tempfile
@@ -56,6 +57,8 @@ def _jwt_exp_ms(access_token: object) -> int | None:
         return None
     exp = payload.get("exp")
     if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        return None
+    if isinstance(exp, float) and not math.isfinite(exp):
         return None
     return int(exp) * 1000
 
@@ -179,7 +182,7 @@ class RefreshOutcome:
     expires_at: int | None = None
 
 
-def _canonical_dir(env: Mapping[str, str]) -> Path:
+def canonical_dir(env: Mapping[str, str]) -> Path:
     override = env.get("CODEX_HOME")
     return Path(override) if override else Path.home() / ".codex"
 
@@ -260,7 +263,7 @@ def refresh_canonical_token(
     """`force` ignores expiry; `spawn_expires_at` still skips a peer's rotation."""
     env = os.environ if env is None else env
     try:
-        base = _canonical_dir(env)
+        base = canonical_dir(env)
     except RuntimeError:
         return RefreshOutcome(NOT_APPLICABLE)
     auth_path = base / "auth.json"
@@ -312,7 +315,7 @@ def canonical_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
     """The canonical access token's expiry — the value a rotation race moves."""
     env = os.environ if env is None else env
     try:
-        base = _canonical_dir(env)
+        base = canonical_dir(env)
     except RuntimeError:
         return None
     data = _load_auth(base / "auth.json")

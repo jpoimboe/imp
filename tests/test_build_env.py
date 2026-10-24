@@ -198,3 +198,10 @@ def test_test_live_runs_the_deny_posture_probes() -> None:
     out = _make_n("test-live")
     assert out.returncode == 0, out.stderr
     assert "tests/test_cc_builtins_drift_live.py" in out.stdout
+
+
+def test_test_live_runs_the_read_only_credentials_copy_test() -> None:
+    # The only end-to-end proof that nested runs authenticate off the read-only copy.
+    out = _make_n("test-live")
+    assert out.returncode == 0, out.stderr
+    assert "tests/test_provider_auth_readonly_live.py" in out.stdout

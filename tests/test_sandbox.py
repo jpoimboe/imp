@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import imp.engine.sandbox as sandbox_mod
-from imp.engine.env import engine_env
+from imp.engine.env import engine_env, provider_auth_dir
 from imp.engine.sandbox import (
     KEEPER_PAYLOAD,
     SANDBOX_SPAWN_MAX_ATTEMPTS,
@@ -579,6 +579,29 @@ def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
     assert str(home / ".aws") not in pol.secret_dirs
 
 
+def test_resolve_policy_masks_symlinked_secrets_at_their_real_path(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    real_dir = home / "dotfiles" / "claude"
+    real_dir.mkdir(parents=True)
+    (real_dir / ".credentials.json").write_text("x")
+    (home / ".claude").symlink_to(real_dir)
+    real_file = home / "dotfiles" / "token"
+    real_file.write_text("x")
+    (home / "token-link").symlink_to(real_file)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=("token-link",)),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert str(real_dir.resolve()) in pol.secret_dirs
+    assert str(home / ".claude") not in pol.secret_dirs
+    assert str(real_file.resolve()) in pol.secret_files
+    assert str(home / "token-link") not in pol.secret_files
+    assert not pol.allows_read((real_dir / ".credentials.json").resolve())
+    assert not pol.allows_read(real_file.resolve())
+
+
 def test_resolve_policy_masks_runtime_dir(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
@@ -980,6 +1003,64 @@ def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     )
     assert str(home / ".mykeys") in pol.secret_dirs
     assert str(home / ".mytoken") in pol.secret_files
+
+
+def test_resolve_policy_masks_the_provider_credential_stores_but_not_claude_json(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".codex").mkdir()
+    (home / ".claude.json").write_text("{}")
+    (home / ".claude.json.backup").write_text("{}")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={}, available=True,
+    )
+    assert str(home / ".claude") in pol.secret_dirs
+    assert str(home / ".codex") in pol.secret_dirs
+    assert not pol.allows_read(home / ".claude" / ".credentials.json")
+    assert not pol.allows_read(home / ".claude" / "projects" / "x.jsonl")
+    assert not pol.allows_read(home / ".codex" / "auth.json")
+    assert pol.allows_read(home / ".claude.json")
+    assert pol.allows_read(home / ".claude.json.backup")
+
+
+def test_resolve_policy_masks_env_relocated_credential_stores_by_kind(tmp_path, monkeypatch):
+    control, wt = _layout(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "alt-claude").mkdir()
+    codex_file = tmp_path / "codex-home-file"
+    codex_file.write_text("x")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(home=tmp_path / "home"), engine_env_result={},
+        # A relative value resolves against imp's cwd, the way the provider CLIs read it.
+        environ={"CLAUDE_CONFIG_DIR": "alt-claude", "CODEX_HOME": str(codex_file)},
+        available=True,
+    )
+    claude_dir = Path.cwd() / "alt-claude"
+    assert str(claude_dir) in pol.secret_dirs
+    assert str(codex_file) in pol.secret_files
+    assert str(codex_file) not in pol.secret_dirs
+    assert not pol.allows_read(claude_dir / ".credentials.json")
+    assert not pol.allows_read(codex_file)
+
+
+def test_resolve_policy_ignores_unset_empty_or_missing_env_credential_stores(tmp_path):
+    control, wt = _layout(tmp_path)
+    cfg = SandboxConfig(home=tmp_path / "home")
+    baseline = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=cfg,
+        engine_env_result={}, environ={}, available=True,
+    )
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=cfg, engine_env_result={},
+        # "" must not become Path("").absolute() == cwd, an existing dir.
+        environ={"CLAUDE_CONFIG_DIR": str(tmp_path / "gone"), "CODEX_HOME": ""},
+        available=True,
+    )
+    assert pol.secret_dirs == baseline.secret_dirs
+    assert pol.secret_files == baseline.secret_files
 
 
 def test_resolve_policy_writable_caches_override_replaces_defaults(tmp_path):
@@ -3267,6 +3348,8 @@ def test_the_scratch_block_docstrings_describe_the_mask_and_the_re_exposes():
     assert ("the exposed set under the scratch root is EXACTLY this quest's own "
             "scratch dir, its own session socket") in plan_doc
     assert "plus any path a LATER bind" in plan_doc
+    assert ("its own session socket, the shared read-only provider-auth/, plus any "
+            "path a LATER bind") in plan_doc
     prepare_doc = _flat_doc(sb.prepare_spawn_policy)
     assert "session_socket_ro churns the same way and is pruned with them" in prepare_doc
     assert "only the session daemon can bind it" in prepare_doc
@@ -3811,3 +3894,70 @@ def test_isolated_subagent_policy_reaches_the_quest_spike_dir(tmp_path, monkeypa
     assert pol.allows_write(spike) is True
     assert pol.allows_read(spike / "probe.py") is True
     assert pol.allows_read(quest_dir.resolve() / "steps" / "s.jsonl") is False
+
+
+def test_provider_auth_is_re_exposed_read_only_through_the_scratch_mask():
+    p = _policy(quest_tmp_mask="/tmp/imp-1000", quest_tmp_dir="/tmp/imp-1000/abc",
+                session_socket_ro="/tmp/imp-1000/abc.sock",
+                provider_auth_ro="/tmp/imp-1000/provider-auth",
+                secret_dirs=("/home/u/.ssh",))
+    plan = p.bind_plan()
+    auth = plan.index(("/tmp/imp-1000/provider-auth", "ro"))
+    assert plan.index(("/tmp/imp-1000", "mask_dir")) < auth
+    assert plan.index(("/tmp/imp-1000/abc", "rw")) < auth
+    assert plan.index(("/tmp/imp-1000/abc.sock", "ro")) < auth
+    assert auth < plan.index(("/home/u/.ssh", "mask_dir"))
+    staged = Path("/tmp/imp-1000/provider-auth/claude/.credentials.json")
+    assert p.allows_read(staged)
+    assert not p.allows_write(staged)
+    assert not p.allows_read(Path("/tmp/imp-1000/provider-auth.lock"))
+    assert _parse_argv_binds(_argv("x", cwd="/wt", policy=p, engine_env={})) == plan
+
+
+def test_resolve_policy_exposes_provider_auth_over_any_ambient_value(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(env_passthrough=("CLAUDE_CONFIG_DIR", "CODEX_HOME")),
+        engine_env_result={},
+        environ={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/home/u/.claude-alt",
+                 "CODEX_HOME": "/home/u/.codex-alt"},
+        available=True,
+    )
+    staged = provider_auth_dir()
+    assert pol.provider_auth_ro == str(staged)
+    assert (str(staged), "ro") in pol.bind_plan()
+    env = dict(pol.child_env)
+    assert env["CLAUDE_CONFIG_DIR"] == str(staged / "claude")
+    assert env["CODEX_HOME"] == str(staged / "codex")
+    keys = [k for k, _ in pol.child_env]
+    assert len(keys) == len(set(keys))
+
+
+def test_with_scratch_slot_keeps_the_provider_auth_exposure():
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc", quest_tmp_mask="/tmp/imp-1000",
+                  provider_auth_ro="/tmp/imp-1000/provider-auth",
+                  child_env=(("CLAUDE_CONFIG_DIR", "/tmp/imp-1000/provider-auth/claude"),
+                             ("TMPDIR", "/tmp/imp-1000/abc")))
+    slotted = with_scratch_slot(pol, "explorer-1")
+    assert ("/tmp/imp-1000/provider-auth", "ro") in slotted.bind_plan()
+    assert dict(slotted.child_env)["CLAUDE_CONFIG_DIR"] == "/tmp/imp-1000/provider-auth/claude"
+
+
+def test_prepare_spawn_policy_mints_the_provider_auth_bind_source(tmp_path):
+    staged = tmp_path / "imp-1000" / "provider-auth"
+    prepared = prepare_spawn_policy(_policy(provider_auth_ro=str(staged)))
+    assert prepared.provider_auth_ro == str(staged)
+    for d in (staged, staged / "claude", staged / "codex"):
+        assert d.stat().st_mode & 0o777 == 0o700
+
+
+def test_an_inactive_policy_exposes_no_provider_auth(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(enabled=False), engine_env_result={},
+        environ={"PATH": "/usr/bin"}, available=True)
+    assert pol.provider_auth_ro == ""
+    prepare_spawn_policy(pol)
+    assert not provider_auth_dir().exists()
