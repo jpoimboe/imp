@@ -15,9 +15,3 @@ self-knowledge index that agents load, not human docs. Keep it accurate
 whenever you change imp's CLI commands/flags, agent tools, or core
 concepts/vocabulary. When editing agent/skill prose, be maximally succinct —
 every token counts.
-
-imp's git history was squashed to a single `imp: initial commit`; the complete
-pre-squash history lives in a separate clone at `~/imp-orig`. For any git
-archaeology — resolving a commit SHA from a bug report, tracing when a prompt
-or partial changed — run git there (e.g. `git -C ~/imp-orig log -S<string> --
-<path>`), since those commits are unreachable in the working checkout.
