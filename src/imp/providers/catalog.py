@@ -324,10 +324,15 @@ MODEL_PRICES: dict[str, ModelPrices] = {
     "opus": ModelPrices(4.00, 20.00, 0.20, 8.00),
     "sonnet": ModelPrices(2.00, 10.00, 0.10, 4.00),
     "haiku": ModelPrices(0.10, 0.50, 0.01, 0.20, _HAIKU_5_5_LONG_CONTEXT),
-    # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
-    # plain input rate everywhere else. Sol's rate is promotional through
-    # 2026-11-21.
+    # OpenAI: cache write is 1.25x input (the 30-min TTL) on the GPT-6 family,
+    # Astra included, and on 5.6; the plain input rate everywhere else. 5.6
+    # Sol's rate is promotional through 2026-11-21. Sources:
+    # developers.openai.com/api/docs/pricing and the per-model pages (fetched
+    # 2026-11-01).
     "gpt-6-astra": ModelPrices(10.00, 50.00, 1.00, 12.50, _OPENAI_LONG_CONTEXT),
+    "gpt-6.1-sol": ModelPrices(2.00, 10.00, 0.10, 2.50, _OPENAI_LONG_CONTEXT),
+    "gpt-6.1-terra": ModelPrices(1.00, 5.00, 0.05, 1.25, _OPENAI_LONG_CONTEXT),
+    "gpt-6-luna": ModelPrices(0.10, 0.50, 0.01, 0.125, _OPENAI_LONG_CONTEXT),
     "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, _OPENAI_LONG_CONTEXT),
     "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, _OPENAI_LONG_CONTEXT),
     "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, _OPENAI_LONG_CONTEXT),
