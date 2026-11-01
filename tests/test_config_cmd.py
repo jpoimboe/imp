@@ -62,7 +62,7 @@ def test_render_shows_sol_as_codex_high_provider_default(
         for line in out.getvalue().splitlines()
         if line.strip().startswith("high codex ")
     )
-    assert row.split()[:3] == ["high", "codex", "gpt-5.6-sol"]
+    assert row.split()[:3] == ["high", "codex", "gpt-6.1-sol"]
     assert row.endswith("[provider default]")
 
 

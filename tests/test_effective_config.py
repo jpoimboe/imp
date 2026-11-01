@@ -28,10 +28,10 @@ def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     eff = load_effective_config()
     cfg = eff.config
-    assert cfg.tiers["low"]["codex"] == "gpt-5.6-luna"
-    assert cfg.tiers["medium"]["codex"] == "gpt-5.6-terra"
-    assert cfg.tiers["high"]["codex"] == "gpt-5.6-sol"
-    assert cfg.tiers["high"]["openai"] == "gpt-5.6-sol"
+    assert cfg.tiers["low"]["codex"] == "gpt-6-luna"
+    assert cfg.tiers["medium"]["codex"] == "gpt-6.1-terra"
+    assert cfg.tiers["high"]["codex"] == "gpt-6.1-sol"
+    assert cfg.tiers["high"]["openai"] == "gpt-6.1-sol"
     assert eff.provenance[("tiers", "high", "codex")].file == FLOOR_SRC.file
 
 
@@ -92,7 +92,7 @@ def test_project_leaf_override_is_additive_over_floor(
     eff = load_effective_config(control_root=proj)
     # Overridden leaf comes from project; sibling vendor stays at the floor.
     assert eff.config.tiers["high"]["anthropic"] == "opus-pinned"
-    assert eff.config.tiers["high"]["openai"] == "gpt-5.6-sol"
+    assert eff.config.tiers["high"]["openai"] == "gpt-6.1-sol"
     assert eff.provenance[("tiers", "high", "anthropic")].file == proj / "imp" / "config.yaml"
     assert "provider code" in str(eff.provenance[("tiers", "high", "openai")].file)
 
