@@ -16,9 +16,9 @@ _SCENE = Path(snap_imp_ui.__file__).resolve().parent / "capture_imp_ui.py"
 _HOURS_ELAPSED = re.compile(r"\b\d+h \d+m\b")
 
 _POSITION_ROW = (
-    "samo71 · JSON output for imp list · implementation phase · "
-    "plan 1/3 · task 1/3 · claude-opus-5[1m] · ██░░░░░░░░ 43k/200k")
-_SUBAGENT_ROW = "↳ coder · 47s · claude-sonnet-4-6 · █░░░░░░░░░ 17k/160k"
+    "seru99 · JSON output for imp list · implementation phase · "
+    "plan 1/1 · task 3/4 · claude-opus-5-5 · ██░░░░░░░░ 45k/200k")
+_SUBAGENT_ROW = "↳ coder · 24s · claude-sonnet-5-5 · █░░░░░░░░░ 28k/200k"
 
 
 def test_hero_capture_is_byte_identical_across_runs(tmp_path: Path) -> None:
@@ -46,6 +46,6 @@ def test_stream_live_scene_exits_cleanly_leaving_the_footer_on_screen() -> None:
     assert code == 0, "\n".join(rows)
     assert rows[-2].rstrip() == _POSITION_ROW
     assert rows[-1].rstrip() == _SUBAGENT_ROW
-    # samo71 summed 2h 6m of step work; an hours-long elapsed anywhere on screen
+    # seru99 summed 34m of step work; an hours-long elapsed anywhere on screen
     # means the journal was measured against today instead of the pinned instant.
     assert not [row for row in rows if _HOURS_ELAPSED.search(row)], "\n".join(rows)

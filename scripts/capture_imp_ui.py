@@ -10,7 +10,7 @@ it settle, and snapshots the rendered screen with impty.render.
 
 No agent, no billing, no repo mutation: streaming scenes replay a *recorded*
 event journal (`stream` replays tests/fixtures/cc_open_by_asking_full.jsonl.gz;
-`stream-live` replays docs/examples/samo71.jsonl.gz). This exists to iterate on
+`stream-live` replays docs/examples/seru99.jsonl.gz). This exists to iterate on
 imp's *look*, not its behavior.
 
 Usage (run from repo root):
@@ -22,7 +22,7 @@ Usage (run from repo root):
 
 Scenes that wait for input (prompt) block until driven; replay scenes print and
 exit. `--color/--no-color` toggles ANSI (default: on). `stream-live` replays
-docs/examples/samo71.jsonl.gz on a tty with the status bar live, always in color
+docs/examples/seru99.jsonl.gz on a tty with the status bar live, always in color
 (`--no-color` does not apply to it), and leaves the final footer on screen.
 """
 
@@ -44,15 +44,16 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent.parent
 _RECORDED = _REPO / "tests" / "fixtures" / "cc_open_by_asking_full.jsonl.gz"
 
-# Regenerate: imp events samo71 --all --json | jq -c '.[]' | gzip; re-redact event 256
-DEMO_JOURNAL = _REPO / "docs" / "examples" / "samo71.jsonl.gz"
+# Regenerate: imp events seru99 --all --json | jq -c '.[]' | gzip -n; then drop any
+# setup-only warning event, renumber ordinals, and scan for private titles/paths
+DEMO_JOURNAL = _REPO / "docs" / "examples" / "seru99.jsonl.gz"
 
-# Hero cut point: plan 1/3 · task 1/3, with the coder subagent mid-flight.
-HERO_LIMIT = 930
+# Hero cut point: plan 1/1 · task 3/4, with the coder subagent mid-flight.
+HERO_LIMIT = 888
 HERO_WIDTH = 124
 
-# Every clock the live footer reads is pointed at this instant (samo71's merge).
-_PINNED_INSTANT = datetime(2026, 9, 18, 5, 38, 3, tzinfo=UTC)
+# Every clock the live footer reads is pointed at this instant (seru99's merge).
+_PINNED_INSTANT = datetime(2026, 11, 1, 0, 39, 36, tzinfo=UTC)
 _PINNED_FRAME = 0
 _PINNED_SEED = 0
 

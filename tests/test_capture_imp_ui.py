@@ -74,15 +74,15 @@ def test_shift_moves_quota_reset_epochs_by_the_same_delta() -> None:
     assert ([w["resets_at"] for w in moved["payload"]["windows"]]
             == [w["resets_at"] + delta for w in source["payload"]["windows"]])
     # The caller's events are left untouched: the journal is read once per replay.
-    assert source["payload"]["windows"][0]["resets_at"] == 1789714200
+    assert source["payload"]["windows"][0]["resets_at"] == 1794034800
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 _HERO_POSITION_ROW = (
-    "samo71 · JSON output for imp list · implementation phase · "
-    "plan 1/3 · task 1/3 · claude-opus-5[1m] · ██░░░░░░░░ 43k/200k")
-_HERO_SUBAGENT_ROW = "↳ coder · 47s · claude-sonnet-4-6 · █░░░░░░░░░ 17k/160k"
+    "seru99 · JSON output for imp list · implementation phase · "
+    "plan 1/1 · task 3/4 · claude-opus-5-5 · ██░░░░░░░░ 45k/200k")
+_HERO_SUBAGENT_ROW = "↳ coder · 24s · claude-sonnet-5-5 · █░░░░░░░░░ 28k/200k"
 
 
 def _screen_rows(text: str) -> list[str]:

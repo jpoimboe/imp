@@ -56,9 +56,9 @@ appearance without a live run (its human companion is `scripts/snap_imp_ui.py`).
 This is the imp-specific home for that knowledge; the project-agnostic manual for
 driving *any* terminal program is the `imp-driving-terminal-uis` skill. Its web
 sibling — rendering and driving a page in a browser — is `imp-driving-web-uis`.
-The README's example blocks and the `docs/examples/` transcripts (`samo71.md`,
-`haje70.md`) are hand-maintained snapshots of real runs — the committed demo
-journal (`docs/examples/samo71.jsonl.gz`) is a frozen artifact, no longer
+The README's example blocks and the `docs/examples/` transcripts (`seru99.md`,
+`vida80.md`) are hand-maintained snapshots of real runs — the committed demo
+journal (`docs/examples/seru99.jsonl.gz`) is a frozen artifact, no longer
 replayed to regenerate them.
 
 ## Trailing output spacing

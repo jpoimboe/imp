@@ -19,7 +19,7 @@ Scenes:
   stream   Replay the recorded run journal (tests/fixtures/...jsonl.gz) through
            the real LiveDriver. Rendered in-process — no pty, no agent, no cost.
            --limit N ends the slice on a chosen state (small N = header).
-  stream-live  Replay the committed demo journal (docs/examples/samo71.jsonl.gz)
+  stream-live  Replay the committed demo journal (docs/examples/seru99.jsonl.gz)
            on a real pty with the live status bar drawn, then snapshot the
            screen. Deterministic: clocks, spinner and width are all pinned.
   prompt   The real interactive input field (prompt_toolkit), driven on a pty.

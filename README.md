@@ -50,108 +50,121 @@ imp builds itself: 875 imp quests merged since May 2026.
 
 ## Examples
 
-With the [default workflow](#default-workflow), a quest typically takes a
-couple of hours (of imp's time, not yours) and ~3% of a weekly Claude Max 20x
-quota.  See [Token costs](#token-costs) below.
+With the [default workflow](#default-workflow), a quest typically takes under
+an hour (of imp's time, not yours) and ~1% of a weekly Claude Max 20x quota.
+See [Token costs](#token-costs) below.
 
 Here are some recent real-world examples of imp running on its own code base.
 
 ### Adding a feature
 
-*[Edited for brevity.  Full transcript [here](docs/examples/samo71.md).]*
+*[Edited for brevity.  Full transcript [here](docs/examples/seru99.md).]*
 
 ```console
 $ imp new "add a --json flag to imp list"
-samo71 · new
+seru99 · new
 
   [imp splash screen]
 
 > add a --json flag to imp list
 
-  [3 explorer subagents map the code in parallel]
+  [2 explorer subagents map imp list and the existing --json outputs in parallel]
 
-• Named this quest `JSON output for imp list`.  Here's what I found and what
-  I propose.
+• I'm calling this JSON output for imp list. Here's how the command works today:
 
-  Today imp list gathers rows in src/imp/cli/main.py:3383 (_overview_lines)
-  and :3420 (_filtered_overview_lines), each of which loads data *and*
-  immediately renders it through quest_row.format_quest_line.  The underlying
-  data is already clean, so adding --json is mostly a matter of splitting
-  gathering from rendering, then serializing the rows instead of formatting
-  them.
+   • imp list builds its rows itself (_cmd_list, src/imp/cli/main.py:2086) and
+     prints three sections: in-flight, backlog, and history.
+   • The filter flags (--active, --merged, --since, --all, and so on) all go
+     through the same row builders.
+   • imp show --json and imp events --json both use plain json.dumps(obj,
+     indent=2), sent through the pager with no trailing blank line.
+   • imp events search --json already labels each hit with a zone, using active
+     / backlog / archive.
 
-  The one real design question is the shape.  imp already has three --json
-  paths to be consistent with: imp show --json emits one object with machine-valued
-  status (merge_blocked, not "merge blocked"), and imp events search --json
-  emits a flat array where each hit carries a zone of active / backlog /
-  archive.
-
-  My recommendation: a flat, zone-tagged array, in exactly the board's
-  display order (in-flight first, then backlog, then history):
+  The first decision is the overall shape. My recommendation is a flat JSON
+  array, one object per quest, each tagged with a zone. It keeps the same order
+  as the text board, and the filters only change which rows appear:
 
   [
-    {
-      "id": "fego87",
-      "zone": "active",
-      "title": "README that shows imp working",
-      "status": "waiting",
-      "step": {"phase": "review", "name": "spec-review"},
-      "created": "2026-09-17T08:41:02+00:00",
-      "last_activity": "2026-09-17T14:35:11+00:00"
-    },
+    {"id": "seru99", "title": "JSON output for imp list", "zone": "active",
+     "status": "running", "step": {"phase": "build", "name": "implement"},
+     "created": "2026-10-31T09:12:03+00:00", [...]},
+    {"id": "k3m9qa", "title": "Telegram retry", "zone": "backlog",
+     "status": "backlog", "readiness": "blocked", "step": null, ...},
     [...]
   ]
 
-  The alternative is a grouped object ({"active": [...], "backlog": [...],
-  "archive": [...]}), which reads a bit more like the board but forces
-  consumers to iterate three keys [...]
+  The alternative is an object keyed by section, like {"active": [...],
+  "backlog": [...], "history": [...]}. That matches the on-screen layout more
+  closely. The cost is that scripts have to join the sections back together to
+  filter by status or date, and a filter like --merged would leave empty keys
+  behind. I'll get to the exact field list once the shape is settled.
 
-  Two things I'd fold in alongside: extracting the shared row-gathering out of
-  _overview_lines / _filtered_overview_lines so text and JSON read from one
-  source (otherwise the two formats will drift), and updating the places that
-  document the command — the imp-knowledge skill's imp list bullet,
-  docs/guide/introspection.md:45, and the README's command block, all of which
-  currently list the flag set without --json.
-
-  Does the flat zone-tagged array look right to you?
+  Should we go with the flat array tagged by zone?
 
 > ok
 
-• Settled, then. To read it back in one piece before I set it up:
+• The flat array it is. Next is the exact set of fields on each object. I'd keep
+  each row to what imp list already knows without opening every quest's event
+  log. [...]
 
-  Goal — imp list gains a --json flag that emits the board as structured data
-  for agents and scripts.
+   key            type                  value
+   ────────────────────────────────────────────────────────────────────────────
+   id             str                   quest id
+   title          str | null            the title, or null when blank
+   zone           str                   active, backlog, or archive
+   status         str                   the status word with no display
+                                        formatting [...]
+   step           {phase, name} | null  only for in-flight quests that have a
+                                        step; phase may itself be null
+   readiness      str | null            ready or blocked for backlog items,
+                                        null for everything else
+   created        ISO str | null        creation time
+   last_activity  ISO str | null        time of the last event (what the
+                                        UPDATED column shows)
 
-  Scope — the flag on the list parser; a JSON branch in _cmd_list; extraction
-  of the shared row-gathering so both formats read one source; updates to the
-  imp-knowledge skill, docs/guide/introspection.md, and the README.
-
-  Decisions — flat array in board order, zone-tagged active / backlog /
-  archive; raw ISO timestamps rather than relative ages; title null when
-  unnamed, with the full opening prompt in intent; step present only on
-  in-flight entries that have one; machine status values kept underscored;
-  all existing filters compose unchanged; no matches emits [].
-
-  Acceptance — the output parses, carries the right entry per zone with the
-  fields above, stays free of ANSI escapes, composes with --all / --backlog /
-  --since, returns [] with exit 0 on an empty board, and leaves today's text
-  output byte-identical.
-
-  Ready for me to set this up and start building? Declining sets it aside, and
-  you can pick it back up later with imp resume samo71.
+  Does that field list work?
 
 > ok
 
-• I'll fork the worktree and write the spec.
+• That settles the fields. What's left is how --json behaves at the edges, and
+  the exact wording of the help text and docs:
 
-  [spec]                       ✓  (2 rounds of review)
-  [plans 1-3]                  ✓  (4 rounds of review)
+  [behavior with filters and empty boards, flag help, doc updates]
+
+  Two small cleanups I noticed nearby
+
+   1 The --since help mentions this-week and this-month, but its error message
+     only lists today and h/d/w/m/y. I'd change the error to [...] list every
+     accepted spec and update the test that pins the old wording.
+   2 The imp list bullet in introspection.md says the board is "active in-flight
+     and draft quests, plus the backlog". It leaves out the completed section
+     that the skill doc mentions. I'd bring it in line with the skill's wording.
+
+  Does all of that sound right, cleanups included?
+
+> ok
+
+• Here's the full design in one place:
+
+  [goal, shape, behavior, docs and copy, cleanups, tests]
+
+  Shall I start building it? If you'd rather hold off, I'll set it aside and you
+  can pick it up later with imp resume seru99.
+
+> ok
+
+• I wrote the spec and set up a separate working copy for the build. The change
+  now goes through the full design review, then planning, building and testing.
+
+  [spec]                       ✓  (1 round of review)
+  [plan]                       ✓  (1 round of review)
   [implementation]             ✓  (each commit reviewed individually)
   [full test suite]            ✓
   [final code review]          ✓
   [integration]                ✓
 
-Merged samo71 into master.
+Merged seru99 into master.
 ```
 Mid-run screenshot:
 
@@ -160,142 +173,171 @@ Mid-run screenshot:
 </p>
 
 <p align="center">
-  <em>Mid-flight: plan 1 of 3, task 1 of 3, with a <code>coder</code> subagent working under a context budget.</em>
+  <em>Mid-flight: task 3 of 4, with a <code>coder</code> subagent working under a context budget.</em>
 </p>
 
+
 Stats:
-- 2h 6m runtime
-- human input: 1 opening prompt, 2 approvals
-- 10 commits, 9 files, +641/-55
-- 26 new tests
-- 2.8% of a weekly Claude Max 20x quota (~0.7% of monthly total)
+- 34m runtime
+- human input: 1 opening prompt, 4 approvals
+- 5 commits, 9 files, +341/-38
+- 14 new tests
+- 0.9% of a weekly Claude Max 20x quota
 
 It produced the following logically sequenced, independently reviewable
 commits:
 
 ```console
-$ git log --oneline --reverse --no-merges --grep='Quest: samo71'
-51a98d03 cli: share one history-selection expression
-9ca92310 cli: extract the overview row gatherer
-390bf01c cli: load the unfiltered board through the gatherer
-7671137b cli: encode board rows as JSON entries
-e449e01d cli: add imp list --json
-d6102f9a cli: emit [] from imp list's no-control-root exit
-944a7e72 skills: name imp list --json in the knowledge cheat-sheet
-cb997ad5 docs: document imp list --json in the guide and README
-e54d5b3a cli: drop the dead _history_rows shim
-20b0569f tests: wrap the retargeted history-disposition calls
+$ git log --oneline --reverse --no-merges --grep='Quest: seru99'
+72c65ca6 list: name every --since keyword in the error
+b6291026 list: split the board gather stage from text rendering
+0e2473cb list: add --json
+c9d433fe docs: document imp list --json
+09e59f13 docs: list completed quests in the README imp list example
 ```
 
-Note that only **three of the ten commits implement the actual feature**:
+Note that only **one of the five commits implements the actual feature**:
 
 ```console
-7671137b cli: encode board rows as JSON entries
-e449e01d cli: add imp list --json
-d6102f9a cli: emit [] from imp list's no-control-root exit
+0e2473cb list: add --json
 ```
 
-Five commits are **refactorings and cleanups**:
+It's preceded by a **refactoring** that splits gathering the board's rows from
+rendering them, so the text and JSON output read from one source, and a
+**cleanup** of an error message it noticed along the way:
 
 ```console
-51a98d03 cli: share one history-selection expression
-9ca92310 cli: extract the overview row gatherer
-390bf01c cli: load the unfiltered board through the gatherer
-e54d5b3a cli: drop the dead _history_rows shim
-20b0569f tests: wrap the retargeted history-disposition calls
+72c65ca6 list: name every --since keyword in the error
+b6291026 list: split the board gather stage from text rendering
 ```
 
-And the remaining two are **proactive documentation updates**:
+And the remaining two are **proactive documentation updates**, one of them a
+stale README example that a reviewer flagged mid-build:
 
 ```console
-944a7e72 skills: name imp list --json in the knowledge cheat-sheet
-cb997ad5 docs: document imp list --json in the guide and README
+c9d433fe docs: document imp list --json
+09e59f13 docs: list completed quests in the README imp list example
 ```
 
-Full quest log and quota summary: [`docs/examples/samo71.md`](docs/examples/samo71.md)
+Full quest log and quota summary: [`docs/examples/seru99.md`](docs/examples/seru99.md)
 
 ### Fixing a bug
 
-*[Edited for brevity.  Full transcript [here](docs/examples/haje70.md).]*
+*[Edited for brevity.  Full transcript [here](docs/examples/vida80.md).]*
 
 ```console
 $ imp new "why did kelu74 fail"
-haje70 · new
+vida80 · new
 
 > why did kelu74 fail
 
-  [4 explorer subagents read kelu74's event log and map the provider stack]
+  [reads kelu74's event log and the provider code]
 
-• I've named this `Fix codex turn-boundary teardown race`.  Here's the design.
+• kelu74 ("Document final merge quest trailers") didn't fail because of
+  anything in its own work. It hit a crash inside imp's Codex provider code and
+  paused itself with the reason "unknown".
 
-  ## Root cause, confirmed
+  [...]
 
-  A prior quest (nehe62, merged 2026-07-21, "Fix pending-task warning from
-  abandoned provider generators") established the discipline for this exact
-  hazard: every place that iterates a provider stream wraps it in
-  contextlib.aclosing, so teardown cascades synchronously instead of being
-  abandoned to garbage collection.  It wrapped the sites that existed then.
+  imp started a new Codex turn to deliver that reminder. 17 ms later, before the
+  model could answer, a bare Python assert failed inside imp. The logged error
+  is AssertionError with an empty message: "unclassified provider error: ".
 
-  src/imp/agents/agent_loop.py was created the *next day*, and the codex
-  session was later folded onto it.  Its `async for item in session.events():`
-  at line 41 is the one iteration site that never got the wrap — and it's the
-  only caller of session.events() in the tree.  Its `break` at line 62 abandons
-  the whole chain mid-yield, so the codex process's teardown is deferred to a
-  GC-scheduled callback.  When the next turn spawns before that lands,
-  publish() finds the slot still occupied and the bare assert fires.
+  [...]
 
-  [proposes the fix, plus a traceback detail so the next unclassified
-   provider error is diagnosable from the event log alone]
+  A fix would have two parts: reproduce the crash with a throwaway test that
+  re-prompts a Codex step and fix the check that fires, and include the
+  traceback in "unknown" error events. Want me to scope a fix covering both?
 
 > ok
 
-  [spec]                       ✓  (4 rounds of review)
-  [plans 1-2]                  ✓  (5 rounds of review)
+• I'll call this "Fix Codex re-prompt crash". Next I'll run two things in
+  parallel: a throwaway reproduction to find which check actually fires, and a
+  code map of how "unknown" errors are recorded and shown.
+
+  spiker · claude-opus-5-5 · 8m 11s
+
+  explorer · claude-sonnet-5-5 · 1m 4s
+
+• The reproduction pinned it down. The check that fires is
+  src/imp/providers/codex_exec.py:132. When a Codex turn ends, imp exits its
+  event loops with a plain break, which leaves the stream generators open. So
+  the cleanup that kills and unregisters the old Codex process only runs later,
+  whenever Python's garbage collector gets around to closing them. If imp
+  re-prompts the agent right away, as it does for the "you forgot to finish"
+  reminder, the new Codex process registers while the old one is still held,
+  and the check fails. [...] The reproduction failed 3 of 3 runs.
+
+  A fix that passed the reproduction 3 of 3 runs closes the generators
+  explicitly, in two places:
+
+   • src/imp/agents/agent_loop.py: wrap session.events() in
+     contextlib.aclosing.
+   • src/imp/providers/observe_session.py: wrap events()'s self._receive() the
+     same way.
+
+  [...]
+
+  Should the crash fix be the explicit close in both places, with the race
+  reproduced as the regression test?
+
+> ok
+
+  [proposes capturing a traceback on "unknown" provider errors and showing it
+   under imp log --full; then a recap of the whole design]
+
+> ok
+> ok
+> ok
+
+  [spec]                       ✓  (2 rounds of review)
+  [plans 1-2]                  ✓  (1 round of review each)
   [implementation]             ✓
   [full test suite]            ✓
   [final code review]          ✓
   [integration]                ✓
 
-Merged haje70 into master.
+Merged vida80 into master.
 ```
 
 Stats:
-- 2h 12m runtime
-- human input: 1 opening prompt, 1 approval
-- 4 commits, 9 files, +266/-91
-- 5 new regression tests
-- 3.0% of a weekly Claude Max 20x quota
+- 1h 3m runtime
+- human input: 1 opening prompt, 5 approvals
+- 3 commits, 15 files, +325/-85
+- 9 new tests, including a regression test that reproduces the crash against a
+  fake codex executable
+- 0.9% of a weekly Claude Max 20x quota
 
-It debugged the issue and then (after getting the user's approval) produced the
-following logically sequenced, independently reviewable commits:
-
-```console
-$ git log --oneline --reverse --no-merges --grep='Quest: haje70'
-dde6ebcf agent_loop: close the provider event stream at the agent-loop turn boundary
-73595da4 observe_session: close _receive on every exit path from events()
-d04c527e fix: make an unclassified provider error legible in the event log
-114fea1e loop_items: tighten Session.events() return type to AsyncGenerator
-```
-
-It fixed the race in the first two commits:
+It debugged the issue, reproduced it with a throwaway spike, and then (after
+getting the user's approval) produced the following logically sequenced,
+independently reviewable commits:
 
 ```console
-dde6ebcf agent_loop: close the provider event stream at the agent-loop turn boundary
-73595da4 observe_session: close _receive on every exit path from events()
+$ git log --oneline --reverse --no-merges --grep='Quest: vida80'
+62b972f7 agents: close per-turn event generators before re-prompting
+93be0593 providers: record a traceback tail on unknown provider errors
+1b66a556 cli: show error tracebacks in imp log --full
 ```
 
-Then it **proactively improved error reporting output** for future provider
-errors by adding a traceback and crash site to the event log:
+It fixed the crash in the first commit:
 
 ```console
-d04c527e fix: make an unclassified provider error legible in the event log
+62b972f7 agents: close per-turn event generators before re-prompting
 ```
 
-Full quest log and quota summary: [`docs/examples/haje70.md`](docs/examples/haje70.md)
+Then it **proactively improved error reporting** so the next unclassified
+provider error can be traced from the log alone:
+
+```console
+93be0593 providers: record a traceback tail on unknown provider errors
+1b66a556 cli: show error tracebacks in imp log --full
+```
+
+Full quest log and quota summary: [`docs/examples/vida80.md`](docs/examples/vida80.md)
 
 ## Token costs
 
-Both of the above [examples](#examples) took 2+ hours of clock time.  The
+The above [examples](#examples) took 30-60 minutes of clock time.  The
 [default workflow](#default-workflow) can be quite a bit more heavyweight than
 a typical Claude session.  Most of the time and tokens go towards design and
 planning (through multiple rounds of review), before any code is written.  That
@@ -305,11 +347,11 @@ to meet the user's expectations, with fewer "surprises".
 Quality isn't cheap.  When using the default workflow, **a Claude Max (or
 ChatGPT Pro) subscription is recommended.**  Subscriptions are *much* cheaper
 per token than API billing.  With Anthropic API billing, the `--json` feature
-above would have cost ~$44, and the bug fix (including debugging) would have
-cost ~$49.
+above would have cost ~$9, and the bug fix (including debugging) would have
+cost ~$15.
 
-The example runs each cost about ~3% of my weekly Claude Max 20x window.  That
-means *roughly* 30 quests per week for a single subscription.
+The example runs each cost about ~1% of my weekly Claude Max 20x window.  That
+means *roughly* 100 quests per week for a single subscription.
 
 Multiple quests can run in parallel on the same project.  I often start 3-5
 quests at the same time, batching my "human input", and then just let them run
@@ -478,7 +520,7 @@ jiro48  Restore archived-row titles and intents under the sa…  backlog   36d
   … 15 rows elided …
 
 completed:
-samo71  JSON output for imp list                               merged    2h
+seru99  JSON output for imp list                               merged    2h
 gepa93  Wire the completion nudge into codex live tests        merged    10h
 sobi11  Adopt filelock 4.0                                     merged    10h
 vuka12  Cut redundant review ceremony                          merged    10h
