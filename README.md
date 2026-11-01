@@ -51,7 +51,7 @@ imp builds itself: 875 imp quests merged since May 2026.
 ## Examples
 
 With the [default workflow](#default-workflow), a quest typically takes under
-an hour (of imp's time, not yours) and ~1% of a weekly Claude Max 20x quota.
+an hour (of imp's time, not yours) and ~1% of a weekly Claude Ultra quota.
 See [Token costs](#token-costs) below.
 
 Here are some recent real-world examples of imp running on its own code base.
@@ -182,7 +182,7 @@ Stats:
 - human input: 1 opening prompt, 4 approvals
 - 5 commits, 9 files, +341/-38
 - 14 new tests
-- 0.9% of a weekly Claude Max 20x quota
+- 0.9% of a weekly Claude Ultra quota
 
 It produced the following logically sequenced, independently reviewable
 commits:
@@ -306,7 +306,7 @@ Stats:
 - 3 commits, 15 files, +325/-85
 - 9 new tests, including a regression test that reproduces the crash against a
   fake codex executable
-- 0.9% of a weekly Claude Max 20x quota
+- 0.9% of a weekly Claude Ultra quota
 
 It debugged the issue, reproduced it with a throwaway spike, and then (after
 getting the user's approval) produced the following logically sequenced,
@@ -344,13 +344,13 @@ planning (through multiple rounds of review), before any code is written.  That
 up-front effort makes the code less buggy, more maintainable, and more likely
 to meet the user's expectations, with fewer "surprises".
 
-Quality isn't cheap.  When using the default workflow, **a Claude Max (or
-ChatGPT Pro) subscription is recommended.**  Subscriptions are *much* cheaper
-per token than API billing.  With Anthropic API billing, the `--json` feature
-above would have cost ~$9, and the bug fix (including debugging) would have
-cost ~$15.
+Quality isn't cheap.  When using the default workflow, **a Claude Max or Ultra
+(or ChatGPT Pro) subscription is recommended.**  Subscriptions are *much*
+cheaper per token than API billing.  With Anthropic API billing, the `--json`
+feature above would have cost ~$9, and the bug fix (including debugging)
+would have cost ~$15.
 
-The example runs each cost about ~1% of my weekly Claude Max 20x window.  That
+The example runs each cost about ~1% of my weekly Claude Ultra window.  That
 means *roughly* 100 quests per week for a single subscription.
 
 Multiple quests can run in parallel on the same project.  I often start 3-5
