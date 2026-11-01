@@ -21,7 +21,7 @@ def _codex_turn() -> list[dict[str, Any]]:
     # the patch row carrying the turn's billing sum plus the rollout reading.
     return [
         {"type": "agent_message", "agent_id": AID,
-         "payload": {"provider": "codex", "model": "gpt-5.6-sol",
+         "payload": {"provider": "codex", "model": "gpt-6.1-sol",
                      "stop_reason": "end_turn", "usage": {},
                      "raw": {"content": [{"type": "text", "text": "done"}]}}},
         {"type": "agent_message_usage_patch", "agent_id": AID,

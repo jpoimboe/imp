@@ -74,7 +74,7 @@ def test_the_re_resolve_discards_a_cross_vendor_step_override(
     # switch exists to escape — so replacement is wholesale, never a merge.
     quest, state, workflow = _seed(tmp_path)
     floor_availability({"claude", "codex"})
-    state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-5.6-sol")}
+    state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-6.1-sol")}
     quest.set_provider("codex")
 
     assert _reconcile_provider(

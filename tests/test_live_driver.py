@@ -1874,7 +1874,7 @@ def test_the_gauge_means_the_same_thing_across_models() -> None:
                             ("claude", "claude-opus-5-5"),
                             ("anthropic", "claude-opus-5-5"),
                             ("openai", "gpt-5"),
-                            ("openai", "gpt-5.6-terra"),
+                            ("openai", "gpt-6.1-terra"),
                             ("codex", "gpt-6-astra")):
         assert context_bar(provider, model, 150_000, color=False,
                            over_bg=False) == "████████░░ 150k/200k", model
@@ -2224,15 +2224,15 @@ def test_verb_step_label_push_emits_no_header() -> None:
 # AC 9(d): the step-row surface
 def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     from imp.cli.live_driver import compose_position_row
-    # Same model, same occupancy: with the provider gpt-5.6-sol's 200k limit
+    # Same model, same occupancy: with the provider gpt-6.1-sol's 200k limit
     # resolves and 315k overflows it (red, clamped full); without it nothing
     # resolves and no bar is drawn.
     banded = compose_position_row(
-        activity=nv.Activity(kind="agent", model="gpt-5.6-sol", provider="openai",
+        activity=nv.Activity(kind="agent", model="gpt-6.1-sol", provider="openai",
                              phase="implementation phase"),
         quest_id="abc", title="t", context_tokens=315_000, color=True, width=200)
     unresolved = compose_position_row(
-        activity=nv.Activity(kind="agent", model="gpt-5.6-sol", phase="implementation phase"),
+        activity=nv.Activity(kind="agent", model="gpt-6.1-sol", phase="implementation phase"),
         quest_id="abc", title="t", context_tokens=315_000, color=True, width=200)
     assert "\x1b[31m" in banded and "315k/200k" in banded
     assert "█" not in unresolved and "░" not in unresolved
@@ -2244,15 +2244,15 @@ def test_subagent_row_bands_identically_to_its_step_row() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="gpt-5.6-sol", provider="openai"))
+             model="gpt-6.1-sol", provider="openai"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
              name="sub_agent", input={"subagent_name": "coder"},
              timestamp="2026-01-01T00:00:00+00:00"))
     b.add(ev("c1", "step_context", agent_id="sub:t1", provider="openai",
-             model="gpt-5.6-sol", tools_schema=[], params={},
+             model="gpt-6.1-sol", tools_schema=[], params={},
              max_tool_calls=None))
     b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="openai",
-             model="gpt-5.6-sol", stop_reason="end_turn",
+             model="gpt-6.1-sol", stop_reason="end_turn",
              raw={"content": [{"type": "text", "text": "hi"}]},
              usage={"input_tokens": 315_000, "output_tokens": 5}))
     rows = compose_subagent_rows(b, color=True, width=200,
@@ -3971,11 +3971,11 @@ def test_context_bar_prefers_a_provider_reported_window() -> None:
     from imp.cli.live_driver import context_bar
     # A derated live window wins: 150k -> a 120k limit, against the catalog
     # 1.05M window's 200k. A reported 258400 still clamps to the 200k ceiling.
-    assert context_bar("codex", "gpt-5.6-sol", 100_000, context_window=150_000,
+    assert context_bar("codex", "gpt-6.1-sol", 100_000, context_window=150_000,
                        color=False, over_bg=False) == "████████░░ 100k/120k"
-    assert context_bar("codex", "gpt-5.6-sol", 100_000,
+    assert context_bar("codex", "gpt-6.1-sol", 100_000,
                        color=False, over_bg=False) == "█████░░░░░ 100k/200k"
-    assert context_bar("codex", "gpt-5.6-sol", 100_000, context_window=258_400,
+    assert context_bar("codex", "gpt-6.1-sol", 100_000, context_window=258_400,
                        color=False, over_bg=False) == "█████░░░░░ 100k/200k"
 
 
@@ -3986,9 +3986,9 @@ def test_compose_status_bar_uses_the_window_from_the_usage_patch(
     drv, _ = _driver()
     drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
-                    model="gpt-5.6-sol", provider="codex"))
+                    model="gpt-6.1-sol", provider="codex"))
     drv.on_event(ev("3", "agent_message", agent_id="step:p/s", provider="codex",
-                    model="gpt-5.6-sol", stop_reason="end_turn",
+                    model="gpt-6.1-sol", stop_reason="end_turn",
                     raw={"content": [{"type": "text", "text": "done"}]}, usage={}))
     drv.on_event({"type": "agent_message_usage_patch", "agent_id": "step:p/s",
                   "payload": {"usage": {"input_tokens": 82628},
@@ -4003,9 +4003,9 @@ def test_compose_status_bar_uses_the_window_from_the_usage_patch(
 def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
     from imp.cli.live_driver import compose_subagent_rows
     ctx = ev("c1", "step_context", agent_id="sub:t1", provider="codex",
-             model="gpt-5.6-sol", tools_schema=[], params={}, max_tool_calls=None)
+             model="gpt-6.1-sol", tools_schema=[], params={}, max_tool_calls=None)
     msg = ev("r1", "agent_message", agent_id="sub:t1", provider="codex",
-             model="gpt-5.6-sol", stop_reason="end_turn",
+             model="gpt-6.1-sol", stop_reason="end_turn",
              raw={"content": [{"type": "text", "text": "hi"}]}, usage={})
     patch = {"type": "agent_message_usage_patch", "agent_id": "sub:t1",
              "payload": {"usage": {"input_tokens": 82628},

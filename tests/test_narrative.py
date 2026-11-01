@@ -3399,10 +3399,10 @@ def test_current_activity_carries_the_step_provider_beside_the_model() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="gpt-5.6-sol", provider="openai"))
+             model="gpt-6.1-sol", provider="openai"))
     act = b.current_activity()
     assert act is not None
-    assert (act.provider, act.model) == ("openai", "gpt-5.6-sol")
+    assert (act.provider, act.model) == ("openai", "gpt-6.1-sol")
 
 
 def _open_three_level_builder() -> tuple[
@@ -3677,11 +3677,11 @@ def test_current_activity_keeps_the_provider_while_a_subagent_runs() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="gpt-5.6-sol", provider="openai"))
+             model="gpt-6.1-sol", provider="openai"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
              name="sub_agent", input={"subagent_name": "coder"},
              timestamp="2026-01-01T00:00:00+00:00"))
     act = b.current_activity()
     assert act is not None
     assert act.verb == "subagent(coder)"        # sanity: the subagent branch ran
-    assert (act.provider, act.model) == ("openai", "gpt-5.6-sol")
+    assert (act.provider, act.model) == ("openai", "gpt-6.1-sol")

@@ -85,13 +85,13 @@ def test_turn_completed_lands_the_rollout_reading(tmp_path: Path) -> None:
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna",
+                  state=state, provider="codex", model="gpt-6-luna",
                   codex_home=home)
     process_event(
         turn_completed(input_tokens=82_628, output_tokens=99,
                        cached_input_tokens=20_992, reasoning_output_tokens=70),
         elog=elog, agent_id="step:a", state=state, provider="codex",
-        model="gpt-5.6-luna", codex_home=home,
+        model="gpt-6-luna", codex_home=home,
         rollout_readings=_readings(22_389))
     payload = next(e for e in elog.read()
                    if e["type"] == "agent_message")["payload"]
@@ -111,13 +111,13 @@ def test_turn_completed_without_a_reading_omits_context_fields(
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna",
+                  state=state, provider="codex", model="gpt-6-luna",
                   codex_home=home)
     process_event(
         turn_completed(input_tokens=82_628, output_tokens=99,
                        cached_input_tokens=20_992),
         elog=elog, agent_id="step:a", state=state, provider="codex",
-        model="gpt-5.6-luna", codex_home=home)
+        model="gpt-6-luna", codex_home=home)
     payload = next(e for e in elog.read()
                    if e["type"] == "agent_message")["payload"]
     assert "context_tokens" not in payload
@@ -187,11 +187,11 @@ def _append_token_count(
 def _drive_turn(elog: InMemoryEventLog, state: dict[str, Any],
                 home: Path, readings: RolloutReadings) -> None:
     process_event(agent_message("working"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna",
+                  state=state, provider="codex", model="gpt-6-luna",
                   codex_home=home)
     process_event(turn_completed(input_tokens=10), elog=elog,
                   agent_id="step:a", state=state, provider="codex",
-                  model="gpt-5.6-luna", codex_home=home,
+                  model="gpt-6-luna", codex_home=home,
                   rollout_readings=readings)
 
 
@@ -220,10 +220,10 @@ def test_usage_less_turn_emits_no_canary_and_no_patch(tmp_path: Path) -> None:
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
     process_event(agent_message("working"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna",
+                  state=state, provider="codex", model="gpt-6-luna",
                   codex_home=home)
     process_event(_UsagelessTurn(), elog=elog, agent_id="step:a", state=state,
-                  provider="codex", model="gpt-5.6-luna", codex_home=home)
+                  provider="codex", model="gpt-6-luna", codex_home=home)
     assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
     payload = next(e for e in elog.read()
                    if e["type"] == "agent_message")["payload"]
@@ -559,11 +559,11 @@ async def test_unreadable_rollout_is_nonfatal_and_preserves_prior_quota(
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
                              "quota_reading": prior}
     process_event(agent_message("done"), elog=elog, agent_id="step:a", state=state,
-                  provider="codex", model="gpt-5.6-luna", codex_home=home)
+                  provider="codex", model="gpt-6-luna", codex_home=home)
     process_event(turn_completed(input_tokens=34_552, cached_input_tokens=26_112,
                                  cache_write_input_tokens=0, output_tokens=85,
                                  reasoning_output_tokens=29), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna", codex_home=home,
+                  state=state, provider="codex", model="gpt-6-luna", codex_home=home,
                   rollout_readings=readings)
 
     payload = next(event["payload"] for event in elog.read()

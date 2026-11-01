@@ -213,7 +213,7 @@ def test_run_query_quota_neighbours_ships_the_slice_not_the_log(
     _neighbour_home(tmp_path, monkeypatch, "fego87", [
         {"id": "am", "agent_id": "step:a",
          "timestamp": "2026-06-01T04:00:00+00:00", "type": "agent_message",
-         "payload": {"provider": "codex", "model": "gpt-5.6-sol",
+         "payload": {"provider": "codex", "model": "gpt-6.1-sol",
                      "auth_mode": "chatgpt", "usage": {"input_tokens": 7},
                      "stop_reason": None,
                      "raw": {"content": [{"type": "thinking",
@@ -239,9 +239,9 @@ def test_run_query_quota_neighbours_ships_the_slice_not_the_log(
     assert wire[0]["quest_id"] == "fego87"
     assert [u["id"] for u in wire[0]["usage"]] == ["am", "qr"]
     assert wire[0]["usage"][0]["payload"] == {
-        "provider": "codex", "model": "gpt-5.6-sol", "auth_mode": "chatgpt",
+        "provider": "codex", "model": "gpt-6.1-sol", "auth_mode": "chatgpt",
         "usage": {"input_tokens": 7}}
-    assert wire[0]["agents"] == {"step:a": ["codex", "gpt-5.6-sol", "chatgpt"]}
+    assert wire[0]["agents"] == {"step:a": ["codex", "gpt-6.1-sol", "chatgpt"]}
     assert [_neighbour_from_wire(d) for d in wire] == store.quota_neighbours(
         "samo71", _QUOTA_START, _QUOTA_END)
 

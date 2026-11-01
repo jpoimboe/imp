@@ -239,7 +239,7 @@ def test_events_compact_renders_context_occupancy_per_provider_shape(
 
 _CODEX_EVENTS = [
     {"type": "agent_message", "agent_id": "step:build/coder",
-     "payload": {"provider": "codex", "model": "gpt-5.6",
+     "payload": {"provider": "codex", "model": "gpt-6.1-sol",
                  "stop_reason": "end_turn",
                  "usage": {"input_tokens": 10, "output_tokens": 2},
                  "raw": {"content": [{"type": "text", "text": "done"}]}}},

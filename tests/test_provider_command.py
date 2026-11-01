@@ -88,7 +88,7 @@ def test_current_falls_back_to_the_resolved_map_not_a_step_override(
     floor_availability({"claude", "codex", "openai"})
     state.resolved_tiers = _tiers("claude")
     state.resolved_steps = {"w": ProviderModel(provider="openai",
-                                               model="gpt-5.6-terra")}
+                                               model="gpt-6.1-terra")}
     state.step = "w"
     state.save(quest.state_dir)
     assert current_provider_for(quest) == "claude"

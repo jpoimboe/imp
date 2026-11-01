@@ -926,7 +926,7 @@ async def test_thinking_tiers_request_high_reasoning_effort(
         resp_response(resp_function_call("c1", "complete_step",
                                          '{"status": "Success"}')),
     ])
-    runner = OpenAIAgentRunner(model_name="gpt-5.6-terra",
+    runner = OpenAIAgentRunner(model_name="gpt-6.1-terra",
                                client_factory=lambda: fake)
     async for _ in runner.run(dataclasses.replace(_inv(tmp_path), tier=tier)):
         pass
@@ -946,7 +946,7 @@ async def test_untiered_and_low_requests_omit_reasoning(
         resp_response(resp_function_call("c1", "complete_step",
                                          '{"status": "Success"}')),
     ])
-    runner = OpenAIAgentRunner(model_name="gpt-5.6-luna",
+    runner = OpenAIAgentRunner(model_name="gpt-6-luna",
                                client_factory=lambda: fake)
     async for _ in runner.run(dataclasses.replace(_inv(tmp_path), tier=tier)):
         pass

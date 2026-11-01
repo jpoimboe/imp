@@ -578,7 +578,7 @@ def test_usage_patch_overlays_ignore_a_patch_with_no_preceding_message() -> None
 
 def test_digest_line_overlay_renders_ctx_without_mutating_the_event() -> None:
     ev = _ev("m1", "agent_message", agent_id="step:build/coder",
-             provider="codex", model="gpt-5.6", stop_reason="end_turn",
+             provider="codex", model="gpt-6.1-sol", stop_reason="end_turn",
              usage={"input_tokens": 10, "output_tokens": 2},
              raw={"content": [{"type": "text", "text": "done"}]})
     line = ei.digest_line(

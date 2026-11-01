@@ -434,8 +434,8 @@ def test_the_soft_cap_field_and_checkpoint_cutoff_are_gone() -> None:
 
 
 def test_limits_for_resolves_exact_aliases_per_provider() -> None:
-    assert limits_for("openai", "gpt-5.6-sol") == OPENAI["gpt-5.6-sol"]
-    codex_sol = limits_for("codex", "gpt-5.6-sol")
+    assert limits_for("openai", "gpt-6.1-sol") == OPENAI["gpt-6.1-sol"]
+    codex_sol = limits_for("codex", "gpt-6.1-sol")
     assert codex_sol is not None
     assert codex_sol.window == 1_050_000
     bare = limits_for("openai", "gpt-5.6")
@@ -471,10 +471,10 @@ def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:
 
 
 def test_limits_for_unknown_provider_or_model_is_none() -> None:
-    assert limits_for("mystery", "gpt-5.6-sol") is None
+    assert limits_for("mystery", "gpt-6.1-sol") is None
     assert limits_for("openai", "some-unlisted-model") is None
     assert limits_for("openai", None) is None
-    assert limits_for(None, "gpt-5.6-sol") is None
+    assert limits_for(None, "gpt-6.1-sol") is None
 
 
 def test_limits_for_is_case_sensitive() -> None:

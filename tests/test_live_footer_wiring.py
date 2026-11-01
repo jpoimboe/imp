@@ -78,9 +78,9 @@ def _codex_events(*tail: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
         ev("2", "step_started", step="coder", kind="agent",
-           phase="implement phase", model="gpt-5.6-terra", provider="codex"),
+           phase="implement phase", model="gpt-6.1-terra", provider="codex"),
         ev("3", "agent_message", agent_id=_STEP, provider="codex",
-           model="gpt-5.6-terra", auth_mode="apikey", stop_reason="end_turn",
+           model="gpt-6.1-terra", auth_mode="apikey", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
         *tail,
     ]
@@ -90,7 +90,7 @@ def _subagent_events(*, auth_mode: str | None,
                      usage: dict[str, Any]) -> list[dict[str, Any]]:
     """A codex step that records its turn and then dispatches a subagent."""
     parent = ev("3", "agent_message", agent_id=_STEP, provider="codex",
-                model="gpt-5.6-terra", stop_reason="end_turn",
+                model="gpt-6.1-terra", stop_reason="end_turn",
                 raw={"content": [{"type": "text", "text": "dispatching"}]},
                 usage={})
     if auth_mode is not None:
@@ -103,7 +103,7 @@ def _subagent_events(*, auth_mode: str | None,
     return [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
         ev("2", "step_started", step="coder", kind="agent",
-           phase="implement phase", model="gpt-5.6-terra", provider="codex"),
+           phase="implement phase", model="gpt-6.1-terra", provider="codex"),
         parent,
         ev("q1", "quota_reading", agent_id=_STEP, **reading.to_payload()),
         _usage_patch(
@@ -115,10 +115,10 @@ def _subagent_events(*, auth_mode: str | None,
         ev("t1", "tool_call", agent_id=_STEP, id="blk-t1", name="sub_agent",
            input={"subagent_name": "coder"}),
         ev("c1", "step_context", agent_id="sub:t1", provider="codex",
-           model="gpt-5.6-terra", tools_schema=[], params={},
+           model="gpt-6.1-terra", tools_schema=[], params={},
            max_tool_calls=None),
         ev("r1", "agent_message", agent_id="sub:t1", provider="codex",
-           model="gpt-5.6-terra", stop_reason="end_turn",
+           model="gpt-6.1-terra", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
         _usage_patch(
             60_000,
@@ -237,11 +237,11 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
     started = [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
         ev("2", "step_started", step="a", kind="agent", phase="p1",
-           model="gpt-5.6-terra", provider="codex"),
+           model="gpt-6.1-terra", provider="codex"),
         # A step-level turn, so codex becomes the last-known provider (and states
         # no auth_mode, so its reading — not dollars — is what the row can show).
         ev("m1", "agent_message", agent_id="step:p1/a", provider="codex",
-           model="gpt-5.6-terra", stop_reason="end_turn",
+           model="gpt-6.1-terra", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
         ev("q1", "quota_reading", agent_id="step:p1/a",
            **codex_reading.to_payload()),
@@ -271,7 +271,7 @@ def test_codex_usage_patches_drive_parent_and_subagent_footer_rows() -> None:
 
     assert rows is not None and len(rows) == 4
     expected_parent = (
-        "t · gpt-5.6-terra · █░░░░░░░░░ 22k/200k"
+        "t · gpt-6.1-terra · █░░░░░░░░░ 22k/200k"
         + " " * 130
         + "codex · session 12% · week 7%"
     )
@@ -443,10 +443,10 @@ def test_a_subagent_provider_never_becomes_the_footers_fallback() -> None:
         ev("t1", "tool_call", agent_id=_STEP, id="blk-t1", name="sub_agent",
            input={"subagent_name": "coder"}),
         ev("c1", "step_context", agent_id="sub:t1", provider="codex",
-           model="gpt-5.6-terra", tools_schema=[], params={},
+           model="gpt-6.1-terra", tools_schema=[], params={},
            max_tool_calls=None),
         ev("r1", "agent_message", agent_id="sub:t1", provider="codex",
-           model="gpt-5.6-terra", stop_reason="end_turn",
+           model="gpt-6.1-terra", stop_reason="end_turn",
            raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
         auth_mode="subscription")
     assert _chrome_row(events).endswith("claude · " + _WINDOWS)

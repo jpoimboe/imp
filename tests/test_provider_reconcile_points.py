@@ -102,7 +102,7 @@ async def test_run_entry_discards_a_cross_vendor_step_override(
     floor_availability({"claude", "codex"}, factory=_recording([]))
     _pre_resolved(quest, "claude")
     state = State.load(quest.state_dir)
-    state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-5.6-sol")}
+    state.resolved_steps = {"w": ProviderModel(provider="openai", model="gpt-6.1-sol")}
     state.save(quest.state_dir)
     quest.set_provider("codex")
 
