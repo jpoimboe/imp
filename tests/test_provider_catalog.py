@@ -378,6 +378,43 @@ def test_astra_hands_off_at_200k_like_every_other_big_window() -> None:
         {"input_tokens": 200_000}, "openai", "gpt-6-astra") is True
 
 
+_GPT_6_SIZES = ("gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna")
+
+
+def test_gpt_6_sizes_share_astra_s_limits_on_openai_and_codex() -> None:
+    expected = ModelInfo(window=1_050_000, max_output_tokens=128_000)
+    for model in _GPT_6_SIZES:
+        assert OPENAI[model] == expected, model
+        for provider in ("openai", "codex"):
+            assert limits_for(provider, model) == expected, (provider, model)
+            assert limits_for(provider, f"{model}-2026-12-01") == expected, (provider, model)
+
+
+def test_gpt_6_sizes_hand_off_at_the_200k_ceiling() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+
+    for provider in ("openai", "codex"):
+        for model in _GPT_6_SIZES:
+            info = limits_for(provider, model)
+            assert info is not None, (provider, model)
+            assert handoff_limit(info.window) == 200_000, (provider, model)
+            assert context_threshold_crossed(
+                {"input_tokens": 199_999}, provider, model) is False
+            assert context_threshold_crossed(
+                {"input_tokens": 200_000}, provider, model) is True
+
+
+def test_gpt_6_sizes_follow_astra_and_lead_5_6_in_both_rosters() -> None:
+    # catalog_aliases returns table order and /model prints it, so placement IS
+    # display order: the 6.x family leads the 5.6 family it supersedes.
+    for provider in ("openai", "codex"):
+        aliases = catalog_aliases(provider)
+        astra = aliases.index("gpt-6-astra")
+        assert aliases[astra:astra + 4] == (
+            "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"), provider
+        assert astra + 4 <= aliases.index("gpt-5.6-sol"), provider
+
+
 def test_the_1m_anthropic_models_all_hand_off_at_the_200k_ceiling() -> None:
     # 0.8 * 1M is 800k, but the absolute ceiling binds first: every one of these
     # hands off at exactly 200k, on either provider.
