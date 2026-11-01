@@ -165,7 +165,7 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
         source_path=Path("a.md"), source=_SRC,
     )
 
-    model_name = "gpt-5.6-terra" if provider == "codex" else "claude-sonnet-4-6"
+    model_name = "gpt-6.1-terra" if provider == "codex" else "claude-sonnet-4-6"
 
     with tempfile.TemporaryDirectory() as _tmpdir:
         tmp_path = Path(_tmpdir)

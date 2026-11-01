@@ -25,7 +25,7 @@ _ENV_VAR = {sub: var for var, sub in PROVIDER_AUTH_ENV}
 _CREDS = {"claude": ".credentials.json", "codex": "auth.json"}
 _REFRESH = {"claude": ("claudeAiOauth", "refreshToken"), "codex": ("tokens", "refresh_token")}
 _MODULES = {"claude": claude_token_refresh, "codex": codex_token_refresh}
-_MODELS = {"claude": "claude-haiku-4-5-20251001", "codex": "gpt-5.6-luna"}
+_MODELS = {"claude": "claude-haiku-4-5-20251001", "codex": "gpt-6-luna"}
 _LOGIN = {"claude": "run `claude` and /login", "codex": "run `codex login`"}
 _MIN_TOKEN_LIFE_MS = 5 * 60 * 1000
 
