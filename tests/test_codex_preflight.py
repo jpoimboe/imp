@@ -30,6 +30,7 @@ def test_codex_model_under_chatgpt_fails_config(tmp_path: Path) -> None:
         preflight(model="gpt-5.5-codex", canonical_auth=canonical, env={})
     assert exc.value.category == "config"
     assert "codex" in str(exc.value).lower()
+    assert "Choose a non-codex model (e.g. gpt-6.1-sol)." in str(exc.value)
 
 
 def test_codex_model_under_apikey_also_fails_config(tmp_path: Path) -> None:

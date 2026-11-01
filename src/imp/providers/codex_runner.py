@@ -112,7 +112,7 @@ def preflight(
             "config",
             f"model {model!r} is a *-codex variant; codex provider refuses "
             "*-codex in both auth modes until it gets fail-closed obedience "
-            "validation. Choose a non-codex model (e.g. gpt-5.5).",
+            "validation. Choose a non-codex model (e.g. gpt-6.1-sol).",
         )
     # 2. Auth must exist.
     mode = detect_auth_mode(canonical_path=canonical_auth, env=env)
