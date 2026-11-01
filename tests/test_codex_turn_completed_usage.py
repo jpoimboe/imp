@@ -44,9 +44,9 @@ def _patched_usage(**turn: int) -> dict[str, Any]:
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6")
+                  state=state, provider="codex", model="gpt-6.1-sol")
     process_event(turn_completed(**turn), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6")
+                  state=state, provider="codex", model="gpt-6.1-sol")
     msgs = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(msgs) == 1
     return dict(msgs[0]["payload"]["usage"])
@@ -75,7 +75,7 @@ def test_cache_write_is_subtracted_from_fresh_input_exactly_once() -> None:
 
 
 def test_cache_write_tokens_reach_the_log_and_raise_the_priced_cost() -> None:
-    """gpt-5.6 bills cache writes at 1.25x input (5.00 vs 4.00 per million), so
+    """gpt-6.1-sol bills cache writes at 1.25x input (2.50 vs 2.00 per million), so
     moving 100 tokens out of fresh and into the cache-write bucket must cost
     MORE, not less. Both figures are hand-worked from the published rates."""
     with_write = _patched_usage(input_tokens=1000, output_tokens=500,
@@ -83,9 +83,9 @@ def test_cache_write_tokens_reach_the_log_and_raise_the_priced_cost() -> None:
                                 cache_write_input_tokens=100)
     without = _patched_usage(input_tokens=1000, output_tokens=500,
                              cached_input_tokens=600)
-    # 300*4.00 + 600*0.40 + 100*5.00 + 500*20.00 = 11_940 per million
-    assert cost_usd("gpt-5.6", _billing(with_write)) == pytest.approx(0.01194)
-    # 400*4.00 + 600*0.40 + 0 + 500*20.00 = 11_840 per million
-    assert cost_usd("gpt-5.6", _billing(without)) == pytest.approx(0.01184)
-    assert cost_usd("gpt-5.6", _billing(with_write)) > cost_usd(
-        "gpt-5.6", _billing(without))
+    # 300*2.00 + 600*0.10 + 100*2.50 + 500*10.00 = 5_910 per million
+    assert cost_usd("gpt-6.1-sol", _billing(with_write)) == pytest.approx(0.00591)
+    # 400*2.00 + 600*0.10 + 0 + 500*10.00 = 5_860 per million
+    assert cost_usd("gpt-6.1-sol", _billing(without)) == pytest.approx(0.00586)
+    assert cost_usd("gpt-6.1-sol", _billing(with_write)) > cost_usd(
+        "gpt-6.1-sol", _billing(without))
