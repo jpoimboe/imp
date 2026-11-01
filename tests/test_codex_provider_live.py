@@ -74,7 +74,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             tier=None,
         ),
         provider_name="codex",
-        model_name="gpt-5.6-luna",
+        model_name="gpt-6-luna",
         system_prompt=(
             'Reply by calling complete_step with word="banana". Do not call '
             "any other tools and do not write any files."
@@ -105,7 +105,7 @@ _ROUND_TRIP_ATTEMPTS = 5
 @pytest.mark.anyio
 async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    runner = CodexAgentRunner(model_name="gpt-5.6-luna")
+    runner = CodexAgentRunner(model_name="gpt-6-luna")
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
     last_events: list[Any] = []
@@ -202,7 +202,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     real codex turn terminates under cap pressure rather than looping."""
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
-    runner = CodexAgentRunner(model_name="gpt-5.6-luna")
+    runner = CodexAgentRunner(model_name="gpt-6-luna")
     inv = _inv(tmp_path)
     # Give the agent a second (read-only) tool so it can make two calls, and
     # order them so the SECOND call (complete_step) is the one that trips cap=1.
@@ -342,7 +342,7 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
         events: list[Any] = []
         try:
             async with contextlib.aclosing(
-                    _ProbeRunner(model_name="gpt-5.6-luna").run(
+                    _ProbeRunner(model_name="gpt-6-luna").run(
                         _probe_inv(root))) as run:
                 async for ev in run:
                     events.append(ev)
@@ -450,7 +450,7 @@ async def test_codex_live_omitted_optional_arg_reaches_python_default(
         events: list[Any] = []
         try:
             async with contextlib.aclosing(
-                    CodexAgentRunner(model_name="gpt-5.6-luna").run(
+                    CodexAgentRunner(model_name="gpt-6-luna").run(
                         _reader_inv(root))) as run:
                 async for ev in run:
                     events.append(ev)
@@ -589,7 +589,7 @@ async def test_codex_live_exposes_imp_tools_directly_and_passes_images(
         events: list[Any] = []
         try:
             async with contextlib.aclosing(
-                    CodexAgentRunner(model_name="gpt-5.6-luna").run(
+                    CodexAgentRunner(model_name="gpt-6-luna").run(
                         _viewer_inv(root))) as run:
                 async for ev in run:
                     events.append(ev)

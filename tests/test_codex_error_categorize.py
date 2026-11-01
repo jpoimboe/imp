@@ -106,7 +106,7 @@ def test_auth_still_beats_the_context_window_branch() -> None:
 def test_chatgpt_account_400_still_beats_the_context_window_branch() -> None:
     err = categorize_turn_failed({
         "status": 400,
-        "message": "model gpt-5.6-sol is not supported with a ChatGPT account; "
+        "message": "model gpt-6.1-sol is not supported with a ChatGPT account; "
                    "context window mismatch",
     })
     assert err.category == "config"

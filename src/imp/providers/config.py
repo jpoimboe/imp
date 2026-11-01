@@ -5,9 +5,9 @@ Schema (post 2026-06-04-roles-to-tiers):
 
     providers: [claude, openai]           # ordered preference list
     tiers:
-      low:    {claude: haiku,  openai: gpt-5.6-luna}
-      medium: {claude: sonnet, openai: gpt-5.6-terra}
-      high:   {claude: opus,   openai: gpt-5.6-sol}
+      low:    {claude: haiku,  openai: gpt-6-luna}
+      medium: {claude: sonnet, openai: gpt-6.1-terra}
+      high:   {claude: opus,   openai: gpt-6.1-sol}
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
     test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast); false if none needed

@@ -47,9 +47,9 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "openai": BuiltinFloor(
         module="openai",
         tier_defaults={
-            "low": "gpt-5.6-luna",
-            "medium": "gpt-5.6-terra",
-            "high": "gpt-5.6-sol",
+            "low": "gpt-6-luna",
+            "medium": "gpt-6.1-terra",
+            "high": "gpt-6.1-sol",
         },
         env_var="OPENAI_API_KEY",
         auth_hint="set OPENAI_API_KEY",
@@ -67,9 +67,9 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "codex": BuiltinFloor(
         module="codex",
         tier_defaults={
-            "low": "gpt-5.6-luna",
-            "medium": "gpt-5.6-terra",
-            "high": "gpt-5.6-sol",
+            "low": "gpt-6-luna",
+            "medium": "gpt-6.1-terra",
+            "high": "gpt-6.1-sol",
         },
         env_var=None,  # CLI-authenticated (codex login); no env var
         auth_hint="run `codex login`",

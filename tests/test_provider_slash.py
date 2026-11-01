@@ -141,7 +141,7 @@ def test_the_guard_compares_the_tier_map_not_a_step_override(
     floor_availability({"claude", "codex", "openai"})
     state.resolved_tiers = _tiers("claude")
     state.resolved_steps = {"w": ProviderModel(provider="openai",
-                                               model="gpt-5.6-terra")}
+                                               model="gpt-6.1-terra")}
     state.step = "w"
     state.save(quest.state_dir)
     out: list[str] = []

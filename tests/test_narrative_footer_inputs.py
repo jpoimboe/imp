@@ -18,7 +18,7 @@ def _reading(provider: str, *windows: QuotaWindow,
 
 def _codex_step(b: NarrativeBuilder) -> None:
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-             model="gpt-5.6-terra", provider="codex"))
+             model="gpt-6.1-terra", provider="codex"))
 
 
 def _message(eid: str, agent_id: str, provider: str,

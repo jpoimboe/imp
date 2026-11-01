@@ -25,7 +25,7 @@ def _qr(ts: str, *, aid: str = "step:a", session: str = "s1",
 
 
 def _msg(ts: str, *, aid: str = "step:a", provider: str = "codex",
-         model: str = "gpt-5.6-sol", auth: str = "chatgpt",
+         model: str = "gpt-6.1-sol", auth: str = "chatgpt",
          eid: str = "am") -> dict:
     # `raw` is the verbatim provider response; its first block is the model's
     # thinking, which is what must never reach a neighbour's slice
@@ -167,7 +167,7 @@ def test_a_patch_is_in_span_though_the_message_it_patches_precedes_it() -> None:
         "agent_message_usage_patch"]
     assert got.usage[0]["payload"]["usage"]["input_tokens"] == 777
     # priced from the pre-span message's triple, which the slice still resolves
-    assert got.agents == {"step:a": ("codex", "gpt-5.6-sol", "chatgpt")}
+    assert got.agents == {"step:a": ("codex", "gpt-6.1-sol", "chatgpt")}
     # the patch must carry the instant the slice resolved (the prose event's ts)
     assert parse_ts(got.usage[0]["timestamp"]) == parse_ts("2026-06-01T04:00:00+00:00")
 

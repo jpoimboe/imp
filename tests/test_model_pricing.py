@@ -31,6 +31,9 @@ def test_anthropic_rates_match_the_published_table() -> None:
 def test_openai_rates_match_the_published_table() -> None:
     s = _OPENAI_SURCHARGE
     assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, s)
+    assert prices_for("gpt-6.1-sol") == ModelPrices(2.00, 10.00, 0.10, 2.50, s)
+    assert prices_for("gpt-6.1-terra") == ModelPrices(1.00, 5.00, 0.05, 1.25, s)
+    assert prices_for("gpt-6-luna") == ModelPrices(0.10, 0.50, 0.01, 0.125, s)
     assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, s)
     assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, s)
     assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, s)
@@ -42,8 +45,9 @@ def test_openai_rates_match_the_published_table() -> None:
     assert prices_for("gpt-5") == ModelPrices(1.25, 10.00, 0.125, 1.25)
 
 
-def test_cache_write_takes_the_1_25x_premium_on_astra_and_5_6() -> None:
-    for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
+def test_cache_write_takes_the_1_25x_premium_on_gpt_6_and_5_6() -> None:
+    for model in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna",
+                  "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
         prices = prices_for(model)
         assert prices.cache_write == pytest.approx(prices.input * 1.25)
     for model in ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5"):
@@ -109,7 +113,8 @@ def test_an_unknown_model_resolves_to_no_prices() -> None:
 
 
 def test_only_the_surcharged_models_carry_a_long_context_surcharge() -> None:
-    for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+    for model in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna",
+                  "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
                   "gpt-5.6", "gpt-5.5", "gpt-5.4"):
         assert prices_for(model).long_context == _OPENAI_SURCHARGE, model
     for model in ("claude-haiku-5-5", "haiku"):
@@ -144,6 +149,9 @@ _MIXED = BillingUsage(fresh_input=1000, cached_input=2000,
 
 @pytest.mark.parametrize(("model", "expected"), [
     ("gpt-6-astra", 0.2495),     # 10000 +  2000 + 37500 + 200000 per million
+    ("gpt-6.1-sol", 0.0497),     #  2000 +   200 +  7500 +  40000
+    ("gpt-6.1-terra", 0.02485),  #  1000 +   100 +  3750 +  20000
+    ("gpt-6-luna", 0.002495),    #   100 +    20 +   375 +   2000
     ("gpt-5.6-sol", 0.0998),     #  4000 +   800 + 15000 +  80000
     ("gpt-5.6-terra", 0.0579),   # 2000 +   400 +  7500 +  48000
     ("gpt-5.6-luna", 0.00579),   #  200 +    40 +   750 +   4800
@@ -157,6 +165,25 @@ _MIXED = BillingUsage(fresh_input=1000, cached_input=2000,
 def test_every_openai_model_prices_the_hand_worked_fixture(
         model: str, expected: float) -> None:
     assert cost_usd(model, _MIXED) == pytest.approx(expected, rel=1e-12)
+
+
+@pytest.mark.parametrize(("model", "standard", "surcharged"), [
+    # surcharged = 2 * (fresh + cached + write) + 1.5 * output, per million
+    ("gpt-6.1-sol", 0.0497, 0.0794),       # 2*9700 + 1.5*40000
+    ("gpt-6.1-terra", 0.02485, 0.0397),    # 2*4850 + 1.5*20000
+    ("gpt-6-luna", 0.002495, 0.00399),     # 2*495  + 1.5*2000
+])
+def test_gpt_6_sizes_are_surcharged_strictly_above_272k(
+        model: str, standard: float, surcharged: float) -> None:
+    assert cost_usd(model, _MIXED, prompt_tokens=272_000) == pytest.approx(standard)
+    assert cost_usd(model, _MIXED, prompt_tokens=272_001) == pytest.approx(surcharged)
+
+
+def test_date_stamped_gpt_6_ids_price_as_their_base_model() -> None:
+    s = _OPENAI_SURCHARGE
+    assert prices_for("gpt-6.1-sol-20261201") == ModelPrices(2.00, 10.00, 0.10, 2.50, s)
+    assert prices_for("gpt-6.1-terra-20261201") == ModelPrices(1.00, 5.00, 0.05, 1.25, s)
+    assert prices_for("gpt-6-luna-20261201") == ModelPrices(0.10, 0.50, 0.01, 0.125, s)
 
 
 def test_bare_aliases_carry_the_5_5_rates() -> None:
@@ -190,13 +217,13 @@ def test_sonnet_and_opus_5_5_bill_base_rates_at_900k() -> None:
 
 
 def test_cached_input_is_not_billed_at_the_fresh_rate() -> None:
-    # 3000 tokens all fresh on gpt-5.6-sol: 3000 * $4/M = $0.012.
-    # The same 3000 as 1000 fresh + 2000 cached: 1000 * $4/M + 2000 * $0.40/M.
-    assert cost_usd("gpt-5.6-sol",
-                    BillingUsage(fresh_input=3000)) == pytest.approx(0.012)
-    assert cost_usd("gpt-5.6-sol",
+    # 3000 tokens all fresh on gpt-6.1-sol: 3000 * $2/M = $0.006.
+    # The same 3000 as 1000 fresh + 2000 cached: 1000 * $2/M + 2000 * $0.10/M.
+    assert cost_usd("gpt-6.1-sol",
+                    BillingUsage(fresh_input=3000)) == pytest.approx(0.006)
+    assert cost_usd("gpt-6.1-sol",
                     BillingUsage(fresh_input=1000, cached_input=2000)
-                    ) == pytest.approx(0.0048)
+                    ) == pytest.approx(0.0022)
 
 
 def test_anthropic_buckets_price_side_by_side_with_no_subtraction() -> None:
@@ -211,7 +238,7 @@ def test_a_model_absent_from_the_table_has_no_computed_cost() -> None:
 
 
 def test_zero_usage_on_a_known_model_costs_nothing() -> None:
-    assert cost_usd("gpt-5.6-sol", BillingUsage()) == 0.0
+    assert cost_usd("gpt-6.1-sol", BillingUsage()) == 0.0
 
 
 def test_web_search_bills_ten_dollars_per_thousand_requests() -> None:
@@ -249,13 +276,13 @@ _LONG = BillingUsage(fresh_input=200_000, cached_input=100_000,
 
 
 def test_the_long_context_surcharge_reprices_the_whole_request() -> None:
-    # unsurcharged on gpt-5.6-sol, per million:
-    #   200000*$4 + 100000*$0.40 + 10000*$5 + 10000*$20 = $1.09
-    assert cost_usd("gpt-5.6-sol", _LONG) == pytest.approx(1.09)
+    # unsurcharged on gpt-6.1-sol, per million:
+    #   200000*$2 + 100000*$0.10 + 10000*$2.50 + 10000*$10 = $0.535
+    assert cost_usd("gpt-6.1-sol", _LONG) == pytest.approx(0.535)
     # surcharged: 2x input, 2x cached, 2x cache write, 1.5x output, everywhere
-    #   2*800000 + 2*40000 + 2*50000 + 1.5*200000 per million = $2.08
-    assert cost_usd("gpt-5.6-sol", _LONG,
-                    prompt_tokens=310_000) == pytest.approx(2.08)
+    #   2*400000 + 2*10000 + 2*25000 + 1.5*100000 per million = $1.02
+    assert cost_usd("gpt-6.1-sol", _LONG,
+                    prompt_tokens=310_000) == pytest.approx(1.02)
 
 
 def test_astra_long_context_surcharge_uses_the_strict_272k_boundary() -> None:
@@ -266,15 +293,15 @@ def test_astra_long_context_surcharge_uses_the_strict_272k_boundary() -> None:
 
 
 def test_the_surcharge_boundary_is_strictly_above_272k() -> None:
-    assert cost_usd("gpt-5.6-sol", _LONG,
-                    prompt_tokens=272_000) == pytest.approx(1.09)
-    assert cost_usd("gpt-5.6-sol", _LONG,
-                    prompt_tokens=272_001) == pytest.approx(2.08)
+    assert cost_usd("gpt-6.1-sol", _LONG,
+                    prompt_tokens=272_000) == pytest.approx(0.535)
+    assert cost_usd("gpt-6.1-sol", _LONG,
+                    prompt_tokens=272_001) == pytest.approx(1.02)
 
 
 def test_an_absent_prompt_reading_is_never_surcharged() -> None:
-    assert cost_usd("gpt-5.6-sol", _LONG,
-                    prompt_tokens=None) == pytest.approx(1.09)
+    assert cost_usd("gpt-6.1-sol", _LONG,
+                    prompt_tokens=None) == pytest.approx(0.535)
 
 
 def test_gpt_5_5_and_5_4_are_surcharged_too() -> None:
@@ -308,8 +335,8 @@ def test_web_search_is_not_surcharged() -> None:
     searched = BillingUsage(fresh_input=200_000, cached_input=100_000,
                             cache_write=10_000, output=10_000,
                             web_search_requests=100)
-    assert cost_usd("gpt-5.6-sol", searched,
-                    prompt_tokens=310_000) == pytest.approx(3.08)
+    assert cost_usd("gpt-6.1-sol", searched,
+                    prompt_tokens=310_000) == pytest.approx(2.02)
 
 
 # A claude `model_usage` rollup. Each `costUSD` is hand-worked from the

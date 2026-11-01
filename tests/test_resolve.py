@@ -110,9 +110,9 @@ def test_codex_high_resolves_sol_from_builtin_floor(
 
     tiers, steps, details = resolve_run(workflow, config)
 
-    assert tiers["high"] == ProviderModel("codex", "gpt-5.6-sol")
+    assert tiers["high"] == ProviderModel("codex", "gpt-6.1-sol")
     assert steps == {}
-    assert details["tiers"]["high"]["model"] == "gpt-5.6-sol"
+    assert details["tiers"]["high"]["model"] == "gpt-6.1-sol"
 
 
 def test_tier_map_first_available_wins_with_both_envs() -> None:

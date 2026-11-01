@@ -1597,9 +1597,9 @@ async def test_noncompleting_run_reuses_persisted_codex_model(tmp_path: Path) ->
         factory=lambda model: _PinnedCodexProvider(model),
     )
     persisted_tiers = {
-        "low": ProviderModel("codex", "gpt-5.6-luna"),
-        "medium": ProviderModel("codex", "gpt-5.6-terra"),
-        "high": ProviderModel("codex", "gpt-5.6-sol"),
+        "low": ProviderModel("codex", "gpt-6-luna"),
+        "medium": ProviderModel("codex", "gpt-6.1-terra"),
+        "high": ProviderModel("codex", "gpt-6.1-sol"),
     }
     state = State.load(quest.state_dir)
     state.resolved_tiers = persisted_tiers
@@ -1609,7 +1609,7 @@ async def test_noncompleting_run_reuses_persisted_codex_model(tmp_path: Path) ->
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    assert captured == [("codex", "gpt-5.6-sol")]
+    assert captured == [("codex", "gpt-6.1-sol")]
     reloaded = State.load(quest.state_dir)
     assert reloaded.resolved_tiers == persisted_tiers
     assert reloaded.resolved_steps == {}

@@ -171,8 +171,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # interrupt/resume machinery is), but it MUST reliably run the scripted
     # bash(`sleep 30`) so the SIGINT lands mid-bash. gpt-4o-mini intermittently
     # skipped the bash call and completed the step immediately, so the test saw no
-    # bash tool_call and failed. gpt-5.4-mini (the project's openai `low` pin)
-    # follows the bash-then-complete sequence reliably.
+    # bash tool_call and failed. gpt-5.4-mini follows the bash-then-complete
+    # sequence reliably.
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main

@@ -29,7 +29,7 @@ def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> N
 
 @pytest.mark.parametrize(
     ("tier", "model"),
-    [("medium", "gpt-5.6-terra"), ("high", "gpt-5.6-sol")],
+    [("medium", "gpt-6.1-terra"), ("high", "gpt-6.1-sol")],
 )
 def test_thinking_tiers_pin_high_reasoning_effort(tier: str, model: str) -> None:
     opts = CodexAgentRunner(model_name=model)._build_thread_options(tier)
@@ -40,5 +40,5 @@ def test_thinking_tiers_pin_high_reasoning_effort(tier: str, model: str) -> None
 
 @pytest.mark.parametrize("tier", ["low", None])
 def test_low_and_untiered_leave_reasoning_effort_unset(tier: str | None) -> None:
-    opts = CodexAgentRunner(model_name="gpt-5.6-luna")._build_thread_options(tier)
+    opts = CodexAgentRunner(model_name="gpt-6-luna")._build_thread_options(tier)
     assert opts.model_reasoning_effort is None

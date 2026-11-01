@@ -220,13 +220,13 @@ async def test_rollout_reading_at_cutoff_elicits_handoff(
         [agent_message("wrote the handoff"), turn_completed(input_tokens=1_000)],
     ]
     runner = CodexAgentRunner(
-        model_name="gpt-5.6-luna",
+        model_name="gpt-6-luna",
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = tmp_path / "auth.json"
 
     inv = AgentInvocation(
         agent_def=_agent_def(), provider_name="codex",
-        model_name="gpt-5.6-luna",
+        model_name="gpt-6-luna",
         system_prompt="you are a test agent", initial_messages=(),
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
@@ -263,13 +263,13 @@ async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
          turn_completed(input_tokens=1_000)],
     ]
     runner = CodexAgentRunner(
-        model_name="gpt-5.6-luna",
+        model_name="gpt-6-luna",
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = tmp_path / "auth.json"
 
     inv = AgentInvocation(
         agent_def=_agent_def(), provider_name="codex",
-        model_name="gpt-5.6-luna",
+        model_name="gpt-6-luna",
         system_prompt="you are a test agent", initial_messages=(),
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),

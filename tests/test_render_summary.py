@@ -419,7 +419,7 @@ def _llm(agent_id: str, ts: str, *, input=0, output=0,
                                   "cache_creation_input_tokens": cache_creation}}}
 
 
-def _codex(agent_id: str, ts: str, *, model="gpt-5.6-sol",
+def _codex(agent_id: str, ts: str, *, model="gpt-6.1-sol",
            auth_mode=None) -> dict:
     """A codex agent_message carries `usage={}` on the wire
     (`codex_runner.py:1057`, `:1283`) — the real figures arrive on the
@@ -663,14 +663,14 @@ def test_codex_tokens_and_cost_come_from_the_usage_patch_row():
     usage = rows[0].usage
     assert (usage.fresh_input, usage.cached_input, usage.cache_write,
             usage.output) == (1000, 4000, 500, 200)
-    # gpt-5.6-sol, per million: 1000*$4 + 4000*$0.40 + 500*$5 + 200*$20
-    assert usage.dollars == pytest.approx(0.0121)
+    # gpt-6.1-sol, per million: 1000*$2 + 4000*$0.10 + 500*$2.50 + 200*$10
+    assert usage.dollars == pytest.approx(0.00565)
     assert (usage.priced, usage.notional) == (1, 1)   # chatgpt auth -> notional
 
 
 def test_a_usage_patch_is_priced_against_the_preceding_message_model():
     # AC 24: the run's configured model on step_started is gpt-5, the turn ran
-    # on gpt-5.6-sol. 1000 fresh + 1000 out is $0.024 on sol, $0.01125 on gpt-5.
+    # on gpt-6.1-sol. 1000 fresh + 1000 out is $0.012 on sol, $0.01125 on gpt-5.
     rows = build_summary([
         {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
          "payload": {"step": "coder", "phase": "build", "model": "gpt-5"}},
@@ -678,7 +678,7 @@ def test_a_usage_patch_is_priced_against_the_preceding_message_model():
         _patch("a1", input=1000, output=1000, context_tokens=2000),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
     ])
-    assert rows[0].usage.dollars == pytest.approx(0.024)
+    assert rows[0].usage.dollars == pytest.approx(0.012)
     assert rows[0].usage.notional == 0          # apikey -> metered
     assert rows[0].usage.priced == 1            # the patch row, once
 
@@ -686,8 +686,8 @@ def test_a_usage_patch_is_priced_against_the_preceding_message_model():
 def test_a_codex_turn_is_surcharged_on_context_tokens_not_the_patch_sum():
     # AC 7(b)/(c): the patch usage sums to 410k, over the 272k breakpoint, but
     # the turn's own occupancy reading is 100k — and an absent reading is never
-    # surcharged either. Unsurcharged on gpt-5.6-sol, per million:
-    #   200000*$4 + 200000*$0.40 + 10000*$20 = $1.08; surcharged = $2.06.
+    # surcharged either. Unsurcharged on gpt-6.1-sol, per million:
+    #   200000*$2 + 200000*$0.10 + 10000*$10 = $0.52; surcharged = $0.99.
     def _cost(**patch_kw):
         rows = build_summary([
             _started("coder", "build", "2026-01-01T00:00:00+00:00"),
@@ -698,9 +698,9 @@ def test_a_codex_turn_is_surcharged_on_context_tokens_not_the_patch_sum():
         ])
         return rows[0].usage.dollars
 
-    assert _cost(context_tokens=100_000) == pytest.approx(1.08)
-    assert _cost() == pytest.approx(1.08)                  # no reading at all
-    assert _cost(context_tokens=300_000) == pytest.approx(2.06)
+    assert _cost(context_tokens=100_000) == pytest.approx(0.52)
+    assert _cost() == pytest.approx(0.52)                  # no reading at all
+    assert _cost(context_tokens=300_000) == pytest.approx(0.99)
 
 
 def test_codex_subagent_figures_routed_via_usage_patch():
@@ -717,8 +717,8 @@ def test_codex_subagent_figures_routed_via_usage_patch():
     ])
     sub = rows[0].subagents[0]
     assert (sub.usage.fresh_input, sub.usage.output) == (500, 200)
-    # gpt-5.6-sol, per million: 500*$4 + 200*$20 = $0.006
-    assert sub.usage.dollars == pytest.approx(0.006)
+    # gpt-6.1-sol, per million: 500*$2 + 200*$10 = $0.003
+    assert sub.usage.dollars == pytest.approx(0.003)
     assert rows[0].usage == RowUsage()
 
 
@@ -906,7 +906,7 @@ def test_anthropic_and_openai_rows_are_metered_without_an_auth_mode():
     # AC 16(a): neither provider has a subscription mode, so neither carries an
     # auth_mode field and both read as metered from provider identity alone.
     for provider, model in (("anthropic", "claude-sonnet-4-6"),
-                            ("openai", "gpt-5.6-sol")):
+                            ("openai", "gpt-6.1-sol")):
         rows = build_summary([
             _started("coder", "build", "2026-01-01T00:00:00+00:00"),
             _llm("a1", "2026-01-01T00:00:01+00:00", provider=provider,
@@ -1551,7 +1551,7 @@ def test_f2_a_subagents_usage_folds_into_the_quest_total():
 def _openai_msg(agent_id: str, ts: str, *, input: int, output: int) -> dict:
     """The nested ResponseUsage shape the raw openai path records."""
     return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"provider": "openai", "model": "gpt-5.6-sol",
+            "payload": {"provider": "openai", "model": "gpt-6.1-sol",
                         "usage": {"input_tokens": input,
                                   "output_tokens": output,
                                   "input_tokens_details": {"cached_tokens": 0},
@@ -1578,20 +1578,20 @@ def test_metered_marker_reads_anthropic_and_openai_from_provider_alone():
 
     openai = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
                                    input=100_000, output=10_000))
-    # sol: 100k*$4 + 10k*$20 per million = $0.60, prompt 100k is under 272k
-    assert cost_cell(openai.totals) == "~$0.60"
+    # sol: 100k*$2 + 10k*$10 per million = $0.30, prompt 100k is under 272k
+    assert cost_cell(openai.totals) == "~$0.30"
 
 
 def test_an_openai_request_over_272k_is_surcharged_end_to_end():
     # AC 7(a): boundary is exclusive — 272k is not surcharged, 272k+1 is.
-    # Unsurcharged: 272000*$4/1e6 + 10000*$20/1e6 = $1.088 + $0.200 = $1.288
-    # Surcharged:   272001*$4*2/1e6 + 10000*$20*1.5/1e6 = $2.176008 + $0.300 = $2.476008
+    # Unsurcharged: 272000*$2/1e6 + 10000*$10/1e6 = $0.544 + $0.100 = $0.644
+    # Surcharged:   272001*$2*2/1e6 + 10000*$10*1.5/1e6 = $1.088004 + $0.150 = $1.238004
     at_boundary = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
                                         input=272_000, output=10_000))
     over_boundary = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
                                           input=272_001, output=10_000))
-    assert at_boundary.totals.dollars == pytest.approx(1.288)
-    assert over_boundary.totals.dollars == pytest.approx(2.476008)
+    assert at_boundary.totals.dollars == pytest.approx(0.644)
+    assert over_boundary.totals.dollars == pytest.approx(1.238004)
 
 
 def test_metered_marker_reads_auth_mode_on_codex_and_claude():
@@ -1599,12 +1599,12 @@ def test_metered_marker_reads_auth_mode_on_codex_and_claude():
                               auth_mode="apikey"),
                        _patch("a1", input=100_000, output=10_000,
                               context_tokens=100_000))
-    assert cost_cell(apikey.totals) == "~$0.60"      # AC 16(b)
+    assert cost_cell(apikey.totals) == "~$0.30"      # AC 16(b)
 
     subscription = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00"),
                              _patch("a1", input=100_000, output=10_000,
                                     context_tokens=100_000))
-    assert cost_cell(subscription.totals) == "$0.60*"
+    assert cost_cell(subscription.totals) == "$0.30*"
 
     old_log = _one_step(
         _cc("a1", "2026-01-01T00:00:05+00:00"),

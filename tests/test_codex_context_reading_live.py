@@ -51,7 +51,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
                 source=_SRC),
             prompt_template_source="", source_path=Path("a.md"), source=_SRC,
             tier=None),
-        provider_name="codex", model_name="gpt-5.6-luna",
+        provider_name="codex", model_name="gpt-6-luna",
         system_prompt=(
             'Call the `glob` tool with pattern "*" and wait for its result. '
             'Then call `glob` again with pattern "**/*.md" and wait. Then call '
@@ -76,7 +76,7 @@ async def test_codex_live_occupancy_is_far_below_the_turn_billing_sum(
         tmp_path: Path) -> None:
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
-    runner = CodexAgentRunner(model_name="gpt-5.6-luna")
+    runner = CodexAgentRunner(model_name="gpt-6-luna")
     try:
         events = [ev async for ev in runner.run(_inv(tmp_path))]
     except AwaitingUserInput:

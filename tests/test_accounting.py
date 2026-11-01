@@ -139,7 +139,7 @@ def test_openai_usage_is_normalized_out_of_its_nested_shape() -> None:
     # AC 10: cached is subtracted out of fresh (1000 - 600), and reasoning is
     # already inside output_tokens, so output stays 400 rather than 650.
     billing = billing_from_agent_message({
-        "provider": "openai", "model": "gpt-5.6-sol",
+        "provider": "openai", "model": "gpt-6.1-sol",
         "usage": {"input_tokens": 1000,
                   "input_tokens_details": {"cached_tokens": 600},
                   "output_tokens": 400,
@@ -151,7 +151,7 @@ def test_openai_usage_is_normalized_out_of_its_nested_shape() -> None:
 def test_a_usage_less_agent_message_bills_nothing() -> None:
     # codex writes usage={} on the message and the real figures on the patch.
     assert billing_from_agent_message(
-        {"provider": "codex", "model": "gpt-5.6-sol", "usage": {}}) is None
+        {"provider": "codex", "model": "gpt-6.1-sol", "usage": {}}) is None
     assert billing_from_agent_message({"provider": "anthropic"}) is None
 
 
@@ -335,10 +335,10 @@ def test_openai_cached_tokens_are_not_billed_at_the_fresh_rate() -> None:
     assert billing.cached_input == 90_000
     # ResponseUsage carries no cache-write field at all.
     assert billing.cache_write == 0
-    # 10_000*4.00 + 90_000*0.40 + 2_000*20.00 = 116_000 per million.
-    assert cost_usd("gpt-5.6-sol", billing) == pytest.approx(0.116)
-    # Billing all 100k as fresh would be $0.44 — the bug this closes.
-    assert cost_usd("gpt-5.6-sol", billing) != pytest.approx(0.44)
+    # 10_000*2.00 + 90_000*0.10 + 2_000*10.00 = 49_000 per million.
+    assert cost_usd("gpt-6.1-sol", billing) == pytest.approx(0.049)
+    # Billing all 100k as fresh would be $0.22 — the bug this closes.
+    assert cost_usd("gpt-6.1-sol", billing) != pytest.approx(0.22)
 
 
 def test_openai_reasoning_tokens_are_not_added_on_top_of_output() -> None:
