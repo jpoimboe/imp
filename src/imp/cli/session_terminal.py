@@ -401,10 +401,7 @@ async def run_terminal_client(
 
                 async def _watch_sigquit() -> None:
                     # Ctrl-\ deliberate detach: same teardown as force-quit — trigger
-                    # the escalation event so _watch_force_quit handles the cancel.
-                    # This avoids a race in anyio's asyncio backend where the sigquit
-                    # wakeup Handle lands in _ready before the socket-reader Handle,
-                    # causing InvalidStateError when cancel fires before set_result.
+                    # the escalation event so _watch_force_quit owns the one cancel.
                     if sigquit_signals is None:
                         return
                     async for _sig in sigquit_signals:

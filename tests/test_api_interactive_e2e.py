@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -18,46 +15,6 @@ from tests.conftest import _git, _init_repo, write_agent_md
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-async def _ignore_anyio_teardown_setresult_race() -> AsyncIterator[None]:
-    """Swallow anyio 4.8's benign socket-teardown InvalidStateError.
-
-    Exiting `attach()` cancels `_pump` while it is parked in `receive_events()`, and
-    anyio registers the bound ``future.set_result`` as the raw fd-readable reader for
-    stream reads (_backends/_asyncio.py:1550), removing it only in the future's
-    done-callback. When the socket tears down in the SAME loop turn the fd goes
-    readable, the already-queued ``set_result`` fires on the just-resolved future ->
-    InvalidStateError, which asyncio routes to the loop exception handler and
-    pytest-anyio promotes to a test failure -- measured at 3/20 runs with this
-    fixture removed. Delegate every other loop exception to the previous handler
-    untouched."""
-    loop = asyncio.get_running_loop()
-    previous = loop.get_exception_handler()
-
-    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
-        exc = context.get("exception")
-        callback = getattr(context.get("handle"), "_callback", None)
-        future = getattr(callback, "__self__", None)
-        if (
-            isinstance(exc, asyncio.InvalidStateError)
-            and getattr(callback, "__name__", "") == "set_result"
-            and isinstance(future, asyncio.Future)
-            and future.done()
-        ):
-            # the anyio read set_result-on-done-future race
-            return  # the anyio accept/read set_result-on-done-future race
-        if previous is not None:
-            previous(loop, context)
-        else:
-            loop.default_exception_handler(context)
-
-    loop.set_exception_handler(handler)
-    try:
-        yield
-    finally:
-        loop.set_exception_handler(previous)
 
 
 def _seed_scripted_interactive_repo(root: Path) -> None:
