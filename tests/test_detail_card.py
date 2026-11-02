@@ -579,3 +579,15 @@ def test_quest_card_shows_done_for_archived_no_merge_quest(tmp_path: Path) -> No
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "done" in status_line
     assert "merged" not in status_line
+
+
+def test_quest_json_omits_seed_opening_for_an_unstarted_draft(tmp_path: Path) -> None:
+    # `imp show --json` stays byte-identical: the new card field is not emitted.
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="", quest_id="2026-06-20-sdj01",
+                       base_branch="main", seed_opening="summarize foo.py")
+    data = main._quest_json(tmp_path, "2026-06-20-sdj01")
+    assert data is not None
+    assert "seed_opening" not in data
+    assert data["title"] is None
+    assert data["intent"] is None

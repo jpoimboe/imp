@@ -59,6 +59,7 @@ class QuestCard:
     parent: dict[str, str] | None
     depends_on: list[dict[str, Any]]
     intent: str | None
+    seed_opening: str | None
     summary: bytes | None
     vars: dict[str, object]
 
@@ -194,6 +195,7 @@ class LocalStore:
             depends_on=quest_refs.resolve_dependencies(
                 self.control_root, list(meta.get("depends_on", []))),
             intent=_resolve_intent(events),
+            seed_opening=meta.get("seed_opening"),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
             vars=dict(state.get("vars") or {}),
         )
