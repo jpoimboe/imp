@@ -202,21 +202,15 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 # segment, and a dot-joined outcome tail whose color carries meaning (green =
 # success, red = error, gold = everything-else). The middle segment is always
 # present via the shared resolver (quest_row.resolve_display_name): a real title
-# is plain, else the opening prompt renders dim with a plain-ASCII `> ` prefix,
-# else the dim `(unnamed)` placeholder. Exception to the old "no dim, no glyphs"
-# rule — but dim is color-only and `> ` is plain ASCII, so NO_COLOR / non-TTY
-# output stays plain and script-parseable. Shared by `new`/`resume`, leaves, and the
-# completed block.
+# is plain, else the opening message renders dim, else the dim `(unnamed)`
+# placeholder. Dim is color-only, so NO_COLOR / non-TTY output stays plain and
+# script-parseable. Shared by `new`/`resume`, leaves, and the completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
     """The styled middle name segment and its kind, resolved title→intent→(unnamed)."""
     resolved = quest_row.resolve_display_name(title, intent)
-    if resolved.kind is quest_row.NameKind.PROMPT:
-        name = quest_row.PROMPT_PREFIX + quest_row._truncate(
-            resolved.text, quest_row.NAME_CAP - len(quest_row.PROMPT_PREFIX))
-    else:
-        name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
+    name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
     if resolved.kind is not quest_row.NameKind.TITLE:
         name = pal.ansi(name, "dim", enabled=color)
     return name, resolved.kind

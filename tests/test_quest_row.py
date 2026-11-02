@@ -236,8 +236,8 @@ def test_intent_fallback_for_empty_title():
 def test_intent_fallback_for_empty_title_color():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=True)
-    # the dimmed opening-prompt fallback now carries the `> ` prompt prefix
-    assert "\x1b[2m> add a dark mode toggle\x1b[0m" in line
+    # the opening-message fallback is dim and carries no prefix
+    assert "\x1b[2madd a dark mode toggle\x1b[0m" in line
     assert "(unnamed)" not in line
 
 
@@ -431,10 +431,10 @@ def test_overview_widths_empty_rows(monkeypatch):
     assert overview_widths([]) == (6, 55)
 
 
-def test_intent_fallback_carries_prompt_prefix():
+def test_intent_fallback_has_no_prompt_prefix():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=False)
-    assert "> add a dark mode toggle" in line
+    assert line.startswith("yaitd7  add a dark mode toggle")   # NAME cell starts at the text
     assert "(unnamed)" not in line
 
 
@@ -445,12 +445,12 @@ def test_unnamed_has_no_prompt_prefix():
     assert "> (unnamed)" not in line
 
 
-def test_intent_fallback_prefix_counts_against_name_width():
-    # name_width 24: cell = "> " (2) + 21 prompt chars + "…" = 24 display cols.
+def test_intent_fallback_clips_to_name_width():
+    # name_width 24: cell = 23 prompt chars + "…" = 24 display cols.
     line = format_quest_line(**_row(title="", status="running", step="s"),
                               intent="y" * 40, color=False, name_width=24)
-    assert "> " + "y" * 21 + "…" in line
-    assert "y" * 22 not in line
+    assert "y" * 23 + "…" in line
+    assert "y" * 24 not in line
 
 
 def test_resolve_display_name_title_kind_and_text():

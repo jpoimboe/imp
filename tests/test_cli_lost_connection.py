@@ -69,5 +69,5 @@ def test_lost_connection_renders_the_intent_it_is_handed(
                  "content": [{"type": "text", "text": "the log's own intent"}]})
     cli_main._emit_lost_connection(quest, intent="witnessed intent")
     out = capsys.readouterr().out
-    assert "lc9 · > witnessed intent" in out
+    assert "lc9 · witnessed intent" in out
     assert "the log's own intent" not in out

@@ -252,22 +252,22 @@ def test_emit_leave_pause_signal_prints_no_caret(
         "\n")
 
 
-def test_status_spine_prompt_fallback_dim_and_prefixed_color() -> None:
+def test_status_spine_prompt_fallback_dim_and_unprefixed_color() -> None:
     from imp.cli import palette as pal
     line = main._status_spine("z1", "", "shelved", "wordmark", color=True,
                               intent="add a dark mode toggle")
-    # the opening-prompt fallback is the dim, `> `-prefixed middle segment
-    assert pal.ansi("> add a dark mode toggle", "dim") in line
+    # the opening-prompt fallback is the dim, unprefixed middle segment
+    assert pal.ansi("add a dark mode toggle", "dim") in line
+    assert "> " not in line
     assert "(unnamed)" not in line
 
 
 def test_status_spine_prompt_fallback_flattens_and_caps_at_70() -> None:
     line = main._status_spine("z1", "   ", "shelved", "wordmark", color=False,
                               intent="add a\n   dark   mode\ttoggle " + "y" * 80)
-    # flattened to single spaces, then "> " (2) + 67 chars + "…" = 70 display cols
+    # flattened to single spaces, then 69 chars + "…" = 70 display cols (NAME_CAP)
     body = "add a dark mode toggle " + "y" * 80
-    assert "> " + body[:67] + "…" in line
-    assert "> " + body[:68] not in line
+    assert "z1 · " + body[:69] + "… · shelved" == line
 
 
 def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
@@ -287,8 +287,8 @@ def test_status_spine_title_unchanged_when_intent_present() -> None:
 def test_status_spine_prompt_fallback_no_color_is_plain_and_parseable() -> None:
     line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
                               intent="when I hit save it crashed")
-    # NO_COLOR / piped: plain ASCII `> `, no ANSI, dot-delimited spine intact
-    assert line == "z1 · > when I hit save it crashed · shelved"
+    # NO_COLOR / piped: plain text, no ANSI, dot-delimited spine intact
+    assert line == "z1 · when I hit save it crashed · shelved"
     assert "\x1b[" not in line
     assert line.count(" · ") == 2
 
@@ -493,7 +493,7 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
     main._emit_completed(_quest(title=""), merged_base="master",
                          intent="add a dark mode toggle")
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "soro82 · > add a dark mode toggle · merged into master"
+    assert out.split("\n")[0] == "soro82 · add a dark mode toggle · merged into master"
     assert "(unnamed)" not in out
     assert "\x1b[" not in out
 
@@ -506,7 +506,7 @@ def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys)
     main._emit_merge_blocked(quest, "worktree_dirty", intent="fix the crash")
     out = capsys.readouterr().out
     assert "merge blocked: uncommitted work in the worktree" in out
-    assert "2026-06-12-run-x · > fix the crash" in out   # identity line, prompt fallback
+    assert "2026-06-12-run-x · fix the crash" in out   # identity line, prompt fallback
     assert "(unnamed)" not in out
 
 
@@ -524,7 +524,7 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == "interrupt"                                    # gold headline, own line
-    assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
+    assert lines[1] == "2026-06-12-run-x · add a dark mode toggle"  # identity, prompt fallback
     assert lines[2] == "resume: imp resume 2026-06-12-run-x"         # resume line kept
     assert "(unnamed)" not in out
 

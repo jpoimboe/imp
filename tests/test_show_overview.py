@@ -218,5 +218,6 @@ def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> No
     row = next(ln for ln in lines if ln.startswith("subf01"))
     assert "spec phase" not in row                    # suffix dropped
     assert "(" not in row.split("please")[0]          # no ` (…)` before NAME
-    # NAME starts right after ID; the `> ` prefix is part of the NAME cell.
-    assert header.index("NAME") == row.index("> please")
+    # NAME starts right after ID; the fallback carries no prefix.
+    assert header.index("NAME") == row.index("please")
+    assert "> please" not in row

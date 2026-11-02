@@ -80,9 +80,9 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 > convenient during this run; it is no longer a skippable afterthought.
 
 > **Leave-banner name segment.** In the banners above, `<name>` is the quest's resolved
-> display name: its title, else the dimmed `> <opening-prompt>` fallback, else `(unnamed)`
+> display name: its title, else the dimmed `<opening-prompt>` fallback, else `(unnamed)`
 > when it has neither. The segment is always present now — a titleless chat no longer drops
-> it (a titleless chat with a prompt renders a `paused · Ctrl-D` head above `<id> · > <prompt…>` — three-part block).
+> it (a titleless chat with a prompt renders a `paused · Ctrl-D` head above `<id> · <prompt…>` — three-part block).
 
 > **Leave-banner headline — state-first.** The `_pause_lines` leave head leads with the
 > **state**: `paused` (gold) followed by a dim ` · <Display>` qualifier naming the trigger —
