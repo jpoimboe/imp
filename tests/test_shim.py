@@ -130,6 +130,31 @@ def test_shim_dir_precedes_preexisting_imp_on_path(tmp_path: Path) -> None:
     assert result.stdout.strip() == str(shim_dir / "imp")
 
 
+def _fake_installed_copy(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point imp.__file__ at `<base>/venv/lib/site-packages/imp`; return that
+    site-packages, resolved. Its parent (`.../lib`) never gains a .git."""
+    site = base / "venv" / "lib" / "site-packages"
+    (site / "imp").mkdir(parents=True)
+    (site / "imp" / "__init__.py").write_text("")
+    monkeypatch.setattr(imp, "__file__", str(site / "imp" / "__init__.py"))
+    return site.resolve()
+
+
+def _imp_target(root: Path) -> Path:
+    (root / "src" / "imp").mkdir(parents=True)
+    (root / "src" / "imp" / "__init__.py").write_text("")
+    return root
+
+
+def _expected_message(installed: Path, control_root: Path) -> str:
+    return (
+        f"outer imp mismatch: imp is running from an installed copy at {installed}, so "
+        "changes merged in this checkout won't take effect until it is reinstalled in "
+        "editable mode from this checkout, e.g. "
+        f"`uv tool install --editable {control_root}`"
+    )
+
+
 def test_outer_imp_mismatch_silent_when_running_from_this_checkout() -> None:
     """The suite runs against the checkout's own src (pyproject pythonpath=["src"]),
     so the real checkout root must produce no message. The name guard keeps this
@@ -138,33 +163,35 @@ def test_outer_imp_mismatch_silent_when_running_from_this_checkout() -> None:
     assert outer_imp_mismatch(_CHECKOUT_ROOT) is None
 
 
+@pytest.mark.parametrize("git_kind", ["dir", "file"])
+def test_outer_imp_mismatch_silent_when_running_from_another_checkout(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_kind: str) -> None:
+    """A dev clone, or a worktree whose .git is a file, counts as a checkout even
+    when it is not the target."""
+    clone = _imp_target(tmp_path / "clone")
+    if git_kind == "dir":
+        (clone / ".git").mkdir()
+    else:
+        (clone / ".git").write_text("gitdir: /elsewhere/.git/worktrees/clone\n")
+    monkeypatch.setattr(imp, "__file__", str(clone / "src" / "imp" / "__init__.py"))
+
+    assert outer_imp_mismatch(_imp_target(tmp_path / "target")) is None
+
+
 def test_outer_imp_mismatch_silent_when_project_is_not_an_imp_checkout(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_installed_copy(tmp_path, monkeypatch)
     assert outer_imp_mismatch(tmp_path) is None          # no src/ at all
     (tmp_path / "src").mkdir()
     assert outer_imp_mismatch(tmp_path) is None          # src/, but no imp package
 
 
-def test_outer_imp_mismatch_names_both_roots_and_the_fix(tmp_path: Path) -> None:
-    (tmp_path / "src" / "imp").mkdir(parents=True)
-    (tmp_path / "src" / "imp" / "__init__.py").write_text("")
+def test_outer_imp_mismatch_names_the_installed_copy_and_the_uv_fix(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    installed = _fake_installed_copy(tmp_path, monkeypatch)
+    _imp_target(tmp_path)
 
-    message = outer_imp_mismatch(tmp_path)
-
-    assert message is not None
-    assert message.startswith("outer imp mismatch: ")
-    assert str(_RUNNING_SRC) in message
-    assert str((tmp_path / "src").resolve()) in message
-    assert f"python3 -m pip install -e {tmp_path}" in message
-
-
-def test_outer_imp_mismatch_silent_through_a_symlinked_checkout(tmp_path: Path) -> None:
-    """A checkout reached by symlink is the same tree: both sides are resolved, so
-    the symlinked path must not read as a mismatch."""
-    link = tmp_path / "checkout-link"
-    link.symlink_to(_CHECKOUT_ROOT, target_is_directory=True)
-
-    assert outer_imp_mismatch(link) is None
+    assert outer_imp_mismatch(tmp_path) == _expected_message(installed, tmp_path)
 
 
 def _fake_snapshot(root: Path, *, source_root: Path) -> Path:
@@ -180,7 +207,7 @@ def test_outer_imp_mismatch_silent_for_a_snapshot_of_this_checkout(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pinned run executes from <quest home>/pinned-src/<token>, which is never the
     checkout's own src — so without provenance every imp-on-imp run would warn. The
-    marker names the tree the snapshot came from; that is what must be compared."""
+    marker names the tree the snapshot came from; that is what must be checked."""
     snapshot = _fake_snapshot(tmp_path, source_root=_RUNNING_SRC)
     monkeypatch.setattr(imp, "__file__", str(snapshot / "imp" / "__init__.py"))
 
@@ -189,20 +216,15 @@ def test_outer_imp_mismatch_silent_for_a_snapshot_of_this_checkout(
 
 def test_outer_imp_mismatch_names_the_source_root_a_snapshot_came_from(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A snapshot taken from an unrelated install still warns — and names that install,
+    """A snapshot taken from an installed copy still warns — and names that copy,
     the operator error the warning exists for, not the snapshot it was copied into."""
-    checkout = tmp_path / "checkout"
-    (checkout / "src" / "imp").mkdir(parents=True)
-    (checkout / "src" / "imp" / "__init__.py").write_text("")
-    foreign_src = tmp_path / "site-packages"
-    (foreign_src / "imp").mkdir(parents=True)
-    snapshot = _fake_snapshot(tmp_path, source_root=foreign_src)
+    checkout = _imp_target(tmp_path / "checkout")
+    installed = tmp_path / "venv" / "lib" / "site-packages"
+    (installed / "imp").mkdir(parents=True)
+    snapshot = _fake_snapshot(tmp_path, source_root=installed)
     monkeypatch.setattr(imp, "__file__", str(snapshot / "imp" / "__init__.py"))
 
     message = outer_imp_mismatch(checkout)
 
-    assert message is not None
-    assert message.startswith("outer imp mismatch: ")
-    assert str(foreign_src) in message
+    assert message == _expected_message(installed.resolve(), checkout)
     assert str(snapshot) not in message
-    assert str((checkout / "src").resolve()) in message
