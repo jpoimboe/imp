@@ -94,12 +94,14 @@ from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
     Transcript,
+    answer_unanswered_tool_uses_on_resume,
     captured_result_key,
     deliver_continuation_reply,
     deliver_engine_continuation,
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
     synthesize_native_success_on_resume,
+    unanswered_tool_uses,
     unresolved_tool_result_content,
 )
 from imp.engine.agent_run import (
@@ -1525,15 +1527,16 @@ class ClaudeSession(ObserveSession):
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
+        captured = _load_captured_tool_results(invocation.transcript_dir)
         # Must precede every classification below: they all read this one list.
-        repair_interrupt_marker_on_resume(
-            existing, transcript,
-            captured=_load_captured_tool_results(invocation.transcript_dir))
+        repair_interrupt_marker_on_resume(existing, transcript, captured=captured)
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step): re-emit the final text as the deliverable rather than
-        # native-resuming or soliciting the human (AWAITING_USER).
+        # native-resuming or soliciting the human (AWAITING_USER). Prose over an
+        # unanswered tool_use is an interrupted turn, not a done-signal.
         if (invocation.subagent_depth > 0 and not is_fresh
-                and classify_resume(existing) is ResumeState.AWAITING_USER):
+                and classify_resume(existing) is ResumeState.AWAITING_USER
+                and not unanswered_tool_uses(existing)):
             self.messages = existing
             self.ceiling = invocation.max_tool_calls
             self.guard = LoopGuard(interactive=invocation.interactive)
@@ -1580,7 +1583,7 @@ class ClaudeSession(ObserveSession):
             if tail_is_complete_step and invocation.retry_feedback:
                 synth = repair_dangling_tool_use_on_resume(
                     messages, transcript, feedback=invocation.retry_feedback,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                    captured=captured)
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
@@ -1596,16 +1599,15 @@ class ClaudeSession(ObserveSession):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
+                answer_unanswered_tool_uses_on_resume(
+                    messages, transcript, elog, aid, captured=captured)
             elif (invocation.retry_feedback
                     and classify_resume(existing) is not ResumeState.AWAITING_USER):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, invocation.retry_feedback)
+            # After the chain, so a complete_step tail is answered first.
+            answer_unanswered_tool_uses_on_resume(
+                messages, transcript, elog, aid, captured=captured)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
@@ -2144,8 +2146,8 @@ class ClaudeSession(ObserveSession):
             for s in settled:
                 captured[s.key] = (s.content, s.is_error)
             _correct_withheld_results(elog, aid, runner._state, captured)
-            # The marker is still the tail here; _enter's repair is tail-only and
-            # can no longer reach it once anything is appended below.
+            # The marker is still in the trailing user run here; _enter's repair
+            # can no longer reach it once the re-query appends an assistant turn.
             repair_interrupt_marker_on_resume(
                 self.messages, self.transcript, captured=captured)
             increment = correction_increment(settled)

@@ -14,9 +14,9 @@ For claude this is unavoidable — the SDK spawns claude-p in our
 process group, so SIGINT kills the subprocess before it can emit the
 tool_result back to our receive loop. For anthropic / openai the same
 shape occurs when the executor's `should_pause` check fires after we
-yielded `tool_result` but before the user message was appended. Each
-provider calls `repair_dangling_tool_use_on_resume` after `load()` so the
-SEND_TO_LLM resume path has a balanced transcript.
+yielded `tool_result` but before the user message was appended. On resume,
+claude calls `answer_unanswered_tool_uses_on_resume` and the push providers call
+`repair_dangling_tool_use_on_resume`, so the resumed transcript is balanced.
 """
 
 from __future__ import annotations
@@ -422,6 +422,41 @@ def repair_interrupt_marker_on_resume(
             *repaired[-1].content, TextBlock(text=RESUME_DURABILITY_NOTE)))
     messages[start:last_marker + 1] = repaired
     transcript.rewrite(messages)
+
+
+def answer_unanswered_tool_uses_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, captured: dict[str, tuple[str, bool]] | None = None,
+) -> None:
+    """Give every unanswered tool_use a result before a claude resume.
+
+    claude transcripts hold one Message per content block, so parallel and
+    interleaved calls leave unanswered tool_uses in any assistant run, not just the
+    last. Each gets imp's captured result, else the synthetic placeholder. With no
+    trailing user run the results form one new user turn; otherwise they head the
+    run's first turn, ahead of its original content — `_project_for_cli` regroups
+    each behind its tool_use by id. The durability note is appended to that turn
+    unless every result is a captured success or the run already holds it. Each
+    result is journaled as a tool_result event.
+    """
+    unanswered = unanswered_tool_uses(messages)
+    if not unanswered:
+        return
+    results = tuple(_resume_result(tu, captured) for tu in unanswered)
+    start = _trailing_user_start(messages)
+    note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
+            if any(r.is_error for r in results)
+            and not any(_has_durability_note(m) for m in messages[start:]) else ())
+    if start == len(messages):
+        repair = Message(role="user", content=(*results, *note))
+        messages.append(repair)
+        transcript.append(repair)
+    else:
+        messages[start] = Message(
+            role="user", content=(*results, *messages[start].content, *note))
+        transcript.rewrite(messages)
+    for rb in results:
+        elog.append_tool_result(agent_id=agent_id, block=rb)
 
 
 def balance_success_on_resume(

@@ -17,6 +17,7 @@ from imp.agents.transcript import (
     RESUME_REDO_NUDGE,
     REWORK_RESULT_FRAME,
     Transcript,
+    _synthetic_tool_result_content,
 )
 from imp.engine.state import InMemoryEventLog
 from imp.providers.claude import (
@@ -59,9 +60,14 @@ def _tr(id_: str, content: str, *, is_error: bool = False) -> ToolResultBlock:
     return ToolResultBlock(tool_use_id=id_, content=content, is_error=is_error)
 
 
+def _bash(id_: str, cmd: str) -> ToolUseBlock:
+    return ToolUseBlock(id=id_, name="mcp__imp__bash", input={"command": cmd})
+
+
 _REJECTED = ("The user doesn't want to proceed with this tool use. "
              "The tool use was rejected.")
 _MARKER = "[Request interrupted by user]"
+_MARKER_TOOL = "[Request interrupted by user for tool use]"
 
 
 @dataclass
@@ -71,6 +77,7 @@ class _Resumed:
     streamed: list[dict[str, Any]]  # the stream-json delta of the first query
     session_id: str
     cwd: str
+    events: list[dict[str, Any]]    # events.jsonl after the run
 
 
 async def _resume(
@@ -79,8 +86,8 @@ async def _resume(
     agent_id: str = "step:p/s", user_input_fn: Any = None, **inv_fields: Any,
 ) -> _Resumed:
     (tmp_path / "art").mkdir()
-    inv = replace(_inv(tmp_path, agent_id=agent_id, event_log=InMemoryEventLog()),
-                  **inv_fields)
+    elog = InMemoryEventLog()
+    inv = replace(_inv(tmp_path, agent_id=agent_id, event_log=elog), **inv_fields)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
@@ -105,7 +112,8 @@ async def _resume(
     skey = session_key(inv.quest_context.project_root, agent_id)
     body = await session_store_for(inv.transcript_dir).load(skey) or []
     return _Resumed(entered=entered[0], body=body, streamed=created[0].queries[0],
-                    session_id=skey["session_id"], cwd=str(tmp_path))
+                    session_id=skey["session_id"], cwd=str(tmp_path),
+                    events=list(elog.read()))
 
 
 def _expected_body(r: _Resumed) -> list[Message]:
@@ -271,3 +279,151 @@ async def test_all_user_text_history_streams_everything(tmp_path: Path) -> None:
     r = await _resume(tmp_path, [_u(_txt("DISPATCH"))])
     assert _assert_boundary(r) == []
     assert _streamed_text(r) == "DISPATCH"
+
+
+def _captured(path: str, content: str) -> dict[str, Any]:
+    return {"name": "read_file", "input": {"path": path},
+            "content": content, "is_error": False}
+
+
+def _assert_repaired(
+    r: _Resumed, *, kept: dict[str, str], placeholders: dict[str, str],
+    swept: set[str], note: bool,
+) -> None:
+    """AC1(f): `kept` ids carry exactly that success content (captured or real),
+    `placeholders` ids (-> tool name) imp's placeholder; `swept` ids alone got a
+    tool_result event; the note sits in the trailing user run iff something was cut off."""
+    results = {b.tool_use_id: b for m in r.entered for b in m.content
+               if isinstance(b, ToolResultBlock)}
+    for id_, content in kept.items():
+        assert (results[id_].content, results[id_].is_error) == (content, False)
+    for id_, name in placeholders.items():
+        assert results[id_].content == _synthetic_tool_result_content(name)
+        assert results[id_].is_error
+    assert not any(_REJECTED in str(b.content) for b in results.values())
+    assert not any(isinstance(b, TextBlock) and b.text in (_MARKER, _MARKER_TOOL)
+                   for m in r.entered for b in m.content)
+    start = len(r.entered)
+    while start > 0 and r.entered[start - 1].role == "user":
+        start -= 1
+    notes = sum(1 for m in r.entered[start:] for b in m.content
+                if isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE)
+    assert notes == (1 if note else 0)
+    journaled = [e["payload"]["id"] for e in r.events if e["type"] == "tool_result"
+                 and e["payload"]["id"] in kept.keys() | placeholders.keys()]
+    assert sorted(journaled) == sorted(swept)
+
+
+@pytest.mark.anyio
+async def test_parallel_dangling_fragments_one_captured(tmp_path: Path) -> None:
+    r = await _resume(
+        tmp_path, [*_PRIOR, _a(_read("t1", "b.txt")), _a(_read("t2", "c.txt"))],
+        captured=(_captured("b.txt", "REAL BODY OF b.txt"),))
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t1": "REAL BODY OF b.txt"},
+                     placeholders={"t2": "mcp__imp__read_file"},
+                     swept={"t1", "t2"}, note=True)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_parallel_fragments_with_one_result_under_marker(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")), _a(_read("t2", "c.txt")),
+        _u(_tr("t2", "CEE")), _u(_txt(_MARKER))])
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t2": "CEE"},
+                     placeholders={"t1": "mcp__imp__read_file"},
+                     swept={"t1"}, note=True)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+_PER_BLOCK_INTERRUPT = [
+    *_PRIOR, _a(_read("t1", "b.txt")), _a(_bash("t2", "make")),
+    _u(_tr("t1", _REJECTED, is_error=True)), _u(_tr("t2", _REJECTED, is_error=True)),
+    _u(_txt(_MARKER_TOOL))]
+
+
+@pytest.mark.anyio
+async def test_per_block_cli_interrupt_restates_every_rejection(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, list(_PER_BLOCK_INTERRUPT),
+                      captured=(_captured("b.txt", "REAL BODY OF b.txt"),))
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t1": "REAL BODY OF b.txt"},
+                     placeholders={"t2": "mcp__imp__bash"}, swept=set(), note=True)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_per_block_cli_interrupt_keeps_human_text_after_marker(
+        tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [*_PER_BLOCK_INTERRUPT, _u(_txt("sandbox is off"))],
+                      captured=(_captured("b.txt", "REAL BODY OF b.txt"),))
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t1": "REAL BODY OF b.txt"},
+                     placeholders={"t2": "mcp__imp__bash"}, swept=set(), note=True)
+    assert r.entered[-1] == _u(_txt("sandbox is off"))
+    assert _streamed_text(r) == "sandbox is off"
+
+
+@pytest.mark.anyio
+async def test_interleaved_fragments_answer_the_earlier_call(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")), _a(_read("t2", "c.txt")),
+        _u(_tr("t2", "CEE")), _a(_read("t3", "d.txt"))])
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t2": "CEE"},
+                     placeholders={"t1": "mcp__imp__read_file",
+                                   "t3": "mcp__imp__read_file"},
+                     swept={"t1", "t3"}, note=True)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: use d.txt"])
+@pytest.mark.anyio
+async def test_dangling_call_under_several_user_turns(
+        tmp_path: Path, feedback: str | None) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")), _u(_txt(_MARKER)),
+        _u(_txt("CORRECTION: b.txt finished")), _u(_txt("use c.txt"))],
+        retry_feedback=feedback)
+    body = _assert_boundary(r)
+    _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
+                     swept={"t1"}, note=True)
+    assert any(isinstance(b, TextBlock) and b.text == "CORRECTION: b.txt finished"
+               for b in body[-1].content)
+    assert _streamed_text(r) == "\n".join(
+        ["use c.txt", *([feedback] if feedback else [])])
+
+
+@pytest.mark.anyio
+async def test_prose_over_unanswered_call_resumes_as_send_to_llm(tmp_path: Path) -> None:
+    asked: list[Any] = []
+    r = await _resume(
+        tmp_path, [*_PRIOR, _a(_read("t1", "b.txt")), _a(_txt("checking b.txt"))],
+        user_input_fn=lambda p: asked.append(p) or "reply")
+    body = _assert_boundary(r)
+    _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
+                     swept={"t1"}, note=True)
+    assert body[-1].role == "user" and asked == []
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_success_under_marker_gets_no_note(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")), _u(_tr("t1", "BEE")), _u(_txt(_MARKER))])
+    _assert_boundary(r)
+    _assert_repaired(r, kept={"t1": "BEE"}, placeholders={}, swept=set(), note=False)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_subagent_prose_over_unanswered_call_resumes(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")), _a(_txt("partial findings")),
+        _u(_txt(_MARKER))], agent_id="sub:tc-1", subagent_depth=1)
+    _assert_boundary(r)
+    _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
+                     swept={"t1"}, note=True)
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE

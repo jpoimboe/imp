@@ -1360,6 +1360,152 @@ def test_interrupt_marker_repair_keeps_an_orphan_error_result(tmp_path: Path) ->
     assert _note_count(msgs) == 0
 
 
+def test_sweep_answers_parallel_fragments_in_a_new_turn(tmp_path: Path) -> None:
+    """Per-block parallel calls: both fragments are unanswered. imp's capture answers
+    one, the placeholder the other, in one new user turn with the note; each answer
+    is journaled as a tool_result event."""
+    from imp.agents.transcript import (
+        answer_unanswered_tool_uses_on_resume,
+        captured_result_key,
+    )
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+    ]
+    t = _write(tmp_path, msgs)
+    elog = InMemoryEventLog()
+
+    answer_unanswered_tool_uses_on_resume(
+        msgs, t, elog, "step:p/s",
+        captured={captured_result_key("read_file", {"path": "a.py"}): ("A BODY", False)})
+
+    assert msgs[3:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+    events = [e["payload"] for e in elog.read() if e["type"] == "tool_result"]
+    assert [(p["id"], p["error"]) for p in events] == [("r1", False), ("b1", True)]
+
+
+def test_sweep_prepends_results_to_the_trailing_user_run(tmp_path: Path) -> None:
+    """With user turns already trailing, the answers head the run's first turn and
+    the run's later turns are untouched."""
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    r2 = ToolResultBlock(tool_use_id="r2", content="B BODY", is_error=False)
+    human = Message(role="user", content=(TextBlock(text="use c.py"),))
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r2", name="mcp__imp__read_file", input={"path": "b.py"}),)),
+        Message(role="user", content=(r2,)),
+        human,
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[2:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True),
+            r2, TextBlock(text=RESUME_DURABILITY_NOTE))),
+        human,
+    ]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_sweep_answers_an_interleaved_earlier_fragment(tmp_path: Path) -> None:
+    """A fast result streamed back between fragments leaves the FIRST call unanswered
+    in an earlier assistant run; the sweep is global, so it is answered too."""
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r2", name="mcp__imp__read_file", input={"path": "b.py"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r2", content="B BODY", is_error=False),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r3", name="mcp__imp__read_file", input={"path": "c.py"}),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[4:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True),
+        ToolResultBlock(tool_use_id="r3", content=_SYNTHETIC_NON_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))]
+
+
+def test_sweep_adds_no_note_when_every_answer_is_a_captured_success(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.transcript import (
+        answer_unanswered_tool_uses_on_resume,
+        captured_result_key,
+    )
+
+    msgs = [Message(role="assistant", content=(
+        ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),))]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(
+        msgs, t, InMemoryEventLog(), "step:p/s",
+        captured={captured_result_key("read_file", {"path": "a.py"}): ("A BODY", False)})
+
+    assert msgs[1:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),))]
+
+
+def test_sweep_adds_no_second_note_to_the_trailing_run(tmp_path: Path) -> None:
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[2].content[0] == ToolResultBlock(
+        tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True)
+    assert _note_count(msgs) == 1
+
+
+def test_sweep_is_a_no_op_when_everything_is_answered(tmp_path: Path) -> None:
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    path = tmp_path / "transcript.jsonl"
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),)),
+    ]
+    t = _write(tmp_path, msgs)
+    before, bytes_before = list(msgs), path.read_bytes()
+    elog = InMemoryEventLog()
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, elog, "step:p/s")
+
+    assert msgs == before and path.read_bytes() == bytes_before
+    assert not any(e["type"] == "tool_result" for e in elog.read())
+
+
 def test_unresolved_tool_result_content_states_uncertainty_without_advising_a_rerun(
 ) -> None:
     """The expiry body must not reuse the interrupted-placeholder's 're-run or
