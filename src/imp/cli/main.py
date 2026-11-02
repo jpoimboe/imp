@@ -3748,22 +3748,27 @@ class EventSearchHit(NamedTuple):
     handle_map: dict[str, str]
     match_count: int
     overlays: dict[int, dict[str, Any]]
+    intent: str | None   # titleless name source (opening, else seed_opening); None when titled
 
 
 def _events_search_active(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
     """In-flight quests with >=1 event matching query (after type/agent filters)."""
-    from imp.cli.store import _status_rows, make_store
+    from imp.cli.store import _resolve_intent, _status_rows, make_store
     store = make_store(control)
     scanned = store.scan_homes()
+    seed_by_id = {d.quest_id: d.meta.get("seed_opening") for d in scanned}
     hits: list[EventSearchHit] = []
     for r in _status_rows(control, scanned):
         events = store.get_events(r[0]) or []
         matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
+            intent = None if r[4].strip() else quest_row.fallback_intent(
+                _resolve_intent(events), seed_by_id.get(r[0]))
             hits.append(EventSearchHit(
-                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays))
+                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays,
+                intent))
     return hits
 
 
@@ -3774,8 +3779,19 @@ def _events_search_backlog(
     if types is not None or agents is not None:
         return []
     from imp.cli.store import _backlog_matches
-    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1, {})
+    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1, {},
+                           None if m.title.strip() else quest_row.fallback_intent(None, m.seed))
             for m in _backlog_matches(control, query)]
+
+
+def _archived_hit_intent(store: Store, quest_id: str,
+                         events: list[dict[str, Any]]) -> str | None:
+    """A titleless archived hit's name source; its card loads only when the events carry none."""
+    from imp.cli.store import _resolve_intent
+    if (intent := _resolve_intent(events)) is not None:
+        return intent
+    card = store.quest_card(quest_id)
+    return quest_row.fallback_intent(None, card.seed_opening if card is not None else None)
 
 
 def _events_search_archived(
@@ -3789,8 +3805,10 @@ def _events_search_archived(
         events = store.get_events(cid) or []
         matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
+            intent = None if title.strip() else _archived_hit_intent(store, cid, events)
             hits.append(EventSearchHit(
-                cid, title, "archive", last, matched, handle_map, len(matched), overlays))
+                cid, title, "archive", last, matched, handle_map, len(matched), overlays,
+                intent))
     return hits
 
 
