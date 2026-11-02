@@ -400,7 +400,7 @@ def test_tear_down_quest_force_reaps_per_quest_var_tmp_dir(
     try:
         tear_down_quest(ch)
         assert not ch.var_tmp_dir.exists()
-        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+        assert str(residue) in chmodded  # proves force_rmtree's chmod walk ran
     finally:
         if residue.exists():
             residue.chmod(0o700)
@@ -442,7 +442,7 @@ def test_tear_down_quest_force_reaps_overlay_residue_in_quest_home(
     try:
         tear_down_quest(ch)
         assert not ch.quest_dir.exists()
-        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+        assert str(residue) in chmodded  # proves force_rmtree's chmod walk ran
     finally:
         if residue.exists():
             residue.chmod(0o700)

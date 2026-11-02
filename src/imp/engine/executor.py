@@ -90,7 +90,7 @@ from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxOpenFailed,
     SandboxUnavailable,
-    _force_rmtree,
+    force_rmtree,
     home_is_overlay_mount,
     make_home_layer,
     overlay_mode,
@@ -1030,11 +1030,11 @@ def _archive_and_reap(quest: Quest, log: EventLog) -> None:
                           f"this imp knows v{exc.known}")},
               agent_id=None)
     else:
-        _force_rmtree(quest.quest_dir)
+        force_rmtree(quest.quest_dir)
     # No other reaper touches these, and the archive never reads them.
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     session_socket_path(quest.id).unlink(missing_ok=True)
-    _force_rmtree(quest.var_tmp_dir)
+    force_rmtree(quest.var_tmp_dir)
 
 
 def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:

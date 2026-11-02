@@ -8,7 +8,7 @@ import shutil
 
 from imp.engine import merge_queue, worktree
 from imp.engine.quest import Quest
-from imp.engine.sandbox import _force_rmtree
+from imp.engine.sandbox import force_rmtree
 from imp.engine.state import ProjectLock, State
 
 
@@ -41,9 +41,9 @@ def tear_down_quest(quest: Quest) -> None:
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    _force_rmtree(quest.quest_dir)
+    force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
-    _force_rmtree(quest.var_tmp_dir)
+    force_rmtree(quest.var_tmp_dir)
 
 
 def archive_conversation(quest: Quest) -> None:
@@ -72,9 +72,9 @@ def archive_conversation(quest: Quest) -> None:
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    _force_rmtree(quest.quest_dir)
+    force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
-    _force_rmtree(quest.var_tmp_dir)
+    force_rmtree(quest.var_tmp_dir)
 
 
 def save_as_draft(quest: Quest, reason: str | None = None) -> None:
@@ -97,6 +97,6 @@ def discard_conversation(quest: Quest) -> None:
     """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
     with ProjectLock(quest.quest_dir / "lock").acquire():
         pass
-    _force_rmtree(quest.quest_dir)
+    force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
-    _force_rmtree(quest.var_tmp_dir)
+    force_rmtree(quest.var_tmp_dir)

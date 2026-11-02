@@ -112,7 +112,7 @@ def test_reap_removes_overlay_residue(
         count = reap_archived_homes(tmp_path)
         assert count == 1
         assert not done.exists()
-        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+        assert str(residue) in chmodded  # proves force_rmtree's chmod walk ran
     finally:
         if residue.exists():
             residue.chmod(0o700)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from imp.engine.archive import check_data_floor, ensure_current, index, index_path
 from imp.engine.errors import ArchiveMismatch
-from imp.engine.sandbox import _force_rmtree
+from imp.engine.sandbox import force_rmtree
 from imp.engine.state import lock_is_live
 from imp.paths import project_state_dir
 
@@ -43,7 +43,7 @@ def reap_archived_homes(control_root: Path) -> int:
                 continue
             if not index.has_quest(conn, cid):
                 continue
-            _force_rmtree(home)
+            force_rmtree(home)
             reaped += 1
         return reaped
     finally:
