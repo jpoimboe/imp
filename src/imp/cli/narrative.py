@@ -2241,22 +2241,27 @@ def _h_step_label_updated(
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
 
 
+def _detail_text(d: object) -> str:
+    if isinstance(d, str):
+        return d
+    if isinstance(d, dict):
+        if d.get("full_summary"):
+            return str(d["full_summary"])
+        if d.get("stderr_tail"):
+            tail = str(d["stderr_tail"])
+            exit_code = d.get("exit_code")
+            return f"exit code {exit_code}\n{tail}" if isinstance(exit_code, int) else tail
+        if d.get("last_agent_text"):
+            return str(d["last_agent_text"])
+    return ""
+
+
 def _error_node(p: dict[str, Any], prefix: str = "") -> ErrorNode | None:
     if p.get("audit"):
         return None
     if p.get("category") == "config" and p.get("kind") == "interrupted":
         return None
-    detail = ""
-    d = p.get("detail")
-    if isinstance(d, dict):
-        if d.get("full_summary"):
-            detail = str(d["full_summary"])
-        elif d.get("stderr_tail"):
-            tail = str(d["stderr_tail"])
-            exit_code = d.get("exit_code")
-            detail = f"exit code {exit_code}\n{tail}" if isinstance(exit_code, int) else tail
-        elif d.get("last_agent_text"):
-            detail = str(d["last_agent_text"])
+    detail = _detail_text(p.get("detail"))
     if p.get("category") == "stalled":
         from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
         return ErrorNode(
@@ -2290,7 +2295,7 @@ def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     message = str(p.get("message", "?"))
     self._warnings.append(message)
     self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
-                           detail=str(p.get("detail", ""))))
+                           detail=_detail_text(p.get("detail"))))
 
 
 def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -2298,7 +2303,7 @@ def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any])
     message = str(p.get("message", "?"))
     self._warnings.append(message)
     self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
-                           detail=str(p.get("detail", ""))))
+                           detail=_detail_text(p.get("detail"))))
 
 
 def _h_sandbox_overlay_unavailable(
@@ -2308,7 +2313,7 @@ def _h_sandbox_overlay_unavailable(
     message = str(p.get("reason", "?"))
     self._warnings.append(message)
     self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
-                           detail=str(p.get("detail", ""))))
+                           detail=_detail_text(p.get("detail"))))
 
 
 def _fmt_hm(seconds: float) -> str:
