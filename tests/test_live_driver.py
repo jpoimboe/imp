@@ -3746,6 +3746,7 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
         id = "2026-06-12-run-x"
         title = ""
         base_branch = "master"
+        seed_opening = None
 
     events = [
         ev("1", "quest_created", quest_id=1, title="x"),

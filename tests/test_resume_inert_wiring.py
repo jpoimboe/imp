@@ -448,6 +448,33 @@ async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
 
 
 @pytest.mark.anyio
+async def test_inert_ask_line_leave_signal_names_a_titleless_quest_by_its_opening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    signal_sentinels: Callable[[int, object], None],
+) -> None:
+    # A titleless saved chat: the identity line carries the opening, not a bare id.
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="", quest_id="c", base_branch="main")
+    State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
+    ch.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent",
+                 "content": [{"type": "text", "text": "summarize foo.py"}]})
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _SignalledInertPrompt(signal.SIGTERM, **kw))
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        line = await m._inert_ask_line(ch)
+
+    assert line is None
+    assert capsys.readouterr().out == (
+        "paused · SIGTERM\nc · summarize foo.py\nresume: imp resume c\n\n")
+
+
+@pytest.mark.anyio
 @_LEAVE_SIGNALS
 async def test_resume_inert_leave_signal_parks_and_exits_130(
     leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,

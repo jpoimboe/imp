@@ -24,6 +24,7 @@ class _Change:
     id = "2026-06-12-run-x"
     title = ""
     base_branch = "master"
+    seed_opening: str | None = None
     materialized = False                # the real render-seam value (draft never reloaded)
     project_root = "/imp-state/worktrees/2026-06-12-run-x"
     control_root = Path("/imp-state")
@@ -706,3 +707,41 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
     assert no_key == (
         "2026-06-12-run-x · (unnamed) · done · commits on imp/2026-06-12-run-x\n"
         "\n")
+
+
+_SEED_EMITTERS = [
+    pytest.param(lambda q: main._emit_completed(q, merged_base="master"), id="completed"),
+    pytest.param(lambda q: main._emit_paused_summary(q, info=None), id="paused"),
+    pytest.param(lambda q: main._emit_leave_pause(q, "sigterm"), id="leave-pause"),
+    pytest.param(lambda q: main._emit_merge_blocked(q, "worktree_dirty"), id="merge-blocked"),
+    pytest.param(lambda q: main._emit_lost_connection(q), id="lost-connection"),
+    pytest.param(lambda q: main._emit_daemon_died(q), id="daemon-died"),
+    pytest.param(lambda q: main._emit_leave_block(q, main.CONTROL_SAVE, intent=None),
+                 id="leave-block"),
+    pytest.param(lambda q: main._print_leave_disposition(q, {"send_failed": "1"}),
+                 id="left-running"),
+]
+
+
+@pytest.mark.parametrize("emit", _SEED_EMITTERS)
+def test_titleless_quest_with_no_intent_is_named_by_its_seed_opening(
+    emit, monkeypatch, capsys,
+) -> None:
+    # An unstarted draft / backlog quest has no intent event; seed_opening names it.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    q = _Change([])
+    q.seed_opening = "summarize\n  foo.py"
+    emit(q)
+    out = capsys.readouterr().out
+    assert "2026-06-12-run-x · summarize foo.py" in out
+    assert "(unnamed)" not in out
+
+
+def test_a_handed_intent_wins_over_seed_opening(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    q = _quest(title="")
+    q.seed_opening = "the seeded brief"
+    main._emit_completed(q, merged_base="master", intent="what the client witnessed")
+    out = capsys.readouterr().out
+    assert out.split("\n")[0] == "soro82 · what the client witnessed · merged into master"
+    assert "the seeded brief" not in out

@@ -237,6 +237,7 @@ def _emit_completed(quest: Quest, *, merged_base: str | None,
     oldest-first when any were recorded; one trailing blank. `merged_base` is the branch
     the merge landed on, None when the run completed without merging."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     tail = (f"merged into {merged_base}" if merged_base is not None
             else f"done · commits on imp/{quest.id}")
     print(_status_spine(quest.id, quest.title, tail, "wordmark", color=color,
@@ -404,6 +405,7 @@ def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
     """The trailing run-status line on a non-interactive pause; `info` None renders the
     bare `paused` block."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     for ln in _pause_lines(quest.id, quest.id, info=info, title=quest.title,
                            color=color, intent=intent):
         print(ln)
@@ -443,6 +445,7 @@ def _emit_merge_blocked(
     `note` (e.g. the recovery-exhaustion note) renders before git's detail.
     `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         summary = "uncommitted work in the worktree"
@@ -489,7 +492,8 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
         head = "startup failed: session daemon did not come up"
         body = [f"It may have crashed; see "
                 f"{project_state_dir(quest.control_root) / 'remote-control.log'}"]
-    intent = _resolve_intent(list(quest.event_log().read()))
+    intent = quest_row.fallback_intent(
+        _resolve_intent(list(quest.event_log().read())), quest.seed_opening)
     for ln in _error_block(head, body, quest.id, quest.title,
                            color=color, intent=intent):
         print(ln)
@@ -499,6 +503,7 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
 def _emit_lost_connection(quest: Quest, *, intent: str | None = None) -> None:
     """The client's event stream faulted: report the ending it saw, never a state it didn't."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     body = [f"It may still be running — `imp resume {quest.id}` to reattach."]
     for ln in _error_block("lost the connection to the run", body, quest.id,
                            quest.title, color=color, intent=intent):
@@ -525,6 +530,7 @@ def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
     the crash, otherwise the run simply stopped reporting. No resume line — the inline
     hint is the remediation."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     stderr_path = quest.quest_dir / "daemon.stderr"
     body: list[str] = []
     if _daemon_stderr_has_crash(stderr_path):
@@ -551,6 +557,7 @@ def _emit_leave_block(
 ) -> None:
     """The closing block for a leave the daemon applies, whichever client sent it."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
                         color=color, intent=intent))
     if disposition == CONTROL_SAVE:
@@ -581,6 +588,7 @@ def _print_leave_disposition(
         return ExitCode.USER_ENDED
     if leave_state.get("send_failed"):
         color = should_use_color(sys.stdout)
+        intent = quest_row.fallback_intent(intent, quest.seed_opening)
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color, intent=intent))
         print(_resume_line(quest.id))
@@ -1598,20 +1606,21 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
     retains the `> ` caret; a leave signal prints its pause block. Both map to
     None — the quest stays parked."""
     from imp.cli.signals import PromptLeave, prompt_signal_guard
+    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
-    prompt.seed_history(
-        _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
+    events = list(quest.event_log().read())
+    prompt.seed_history(_prompt_history_lines(quest.seed_opening, events))
     try:
         async with prompt_signal_guard():
             line = await _read_intent_line(
                 prompt, quest, color=color, width=width, toolbar=toolbar)
     except PromptLeave as leave:
-        _emit_leave_pause(quest, leave.trigger)
+        _emit_leave_pause(quest, leave.trigger, intent=_resolve_intent(events))
         return None
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))

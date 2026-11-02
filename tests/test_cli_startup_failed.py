@@ -110,3 +110,35 @@ def test_backstop_colored(
     out = capsys.readouterr().out
     assert pal.ansi(
         "startup failed: session daemon did not come up", "red") in out
+
+
+def _titleless(tmp_path: Path) -> Quest:
+    _seed_control(tmp_path)
+    return Quest.create(tmp_path, title="", quest_id="feat", base_branch="main")
+
+
+def test_titleless_first_run_death_is_named_by_seed_opening(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The daemon died before the intent event was written: seed_opening names it.
+    monkeypatch.setattr(cli_main, "should_use_color", lambda stream: False)
+    q = _titleless(tmp_path)
+    q.set_seed_opening("summarize foo.py")
+    cli_main._emit_startup_failed(q, DaemonStartupError("feat", 7, tmp_path / "e", ""))
+    lines = capsys.readouterr().out.rstrip("\n").split("\n")
+    assert lines[-1] == "feat · summarize foo.py"
+
+
+def test_startup_failed_events_intent_wins_over_seed_opening(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_main, "should_use_color", lambda stream: False)
+    q = _titleless(tmp_path)
+    q.set_seed_opening("the seeded brief")
+    q.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent",
+                 "content": [{"type": "text", "text": "the log's own intent"}]})
+    cli_main._emit_startup_failed(q, DaemonStartupError("feat", 7, tmp_path / "e", ""))
+    lines = capsys.readouterr().out.rstrip("\n").split("\n")
+    assert lines[-1] == "feat · the log's own intent"
