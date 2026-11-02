@@ -6,7 +6,13 @@ from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
-from imp.cli.render_html import _md_to_fragment, render_html
+from imp.cli.render_html import (
+    _fold_markers,
+    _FoldClose,
+    _FoldOpen,
+    _md_to_fragment,
+    render_html,
+)
 from imp.cli.render_markdown import render_markdown, render_summary_markdown
 from imp.cli.render_summary import StepRow, SummaryHeader
 
@@ -208,6 +214,137 @@ def test_indented_fence_in_prose_does_not_swallow_a_later_fold() -> None:
     assert "body" in frag
 
 
+_NESTED_FOLDS_FIXTURE = (
+    "# Step spec\n"
+    "\n"
+    "intro &lt;prose&gt;\n"
+    "\n"
+    "<details>\n"
+    "<summary>· reviewer &lt;r&gt;</summary>\n"
+    "\n"
+    "outer text\n"
+    "\n"
+    "<details>\n"
+    "<summary>thinking</summary>\n"
+    "\n"
+    "middle text\n"
+    "\n"
+    "<details>\n"
+    "<summary>2 calls</summary>\n"
+    "\n"
+    "```\n"
+    "· bash\n"
+    "  command=cat x\n"
+    "</details>\n"
+    "```\n"
+    "\n"
+    "note\n"
+    "\n"
+    "    indented a < b\n"
+    "    <details>\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "after inner\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "after middle\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "trailing prose\n"
+)
+
+
+def test_fragment_nested_folds_match_pre_rewrite_output() -> None:
+    assert _md_to_fragment(_NESTED_FOLDS_FIXTURE) == (
+        "<h1>Step spec</h1>\n"
+        "<p>intro &lt;prose&gt;</p>\n"
+        "<details>\n"
+        "<summary>· reviewer &lt;r&gt;</summary>\n"
+        "<p>outer text</p>\n"
+        "<details>\n"
+        "<summary>thinking</summary>\n"
+        "<p>middle text</p>\n"
+        "<details>\n"
+        "<summary>2 calls</summary>\n"
+        "<pre><code>· bash\n"
+        "  command=cat x\n"
+        "&lt;/details&gt;\n"
+        "</code></pre>\n"
+        "<p>note</p>\n"
+        "<pre><code>indented a &lt; b\n"
+        "&lt;details&gt;\n"
+        "</code></pre>\n"
+        "</details>\n"
+        "<p>after inner</p>\n"
+        "</details>\n"
+        "<p>after middle</p>\n"
+        "</details>\n"
+        "<p>trailing prose</p>\n"
+    )
+
+
+def test_fold_markers_classify_opens_and_honored_closes() -> None:
+    md = "\n".join([
+        "<details>",                        # 0: open a
+        "<summary>a</summary>",
+        "",
+        "<details>",                        # 3: open b (summary kept raw)
+        "<summary>b &lt;c&gt;</summary>",
+        "",
+        "```",
+        "</details>",                       # 7: inside a fence, not a marker
+        "```",
+        "",
+        "</details>",                       # 10: closes b
+        "",
+        "<details>",                        # 12: no <summary> next, not a marker
+        "",
+        "</details>",                       # 14: closes a
+        "",
+        "</details>",                       # 16: nothing open, not a marker
+    ])
+    assert _fold_markers(md) == [
+        _FoldOpen(0, "a"), _FoldOpen(3, "b &lt;c&gt;"),
+        _FoldClose(10), _FoldClose(14),
+    ]
+
+
+def test_fragment_stray_details_after_fence_does_not_raise() -> None:
+    frag = _md_to_fragment("```\nfoo\n\n```\n<details>\nx\n<details>\n")
+    assert "<details>" not in frag                 # neither line opens a fold
+    assert frag.count("&lt;details&gt;") == 2      # both render as inert text
+
+
+def test_fragment_final_details_line_is_escaped_text() -> None:
+    frag = _md_to_fragment("text\n\n<details>")
+    assert "<details>" not in frag
+    assert "&lt;details&gt;" in frag
+
+
+def test_fragment_details_without_summary_line_is_not_a_fold() -> None:
+    frag = _md_to_fragment("<details>\nnot a summary\n\nbody\n\n</details>")
+    assert "<details>" not in frag
+    assert "<summary>" not in frag
+    assert "&lt;details&gt;" in frag
+    assert "&lt;/details&gt;" in frag              # its close has nothing to close
+    assert "body" in frag
+
+
+def test_fragment_top_level_close_without_open_is_escaped_text() -> None:
+    frag = _md_to_fragment("a\n\n</details>\n\nb")
+    assert "</details>" not in frag
+    assert "&lt;/details&gt;" in frag
+
+
+def test_fragment_deeply_nested_unclosed_folds_do_not_recurse() -> None:
+    frag = _md_to_fragment("<details>\n<summary>s</summary>\n" * 5000)
+    assert frag.count("<details>") == 5000
+    assert frag.count("</details>") == 5000        # all closed implicitly at end
+
+
 def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
@@ -371,3 +508,23 @@ def test_summary_html_puts_a_providers_share_in_the_quota_column() -> None:
             "<td></td>\n<td></td>\n<td>2.00%</td>\n</tr>") in out
     assert ("<tr>\n<td>↳ codex</td>\n<td></td>\n<td></td>\n<td></td>\n"
             "<td></td>\n<td></td>\n<td>—</td>\n</tr>") in out
+
+
+def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "`<x>`", "task_description": "go"}),
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ]
+    md = render_markdown(nv.build_tree(events), full=False,
+                         show=frozenset({"subagents"}))
+    out = render_html(md)
+    for doc in (md, out):
+        assert "<summary>· `&lt;x&gt;` · m</summary>" in doc
+        assert "&amp;" not in doc
