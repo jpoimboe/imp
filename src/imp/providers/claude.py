@@ -296,6 +296,15 @@ def _text_of(message: Any) -> str:
     return "\n".join(parts)
 
 
+def _stream_start(messages: list[Message]) -> int:
+    """Start of the trailing user-text run: streamed on native resume, never loaded."""
+    i = len(messages)
+    while (i > 0 and messages[i - 1].role == "user"
+           and not _contains_tool_result(messages[i - 1])):
+        i -= 1
+    return i
+
+
 def _tail_has_complete_step(messages: list[Message]) -> bool:
     """True when the transcript's last turn is an assistant turn whose tool_use is
     a `complete_step` awaiting its result.
@@ -1540,14 +1549,7 @@ class ClaudeSession(ObserveSession):
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
         )
-        resume_base = len(existing)
-        if (shape_native_eligible
-                and classify_resume(existing) is ResumeState.SEND_TO_LLM):
-            while (resume_base > 0
-                   and existing[resume_base - 1].role == "user"
-                   and not _contains_tool_result(existing[resume_base - 1])):
-                resume_base -= 1
-        fresh_stream = shape_native_eligible and resume_base == 0
+        fresh_stream = shape_native_eligible and _stream_start(existing) == 0
         native_resume = shape_native_eligible
         _pre_spawn_token_refresh(elog, aid)
         config_dir: Path | None = None
@@ -1584,10 +1586,8 @@ class ClaudeSession(ObserveSession):
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
             elif tail_is_complete_step:
-                injected = synthesize_native_success_on_resume(
+                synthesize_native_success_on_resume(
                     messages, transcript, elog, aid)
-                if injected is not None:
-                    resume_base += 1
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             elif tail_step_completed and invocation.retry_feedback:
@@ -1652,11 +1652,14 @@ class ClaudeSession(ObserveSession):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     continuation_nudge(invocation.resume_cause))
-            if len(messages) == resume_base:
+            # Split only after every repair: the CLI drops a streamed tool_result as an orphan.
+            resume_base = _stream_start(messages)
+            if resume_base == len(messages):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     continuation_nudge(invocation.resume_cause))
         else:
+            resume_base = 0
             messages = []
             for m in invocation.initial_messages:
                 messages.append(m)

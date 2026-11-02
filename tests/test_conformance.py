@@ -369,10 +369,10 @@ async def test_dangling_tool_use_repair_claude(tmp_path: Path) -> None:
                    for e in driven.control)
     assert created[0].opts.resume is None
     assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
-    # DANGLING native resume STREAMS a synth tool_result for t1.
+    # DANGLING native resume loads the synth t1 result; the delta is text only.
     streamed = created[0].queries[0]
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert isinstance(streamed[0]["message"]["content"], str)
     check_golden("dangling__claude", record(driven))
 
 
