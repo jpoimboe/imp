@@ -35,7 +35,12 @@ from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_rollout import CODEX_ROLLOUT_SLOTS
 from imp.providers.codex_runner import CodexAgentRunner
-from tests._live import native_denial_miss, stale_codex_oauth_skip_reason
+from tests._live import (
+    call_args,
+    mcp_write_miss,
+    native_denial_miss,
+    stale_codex_oauth_skip_reason,
+)
 
 pytestmark = pytest.mark.live("codex")
 
@@ -369,8 +374,13 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
         assert (root / "probe.txt").read_bytes() == b"KEEP\n"
         # (b) the exec target was never created.
         assert not (root / "exec_written.txt").exists()
-        # (c) the MCP write landed, with its expected contents.
-        assert (root / "mcp_written.txt").read_text().strip() == "MCP-OK"
+        # (c) the MCP write landed. A run that never called write_file on the
+        # target (e.g. tried it from code-mode `exec`) is a bad draw; a call
+        # that failed or did not land raises inside the helper.
+        mcp_miss = mcp_write_miss(root, _records(root))
+        if mcp_miss is not None:
+            notes.append(f"#{attempt + 1} {mcp_miss}")
+            continue
         # Positive evidence that each native leg was ATTEMPTED and denied —
         # without this, (a) and (b) also pass when the model never tried. A
         # report the model paraphrased is a bad draw, not a regression: spend
@@ -417,16 +427,13 @@ def _reader_inv(root: Path) -> AgentInvocation:
     )
 
 
-def _call_args(payload: dict[str, Any]) -> dict[str, Any]:
-    """`tool_call` payloads store the SDK's `arguments` under `"input"` verbatim —
-    a dict on 0.153.2 but a JSON string on other shapes."""
-    raw = payload.get("input") or {}
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            return {}
-    return raw if isinstance(raw, dict) else {}
+def _records(root: Path) -> list[dict[str, Any]]:
+    ev_path = root / "events.jsonl"
+    return [
+        json.loads(ln)
+        for ln in (ev_path.read_text().splitlines() if ev_path.exists() else [])
+        if ln.strip()
+    ]
 
 
 @pytest.mark.anyio
@@ -467,19 +474,14 @@ async def test_codex_live_omitted_optional_arg_reaches_python_default(
         if reason is not None:
             pytest.skip(reason)
 
-        ev_path = root / "events.jsonl"
-        recs = [
-            json.loads(ln)
-            for ln in (ev_path.read_text().splitlines() if ev_path.exists() else [])
-            if ln.strip()
-        ]
+        recs = _records(root)
         results = {r["payload"]["id"]: r["payload"]
                    for r in recs if r.get("type") == "tool_result"}
         for rec in recs:
             if (rec.get("type") != "tool_call"
                     or rec["payload"].get("name") != "read_file"):
                 continue
-            if _call_args(rec["payload"]).get("offset") is not None:
+            if call_args(rec["payload"]).get("offset") is not None:
                 continue
             result = results.get(rec["payload"]["id"])
             if result is None:
