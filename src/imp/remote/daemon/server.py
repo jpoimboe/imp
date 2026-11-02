@@ -12,6 +12,7 @@ from anyio.abc import SocketListener, SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.daemon.protocol import parse_hello
+from imp.remote.sockets import create_unix_listener
 
 _MAX_FRAME = 1 << 20
 
@@ -35,7 +36,7 @@ class SouthHub:
         self._listener: SocketListener | None = None
 
     async def open(self) -> None:
-        self._listener = await anyio.create_unix_listener(self._path)
+        self._listener = await create_unix_listener(self._path)
 
     async def serve(self) -> None:
         assert self._listener is not None

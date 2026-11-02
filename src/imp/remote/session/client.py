@@ -22,6 +22,7 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_stream_frame,
 )
+from imp.remote.sockets import connect_unix
 
 
 class StreamEnding(enum.Enum):
@@ -49,7 +50,7 @@ class SessionClient:
         self._send_lock = anyio.Lock()
 
     async def connect(self) -> None:
-        stream = await anyio.connect_unix(self._path)
+        stream = await connect_unix(self._path)
         try:
             await stream.send(
                 (encode_attach(self._quest_id, self._title, self._lease) + "\n").encode("utf-8"))

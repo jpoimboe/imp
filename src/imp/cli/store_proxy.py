@@ -24,6 +24,7 @@ from imp.cli.store import (
     Store,
 )
 from imp.remote.session.protocol import encode_query, parse_result
+from imp.remote.sockets import connect_unix
 
 
 def _b64e(b: bytes | None) -> str | None:
@@ -154,7 +155,7 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
 
 
 async def _roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
-    stream = await anyio.connect_unix(sock)
+    stream = await connect_unix(sock)
     try:
         await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
         chunks: list[bytes] = []

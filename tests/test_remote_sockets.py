@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import socket
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -138,3 +139,28 @@ async def test_raw_socket_attribute_is_the_underlying_socket(tmp_path: Path) -> 
             await accepted.aclose()
         finally:
             await client.aclose()
+
+
+_SRC = Path(__file__).resolve().parents[1] / "src" / "imp"
+_UNSAFE_FACTORIES = frozenset({"connect_unix", "create_unix_listener"})
+
+
+def _opens_unsafe_socket(node: ast.AST) -> bool:
+    if isinstance(node, ast.ImportFrom):
+        return node.module == "anyio" and any(a.name in _UNSAFE_FACTORIES for a in node.names)
+    if isinstance(node, ast.Attribute):
+        return node.attr == "from_socket" or (
+            node.attr in _UNSAFE_FACTORIES
+            and isinstance(node.value, ast.Name) and node.value.id == "anyio")
+    return False
+
+
+def test_unix_sockets_open_only_through_imp_remote_sockets() -> None:
+    offenders = [
+        f"{path.relative_to(_SRC)}:{node.lineno}"
+        for path in sorted(_SRC.rglob("*.py"))
+        if path != _SRC / "remote" / "sockets.py"
+        for node in ast.walk(ast.parse(path.read_text()))
+        if _opens_unsafe_socket(node)
+    ]
+    assert offenders == []

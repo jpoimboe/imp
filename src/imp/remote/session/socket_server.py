@@ -40,6 +40,7 @@ from imp.remote.session.protocol import (
     encode_result_error,
     parse_client_message,
 )
+from imp.remote.sockets import create_unix_listener
 
 # What the input channel carries: a client reply, a client skill request, or a server-injected note.
 InputPayload = str | SkillRequest | ContinuationNote
@@ -161,7 +162,7 @@ class SessionSocket:
         # ProjectLock (daemon.py serve_quest_session): a racing spawn raises
         # LockHeld and exits without binding. The stale .sock is removed by
         # close() on teardown, so no pre-unlink is needed here.
-        self._listener = await anyio.create_unix_listener(self._path)
+        self._listener = await create_unix_listener(self._path)
 
     async def serve(self) -> None:
         if self._listener is None:
@@ -383,8 +384,7 @@ class SessionSocket:
 
     async def close(self) -> None:
         await self.detach_all()
-        # Cancel before close: keeps accept()'s done callback fd-valid,
-        # preventing stale selector entry on reuse.
+        # Cancel serve() and wait it out so no handler outlives the listener.
         if self._serve_scope is not None:
             done = self._serve_done
             self._serve_scope.cancel()
