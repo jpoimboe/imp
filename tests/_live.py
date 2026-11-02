@@ -467,12 +467,16 @@ def _tail(path: Path, lines: int = _EVIDENCE_TAIL_LINES) -> str:
 
 
 def evidence(quest_dir: Path) -> str:
-    """Failure evidence for a live subprocess run. events.jsonl carries the real
-    trace; daemon.stderr is empty unless the daemon itself crashed."""
-    return (
-        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}\n"
-        f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}"
-    )
+    """Failure evidence for a live run: events.jsonl, daemon.stderr, each step's stderr.log."""
+    sections = [
+        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}",
+        f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}",
+    ]
+    sections += [
+        f"{log.relative_to(quest_dir)} tail:\n{_tail(log)}"
+        for log in sorted(quest_dir.glob("steps/**/stderr.log"))
+    ]
+    return "\n".join(sections)
 
 
 def fail_no_bash_tool_call(

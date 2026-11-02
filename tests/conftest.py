@@ -206,6 +206,30 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.skip(reason=reason))
 
 
+_QUEST_EVIDENCE_DIR = pytest.StashKey[Path]()
+
+
+@pytest.fixture
+def register_quest_evidence(request: pytest.FixtureRequest) -> Callable[[Path], None]:
+    """Attach the quest dir's evidence() to this test's report if its call fails."""
+    def register(quest_dir: Path) -> None:
+        request.node.stash[_QUEST_EVIDENCE_DIR] = quest_dir
+    return register
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None],
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    report = yield
+    quest_dir = item.stash.get(_QUEST_EVIDENCE_DIR, None)
+    # pytest-timeout's signal method raises inside the call, so a timeout lands here too.
+    if quest_dir is not None and report.when == "call" and report.failed:
+        from tests._live import evidence
+        report.sections.append(("imp quest evidence", evidence(quest_dir)))
+    return report
+
+
 def _pin_subprocess_imp_to_working_tree() -> None:
     """Make subprocess `imp` resolution deterministic for the whole test run.
 
