@@ -397,7 +397,7 @@ def _wipe_step_scratch(quest: Quest) -> None:
     ensure_quest_tmp_dir(quest.tmp_dir)
     for child in quest.tmp_dir.iterdir():
         if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child, ignore_errors=True)
+            force_rmtree(child)
         else:
             child.unlink(missing_ok=True)
 

@@ -9,7 +9,7 @@ import pytest
 
 from imp.engine.abandon import archive_conversation, discard_conversation, tear_down_quest
 from imp.engine.env import ensure_quest_tmp_dir
-from imp.engine.executor import _archive_and_reap
+from imp.engine.executor import _archive_and_reap, _wipe_step_scratch
 from imp.engine.quest import Quest
 from imp.remote.session.attach import spawn_session_daemon
 from tests.conftest import _seed_control
@@ -336,3 +336,27 @@ def test_quest_end_removes_a_read_only_tmp_subtree(
 
     assert not ch.tmp_dir.exists()
     assert str(ro) in chmodded  # proves force_rmtree's chmod walk ran
+
+
+def test_wipe_step_scratch_removes_a_read_only_child_in_place(
+    tmp_path: Path, plant_read_only: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="T", quest_id="rowipe", base_branch="main")
+    ensure_quest_tmp_dir(ch.tmp_dir)
+    before_ino = ch.tmp_dir.stat().st_ino
+    ro = plant_read_only(ch.tmp_dir)
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+
+    _wipe_step_scratch(ch)
+
+    assert not ro.exists()
+    assert str(ro) in chmodded  # proves force_rmtree's chmod walk ran
+    assert ch.tmp_dir.stat().st_ino == before_ino
