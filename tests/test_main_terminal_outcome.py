@@ -69,7 +69,7 @@ def test_witnessed_pause_emits_the_paused_summary() -> None:
         rc = _closing_block(
             _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
             coord=_NO_LEAVE, leave_state={})
-    assert rc == 1
+    assert rc == 130
     ps.assert_called_once()
     assert ps.call_args.kwargs["info"] == main._PauseInfo("interrupt", None)
 
@@ -537,7 +537,7 @@ def test_a_non_leave_pause_prints_no_caret(monkeypatch, capsys) -> None:
         rc = _closing_block(
             _Change(events), witness=_witness(*events), ending=StreamEnding.CUT,
             coord=_NO_LEAVE, leave_state={})
-    assert rc == 1
+    assert rc == 130
     ps.assert_called_once()
     assert capsys.readouterr().out == ""
 

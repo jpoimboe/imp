@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.cli.exit_codes import ExitCode
 from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.session_terminal import RunWitness, run_terminal_client
@@ -99,7 +100,7 @@ def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
 def _closing_block(
     quest: Quest, *, witness: RunWitness, ending: StreamEnding,
     coord: InterruptCoordinator, leave_state: dict[str, str],
-) -> int:
+) -> ExitCode:
     """Select the closing block from what this client witnessed, in row order: its own
     leave, then a leave the end frame named, then the run's own outcome. Only the
     last row consults disk — there the stream broke before anything could be
@@ -125,39 +126,39 @@ def _closing_block(
     leave = witness.leave()
     if leave is not None:
         _emit_leave_block(quest, leave, intent=intent)
-        return 0
+        return ExitCode.USER_ENDED
     terminal = witness.terminal()
     if terminal is not None:
         if terminal.type == "quest_merged":
             _emit_completed(quest, merged_base=terminal.payload["base"], intent=intent,
                             commits=terminal.payload.get("commits", []))
-            return 0
+            return ExitCode.OK
         if terminal.type == "workflow_completed":
             _emit_completed(quest, merged_base=None, intent=intent,
                             commits=terminal.payload.get("commits", []))
-            return 0
+            return ExitCode.OK
         _emit_merge_blocked(
             quest, terminal.payload.get("reason"), terminal.payload.get("detail"),
             terminal.payload.get("note"), intent=intent)
-        return 1
+        return ExitCode.FAILED
     trigger = _leave_trigger(coord)
     if trigger is not None:
         # The daemon writes its workflow_paused after this client departs, so on a
         # deliberate leave the client's own trigger is the fresher truth.
         _emit_leave_pause(quest, trigger, intent=intent)
-        return 1
+        return ExitCode.USER_ENDED
     paused = witness.paused()
     if paused is not None:
         _emit_paused_summary(quest, info=paused.info, intent=intent)
-        return 1
+        return ExitCode.FAILED if paused.failed else ExitCode.USER_ENDED
     if coord.escalation_event is not None and coord.escalation_event.is_set():
         _emit_paused_summary(quest, info=None, intent=intent)
-        return 1
+        return ExitCode.USER_ENDED
     if ending is StreamEnding.ENDED:
         # An end frame arrived, so the ordering guarantee holds: an outcome the client
         # failed to witness is structurally impossible. The run reported nothing.
         _emit_daemon_died(quest, intent=intent)
-        return 1
+        return ExitCode.FAILED
     outcome = resolve_settled_outcome(quest)
     settled_intent = _resolve_intent(outcome.events)
     if outcome.completed:
@@ -167,9 +168,9 @@ def _closing_block(
             merged_base=quest.base_branch if merged else None,
             intent=settled_intent,
             commits=_recorded_commits(outcome.events, merged=merged))
-        return 0
+        return ExitCode.OK
     _emit_lost_connection(quest, intent=settled_intent or intent)
-    return 4
+    return ExitCode.LOST_CONNECTION
 
 
 async def run_session_client(
@@ -189,7 +190,7 @@ async def run_session_client(
     model: str | None = None,
     provider: str | None = None,
     opening_unsandboxed: bool = False,
-) -> int:
+) -> ExitCode:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
     title = title if title is not None else TerminalTitle(
@@ -237,15 +238,12 @@ async def run_session_client(
     if startup_failed and not resolve_settled_outcome(quest).completed:
         if startup_error is not None and startup_error.exit_code == LAYOUT_MISMATCH_EXIT:
             print(startup_error.stderr_tail, file=sys.stderr)
-            return 2
+            return ExitCode.USAGE
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
-        return 3
-    rc = _closing_block(
+        return ExitCode.STARTUP_FAILED
+    return _closing_block(
         quest, witness=witness, ending=ending, coord=coord, leave_state=leave_state)
-    # The single statement of the interrupt rule: every non-zero, non-completed row
-    # becomes 130. The last row returns its own 0 / 4 and is exempt by construction.
-    return 130 if rc == 1 and coord.interrupted else rc
 
 
 def make_headless_solicit(

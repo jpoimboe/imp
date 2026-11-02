@@ -240,11 +240,9 @@ class InterruptCoordinator:
         # reads it to fill the CONTROL_INTERRUPT_LEAVE frame's reason.
         self.leave_reason: str | None = None
         self._should_pause = False
-        # Durable "an interrupt/leave gesture drove a pause this session" signal
-        # for the 130 exit code (the closing block's remap). Set alongside should_pause on
-        # a gesture; unlike should_pause it SURVIVES end_gesture_round (which clears
-        # the live latch so the next ctrl-c is fresh), so a paused non-interactive
-        # session still exits 130 after the prompt posts.
+        # Durable "an interrupt/leave gesture drove a pause this session" signal. Set
+        # alongside should_pause on a gesture; unlike should_pause it SURVIVES
+        # end_gesture_round (which clears the live latch so the next ctrl-c is fresh).
         self._interrupted = False
         self.pause_reason: str | None = None
         self._pending_model: str | None = None
@@ -553,7 +551,7 @@ class InterruptCoordinator:
         Distinct from the daemon's brake (which holds until the reply is
         accepted, §3) and narrower than
         reset() — leave_reason / escalated / _yielded AND the durable _interrupted
-        flag (the 130 exit-code signal) are left untouched."""
+        flag are left untouched."""
         self._should_pause = False
         self.pause_reason = None
         self._first_gesture_at = None
@@ -831,8 +829,7 @@ class InterruptCoordinator:
     @property
     def interrupted(self) -> bool:
         """Durable session-lifetime signal: an interrupt/leave gesture drove a
-        pause. Read by the closing block's remap for the 130 exit code; survives
-        end_gesture_round (unlike should_pause)."""
+        pause; survives end_gesture_round (unlike should_pause)."""
         return self._interrupted
 
     async def signal_pause(self, *, reason: str = "ctrl-c",

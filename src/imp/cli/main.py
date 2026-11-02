@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NoReturn
 from imp import __version__
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
+from imp.cli.exit_codes import ExitCode
 from imp.cli.help_format import (
     TAGLINE,
     ImpParser,
@@ -565,27 +566,27 @@ def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> 
 
 def _print_leave_disposition(
     quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
-) -> int | None:
+) -> ExitCode | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
     The disposition itself is applied by the daemon after it releases the lock;
-    here we only echo what was (or is being) done, on the shared spine. Returns 0
-    when a leave was handled, None to fall through to the normal exit-code path.
+    here we only echo what was (or is being) done, on the shared spine. Returns
+    USER_ENDED when a leave was handled, None to fall through to the next row.
     """
     if leave_state.get("intent") == "abandon":
         _emit_leave_block(quest, CONTROL_ABANDON, intent=intent)
-        return 0
+        return ExitCode.USER_ENDED
     disposition = leave_state.get("disposition")
     if disposition is not None:
         _emit_leave_block(quest, disposition, intent=intent)
-        return 0
+        return ExitCode.USER_ENDED
     if leave_state.get("send_failed"):
         color = should_use_color(sys.stdout)
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color, intent=intent))
         print(_resume_line(quest.id))
         print()
-        return 0
+        return ExitCode.USER_ENDED
     return None
 
 

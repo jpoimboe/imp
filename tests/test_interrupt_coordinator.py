@@ -289,7 +289,7 @@ async def test_leave_mid_run_stamps_reason_and_takes_leave_path() -> None:
 
     assert coord.leave_reason == "ctrl-d"    # trigger stamped for the choke point
     assert runner_called["n"] == 0           # NOT the ctrl-c signal_pause runner
-    assert coord.should_pause is True        # rc 130 path
+    assert coord.should_pause is True        # the leave drives a pause
     assert coord.pause_reason == "ctrl-d"
     assert coord.escalation_event.is_set()   # detach driven
 
@@ -366,7 +366,7 @@ def test_end_gesture_round_clears_latch_for_a_fresh_round() -> None:
     assert coord.leave_reason == "sigterm"          # narrower than reset()
     assert coord.escalated is True                  # narrower than reset()
     assert coord._yielded is _yielded_sentinel      # narrower than reset()
-    assert coord.interrupted is True                 # durable 130 signal, narrower than reset()
+    assert coord.interrupted is True                 # durable signal, narrower than reset()
     # Falsifiable now: without the clear, _now()=123.5 is <1s from 123.0 → False.
     assert coord._register_gesture(kind="ctrl-c") is True   # fresh first gesture
 
@@ -394,15 +394,14 @@ async def test_signal_pause_dispatches_to_innermost_runner_only() -> None:
 async def test_interrupted_flag_survives_end_gesture_round() -> None:
     """Regression: end_gesture_round clears the live gesture latch (should_pause)
     so the next ctrl-c is a fresh gesture, but must PRESERVE the durable
-    `interrupted` flag that the closing block's remap reads to return 130 for an
-    interrupt-paused session."""
+    `interrupted` flag the engine reads for an interrupt-paused session."""
     coord = InterruptCoordinator()
     await coord.signal_pause(reason="ctrl-c")   # no runner attached: sets flags, returns
     assert coord.should_pause is True
     assert coord.interrupted is True
     coord.end_gesture_round()
     assert coord.should_pause is False   # live latch cleared (fresh next gesture)
-    assert coord.interrupted is True     # durable signal survives -> rc 130 preserved
+    assert coord.interrupted is True     # durable signal survives
 
 
 def test_pending_model_take_is_one_shot() -> None:
