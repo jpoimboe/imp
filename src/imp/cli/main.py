@@ -3189,33 +3189,19 @@ async def _pick_abandon_matches(
     )
 
 
-def _cmd_abandon(args: argparse.Namespace) -> int:
+def _resolve_abandon_target(control: Path, token: str | None) -> str | int:
     import anyio
 
-    from imp.cli.mutation_proxy import proxy_mutation
     from imp.engine.archive import read as archive_read
-    token = args.token
-    if os.environ.get("IMP_SESSION_SOCKET"):
-        if token is None or not token.strip():
-            _emit_cli_error("abandon needs a quest token in a sandboxed session")
-            return 2
-        return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
-    control = _control_root()
     if token is None or not token.strip():
-        target = anyio.run(_pick_abandon_target, control)
-        if isinstance(target, int):
-            return target
-        return _abandon_local(control, target)
+        return anyio.run(_pick_abandon_target, control)
     matches = _abandon_match_rows(control, token)
     if len(matches) >= 2:
-        target = anyio.run(_pick_abandon_matches, control, token, matches)
-        if isinstance(target, int):
-            return target
-        return _abandon_local(control, target)
+        return anyio.run(_pick_abandon_matches, control, token, matches)
     if len(matches) == 1:
-        return _abandon_local(control, matches[0][0])
+        return matches[0][0]
     try:
-        quest_id = _resolve_id(control, token)
+        return _resolve_id(control, token)
     except SystemExit:
         # No live/backlog match, and _resolve_id found nothing live either. A
         # quest whose worktree was already removed (crash between abandon's
@@ -3226,11 +3212,52 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon_local(control, hits[0])
+            return hits[0]
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         _emit_cli_error(f"no quest matches {token!r}")
         return 2
-    return _abandon_local(control, quest_id)
+
+
+def _abandon_approved(control: Path, quest_id: str) -> bool:
+    from imp.cli.abandon_confirm import abandon_question, removal_description
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
+    try:
+        quest = Quest.load(control, quest_id)
+    except (LoadError, LoadErrors):
+        return True
+    removed = removal_description(quest)
+    if removed is None:
+        return True
+    # __main__'s SIGINT handler exits 130; Ctrl-C here must decline instead.
+    prev = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        answer = input(abandon_question(quest.id, removed))
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    finally:
+        signal.signal(signal.SIGINT, prev)
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _cmd_abandon(args: argparse.Namespace) -> int:
+    from imp.cli.mutation_proxy import proxy_mutation
+    token = args.token
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        if token is None or not token.strip():
+            _emit_cli_error("abandon needs a quest token in a sandboxed session")
+            return 2
+        return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
+    control = _control_root()
+    target = _resolve_abandon_target(control, token)
+    if isinstance(target, int):
+        return target
+    if not args.yes and _interactive() and not _abandon_approved(control, target):
+        _emit_human([f"Kept {target}."])
+        return ExitCode.USER_ENDED
+    return _abandon_local(control, target)
 
 
 def apply_edit(
@@ -4588,12 +4615,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
             "Tear down a materialized quest — its worktree, branch, and state — "
-            "or discard a pure backlog idea. With no token, pick from a list."),
+            "or discard a pure backlog idea. With no token, pick from a list. "
+            "On a terminal, confirm before tearing down a quest that has a "
+            "worktree; pass --yes to skip."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
         help="Quest id or short token identifying which quest to abandon "
              "(omit on a tty to pick from a list).")
+    p_abandon.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation before tearing down a quest that has a worktree.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(

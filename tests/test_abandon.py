@@ -1,7 +1,10 @@
 import argparse
 import os
 import shutil
+import signal
+import sys
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -289,22 +292,6 @@ def test_abandon_draft_no_prompt_on_tty(
     assert not (project_state_dir(tmp_path) / "quests" / "idea1").exists()  # torn down, no prompt
 
 
-def test_abandon_materialized_no_prompt_on_tty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-
-    def _boom(_p: str) -> str:
-        raise AssertionError("abandon must not prompt")
-
-    monkeypatch.setattr("builtins.input", _boom)
-    rc = _abandon_local(tmp_path, "feat")
-    assert rc == 0
-    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()  # torn down, no prompt
-
-
 def test_resume_refuses_abandoned_draft(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -493,3 +480,262 @@ def test_abandon_summary_count_captured_before_resident_teardown(
     assert rc == 0
     assert message == "Abandoned feat · removed worktree and branch imp/feat (1 commit)."
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # daemon tore down
+
+
+_FEAT_SUMMARY = "Abandoned feat · removed worktree and branch imp/feat (no commits)."
+
+
+def _question(qid: str, count: str = "no commits") -> str:
+    return f"Abandon {qid}? This removes its worktree and branch imp/{qid} ({count}). [y/N] "
+
+
+def _tty_prompt(
+    monkeypatch: pytest.MonkeyPatch, reply: str | BaseException | Callable[[], str],
+) -> list[str]:
+    """An interactive terminal whose input() records each prompt and answers `reply`."""
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+    prompts: list[str] = []
+
+    def _input(prompt: str = "") -> str:
+        prompts.append(prompt)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply() if callable(reply) else reply
+
+    monkeypatch.setattr("builtins.input", _input)
+    return prompts
+
+
+def _run_abandon(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                 token: str | None, *, yes: bool = False) -> int:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    return m._cmd_abandon(argparse.Namespace(token=token, yes=yes))
+
+
+def _assert_intact(tmp_path: Path, qid: str) -> None:
+    assert (project_state_dir(tmp_path) / "worktrees" / qid).exists()
+    assert _git(tmp_path, "branch", "--list", f"imp/{qid}").stdout.strip() != ""
+    assert (project_state_dir(tmp_path) / "quests" / qid).exists()
+
+
+@pytest.mark.parametrize("reply", ["y", "Y", "yes", "YES"])
+def test_cli_abandon_built_prompts_before_teardown_then_summarises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], reply: str,
+) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    _commit_work(ch, 2)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+    asked: list[str] = []
+
+    def _input(prompt: str = "") -> str:
+        _assert_intact(tmp_path, "feat")          # nothing torn down yet
+        asked.append(prompt)
+        return reply
+
+    monkeypatch.setattr("builtins.input", _input)
+    rc = _run_abandon(monkeypatch, tmp_path, "feat")
+    assert rc == 0
+    assert asked == [_question("feat", "2 commits")]
+    assert capsys.readouterr().out == (
+        "Abandoned feat · removed worktree and branch imp/feat (2 commits).\n")
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
+
+
+@pytest.mark.parametrize("reply", ["", "n", "no", "N", "yep", "y es"])
+def test_cli_abandon_built_decline_keeps_quest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], reply: str,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    prompts = _tty_prompt(monkeypatch, reply)
+    rc = _run_abandon(monkeypatch, tmp_path, "feat")
+    assert rc == 130
+    assert prompts == [_question("feat")]
+    assert capsys.readouterr().out == "Kept feat.\n"
+    _assert_intact(tmp_path, "feat")
+
+
+def test_cli_abandon_built_eof_declines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    _tty_prompt(monkeypatch, EOFError())
+    rc = _run_abandon(monkeypatch, tmp_path, "feat")
+    assert rc == 130
+    assert capsys.readouterr().out == "\nKept feat.\n"   # newline ends the ^D prompt line
+    _assert_intact(tmp_path, "feat")
+
+
+@pytest.fixture
+def entry_point_sigint() -> Iterator[Callable[[int, object], None]]:
+    """The installed entry point's process-wide SIGINT handler, restored afterwards."""
+    saved = signal.getsignal(signal.SIGINT)
+    try:
+        import imp.__main__ as entry
+        signal.signal(signal.SIGINT, entry._exit_130_on_sigint)
+        yield entry._exit_130_on_sigint
+    finally:
+        signal.signal(signal.SIGINT, saved)
+
+
+def test_cli_abandon_built_ctrl_c_declines_under_entry_point_sigint_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    entry_point_sigint: Callable[[int, object], None],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    def _ctrl_c() -> str:
+        signal.raise_signal(signal.SIGINT)
+        return "y"
+
+    _tty_prompt(monkeypatch, _ctrl_c)
+    rc = _run_abandon(monkeypatch, tmp_path, "feat")
+    assert rc == 130
+    assert capsys.readouterr().out == "\nKept feat.\n"   # newline ends the ^C prompt line
+    _assert_intact(tmp_path, "feat")
+    assert signal.getsignal(signal.SIGINT) is entry_point_sigint
+
+
+def test_cli_abandon_decline_trailing_blank_on_tty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    _tty_prompt(monkeypatch, "n")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert _run_abandon(monkeypatch, tmp_path, "feat") == 130
+    assert capsys.readouterr().out == "Kept feat.\n\n"
+
+
+@pytest.mark.parametrize(("route", "ids", "token", "target"), [
+    ("explicit token", ["feat"], "feat", "feat"),
+    ("scoped multi-match picker", ["feat1", "feat2"], "feat", "feat2"),
+    ("no-token picker", ["feat1", "feat2"], None, "feat2"),
+    ("single-row auto-pick", ["feat"], None, "feat"),
+])
+def test_cli_abandon_prompts_on_every_selection_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    route: str, ids: list[str], token: str | None, target: str,
+) -> None:
+    _seed_control(tmp_path)
+    for qid in ids:
+        Quest.create(tmp_path, title=qid, quest_id=qid, base_branch="main")
+
+    async def _picker(candidates, **_kw):
+        assert len(candidates) == 2       # only the multi-row routes draw the picker
+        return target
+
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", _picker)
+    prompts = _tty_prompt(monkeypatch, "n")
+    assert _run_abandon(monkeypatch, tmp_path, token) == 130
+    assert prompts == [_question(target)]
+    _assert_intact(tmp_path, target)
+
+
+def test_cli_abandon_unloadable_target_never_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_abandon_match_rows", lambda c, t: [])
+
+    def _raise_exit(control: Path, token: str) -> str:
+        raise SystemExit(2)
+
+    monkeypatch.setattr(m, "_resolve_id", _raise_exit)
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", lambda c: ["gone40"])
+    seen: list[str] = []
+    monkeypatch.setattr(m, "_abandon_local",
+                        lambda control, qid: seen.append(qid) or 0)
+    prompts = _tty_prompt(monkeypatch, "n")
+    assert _run_abandon(monkeypatch, tmp_path, "gone40") == 0
+    assert prompts == []
+    assert seen == ["gone40"]
+
+
+def test_cli_abandon_yes_skips_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    prompts = _tty_prompt(monkeypatch, "n")
+    assert _run_abandon(monkeypatch, tmp_path, "feat", yes=True) == 0
+    assert prompts == []
+    assert capsys.readouterr().out == _FEAT_SUMMARY + "\n"
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
+
+
+def test_cli_abandon_non_interactive_skips_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    prompts = _tty_prompt(monkeypatch, "n")
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+    assert _run_abandon(monkeypatch, tmp_path, "feat") == 0
+    assert prompts == []
+    assert capsys.readouterr().out == _FEAT_SUMMARY + "\n"
+
+
+def test_run_mutation_abandon_built_relays_summary_without_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.mutation_proxy import run_mutation
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    prompts = _tty_prompt(monkeypatch, "n")
+    result = run_mutation(tmp_path, "abandon", {"token": "feat"})
+    assert result == {"returncode": 0, "message": _FEAT_SUMMARY}
+    assert prompts == []
+
+
+def test_abandon_local_built_never_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    prompts = _tty_prompt(monkeypatch, "n")
+    assert _abandon_local(tmp_path, "feat") == 0
+    assert prompts == []
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
+
+
+def test_cli_abandon_draft_never_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
+                       base_branch="main", origin="idea",
+                       seed_opening="An idea\n\ndo a thing")
+    prompts = _tty_prompt(monkeypatch, "n")
+    assert _run_abandon(monkeypatch, tmp_path, "idea1") == 0
+    assert prompts == []
+    assert capsys.readouterr().out == "Abandoned idea1.\n"
+
+
+def test_abandon_help_names_confirm_and_yes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.main import _build_parser
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["abandon", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert ("On a terminal, confirm before tearing down a quest that has a "
+            "worktree; pass --yes to skip.") in out
+    assert ("--yes Skip the confirmation before tearing down a quest that has "
+            "a worktree.") in out

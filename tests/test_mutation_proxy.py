@@ -343,7 +343,7 @@ def test_cmd_abandon_proxies_when_socket_set(
         return {"returncode": 0, "message": "Abandoned q1."}
 
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _fake)
-    assert main._cmd_abandon(argparse.Namespace(token="q1")) == 0
+    assert main._cmd_abandon(argparse.Namespace(token="q1", yes=False)) == 0
     assert seen == {"op": "abandon", "args": {"token": "q1"}}
 
 
@@ -357,7 +357,7 @@ def test_cmd_abandon_missing_token_in_sandbox_errors(
         raise AssertionError("must not proxy or tear down without a token")
 
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _boom)
-    rc = main._cmd_abandon(argparse.Namespace(token=token))
+    rc = main._cmd_abandon(argparse.Namespace(token=token, yes=False))
     assert rc == 2
     assert "needs a quest token" in capsys.readouterr().err
 
