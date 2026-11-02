@@ -378,6 +378,36 @@ def _interrupted_script() -> list[Any]:
     ]
 
 
+class _DispatchingClient(FakeClaudeSDKClient):
+    """Each interrupt() dispatches imp's real write_file through the wrapper and
+    lands once that call is in flight. Like the CLI, the stream yields nothing
+    past an interrupt until it has landed."""
+
+    def __init__(self, opts: Any, *, scripted_messages: list[Any],
+                 holder: dict[str, Any]) -> None:
+        super().__init__(opts, scripted_messages=scripted_messages)
+        self._holder = holder
+        self._started = asyncio.Event()
+        self._landed = asyncio.Event()
+        self._landed.set()
+
+    async def interrupt(self) -> None:
+        self._landed.clear()
+        runner = self._holder["runner"]
+        wrapped = _wrap_one("write_file", _slow_write_tool(self._started),
+                            runner._ctx, runner._state, _passthrough)
+        self._holder.setdefault("calls", []).append(
+            asyncio.create_task(wrapped(dict(SLOW_ARGS))))
+        await self._started.wait()
+        await super().interrupt()
+        self._landed.set()
+
+    async def receive_response(self) -> Any:
+        async for msg in super().receive_response():
+            await self._landed.wait()
+            yield msg
+
+
 @pytest.mark.anyio
 async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -399,26 +429,18 @@ async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
-
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=_interrupted_script())
+        return _DispatchingClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
         model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     body = (tmp_path / "step" / "transcript.jsonl").read_text()
     rows = [json.loads(x) for x in body.splitlines()]
@@ -559,17 +581,8 @@ async def test_handoff_note_is_written_from_imps_real_result(
     hp = handoff_path_for(tmp_path / "step")
     log = InMemoryEventLog()
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
 
-    class NoteWritingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
-
+    class NoteWritingClient(_DispatchingClient):
         async def query(self, prompt: Any) -> None:
             await super().query(prompt)
             if isinstance(prompt, str) and "approaching the context limit" in prompt:
@@ -580,7 +593,7 @@ async def test_handoff_note_is_written_from_imps_real_result(
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
         client = NoteWritingClient(
-            opts, scripted_messages=_interrupted_script())
+            opts, scripted_messages=_interrupted_script(), holder=holder)
         holder["client"] = client
         return client
 
@@ -589,7 +602,8 @@ async def test_handoff_note_is_written_from_imps_real_result(
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     client = holder["client"]
     requery = client.queries[1]
@@ -692,26 +706,18 @@ async def test_handoff_event_log_carries_imps_real_result_not_the_filler(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
-
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=_interrupted_script())
+        return _DispatchingClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
         model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     events = list(log.read())
     assert REJECTION not in json.dumps(events)
@@ -774,7 +780,6 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
     scripted = [
         _occupancy(170_000),
         assistant(text("working"),
@@ -789,18 +794,9 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
         result(),
     ]
 
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder.setdefault("calls", []).append(
-                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
-            await started.wait()
-            await super().interrupt()
-
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=scripted)
+        return _DispatchingClient(
+            opts, scripted_messages=scripted, holder=holder)
 
     runner = ClaudeAgentRunner(
         model_name=_MODEL, client_factory=factory)
@@ -833,18 +829,8 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
 
-    class FatalClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder.setdefault("calls", []).append(
-                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
-            await started.wait()
-            await super().interrupt()
-
+    class FatalClient(_DispatchingClient):
         async def receive_response(self) -> Any:
             seen = 0
             async for msg in super().receive_response():
@@ -859,7 +845,8 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
                         "create_and_enter_worktree", "worktree already exists")
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FatalClient(opts, scripted_messages=_interrupted_script())
+        return FatalClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
         model_name=_MODEL, client_factory=factory)

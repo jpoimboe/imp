@@ -1408,6 +1408,19 @@ class ClaudeSession(ObserveSession):
     shared driver.
     """
 
+    def __init__(self, invocation: Any, runner: Any) -> None:
+        super().__init__(invocation, runner)
+        self._interrupt_tasks: set[asyncio.Task[None]] = set()
+
+    async def _spawn_interrupt(self, client: Any) -> None:
+        # Never await inline: the SDK reader parks on a buffer only this loop drains.
+        async def _send() -> None:
+            with contextlib.suppress(Exception):
+                await client.interrupt()
+        self._interrupt_tasks.add(asyncio.create_task(_send()))
+        # Best-effort yield so the send can start; nothing depends on it completing.
+        await asyncio.sleep(0)
+
     # complete_step is captured race-free by the MCP wrapper into runner._state.
     @property
     def _complete_step_called(self) -> bool:
@@ -1903,8 +1916,7 @@ class ClaudeSession(ObserveSession):
                         self._flush_llm_group()
                         self.runner._handoff_requested = True
                         self._handoff_phase = "interrupt_requested"
-                        with contextlib.suppress(Exception):
-                            await client.interrupt()
+                        await self._spawn_interrupt(client)
                         return
                     if any(isinstance(b, ToolUseBlock)
                            for b in imp_msg.content):
@@ -1933,8 +1945,7 @@ class ClaudeSession(ObserveSession):
                                             input=b.input))
                                     self._flush_llm_group()
                                     self.runner._complete_requested = True
-                                    with contextlib.suppress(Exception):
-                                        await client.interrupt()
+                                    await self._spawn_interrupt(client)
                                     continue
                             if (self.ceiling is not None
                                     and self.tool_calls_used >= self.ceiling):
@@ -2462,6 +2473,12 @@ class ClaudeAgentRunner:
                     with contextlib.suppress(Exception):
                         self._impty_driver.close()
                     self._impty_driver = None
+                # Cancel, not await: a reply may never come; wait() won't re-raise CancelledError.
+                pending = [t for t in session._interrupt_tasks if not t.done()]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    await asyncio.wait(pending)
                 if self._client_ctx is not None:
                     with contextlib.suppress(Exception):
                         await self._client_ctx.__aexit__(None, None, None)
