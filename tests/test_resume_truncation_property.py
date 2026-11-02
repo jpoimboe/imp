@@ -1,7 +1,9 @@
 # tests/test_resume_truncation_property.py
 """Truncation property test: at every cut of a real-shaped, one-Message-per-block
 claude transcript, the interrupt repairs leave a paired, marker-free tail that
-carries imp's captured results and at most one durability note."""
+carries imp's captured results and at most one durability note; at every
+complete_step tail shape, the complete_step answer loads the framed feedback or a
+success behind the call and trails one redo nudge."""
 from __future__ import annotations
 
 import json
@@ -21,15 +23,19 @@ from imp.agents.runner import (
 )
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
+    RESUME_REDO_NUDGE,
+    REWORK_RESULT_FRAME,
     Transcript,
     _is_interrupt_marker,
+    answer_complete_step_on_resume,
     answer_unanswered_tool_uses_on_resume,
     captured_result_key,
+    complete_step_tail,
     repair_interrupt_marker_on_resume,
     unanswered_tool_uses,
 )
 from imp.engine.state import InMemoryEventLog
-from imp.providers.claude import _project_for_cli
+from imp.providers.claude import _project_for_cli, _stream_start
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "claude_per_block_transcript.jsonl"
 _REJECTION = (
@@ -196,3 +202,90 @@ def test_interrupt_repairs_hold_at_every_truncation(tmp_path: Path, mode: str) -
             if fails := _check(inp, out, captured):
                 failures.append((k, name, fails))
     assert failures == []
+
+
+def _cs_cases() -> list[tuple[str, ToolUseBlock, list[Message]]]:
+    out: list[tuple[str, ToolUseBlock, list[Message]]] = []
+    for ci, m in enumerate(_MSGS):
+        for cs in filter(_is_cs, _tool_uses(m)):
+            dangling = _MSGS[:ci + 1]
+            ri = next(i for i in range(ci + 1, len(_MSGS))
+                      if any(r.tool_use_id == cs.id for r in _results(_MSGS[i])))
+            stored = _MSGS[:ri + 1]
+            marked = [*stored, _u(TextBlock(text=_MARK_PLAIN))]
+            out += [
+                (f"{cs.id}:dangling", cs, dangling),
+                (f"{cs.id}:dangling+marker", cs,
+                 [*dangling, _u(TextBlock(text=_MARK_PLAIN))]),
+                (f"{cs.id}:race", cs, [*dangling, _rejected(cs),
+                                       _u(TextBlock(text=_MARK_TOOL))]),
+                (f"{cs.id}:stored", cs, stored),
+                (f"{cs.id}:stored+marker", cs, marked),
+                (f"{cs.id}:stored+marker+text", cs,
+                 [*marked, _u(TextBlock(text="OLD FEEDBACK"))]),
+            ]
+    return out
+
+
+def _resume_cs(msgs: list[Message], transcript: Transcript, elog: InMemoryEventLog,
+               feedback: str | None) -> ToolUseBlock | None:
+    repair_interrupt_marker_on_resume(msgs, transcript)
+    cs = complete_step_tail(msgs)
+    if cs is not None:
+        answer_complete_step_on_resume(msgs, transcript, elog, "step:p/s", cs, feedback)
+    answer_unanswered_tool_uses_on_resume(msgs, transcript, elog, "step:p/s")
+    return cs
+
+
+def _check_cs(cs: ToolUseBlock, out: list[Message], elog: InMemoryEventLog,
+              feedback: str | None) -> list[str]:
+    fails: list[str] = []
+    if (err := _pairing_error(_project_for_cli(out))) is not None:
+        fails.append(f"i:{err}")
+    tail = out[_trailing_user_start(out):]
+    if any(_is_interrupt_marker(m) for m in tail):
+        fails.append("v:marker remains")
+    got = [b for m in out for b in _results(m) if b.tool_use_id == cs.id]
+    if feedback:
+        ok = [(b.content, b.is_error) for b in got] == [
+            (REWORK_RESULT_FRAME + "\n\n" + feedback, True)]
+    else:
+        ok = len(got) == 1 and not got[0].is_error
+    if not ok:
+        fails.append(f"e:result {[(b.content, b.is_error) for b in got]}")
+    texts = [b.text for m in tail for b in m.content if isinstance(b, TextBlock)]
+    if RESUME_DURABILITY_NOTE in texts:
+        fails.append("e:durability note")
+    if out[-1] != _u(TextBlock(text=RESUME_REDO_NUDGE)) or texts.count(RESUME_REDO_NUDGE) != 1:
+        fails.append("e:redo nudge")
+    if feedback and any(isinstance(b, TextBlock) and feedback in b.text
+                        for m in out for b in m.content):
+        fails.append("e:feedback as text")
+    if any(e["type"] == "tool_result" and e["payload"]["id"] == cs.id
+           for e in elog.read()):
+        fails.append("e:tool_result event")
+    if _project_for_cli(out[:_stream_start(out)])[-1].role != "user":
+        fails.append("e:body ends on assistant")
+    return fails
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: fix X"])
+def test_complete_step_tail_answers_hold_at_every_shape(
+        tmp_path: Path, feedback: str | None) -> None:
+    transcript = Transcript(tmp_path / "transcript.jsonl")
+    cases = _cs_cases()
+    failures: list[tuple[str, list[str]]] = []
+    for name, cs, inp in cases:
+        out, elog = list(inp), InMemoryEventLog()
+        if _resume_cs(out, transcript, elog, feedback) != cs:
+            failures.append((name, ["tail: complete_step not found"]))
+            continue
+        fails = _check_cs(cs, out, elog, feedback)
+        for refeed in (None, feedback):
+            again = list(out)
+            _resume_cs(again, transcript, InMemoryEventLog(), refeed)
+            if again != out:
+                fails.append(f"re-resume ({refeed!r}) changed the transcript")
+        if fails:
+            failures.append((name, fails))
+    assert cases and failures == []
