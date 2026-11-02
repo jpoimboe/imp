@@ -50,7 +50,6 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                    empty_hint: str = EMPTY_PROMPT_HINT) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
-    from prompt_toolkit.filters import completion_is_selected
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
 
@@ -84,15 +83,12 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             # returned Future is intentionally not awaited from this sync handler.
             run_in_terminal(lambda: print(empty_hint))
 
-    @kb.add("c-m", filter=~completion_is_selected)
+    @kb.add("c-m")
     def _(event: Any) -> None:
-        # Enter submits. Alt+Enter (below) inserts a newline — the pair is the
-        # reverse of prompt_toolkit's multiline default (Enter=newline,
-        # Meta+Enter=accept). The filter lets Enter still ACCEPT a selected
-        # completion (prompt_toolkit's default c-m binding) rather than submit.
+        # Enter always submits (even with a completion selected); Alt+Enter inserts a newline.
         event.app.current_buffer.validate_and_handle()
 
-    @kb.add("c-j", filter=~completion_is_selected)
+    @kb.add("c-j")
     def _(event: Any) -> None:
         event.app.current_buffer.validate_and_handle()
 

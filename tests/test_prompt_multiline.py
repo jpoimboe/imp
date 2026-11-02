@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import sys
 from collections.abc import Iterator
@@ -57,6 +58,60 @@ async def test_ctrl_j_submits_single_line() -> None:
         pipe.send_text("hello\n")
         result = await session.prompt_async("> ")
     assert result == "hello"
+
+
+async def _drive_keys(skills_dir: Path, editing_mode: str, keys: list[str]) -> str:
+    """Feed keys while the prompt runs; Tab waits for completions of the text
+    typed so far. Times out if Enter never submits."""
+    with create_pipe_input() as pipe, create_app_session(
+        input=pipe, output=DummyOutput()
+    ):
+        session = _build_session(skills_dir, editing_mode=editing_mode)
+        buffer = session.default_buffer
+
+        async def completions_ready(typed: str) -> None:
+            while not (
+                buffer.text == typed
+                and buffer.complete_state
+                and buffer.complete_state.original_document.text == typed
+                and buffer.complete_state.completions
+            ):
+                await asyncio.sleep(0.01)
+
+        async def drive() -> str:
+            task = asyncio.create_task(session.prompt_async("> "))
+            try:
+                for i, key in enumerate(keys):
+                    if key == "\t":
+                        await completions_ready("".join(keys[:i]))
+                    await asyncio.sleep(0.01)
+                    pipe.send_text(key)
+                return str(await task)
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        return await asyncio.wait_for(drive(), timeout=10)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("editing_mode", ["vi", "emacs"])
+async def test_enter_submits_selected_completion_first_press(
+    tmp_path: Path, editing_mode: str
+) -> None:
+    # Builtins only: the first `/sa` candidate is `/save`.
+    result = await _drive_keys(tmp_path, editing_mode, ["/", "s", "a", "\t", "\r"])
+    assert result == "/save"
+    assert "\n" not in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("editing_mode", ["vi", "emacs"])
+async def test_enter_submits_tab_completed_skills(
+    tmp_path: Path, editing_mode: str
+) -> None:
+    result = await _drive_keys(tmp_path, editing_mode, ["/", "s", "k", "\t", "\r"])
+    assert result == "/skills"
 
 
 _PROMPT_PROGRAM = (
