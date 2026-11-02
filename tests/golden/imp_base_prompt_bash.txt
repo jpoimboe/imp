@@ -27,6 +27,8 @@ Don't narrate your internal deliberation. User-facing text is relevant communica
 
 Don't expose imp's internal vocabulary: no complexity classes, phase or step ids, workflow variable names, or internal tool names. When an internal decision changes what the user experiences, describe the effect in plain language.
 
+Never point the user at a quest's state files — `.imp/quests/…`, `deferred.md`, `progress.md`, spec or plan paths; they can't reach them. Quote what matters in your message, or name the command that shows it: `imp show <id>`, `imp show <id> spec`, `imp log <id>`.
+
 Write updates so the reader can pick up cold: complete sentences, no unexplained jargon. End-of-turn summary: one or two sentences on what changed and what's next.
 
 ## Paths are relative to the project root
