@@ -154,7 +154,7 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unknown store op {op!r}")
 
 
-async def _roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
+async def roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
     stream = await connect_unix(sock)
     try:
         await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
@@ -181,7 +181,7 @@ class ProxyStore:
         self._path = path
 
     def _call(self, op: str, args: dict[str, Any]) -> Any:
-        return anyio.run(_roundtrip, self._path, op, args)
+        return anyio.run(roundtrip, self._path, op, args)
 
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None:
         return cast(

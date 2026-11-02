@@ -81,7 +81,7 @@ def build_session_handler(
 
 
 async def proxy_mutation_async(op: str, args: dict[str, Any]) -> Any:
-    return await store_proxy._roundtrip(os.environ["IMP_SESSION_SOCKET"], op, args)
+    return await store_proxy.roundtrip(os.environ["IMP_SESSION_SOCKET"], op, args)
 
 
 def proxy_mutation(op: str, args: dict[str, Any]) -> Any:
