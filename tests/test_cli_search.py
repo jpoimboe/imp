@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from imp.cli.main import _build_parser, _cmd_search, _command_names
+from imp.create import create_draft_quest
 from imp.engine import archive
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
@@ -372,3 +373,66 @@ def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
     assert rc == 0
     assert len(lines) == 2
     assert all(" · archive · " in ln for ln in lines)
+
+
+_OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
+_BRIEF = "Brief foo.py one\n\nmore body"
+_ALL_ARCHIVED = {"merged", "done", "abandoned", "shelved"}
+
+
+def _intent_event(text: str) -> dict[str, object]:
+    return {"type": "user_message", "timestamp": "2026-06-10T00:00:00+00:00",
+            "payload": {"subtype": "intent", "content": [{"type": "text", "text": text}]}}
+
+
+def _archive_titleless(tmp_path: Path, quest_id: str, *, intent: str | None,
+                       seed: str | None) -> None:
+    events = tmp_path / f"{quest_id}.jsonl"
+    events.write_text("" if intent is None else json.dumps(_intent_event(intent)) + "\n")
+    meta: dict[str, object] = {
+        "id": quest_id, "title": "", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}
+    if seed is not None:
+        meta["seed_opening"] = seed
+    quest_json = tmp_path / f"{quest_id}.quest.json"
+    quest_json.write_text(json.dumps(meta))
+    state_json = tmp_path / f"{quest_id}.state.json"
+    state_json.write_text(json.dumps({"id": quest_id, "status": "shelved", "step": "spec"}))
+    archive.archive_quest(
+        tmp_path, quest_id, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+
+def _with_intent(tmp_path: Path, quest_id: str, title: str, intent: str) -> None:
+    q = Quest.create(tmp_path, title=title, quest_id=quest_id, base_branch="main")
+    q.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent", "content": [{"type": "text", "text": intent}]})
+
+
+def _titleless_in_every_zone(tmp_path: Path) -> str:
+    """Titleless arc001 (archived, intent), arc002 (archived, seed only), act001
+    (active, intent), bk0001 (backlog brief) and an unstarted draft; returns the draft id."""
+    _archive_titleless(tmp_path, "arc001", intent=_OPENING, seed=None)
+    _archive_titleless(tmp_path, "arc002", intent=None, seed="seed only brief")
+    _seed_control(tmp_path)
+    _with_intent(tmp_path, "act001", "", _OPENING)
+    Quest.create_draft(tmp_path, title="", quest_id="bk0001", base_branch="main",
+                       origin="idea", seed_opening=_BRIEF)
+    return create_draft_quest(tmp_path, "summarize\n  bar.py").id
+
+
+def test_search_hits_carry_the_titleless_name_source_in_every_zone(tmp_path: Path) -> None:
+    from imp.cli.store import _search_active, _search_archived, _search_backlog
+    draft_id = _titleless_in_every_zone(tmp_path)
+    _with_intent(tmp_path, "ttl001", "Titled foo.py work", "an opening foo.py prompt")
+    active = {h.quest_id: h.intent for h in _search_active(tmp_path, "foo.py")}
+    assert active == {"act001": _OPENING, "ttl001": None}
+    assert [h.intent for h in _search_active(tmp_path, draft_id)] == ["summarize\n  bar.py"]
+    assert [(h.quest_id, h.intent) for h in _search_backlog(tmp_path, "foo.py")] == [
+        ("bk0001", _BRIEF)]
+    archived = {h.quest_id: h.intent
+                for h in _search_archived(tmp_path, "foo.py", _ALL_ARCHIVED, None)}
+    assert archived == {"arc001": _OPENING}
+    assert [h.intent for h in _search_archived(tmp_path, "arc002", _ALL_ARCHIVED, None)] == [
+        "seed only brief"]

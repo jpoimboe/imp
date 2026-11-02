@@ -2277,10 +2277,10 @@ def _row_seed_opening(control: Path, quest_id: str) -> str | None:
 
 def _row_display_intent(control: Path, r: _Row) -> str | None:
     """A title-less row's human name source: its opening prompt, else its seed_opening."""
+    from imp.cli.store import _display_intent_for_id
     if r[4].strip():
         return None
-    return quest_row.fallback_intent(_resolve_row_intent(control, r),
-                                     _row_seed_opening(control, r[0]))
+    return _display_intent_for_id(control, r[0])
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
@@ -3956,7 +3956,7 @@ def _render_events_search_hit(
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
-        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
+        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity, hit.intent),
         query=query, now=now, color=color)
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]
