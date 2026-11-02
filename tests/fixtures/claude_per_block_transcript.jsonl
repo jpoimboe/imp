@@ -1,0 +1,49 @@
+{"role":"user","content":[{"type":"text","text":"user text 1"}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 2"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu01","name":"mcp__imp__read_file","input":{"path":"tu01.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu01","content":"result tu01","is_error":false}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu02","name":"mcp__imp__read_file","input":{"path":"tu02.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu02","content":"result tu02","is_error":false}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu03","name":"mcp__imp__read_file","input":{"path":"tu03.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu03","content":"result tu03","is_error":false}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu04","name":"mcp__imp__glob","input":{"path":"tu04.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu04","content":"result tu04","is_error":false}]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 3"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu05","name":"mcp__imp__bash","input":{"command":"cmd tu05"}}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu06","name":"mcp__imp__read_file","input":{"path":"tu06.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu05","content":"result tu05","is_error":false}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu07","name":"mcp__imp__read_file","input":{"path":"tu07.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu07","content":"result tu07","is_error":false}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu06","content":"result tu06","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 4"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu08","name":"mcp__imp__bash","input":{"command":"cmd tu08"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu08","content":"result tu08","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 5"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu09","name":"mcp__imp__bash","input":{"command":"cmd tu09"}}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu10","name":"mcp__imp__read_file","input":{"path":"tu10.txt"}}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu11","name":"mcp__imp__read_file","input":{"path":"tu11.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu09","content":"result tu09","is_error":false}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu11","content":"result tu11","is_error":false}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu10","content":"result tu10","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 6"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu12","name":"mcp__imp__bash","input":{"command":"cmd tu12"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu12","content":"result tu12","is_error":false}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu13","name":"mcp__imp__bash","input":{"command":"cmd tu13"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu13","content":"result tu13","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 7"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu14","name":"mcp__imp__load_skill","input":{"path":"tu14.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu14","content":"result tu14","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 8"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu15","name":"mcp__imp__edit_file","input":{"path":"tu15.txt"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu15","content":"result tu15","is_error":false}]}
+{"role":"assistant","content":[]}
+{"role":"assistant","content":[{"type":"text","text":"assistant text 9"}]}
+{"role":"assistant","content":[{"type":"tool_use","id":"tu16","name":"mcp__imp__complete_step","input":{"status":"Success"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu16","content":[{"type":"text","text":"step complete"}],"is_error":false}]}
+{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}
