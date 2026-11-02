@@ -75,18 +75,19 @@ def test_disposition_abandon_prints_spine_no_torn_down(
     assert "imp search" not in out
 
 
-def test_disposition_abandon_materialized_also_has_no_torn_down_line(
+def test_disposition_abandon_built_prints_the_removed_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(
         tmp_path, title="Big feature", quest_id="ab2", base_branch="main")
-    rc = m._print_leave_disposition(ch, {"intent": "abandon", "materialized": "1"})
+    rc = m._print_leave_disposition(
+        ch, {"intent": "abandon", "removed": "worktree and branch imp/ab2 (5 commits)"})
     assert rc == 130
-    out = capsys.readouterr().out
-    assert out == "ab2 · Big feature · abandoned\n\n"
-    assert "torn down" not in out
-    assert "imp search" not in out
+    assert capsys.readouterr().out == (
+        "ab2 · Big feature · abandoned\n"
+        "removed: worktree and branch imp/ab2 (5 commits)\n"
+        "\n")
 
 
 def test_print_leave_disposition_archive_is_lock_free(

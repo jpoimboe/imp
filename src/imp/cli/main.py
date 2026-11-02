@@ -552,7 +552,9 @@ _LEAVE_TAILS: dict[str, str] = {
 }
 
 
-def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> None:
+def _emit_leave_block(
+    quest: Quest, disposition: str, *, intent: str | None, removed: str | None = None,
+) -> None:
     """The closing block for a leave the daemon applies, whichever client sent it."""
     color = should_use_color(sys.stdout)
     print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
@@ -561,6 +563,8 @@ def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> 
         print(_resume_line(quest.id))
     elif disposition == CONTROL_ARCHIVE:
         print(_resume_line(quest.id, " — or find it later with imp search"))
+    elif disposition == CONTROL_ABANDON and removed is not None:
+        print(f"removed: {removed}")
     print()
 
 
@@ -574,7 +578,8 @@ def _print_leave_disposition(
     USER_ENDED when a leave was handled, None to fall through to the next row.
     """
     if leave_state.get("intent") == "abandon":
-        _emit_leave_block(quest, CONTROL_ABANDON, intent=intent)
+        _emit_leave_block(quest, CONTROL_ABANDON, intent=intent,
+                          removed=leave_state.get("removed"))
         return ExitCode.USER_ENDED
     disposition = leave_state.get("disposition")
     if disposition is not None:
