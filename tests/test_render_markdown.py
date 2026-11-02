@@ -33,6 +33,7 @@ from imp.cli.render_summary import (
     summary_total,
 )
 from imp.cli.render_text import LOG_CATEGORIES
+from tests._event_fixtures import ev, interrupted_task_lead_events, task_lead_started
 
 _ALL_CATS = frozenset(LOG_CATEGORIES)
 
@@ -1351,3 +1352,47 @@ def test_blockquoted_code_does_not_force_a_fallback(quoted: str, escaped: str) -
     md = _md(_agent_events(quoted, "Use `a -> b`"))
     assert escaped in md
     assert "Use `a -> b`" in md
+
+
+def _headings(md: str) -> list[str]:
+    return [ln for ln in md.splitlines() if ln.startswith("#")]
+
+
+def test_md_headings_follow_each_header_in_order() -> None:
+    assert _headings(_md(interrupted_task_lead_events())) == [
+        "# t", "## implementation phase · plan 1/1",
+        "### task 1/2", "### task 1/2 (resume)", "### task 2/2"]
+
+
+def test_md_reopen_restart_heads_the_step_with_its_resume_seed() -> None:
+    md = _md([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        ev("3", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        task_lead_started("5", label="task 2/2", resumed=True, restarted=True),
+    ])
+    assert "### task 2/2 (resume)" in _headings(md)
+    assert "### task 1/2" not in _headings(md)
+
+
+def test_md_new_node_resume_heads_the_step_with_resume() -> None:
+    md = _md([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("3", "workflow_resumed"),
+        task_lead_started("4", label="task 2/2", resumed=True, restarted=False),
+    ])
+    assert "### task 2/2 (resume)" in _headings(md)
+
+
+def test_md_verb_push_keeps_the_entry_heading() -> None:
+    md = _md([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="writing plan"),
+        ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
+           label="addressing plan review feedback"),
+    ])
+    assert "### writing plan" in _headings(md)
+    assert "### addressing plan review feedback" not in _headings(md)
