@@ -726,7 +726,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
             )
         else:
             run_init(project, input_fn=input, output_fn=print,
-                     providers_override=providers_override)
+                     providers_override=providers_override,
+                     settings_root=_claiming_settings_root())
     except (IntegrationBranchUnresolved, GitIdentityUnavailable,
             ConfigWriteError) as e:
         _emit_cli_error(f"{e}")

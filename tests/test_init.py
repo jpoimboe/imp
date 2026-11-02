@@ -1315,6 +1315,26 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
     assert (fresh / "imp" / "config.yaml").is_file()
 
 
+@pytest.mark.parametrize("initialized", [False, True])
+def test_cmd_init_hands_run_init_the_imp_config_settings_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialized: bool,
+) -> None:
+    import imp.cli.init as initmod
+    import imp.cli.main as m
+
+    if initialized:
+        (tmp_path / "imp").mkdir()
+        (tmp_path / "imp" / "config.yaml").write_text("default-workflow: default\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda _args: (False, False))
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(initmod, "run_init", lambda _root, **kw: seen.update(kw))
+
+    assert m._cmd_init(_init_args(non_interactive=False)) == 0
+    assert seen["settings_root"] == (tmp_path.resolve() if initialized else None)
+
+
 @pytest.mark.parametrize(("key", "anthropic_line"), [
     (None, "  anthropic — set ANTHROPIC_API_KEY"),
     ("sk-test", "  anthropic — ready"),
