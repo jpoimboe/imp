@@ -24,7 +24,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import RESUME_STUB_NOTE, Transcript
 from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -207,10 +207,12 @@ async def test_send_to_llm_store_backed_native_resume(
     # (which a replay fallback would send).
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
     assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
-               for b in streamed[0][0].content)
+               for b in delta.content)
 
 
 @pytest.mark.live("claude")
@@ -257,9 +259,10 @@ async def test_dangling_tool_use_store_backed_native_resume(
         msgs[:2], session_id=skey["session_id"],
         cwd=str(tmp_path), model=_MODEL))
 
-    # Spy on the first-query stream: native resume must STREAM the synthesized
-    # placeholder tool_result for the dangling t1 (1 turn) to kick the next turn.
-    # An empty delta would deadlock (claude-p never self-starts a loaded session).
+    # Spy on the first-query stream: native resume loads the synthesized
+    # placeholder tool_result for t1 right behind it and streams only a text
+    # nudge (1 turn). An empty delta would deadlock (claude-p never self-starts a
+    # loaded session).
     streamed: list[list[Message]] = []
     _orig_stream = claude._stream_history
     monkeypatch.setattr(
@@ -273,11 +276,13 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # transcript_invalid abort (which the store assertion below ties to the
     # native path).
     assert events[-1]["type"] == "agent_result", events[-1]
-    # The synthesized tool_result for t1 was streamed as the delta (not an empty
-    # query): one trailing user turn carrying a tool_result.
+    # The delta is one text-only user turn; the t1 result is in the loaded body.
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
+    assert any(isinstance(b, TextBlock) for b in delta.content), streamed[0]
     assert not any(
         e["type"] == "error" and e["payload"].get("kind") == "transcript_invalid"
         for e in events)
@@ -286,11 +291,14 @@ async def test_dangling_tool_use_store_backed_native_resume(
     assert _read_file_call_count(inv.event_log) == 0
     # Prove the native-resume path actually ran (not a repaired stream-json
     # fallback, which also clears the assertions above): the projection overwrite
-    # replaces the 2 seeded records with the whole prefix (tool_result + dangling
-    # t1) before resuming, so the store holds >=3 records; the fallback path never
-    # writes the store (its session_store is None), leaving the 2 seeds.
+    # replaces the 2 seeded records with the whole repaired prefix (tool_result,
+    # dangling t1 and its synth result) before resuming; the fallback path never
+    # writes the store (its session_store is None), leaving the 2 seeds. Records
+    # the live turn appends land past index 4.
     entries = await store.load(skey)
-    assert entries is not None and len(entries) >= 3, entries
+    assert entries is not None and len(entries) >= 5, entries
+    t1_result = entries[4]["message"]["content"][0]
+    assert t1_result["type"] == "tool_result" and t1_result["tool_use_id"] == "t1"
 
 
 def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
@@ -364,8 +372,8 @@ async def test_complete_step_handback_native_resume(
         msgs[:1], session_id=skey["session_id"],
         cwd=str(tmp_path), model=_MODEL))
 
-    # Spy on the first-query stream: the native path streams ONLY the handback
-    # (1 user turn) — the is_error feedback result that pairs the dangling call.
+    # Spy on the first-query stream: the native path streams ONLY a text-only
+    # kick (1 user turn); the is_error feedback result is loaded behind the call.
     streamed: list[list[Message]] = []
     _orig_stream = claude._stream_history
     monkeypatch.setattr(
@@ -379,28 +387,31 @@ async def test_complete_step_handback_native_resume(
     assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
-    # The handback is the single streamed delta turn — the is_error complete_step
-    # result whose content IS the feedback (the dangling call is left in the loaded
-    # session and this result pairs it).
+    # The delta is one text-only user turn: the handback is not streamed.
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    results = [b for b in streamed[0][0].content if isinstance(b, ToolResultBlock)]
-    assert len(results) == 1 and results[0].tool_use_id == "c0"
-    assert results[0].is_error is True
-    assert "REVISE: confirm the work is done, then finish." in results[0].content
-    # On a rework resume NO success result is folded: the complete_step is left
-    # dangling in the loaded session and the is_error feedback result streams as
-    # the delta and pairs it. The projection overwrite writes [seed user, dangling
-    # complete_step assistant] before load; the live turn the batcher flushes
-    # afterward appends past it, so target the stable projected index 1.
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
+    assert any(isinstance(b, TextBlock) for b in delta.content), streamed[0]
+    # On a rework resume NO success result is folded: the projection overwrite
+    # writes [seed user, complete_step assistant, is_error feedback result] before
+    # load; the live turn the batcher flushes afterward appends past it, so target
+    # the stable projected indexes 1 and 2.
     entries = await store.load(skey)
-    assert entries is not None and len(entries) >= 2, entries
+    assert entries is not None and len(entries) >= 3, entries
     projected = entries[1]
     assert projected["message"]["role"] == "assistant"
     assert any(
         isinstance(b, dict) and b.get("type") == "tool_use"
         and b.get("id") == "c0" and b.get("name") == "complete_step"
         for b in projected["message"]["content"]), projected
+    answer = entries[2]["message"]
+    results = [b for b in answer["content"]
+               if isinstance(b, dict) and b.get("type") == "tool_result"]
+    assert answer["role"] == "user" and [b["tool_use_id"] for b in results] == ["c0"]
+    assert results[0]["is_error"] is True
+    assert "REVISE: confirm the work is done, then finish." in results[0]["content"]
 
 
 @pytest.mark.live("claude")

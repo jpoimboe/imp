@@ -93,13 +93,17 @@ from imp.agents.tools.spill import wrap_task_result
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
+    RESUME_STUB_NOTE,
     Transcript,
+    answer_complete_step_on_resume,
+    answer_unanswered_tool_uses_on_resume,
     captured_result_key,
+    complete_step_tail,
     deliver_continuation_reply,
     deliver_engine_continuation,
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
-    synthesize_native_success_on_resume,
+    unanswered_tool_uses,
     unresolved_tool_result_content,
 )
 from imp.engine.agent_run import (
@@ -296,24 +300,13 @@ def _text_of(message: Any) -> str:
     return "\n".join(parts)
 
 
-def _tail_has_complete_step(messages: list[Message]) -> bool:
-    """True when the transcript's last turn is an assistant turn whose tool_use is
-    a `complete_step` awaiting its result.
-
-    On a non-rework resume of this shape (bare backward goto) imp folds a SUCCESS
-    result into the loaded session via `synthesize_native_success_on_resume`
-    (claude-p's own pairing would inject an `is_error` for the dangling
-    `complete_step`, telling the agent its already-accepted work failed) and kicks
-    the delta with a redo nudge. On a rework resume the `complete_step` is left
-    dangling instead, and the is_error feedback result streams as the delta
-    claude-p pairs it against."""
-    last = messages[-1] if messages else None
-    if last is None or last.role != "assistant":
-        return False
-    return any(
-        isinstance(b, ToolUseBlock) and _canon_tool_name(b.name) == "complete_step"
-        for b in last.content
-    )
+def _stream_start(messages: list[Message]) -> int:
+    """Start of the trailing user-text run: streamed on native resume, never loaded."""
+    i = len(messages)
+    while (i > 0 and messages[i - 1].role == "user"
+           and not _contains_tool_result(messages[i - 1])):
+        i -= 1
+    return i
 
 
 def _drain_interject_message(coordinator: Any, elog: Any,
@@ -1104,7 +1097,8 @@ def _project_for_cli(messages: list[Message]) -> list[Message]:
     immediately after it (extras dropped, gaps filled with an error stub), and
     the closing merge undoes the split regrouping causes — consecutive same-role
     turns are the 400 `_stream_history` documents. A tool_result whose tool_use
-    is absent is paired across the resume_base split; it is kept, never dropped.
+    is absent from `messages` is kept in place, never dropped; native resume never
+    streams one, since `_enter` splits the body only before trailing user-text turns.
     """
     merged = _merge_assistant_fragments(messages)
     results: dict[str, ToolResultBlock] = {}
@@ -1517,15 +1511,16 @@ class ClaudeSession(ObserveSession):
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
+        captured = _load_captured_tool_results(invocation.transcript_dir)
         # Must precede every classification below: they all read this one list.
-        repair_interrupt_marker_on_resume(
-            existing, transcript,
-            captured=_load_captured_tool_results(invocation.transcript_dir))
+        repair_interrupt_marker_on_resume(existing, transcript, captured=captured)
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step): re-emit the final text as the deliverable rather than
-        # native-resuming or soliciting the human (AWAITING_USER).
+        # native-resuming or soliciting the human (AWAITING_USER). Prose over an
+        # unanswered tool_use is an interrupted turn, not a done-signal.
         if (invocation.subagent_depth > 0 and not is_fresh
-                and classify_resume(existing) is ResumeState.AWAITING_USER):
+                and classify_resume(existing) is ResumeState.AWAITING_USER
+                and not unanswered_tool_uses(existing)):
             self.messages = existing
             self.ceiling = invocation.max_tool_calls
             self.guard = LoopGuard(interactive=invocation.interactive)
@@ -1540,14 +1535,7 @@ class ClaudeSession(ObserveSession):
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
         )
-        resume_base = len(existing)
-        if (shape_native_eligible
-                and classify_resume(existing) is ResumeState.SEND_TO_LLM):
-            while (resume_base > 0
-                   and existing[resume_base - 1].role == "user"
-                   and not _contains_tool_result(existing[resume_base - 1])):
-                resume_base -= 1
-        fresh_stream = shape_native_eligible and resume_base == 0
+        fresh_stream = shape_native_eligible and _stream_start(existing) == 0
         native_resume = shape_native_eligible
         _pre_spawn_token_refresh(elog, aid)
         config_dir: Path | None = None
@@ -1573,41 +1561,24 @@ class ClaudeSession(ObserveSession):
         if existing:
             messages = existing
             self.tool_calls_used = 0  # per-invocation; never inherit history
-            tail_is_complete_step = _tail_has_complete_step(existing)
+            cs = complete_step_tail(existing)
             tail_step_completed = (
                 classify_resume(existing) is ResumeState.STEP_COMPLETED)
-            if tail_is_complete_step and invocation.retry_feedback:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript, feedback=invocation.retry_feedback,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            elif tail_is_complete_step:
-                injected = synthesize_native_success_on_resume(
-                    messages, transcript, elog, aid)
-                if injected is not None:
-                    resume_base += 1
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-            elif tail_step_completed and invocation.retry_feedback:
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
+            if cs is not None:
+                answer_complete_step_on_resume(
+                    messages, transcript, elog, aid, cs, invocation.retry_feedback)
             elif tail_step_completed:
                 deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            elif (invocation.retry_feedback
-                    and classify_resume(existing) is not ResumeState.AWAITING_USER):
+                    messages, transcript, elog, aid,
+                    invocation.retry_feedback or RESUME_REDO_NUDGE)
+            # After the chain, so a complete_step tail is answered first.
+            answer_unanswered_tool_uses_on_resume(
+                messages, transcript, elog, aid, captured=captured)
+            resume_state = classify_resume(messages)
+            if (invocation.retry_feedback and cs is None and not tail_step_completed
+                    and resume_state is not ResumeState.AWAITING_USER):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, invocation.retry_feedback)
-            resume_state = classify_resume(messages)
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
                     self.messages = messages
@@ -1652,11 +1623,14 @@ class ClaudeSession(ObserveSession):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     continuation_nudge(invocation.resume_cause))
-            if len(messages) == resume_base:
+            # Split only after every repair: the CLI drops a streamed tool_result as an orphan.
+            resume_base = _stream_start(messages)
+            if resume_base == len(messages):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     continuation_nudge(invocation.resume_cause))
         else:
+            resume_base = 0
             messages = []
             for m in invocation.initial_messages:
                 messages.append(m)
@@ -1689,9 +1663,10 @@ class ClaudeSession(ObserveSession):
         self._pending_complete = False
         self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
 
+        body = _project_for_cli(messages[:resume_base])
         if native_resume:
             await store.overwrite(skey, message_to_session_records(
-                _project_for_cli(messages[:resume_base]),
+                body,
                 session_id=skey["session_id"],
                 cwd=str(invocation.quest_context.project_root),
                 model=runner.model,
@@ -1729,7 +1704,12 @@ class ClaudeSession(ObserveSession):
         client = await client_ctx.__aenter__()
         runner._client = client
         self.runner._client_ctx = client_ctx
-        self._next_query: Any = _stream_history(messages[resume_base:])
+        streamed = messages[resume_base:]
+        # On --resume the CLI splices "No response requested." after a user-tail body.
+        if resume_dir is not None and body and body[-1].role == "user":
+            streamed = [Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),)),
+                        *streamed]
+        self._next_query: Any = _stream_history(streamed)
         self._last_raw: Any = None
         from imp.engine.reincarnation import handoff_path_for
         self._handoff_phase: str | None = None
@@ -2142,8 +2122,8 @@ class ClaudeSession(ObserveSession):
             for s in settled:
                 captured[s.key] = (s.content, s.is_error)
             _correct_withheld_results(elog, aid, runner._state, captured)
-            # The marker is still the tail here; _enter's repair is tail-only and
-            # can no longer reach it once anything is appended below.
+            # The marker is still in the trailing user run here; _enter's repair
+            # can no longer reach it once the re-query appends an assistant turn.
             repair_interrupt_marker_on_resume(
                 self.messages, self.transcript, captured=captured)
             increment = correction_increment(settled)

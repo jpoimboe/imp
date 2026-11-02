@@ -14,9 +14,9 @@ For claude this is unavoidable — the SDK spawns claude-p in our
 process group, so SIGINT kills the subprocess before it can emit the
 tool_result back to our receive loop. For anthropic / openai the same
 shape occurs when the executor's `should_pause` check fires after we
-yielded `tool_result` but before the user message was appended. Each
-provider calls `repair_dangling_tool_use_on_resume` after `load()` so the
-SEND_TO_LLM resume path has a balanced transcript.
+yielded `tool_result` but before the user message was appended. On resume,
+claude calls `answer_unanswered_tool_uses_on_resume` and the push providers call
+`repair_dangling_tool_use_on_resume`, so the resumed transcript is balanced.
 """
 
 from __future__ import annotations
@@ -93,6 +93,14 @@ RESUME_REDO_NUDGE = (
     "This step is resuming. Your previous output was recorded and is now "
     "superseded; re-run the step from the current state and call complete_step "
     "when the work is done."
+)
+
+# Stream-only: the CLI splices a "No response requested." turn after a user-tail body at load.
+RESUME_STUB_NOTE = (
+    '[imp] The "No response requested." turn just above was inserted by the '
+    "Claude Code CLI when it reloaded this session. You did not write it and "
+    "nothing went wrong, so don't apologise for it or mention it. Carry on from "
+    "the turn before it."
 )
 
 
@@ -217,7 +225,6 @@ def captured_result_key(name: str, tool_input: dict[str, Any]) -> str:
 
 def repair_dangling_tool_use_on_resume(
     messages: list[Message], transcript: Transcript,
-    feedback: str | None = None,
     captured: dict[str, tuple[str, bool]] | None = None,
 ) -> tuple[ToolResultBlock, ...] | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
@@ -242,31 +249,7 @@ def repair_dangling_tool_use_on_resume(
     empty, so `is not None` is still the 'transcript was already balanced' signal.
     The Message is mutated in place in `messages` and `transcript`; callers iterate
     the returned tuple to emit one tool_result event per synthesized block.
-
-    When `feedback` is given (the claude native rework delta), the shape-1
-    dangling `complete_step` block's is_error result carries the framed feedback
-    (`REWORK_RESULT_FRAME + "\\n\\n" + feedback`) instead of the synthetic
-    "interrupted" filler, so `claude-p` pairs the dangling call against the
-    model's own revision instruction. Rework tails are always shape-1 (a dangling
-    `complete_step` assistant turn), so shape-2 ignores `feedback`.
     """
-    def _result_for(tu: ToolUseBlock) -> ToolResultBlock:
-        if captured is not None:
-            key = captured_result_key(tu.name, tu.input)
-            if key in captured:
-                content, is_err = captured[key]
-                return ToolResultBlock(
-                    tool_use_id=tu.id, content=content, is_error=is_err)
-        if feedback is not None and canonicalize_tool_name(tu.name) == "complete_step":
-            return ToolResultBlock(
-                tool_use_id=tu.id,
-                content=REWORK_RESULT_FRAME + "\n\n" + feedback,
-                is_error=True)
-        return ToolResultBlock(
-            tool_use_id=tu.id,
-            content=_synthetic_tool_result_content(tu.name),
-            is_error=True)
-
     def _all_captured_success(tus: list[ToolUseBlock]) -> bool:
         if captured is None:
             return False
@@ -286,7 +269,7 @@ def repair_dangling_tool_use_on_resume(
         ]
         if not tool_uses:
             return None
-        result_blocks = tuple(_result_for(tu) for tu in tool_uses)
+        result_blocks = tuple(_resume_result(tu, captured) for tu in tool_uses)
         note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
                 if not _all_captured_success(tool_uses) else ())
         repair = Message(role="user", content=(*result_blocks, *note))
@@ -306,7 +289,7 @@ def repair_dangling_tool_use_on_resume(
         unmatched = [tu for tu in tool_uses if tu.id not in matched]
         if not unmatched:
             return None
-        result_blocks = tuple(_result_for(tu) for tu in unmatched)
+        result_blocks = tuple(_resume_result(tu, captured) for tu in unmatched)
         # Anthropic requires tool_result blocks at the head of the user turn; the
         # original interrupt text follows, and the durability note frames the
         # (error-shaped) reconstructed results last.
@@ -336,70 +319,191 @@ def _is_interrupt_marker(msg: Message) -> bool:
             and _INTERRUPT_MARKER_RE.match(block.text.strip()) is not None)
 
 
+def _trailing_user_start(messages: list[Message]) -> int:
+    i = len(messages)
+    while i > 0 and messages[i - 1].role == "user":
+        i -= 1
+    return i
+
+
+def _has_durability_note(msg: Message) -> bool:
+    return any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msg.content)
+
+
+def unanswered_tool_uses(messages: list[Message]) -> list[ToolUseBlock]:
+    """Every tool_use in `messages` whose id has no tool_result anywhere in `messages`."""
+    answered = {b.tool_use_id for m in messages for b in m.content
+                if isinstance(b, ToolResultBlock)}
+    return [b for m in messages if m.role == "assistant" for b in m.content
+            if isinstance(b, ToolUseBlock) and b.id not in answered]
+
+
+def complete_step_tail(messages: list[Message]) -> ToolUseBlock | None:
+    """The complete_step tool_use in the last assistant turn when only user turns
+    follow it: dangling, under its stored "step complete" result, or already
+    answered by an earlier resume. Read after the marker repair has dropped claude's
+    interrupt marker."""
+    start = _trailing_user_start(messages)
+    if start == 0 or messages[start - 1].role != "assistant":
+        return None
+    return next((b for b in messages[start - 1].content
+                 if isinstance(b, ToolUseBlock)
+                 and canonicalize_tool_name(b.name) == "complete_step"), None)
+
+
+def _resume_result(
+    tu: ToolUseBlock, captured: dict[str, tuple[str, bool]] | None,
+) -> ToolResultBlock:
+    hit = (captured.get(captured_result_key(tu.name, tu.input))
+           if captured is not None else None)
+    if hit is not None:
+        return ToolResultBlock(tool_use_id=tu.id, content=hit[0], is_error=hit[1])
+    return ToolResultBlock(tool_use_id=tu.id,
+                           content=_synthetic_tool_result_content(tu.name),
+                           is_error=True)
+
+
 def repair_interrupt_marker_on_resume(
     messages: list[Message], transcript: Transcript,
     captured: dict[str, tuple[str, bool]] | None = None,
 ) -> None:
     """Strip claude-p's interrupt framing before resume classification.
 
-    On a cooperative mid-tool interrupt claude-p writes two turns of its own into
-    the transcript: a tool_result telling the model its call was REJECTED and it
-    must stop, then a text-only '[Request interrupted by user …]' marker turn. The
-    marker makes the tail look like a human turn, so the resume continuation nudge
-    is suppressed and the rejection copy is the model's only framing.
+    On an interrupt claude-p writes its own turns, one Message per block: an is_error
+    "rejected, STOP" tool_result per outstanding call, then a text-only
+    '[Request interrupted by user …]' marker, possibly followed by real user text.
+    The marker makes the tail look like a human turn and the rejection copy is the
+    model's only framing.
 
-    Drop the marker and restate every is_error result in the turn beneath it as an
-    interruption — from `captured` when the call really completed, else the synthetic
-    body — then rewrite the transcript. Journals nothing: the pause already recorded
+    Within the trailing user run, find the last marker; R is the run's non-marker
+    turns before it. Unless R holds no tool_result and every tool_use is answered
+    (a lone marker over prose), drop every marker up to the last and restate each
+    is_error result in R as an interruption — imp's captured result when the call
+    really completed, else the synthetic body; tool_uses resolve by id anywhere.
+    complete_step results are left for the complete_step-tail answer. Turns after
+    the last marker are untouched. Journals nothing: the pause already recorded
     these results in the event log, so a second entry would falsify it.
 
-    The durability note is appended unless every restated result was recovered from
-    `captured` as a success, matching repair_dangling_tool_use_on_resume.
+    The durability note is appended to R's last turn only when some result was
+    restated as a placeholder or a captured error and R does not already hold it.
     """
-    if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
+    start = _trailing_user_start(messages)
+    markers = [i for i in range(start, len(messages))
+               if _is_interrupt_marker(messages[i])]
+    if not markers:
         return
-    target = messages[-2]
-    # Repair the marker and the rejection it sits on as one unit, never the marker
-    # alone: dropping a lone marker would expose an assistant tail to AWAITING_USER,
-    # which a subagent (no user_input_fn) cannot serve.
-    if target.role != "user" or not any(
-            isinstance(b, ToolResultBlock) for b in target.content):
+    last_marker = markers[-1]
+    run = [m for m in messages[start:last_marker] if not _is_interrupt_marker(m)]
+    if not any(isinstance(b, ToolResultBlock) for m in run for b in m.content) \
+            and not unanswered_tool_uses(messages):
         return
-    tool_uses = {
-        b.id: b
-        for m in messages[-3:-2] if m.role == "assistant"
-        for b in m.content if isinstance(b, ToolUseBlock)
-    }
-    blocks: list[ContentBlock] = []
-    restated_any = False
-    all_recovered = True
-    for b in target.content:
-        # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
-        if isinstance(b, ToolResultBlock) and b.is_error:
-            restated_any = True
-            tu = tool_uses.get(b.tool_use_id)
-            hit = (captured.get(captured_result_key(tu.name, tu.input))
-                   if tu is not None and captured is not None else None)
-            if hit is not None:
-                blocks.append(ToolResultBlock(
-                    tool_use_id=b.tool_use_id, content=hit[0], is_error=hit[1]))
-                if hit[1]:
-                    all_recovered = False
-            else:
-                all_recovered = False
-                blocks.append(ToolResultBlock(
-                    tool_use_id=b.tool_use_id,
-                    content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
-                    is_error=True))
-        else:
+    tool_uses = {b.id: b for m in messages if m.role == "assistant"
+                 for b in m.content if isinstance(b, ToolUseBlock)}
+    cut_off = False
+    repaired: list[Message] = []
+    for m in run:
+        blocks: list[ContentBlock] = []
+        for b in m.content:
+            tu = (tool_uses.get(b.tool_use_id)
+                  if isinstance(b, ToolResultBlock) and b.is_error else None)
+            # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
+            if tu is not None and canonicalize_tool_name(tu.name) != "complete_step":
+                b = _resume_result(tu, captured)
+                cut_off = cut_off or b.is_error
             blocks.append(b)
-    # Same gate as _all_captured_success: hedging a recovered success argues against imp's record.
-    if not (restated_any and all_recovered) and not any(
-            isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
-            for b in blocks):
-        blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
-    messages[-2:] = [Message(role="user", content=tuple(blocks))]
+        repaired.append(Message(role="user", content=tuple(blocks)))
+    if cut_off and not any(_has_durability_note(m) for m in repaired):
+        repaired[-1] = Message(role="user", content=(
+            *repaired[-1].content, TextBlock(text=RESUME_DURABILITY_NOTE)))
+    messages[start:last_marker + 1] = repaired
     transcript.rewrite(messages)
+
+
+def answer_unanswered_tool_uses_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, captured: dict[str, tuple[str, bool]] | None = None,
+) -> None:
+    """Give every unanswered tool_use a result before a claude resume.
+
+    claude transcripts hold one Message per content block, so parallel and
+    interleaved calls leave unanswered tool_uses in any assistant run, not just the
+    last. Each gets imp's captured result, else the synthetic placeholder. With no
+    trailing user run the results form one new user turn; otherwise they head the
+    run's first turn, ahead of its original content — `_project_for_cli` regroups
+    each behind its tool_use by id. The durability note is appended to that turn
+    unless every result is a captured success or the run already holds it. Each
+    result is journaled as a tool_result event.
+    """
+    unanswered = unanswered_tool_uses(messages)
+    if not unanswered:
+        return
+    results = tuple(_resume_result(tu, captured) for tu in unanswered)
+    start = _trailing_user_start(messages)
+    note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
+            if any(r.is_error for r in results)
+            and not any(_has_durability_note(m) for m in messages[start:]) else ())
+    if start == len(messages):
+        repair = Message(role="user", content=(*results, *note))
+        messages.append(repair)
+        transcript.append(repair)
+    else:
+        messages[start] = Message(
+            role="user", content=(*results, *messages[start].content, *note))
+        transcript.rewrite(messages)
+    for rb in results:
+        elog.append_tool_result(agent_id=agent_id, block=rb)
+
+
+def answer_complete_step_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, cs: ToolUseBlock, feedback: str | None,
+) -> None:
+    """Answer a complete_step tail on a claude rework or backward-goto resume.
+
+    Rework (`feedback`): cs's result becomes the framed feedback, is_error. Goto: an
+    existing success or framed-feedback result is kept (a paused rework resumed
+    plainly), else cs gets a success result. A changed result replaces the old one
+    in place, else heads the trailing user run, else forms a new user turn, and is
+    journaled as an engine continuation, never a tool_result event. No durability
+    note. Then RESUME_REDO_NUDGE trails, unless it already does.
+    """
+    start = _trailing_user_start(messages)
+    hit = next(((i, j, b) for i in range(start, len(messages))
+                for j, b in enumerate(messages[i].content)
+                if isinstance(b, ToolResultBlock) and b.tool_use_id == cs.id), None)
+    old = hit[2] if hit is not None else None
+    if feedback:
+        new = ToolResultBlock(tool_use_id=cs.id, is_error=True,
+                              content=REWORK_RESULT_FRAME + "\n\n" + feedback)
+    elif old is not None and (not old.is_error or (
+            isinstance(old.content, str)
+            and old.content.startswith(REWORK_RESULT_FRAME))):
+        new = old
+    else:
+        new = ToolResultBlock(tool_use_id=cs.id, is_error=False,
+                              content="previous step output recorded; resuming")
+    if new != old:
+        if hit is not None:
+            i, j, _ = hit
+            content = list(messages[i].content)
+            content[j] = new
+            messages[i] = Message(role="user", content=tuple(content))
+            transcript.rewrite(messages)
+        elif start < len(messages):
+            messages[start] = Message(
+                role="user", content=(new, *messages[start].content))
+            transcript.rewrite(messages)
+        else:
+            turn = Message(role="user", content=(new,))
+            messages.append(turn)
+            transcript.append(turn)
+        elog.append_engine_message(
+            agent_id=agent_id, message=Message(role="user", content=(new,)),
+            subtype="continuation")
+    if messages[-1] != Message(role="user", content=(TextBlock(text=RESUME_REDO_NUDGE),)):
+        deliver_engine_continuation(
+            messages, transcript, elog, agent_id, RESUME_REDO_NUDGE)
 
 
 def balance_success_on_resume(
@@ -459,47 +563,6 @@ def balance_success_on_resume(
     if wrapper_text and not feedback_delivered:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
-    messages.append(injected)
-    transcript.append(injected)
-    elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
-    return injected
-
-
-def synthesize_native_success_on_resume(
-    messages: list[Message], transcript: Transcript, elog: EventLog,
-    agent_id: str,
-) -> Message | None:
-    """Balance a trailing complete_step tool_use for NATIVE corrective resume.
-
-    The targeted step's transcript ends with a SUCCESSFUL complete_step tool_use
-    (no tool_result). Synthesize a non-error, success-shaped result and append it
-    as a NEW user turn so the loaded native session is balanced — no dangling
-    tool_use for claude-p to auto-pair with an is_error placeholder. Unlike
-    balance_success_on_resume this adds NO durability note and NO wrapper feedback:
-    the result is genuinely in the faithful loaded session, and the handback rides
-    the streamed delta. Any other trailing tool_use is a real interruption and gets
-    error-flavored content. Returns the appended Message, or None when the tail
-    carries no tool_use to balance.
-    """
-    last = messages[-1] if messages else None
-    tool_uses = (
-        [b for b in last.content if isinstance(b, ToolUseBlock)]
-        if last is not None and last.role == "assistant" else []
-    )
-    result_blocks: list[ToolResultBlock] = []
-    for tu in tool_uses:
-        if canonicalize_tool_name(tu.name) == "complete_step":
-            result_blocks.append(ToolResultBlock(
-                tool_use_id=tu.id,
-                content="previous step output recorded; resuming",
-                is_error=False))
-        else:
-            result_blocks.append(ToolResultBlock(
-                tool_use_id=tu.id,
-                content=_synthetic_tool_result_content(tu.name), is_error=True))
-    if not result_blocks:
-        return None
-    injected = Message(role="user", content=tuple(result_blocks))
     messages.append(injected)
     transcript.append(injected)
     elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")

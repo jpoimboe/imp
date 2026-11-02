@@ -15,6 +15,7 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
+from imp.agents.transcript import RESUME_STUB_NOTE
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
@@ -1741,7 +1742,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
     assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
     assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t0"
     # Only the trailing text turn streams as the delta.
-    assert _user_text_blob(created[0].queries[0]) == "also do Y"
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\nalso do Y"
 
 
 @pytest.mark.anyio
@@ -1867,7 +1868,7 @@ async def test_native_folded_tool_result_tail_gets_continuation_nudge(
     assert len(conts) == 1
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     # The streamed delta carries exactly that nudge (non-empty).
-    assert _user_text_blob(created[0].queries[0]) == RESUME_CONTINUE_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\n{RESUME_CONTINUE_NUDGE}"
 
 
 @pytest.mark.anyio
@@ -1912,7 +1913,7 @@ async def test_native_empty_delta_guard_selects_the_note_by_cause(
     conts = [e for e in log.read() if e["type"] == "engine_message"]
     assert len(conts) == 1
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
-    assert _user_text_blob(created[0].queries[0]) == RESUME_RETRY_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\n{RESUME_RETRY_NUDGE}"
 
 
 def _user_text_blob(replayed: list[Any]) -> str:
@@ -1974,10 +1975,11 @@ async def test_complete_step_tail_with_feedback_native_resumes(tmp_path: Path) -
 
 
 @pytest.mark.anyio
-async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: Path) -> None:
-    """A rework resume leaves the complete_step DANGLING in the loaded session
-    (no success fold); the is_error feedback result streams as the delta and pairs
-    it. So the stored record's trailing entry is the unpaired complete_step turn."""
+async def test_complete_step_tail_rework_result_is_in_record_before_load(
+        tmp_path: Path) -> None:
+    """A rework resume loads the is_error feedback result right behind the
+    complete_step it answers (no success fold), so the stored record never ends
+    on a dangling complete_step for claude-p to pair with its own stub."""
     from imp.providers.claude_session_store import session_key
 
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
@@ -1992,21 +1994,26 @@ async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: 
     [ev async for ev in runner.run(inv)]
 
     entries = await store.load(skey)
-    # The loaded session ends on the DANGLING complete_step assistant turn — no
-    # success result was folded in (that would pre-balance the call and the
-    # feedback would never reach the model).
-    last = entries[-1]
-    assert last["message"]["role"] == "assistant"
-    tool_uses = [b for b in last["message"]["content"]
+    # The loaded session ends on the complete_step and its only result: the
+    # is_error feedback (a success fold would tell the model its work stood).
+    call, answer = entries[-2], entries[-1]
+    assert call["message"]["role"] == "assistant"
+    tool_uses = [b for b in call["message"]["content"]
                  if isinstance(b, dict) and b.get("type") == "tool_use"]
     assert tool_uses and tool_uses[0]["id"] == "c0"
     assert tool_uses[0]["name"] == "complete_step"
+    assert answer["message"]["role"] == "user"
+    results = [b for b in answer["message"]["content"]
+               if b.get("type") == "tool_result"]
+    assert [b["tool_use_id"] for b in results] == ["c0"]
+    assert results[0]["is_error"] is True
+    assert "REVISE: rewrite plan.md" in results[0]["content"]
 
 
 @pytest.mark.anyio
-async def test_complete_step_tail_handback_rides_streamed_delta(tmp_path: Path) -> None:
-    """A rework handback rides the streamed delta as the is_error complete_step
-    result whose content IS the feedback — the delta pairs the dangling call."""
+async def test_complete_step_tail_handback_is_not_streamed(tmp_path: Path) -> None:
+    """A rework handback is loaded with the session as the is_error complete_step
+    result, never streamed: claude-p drops a streamed result as an orphan."""
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
@@ -2020,13 +2027,11 @@ async def test_complete_step_tail_handback_rides_streamed_delta(tmp_path: Path) 
     [ev async for ev in runner.run(inv)]
 
     delta = created[0].queries[0]
-    # Exactly one streamed user turn — the is_error feedback result for c0.
+    # Exactly one streamed user turn, text only — no tool_result, no feedback.
     assert len(delta) == 1 and delta[0]["type"] == "user"
-    tr = delta[0]["message"]["content"][0]
-    assert tr["type"] == "tool_result"
-    assert tr["tool_use_id"] == "c0"
-    assert tr["is_error"] is True
-    assert "REVISE: rewrite plan.md" in tr["content"]
+    assert [b["type"] for b in delta[0]["message"]["content"]] == ["text", "text"]
+    assert delta[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
+    assert "REVISE: rewrite plan.md" not in json.dumps(delta)
 
 
 @pytest.mark.anyio
@@ -2050,7 +2055,8 @@ async def test_complete_step_tail_no_feedback_kicks_with_redo_nudge(tmp_path: Pa
 
     assert created[0].opts.resume is None
     assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
-    assert _user_text_blob(created[0].queries[0]).strip() == RESUME_REDO_NUDGE
+    assert (_user_text_blob(created[0].queries[0]).strip()
+            == f"{RESUME_STUB_NOTE}\n{RESUME_REDO_NUDGE}")
 
 
 @pytest.mark.anyio
@@ -2101,14 +2107,15 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Path) -> None:
+async def test_native_resume_loads_retry_feedback_as_error_result(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
+    from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     # A previously-completed step re-invoked with reviewer/gate retry feedback —
-    # native resume, with the feedback delivered on the streamed delta turn.
+    # native resume, with the feedback loaded as the complete_step's result.
     inv = replace(
         inv, balance_on_resume=True, retry_feedback="REVISE: rewrite plan.md")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
@@ -2141,10 +2148,11 @@ async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Pa
     )
     [ev async for ev in runner.run(inv)]
 
-    delta = created[0].queries[0]
-    # The retry feedback rides IN the is_error complete_step result (c0), not as a
-    # plain text turn.
-    tr = delta[0]["message"]["content"][0]
+    body = await session_store_for(inv.transcript_dir).load(
+        session_key(inv.quest_context.project_root, "step:p/s"))
+    # The retry feedback rides IN the is_error complete_step result (c0) the
+    # session loads, not as a plain text turn.
+    tr = body[-1]["message"]["content"][0]
     assert tr["type"] == "tool_result" and tr["tool_use_id"] == "c0"
     assert tr["is_error"] is True
     assert "REVISE: rewrite plan.md" in tr["content"]
@@ -2154,8 +2162,10 @@ async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Pa
 async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Path) -> None:
     """Core-bug regression: a rework resume of a completed step (clean dangling
     complete_step tail, post Part A) delivers the feedback AS the is_error
-    complete_step result on the streamed delta and re-runs the step — it never
+    complete_step result in the loaded session and re-runs the step — it never
     solicits the human (no awaiting_user_input)."""
+    from imp.providers.claude_session_store import session_key
+
     log = InMemoryEventLog()
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
     inv = replace(inv, event_log=log)
@@ -2173,8 +2183,10 @@ async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Pat
     # It re-ran and completed — never re-parked on an empty prompt.
     assert events[-1]["type"] == "agent_result"
     assert not any(e["type"] == "awaiting_user_input" for e in log.read())
-    # The feedback reached the model as the is_error complete_step result on the delta.
-    tr = created[0].queries[0][0]["message"]["content"][0]
+    # The feedback reaches the model as the is_error complete_step result it loads.
+    body = await session_store_for(inv.transcript_dir).load(
+        session_key(inv.quest_context.project_root, "step:p/s"))
+    tr = body[-1]["message"]["content"][0]
     assert tr["type"] == "tool_result" and tr["tool_use_id"] == "c0"
     assert tr["is_error"] is True
     assert "REVISE: rewrite plan.md" in tr["content"]
@@ -2184,8 +2196,8 @@ async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Pat
 async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> None:
     """A no-store DANGLING tail now resumes natively. No replay manifest
     is built (so the completed write is NOT named succeeded in a manifest); the
-    dangling read is repaired by a STREAMED synth tool_result, and the flushed
-    prefix is reconstructed into the native session."""
+    dangling read is repaired by a synth tool_result, and the flushed prefix plus
+    that result is reconstructed into the native session."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_session_store import session_key
@@ -2228,18 +2240,20 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # The dangling r2 read is repaired by a STREAMED synth tool_result.
+    # The delta is one text-only user turn; the repair is not streamed.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "r2"
-    # The flushed prefix (write + dangling read) is reconstructed; r2 is the
-    # trailing native-session entry, the synth result is streamed, not stored.
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
+    # The flushed prefix (write + dangling read) is reconstructed with the synth
+    # r2 result as the trailing native-session entry, right behind its call.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
-    assert reconciled[-1]["message"]["content"][0] == {
+    assert len(reconciled) == 5
+    assert reconciled[-2]["message"]["content"][0] == {
         "type": "tool_use", "id": "r2",
         "name": "mcp__imp__read_file", "input": {"path": "x.md"}}
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "r2"
 
 
 def test_build_options_carries_resume(tmp_path: Path) -> None:
@@ -2433,7 +2447,7 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert _user_text_blob(streamed) == RESUME_CONTINUE_NUDGE
+    assert _user_text_blob(streamed) == f"{RESUME_STUB_NOTE}\n{RESUME_CONTINUE_NUDGE}"
     # The completed pair folded into the store: 3 turns, ending on the tool_result.
     reconciled = await store.load(skey)
     assert len(reconciled) == 3
@@ -2560,7 +2574,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
@@ -2610,27 +2624,28 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
 
     opts = created[0].opts
     # In-place-repair shape WITH a store takes the native path (not fallback).
-    # Its last turn is the user interrupt marker, so it classifies as SEND_TO_LLM:
-    # native resume STREAMS that trailing user turn to kick the next turn (an empty
-    # delta would deadlock). claude-p pairs the dangling t1 from its loaded session
-    # — imp injects no synthetic tool_result. Live acceptance: the SEND_TO_LLM
-    # round-trip in tests/test_resume_all_shapes_live.py.
+    # The marker over the unanswered t1 is dropped and t1's placeholder result is
+    # loaded right behind it; the stream is the continuation nudge (an empty delta
+    # would deadlock). Live acceptance: tests/test_resume_all_shapes_live.py.
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
-    # The flushed prefix (through the dangling t1 turn) stays in the native
-    # session; only the interrupt marker is streamed, not written to the store.
+    assert streamed[0]["message"]["content"] == [
+        {"type": "text", "text": RESUME_STUB_NOTE},
+        {"type": "text", "text": RESUME_CONTINUE_NUDGE}]
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
+    assert len(reconciled) == 5
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert "[Request interrupted by user]" not in json.dumps(reconciled)
 
 
 @pytest.mark.anyio
 async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -2671,15 +2686,19 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # SEND_TO_LLM STREAMS the trailing user interrupt marker to kick the turn;
-    # claude-p pairs the dangling t1 from its (reconstructed) loaded session.
+    # The marker over the unanswered t1 is dropped and t1's placeholder result is
+    # reconstructed into the native session right behind it; the stream is the
+    # continuation nudge.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
-    # The flushed prefix (through the dangling t1 turn) was reconstructed into
-    # the native session; only the interrupt marker is streamed, not stored.
+    assert streamed[0]["message"]["content"] == [
+        {"type": "text", "text": RESUME_STUB_NOTE},
+        {"type": "text", "text": RESUME_CONTINUE_NUDGE}]
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
+    assert len(reconciled) == 5
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert "[Request interrupted by user]" not in json.dumps(reconciled)
 
 
 @pytest.mark.anyio
@@ -2740,24 +2759,23 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1
-    # to kick the next turn — an empty delta would deadlock (claude-p never
-    # self-starts a loaded --resume session). claude-p pairs the dangling t1 from
-    # its loaded session against this streamed result.
+    # DANGLING native resume loads a synthesized placeholder tool_result for t1
+    # right behind it (a streamed one is dropped as an orphan) and kicks the next
+    # turn with a text nudge — an empty delta would deadlock (claude-p never
+    # self-starts a loaded --resume session).
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
-    # The synth tool_result turn was injected (4 original + 1 synth user turn +
-    # 1 new assistant turn = 6).
-    assert len(t.load()) == 6
-    # The dangling t1 turn stays in the native session as the trailing projected
-    # record; the synth result is streamed, not written to the store.
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
+    # 4 original + 1 synth user turn + 1 nudge + 1 new assistant turn = 7.
+    assert len(t.load()) == 7
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
-    assert reconciled[-1]["message"]["content"][0] == {
+    assert len(reconciled) == 5
+    assert reconciled[-2]["message"]["content"][0] == {
         "type": "tool_use", "id": "t1",
         "name": "mcp__imp__read_file", "input": {"path": "b.txt"}}
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
 
 
 @pytest.mark.anyio
@@ -2807,18 +2825,21 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1.
+    # DANGLING native resume loads a synthesized placeholder tool_result for t1;
+    # the delta is one text-only user turn.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
-    # The dangling t1 turn was reconstructed as the trailing native-session entry;
-    # the synth result is streamed, not stored.
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
+    # The dangling t1 turn and its synth result are reconstructed as the
+    # trailing native-session entries.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
-    assert reconciled[-1]["message"]["content"][0] == {
+    assert len(reconciled) == 5
+    assert reconciled[-2]["message"]["content"][0] == {
         "type": "tool_use", "id": "t1",
         "name": "mcp__imp__read_file", "input": {"path": "b.txt"}}
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
 
 
 
@@ -3584,7 +3605,7 @@ async def test_complete_step_tail_native_resumes_with_store_body(
         tmp_path: Path) -> None:
     """A resume whose tail is a `complete_step` tool_use takes the NATIVE path even
     when a store body is present (the needs_imp_balance veto is gone): imp folds a
-    SUCCESS result into the loaded session via synthesize_native_success_on_resume,
+    SUCCESS result into the loaded session via answer_complete_step_on_resume,
     so claude-p resumes its own session by id rather than re-streaming a replay."""
     from imp.agents.runner import ToolUseBlock
     from imp.agents.transcript import Transcript
@@ -4618,10 +4639,9 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
-    # The streamed repair result for the dangling t1 carries the REAL captured body
+    # The loaded repair result for the dangling t1 carries the REAL captured body
     # (not the synthetic "interrupted" placeholder) and is success-shaped.
-    streamed = created[0].queries[0]
-    tr = streamed[0]["message"]["content"][0]
+    tr = (await store.load(skey))[-1]["message"]["content"][0]
     assert tr["type"] == "tool_result"
     assert tr["tool_use_id"] == "t1"
     assert tr["content"] == "REAL BODY OF b.txt"
@@ -5153,11 +5173,16 @@ def _no_ts(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @pytest.mark.anyio
 async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> None:
-    """The body after _enter() is exactly the projection of messages[:resume_base],
+    """The body after _enter() is exactly the projection of the repaired transcript
+    short of its trailing user-text run (here msgs plus the synthesized t1 result),
     whatever the store held before: CLI resume artifacts and uuid-less metadata are
     replaced, not counted as turns and not allowed to displace real ones."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import (
+        RESUME_DURABILITY_NOTE,
+        Transcript,
+        _synthetic_tool_result_content,
+    )
     from imp.providers.claude import _project_for_cli
     from imp.providers.claude_session_store import (
         message_to_session_records,
@@ -5202,8 +5227,13 @@ async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> No
     [ev async for ev in runner.run(inv)]
 
     body = await store.load(skey)
+    repaired = [*msgs, Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t1",
+                        content=_synthetic_tool_result_content("mcp__imp__read_file"),
+                        is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))]
     expected = message_to_session_records(
-        _project_for_cli(msgs), session_id=skey["session_id"],
+        _project_for_cli(repaired), session_id=skey["session_id"],
         cwd=str(tmp_path), model="claude-sonnet-4-5")
     assert _no_ts(body) == _no_ts(expected)
     blob = json.dumps(body)

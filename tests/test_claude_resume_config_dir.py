@@ -161,8 +161,8 @@ async def test_resume_dir_holds_the_projection_when_the_store_was_absent(
 async def test_resume_dir_holds_the_synthesized_tool_result(
     tmp_path: Path, overwrites: list[list[dict[str, Any]]],
 ) -> None:
-    # Dangling complete_step tail: synthesize_native_success_on_resume folds a
-    # tool_result for c0 into the projection (resume_base += 1).
+    # Dangling complete_step tail: answer_complete_step_on_resume folds a
+    # tool_result for c0 into the loaded body.
     inv = _seed_complete_step_resume(tmp_path, retry_feedback=None)
     seen: dict[str, Any] = {}
     [ev async for ev in _run_factory_runner(tmp_path, seen).run(inv)]

@@ -4,11 +4,11 @@ from imp.agents.runner import Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import (
     SkillReply,
     Transcript,
+    answer_complete_step_on_resume,
     balance_success_on_resume,
     deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
-    synthesize_native_success_on_resume,
 )
 from imp.engine.state import InMemoryEventLog
 
@@ -58,21 +58,20 @@ def test_balance_success_emits_engine_message_continuation(tmp_path) -> None:
     assert "user_message" not in _types(log)
 
 
-def test_synthesize_native_success_emits_engine_message_continuation(tmp_path) -> None:
+def test_answer_complete_step_emits_engine_message_continuation(tmp_path) -> None:
     log = InMemoryEventLog()
     tr = Transcript(tmp_path / "t.jsonl")
+    cs = ToolUseBlock(id="c1", name="complete_step", input={"status": "Success"})
     msgs = [
         Message(role="user", content=(TextBlock(text="begin"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="c1", name="complete_step", input={"status": "Success"}),
-        )),
+        Message(role="assistant", content=(cs,)),
     ]
     for m in msgs:
         tr.append(m)
-    synthesize_native_success_on_resume(msgs, tr, log, "step:a")
+    answer_complete_step_on_resume(msgs, tr, log, "step:a", cs, None)
     evs = list(log.read())
-    assert _types(log) == ["engine_message"]
-    assert evs[0]["payload"]["subtype"] == "continuation"
+    assert _types(log) == ["engine_message", "engine_message"]
+    assert all(e["payload"]["subtype"] == "continuation" for e in evs)
     assert "user_message" not in _types(log)
 
 

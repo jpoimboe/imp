@@ -10,6 +10,7 @@
   "log_types": [
     "token_refresh",
     "tool_result",
+    "engine_message",
     "agent_message",
     "tool_call",
     "query_result"

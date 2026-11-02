@@ -10,17 +10,19 @@ from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
+    RESUME_REDO_NUDGE,
     REWORK_RESULT_FRAME,
     ContinuationNote,
     SkillReply,
     Transcript,
+    answer_complete_step_on_resume,
     balance_success_on_resume,
+    complete_step_tail,
     deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
-    synthesize_native_success_on_resume,
     unresolved_tool_result_content,
 )
 from imp.engine.state import InMemoryEventLog
@@ -406,56 +408,140 @@ def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> No
     assert [e["type"] for e in log.read()] == ["user_message"]
 
 
-def test_synthesize_native_success_appends_result_only_no_notes(tmp_path: Path) -> None:
+_CS = ToolUseBlock(id="c0", name="mcp__imp__complete_step", input={"status": "Success"})
+_REDO = Message(role="user", content=(TextBlock(text=RESUME_REDO_NUDGE),))
+
+
+def _cs_user(*blocks: TextBlock | ToolResultBlock) -> Message:
+    return Message(role="user", content=blocks)
+
+
+def _cs_history(*tail: Message) -> list[Message]:
+    return [_cs_user(TextBlock(text="go")),
+            Message(role="assistant", content=(_CS,)), *tail]
+
+
+def _cs_answer(tmp_path: Path, msgs: list[Message], feedback: str | None,
+               ) -> tuple[list[Message], InMemoryEventLog, Transcript]:
     t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="begin"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="c0", name="complete_step",
-                         input={"status": "Success"}),)),
-    ]
-    for m in msgs:
-        t.append(m)
+    t.rewrite(msgs)
     elog = InMemoryEventLog()
+    cs = complete_step_tail(msgs)
+    assert cs == _CS
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", cs, feedback)
+    assert t.load() == msgs
+    return msgs, elog, t
 
-    injected = synthesize_native_success_on_resume(msgs, t, elog, "step:p/s")
 
-    # Exactly one new trailing user turn carrying a SUCCESS-shaped result.
-    assert injected is msgs[-1] and injected.role == "user"
-    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
-    texts = [b for b in injected.content if isinstance(b, TextBlock)]
-    assert len(results) == 1 and results[0].tool_use_id == "c0"
-    assert results[0].is_error is False
-    assert results[0].content == "previous step output recorded; resuming"
-    # NO durability note and NO feedback — the handback rides the streamed delta.
-    assert texts == []
-    # Persisted to disk and audit-logged exactly once as an engine_message.
-    assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
+def _cs_results(msgs: list[Message]) -> list[ToolResultBlock]:
+    return [b for m in msgs for b in m.content
+            if isinstance(b, ToolResultBlock) and b.tool_use_id == "c0"]
+
+
+@pytest.mark.parametrize("tail", [
+    (),
+    (_cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),),
+    (_cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),
+     _cs_user(TextBlock(text="OLD FEEDBACK"))),
+])
+def test_complete_step_tail_finds_the_call_under_user_turns(
+        tail: tuple[Message, ...]) -> None:
+    assert complete_step_tail(_cs_history(*tail)) == _CS
+
+
+def test_complete_step_tail_none_off_a_complete_step_tail() -> None:
+    bash = ToolUseBlock(id="b1", name="bash", input={"cmd": "x"})
+    assert complete_step_tail(_cs_history(
+        _cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),
+        Message(role="assistant", content=(TextBlock(text="all done"),)))) is None
+    assert complete_step_tail([_cs_user(TextBlock(text="go")),
+                               Message(role="assistant", content=(bash,))]) is None
+    assert complete_step_tail([]) is None
+    assert complete_step_tail([_cs_user(TextBlock(text="go"))]) is None
+    assert complete_step_tail(
+        [Message(role="system", content=(TextBlock(text="sys"),))]) is None
+
+
+def test_answer_complete_step_rework_replaces_stored_result_in_place(
+        tmp_path: Path) -> None:
+    fb = "REVISE: fix X"
+    stored = ToolResultBlock(tool_use_id="c0", content=[{"type": "text", "text": "step complete"}])
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(_cs_user(stored)), fb)
+    framed = ToolResultBlock(tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + fb,
+                             is_error=True)
+    assert msgs[2:] == [_cs_user(framed), _REDO]
+    evs = list(elog.read())
+    assert [(e["type"], e["payload"]["subtype"]) for e in evs] == [
+        ("engine_message", "continuation"), ("engine_message", "continuation")]
+    assert evs[0]["payload"]["content"] == [{
+        "type": "tool_result", "tool_use_id": "c0",
+        "content": REWORK_RESULT_FRAME + "\n\n" + fb, "is_error": True}]
+    assert evs[1]["payload"]["content"] == [{"type": "text", "text": RESUME_REDO_NUDGE}]
+
+
+def test_answer_complete_step_goto_keeps_stored_success(tmp_path: Path) -> None:
+    stored = ToolResultBlock(tool_use_id="c0", content=[{"type": "text", "text": "step complete"}])
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(_cs_user(stored)), None)
+    assert msgs[2:] == [_cs_user(stored), _REDO]
+    assert [e["payload"]["content"] for e in elog.read()] == [
+        [{"type": "text", "text": RESUME_REDO_NUDGE}]]
+
+
+def test_answer_complete_step_goto_answers_a_dangling_call(tmp_path: Path) -> None:
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(), None)
+    ok = ToolResultBlock(tool_use_id="c0", content="previous step output recorded; resuming")
+    assert msgs[2:] == [_cs_user(ok), _REDO]
+    assert [e["type"] for e in elog.read()] == ["engine_message", "engine_message"]
+    assert not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+                   for m in msgs for b in m.content)
+
+
+def test_answer_complete_step_goto_overrides_a_cli_rejection(tmp_path: Path) -> None:
+    rejected = ToolResultBlock(tool_use_id="c0", content="rejected", is_error=True)
+    msgs, _, _ = _cs_answer(
+        tmp_path, _cs_history(_cs_user(rejected), _cs_user(TextBlock(text="hi"))), None)
+    ok = ToolResultBlock(tool_use_id="c0", content="previous step output recorded; resuming")
+    assert msgs[2:] == [_cs_user(ok), _cs_user(TextBlock(text="hi")), _REDO]
+
+
+def test_answer_complete_step_prepends_to_the_trailing_run(tmp_path: Path) -> None:
+    fb = "REVISE: fix X"
+    msgs, elog, _ = _cs_answer(
+        tmp_path, _cs_history(_cs_user(TextBlock(text="OLD FEEDBACK"))), fb)
+    framed = ToolResultBlock(tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + fb,
+                             is_error=True)
+    assert msgs[2:] == [_cs_user(framed, TextBlock(text="OLD FEEDBACK")), _REDO]
+    assert [e["payload"]["content"] for e in elog.read()] == [
+        [{"type": "tool_result", "tool_use_id": "c0",
+          "content": REWORK_RESULT_FRAME + "\n\n" + fb, "is_error": True}],
+        [{"type": "text", "text": RESUME_REDO_NUDGE}]]
+
+
+def test_answer_complete_step_reapplied_plainly_keeps_the_rework(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "REVISE: fix X")
+    before = list(msgs)
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, None)
+    assert msgs == before and list(elog.read()) == []
+    assert sum(m == _REDO for m in msgs) == 1
+
+
+def test_answer_complete_step_rework_replaces_an_earlier_rework(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "F1")
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, "F2")
+    assert _cs_results(msgs) == [ToolResultBlock(
+        tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + "F2", is_error=True)]
+    assert msgs[-1] == _REDO and sum(m == _REDO for m in msgs) == 1
     assert [e["type"] for e in elog.read()] == ["engine_message"]
 
 
-def test_synthesize_native_success_error_flavors_non_complete_step(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="assistant", content=(
-        ToolUseBlock(id="b1", name="bash", input={"cmd": "x"}),))]
-    t.append(msgs[0])
-
-    injected = synthesize_native_success_on_resume(msgs, t, InMemoryEventLog(), "x")
-
-    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
-    assert len(results) == 1 and results[0].tool_use_id == "b1"
-    # A genuine non-complete_step interrupt is error-flavored, not "succeeded".
-    assert results[0].is_error is True
-    # No durability note / wrapper feedback on the error-flavored path either.
-    assert [b for b in injected.content if isinstance(b, TextBlock)] == []
-
-
-def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
-    t.append(msgs[0])
-    assert synthesize_native_success_on_resume(
-        msgs, t, InMemoryEventLog(), "x") is None
+def test_answer_complete_step_rework_same_feedback_is_a_no_op(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "F1")
+    before = list(msgs)
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, "F1")
+    assert msgs == before and list(elog.read()) == []
 
 
 def test_deliver_engine_continuation_journals_internal_event_not_user_message(
@@ -484,31 +570,6 @@ def test_deliver_engine_continuation_journals_internal_event_not_user_message(
     assert cont["payload"] == {
         "role": "user", "subtype": "continuation",
         "content": [{"type": "text", "text": "CONTINUE NOW"}]}
-
-
-def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="c0", name="complete_step", input={"status": "Success"}),)),
-    ]
-    for m in msgs:
-        t.append(m)
-    synth = repair_dangling_tool_use_on_resume(
-        msgs, t, feedback="REVISE: rewrite plan.md")
-    assert synth is not None and len(synth) == 1
-    rb = synth[0]
-    assert rb.tool_use_id == "c0"
-    # The dangling complete_step is paired with an is_error result whose content
-    # IS the framed feedback (not the synthetic "interrupted" filler).
-    assert rb.is_error is True
-    assert rb.content == REWORK_RESULT_FRAME + "\n\n" + "REVISE: rewrite plan.md"
-    # Appended as a trailing user turn (repair shape) with the durability note.
-    assert msgs[-1].role == "user"
-    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
-               for b in msgs[-1].content)
-    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
 
 
 def test_repair_prefers_captured_success_over_synthetic(tmp_path: Path) -> None:
@@ -1045,9 +1106,10 @@ def test_interrupt_marker_repair_ignores_ordinary_text_tail(tmp_path: Path) -> N
     assert path.read_bytes() == bytes_before
 
 
-def test_interrupt_marker_left_alone_after_dangling_tool_use(tmp_path: Path) -> None:
+def test_interrupt_marker_dropped_over_an_unanswered_tool_use(tmp_path: Path) -> None:
     """Criterion 6(a): interrupt between turns — the marker sits on an assistant turn
-    with a dangling tool_use. Untouched: repairing it would strand an assistant tail."""
+    with a dangling tool_use. The marker goes; the unanswered-tool_use sweep then
+    answers b1, so no assistant tail is stranded."""
     path = tmp_path / "transcript.jsonl"
     t = Transcript(path)
     msgs = [
@@ -1058,13 +1120,12 @@ def test_interrupt_marker_left_alone_after_dangling_tool_use(tmp_path: Path) -> 
     ]
     for m in msgs:
         t.append(m)
-    before = list(msgs)
-    bytes_before = path.read_bytes()
+    beneath = msgs[:2]
 
     repair_interrupt_marker_on_resume(msgs, t)
 
-    assert msgs == before
-    assert path.read_bytes() == bytes_before
+    assert msgs == beneath
+    assert Transcript(path).load() == beneath
 
 
 def test_interrupt_marker_left_alone_after_plain_assistant_text(tmp_path: Path) -> None:
@@ -1190,6 +1251,320 @@ def test_interrupt_marker_repair_keeps_the_note_when_a_recovered_result_failed(
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["w1"].is_error is True
     assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
+
+
+def _write(tmp_path: Path, msgs: list[Message]) -> Transcript:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    return t
+
+
+def _note_count(msgs: list[Message]) -> int:
+    return sum(1 for m in msgs for b in m.content
+               if isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE)
+
+
+def test_interrupt_marker_repair_restates_every_per_block_rejection(
+    tmp_path: Path,
+) -> None:
+    """claude writes one Message per block: a parallel-call interrupt is one rejection
+    turn per outstanding call, then the marker. Every rejection is restated — the
+    first from imp's capture, the second as the bash placeholder resolved by id two
+    turns back — and the note lands once, on the last restated turn."""
+    from imp.agents.transcript import captured_result_key
+
+    sub = ToolUseBlock(id="s1", name="mcp__imp__sub_agent",
+                       input={"subagent_name": "coder", "task_description": "t"})
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(sub,)),
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="s1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+    captured = {captured_result_key("sub_agent", dict(sub.input)): ("coder done", False)}
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    assert msgs[3:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="s1", content="coder done", is_error=False),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+    ]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_interrupt_marker_repair_keeps_user_text_after_the_marker(tmp_path: Path) -> None:
+    """A real human turn after the marker survives untouched; the run beneath the
+    marker is still repaired."""
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    human = Message(role="user", content=(TextBlock(text="sandbox is off"),))
+    msgs = [
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+        human,
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+        human,
+    ]
+
+
+def test_interrupt_marker_repair_drops_every_marker_up_to_the_last(tmp_path: Path) -> None:
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    msgs = [
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+        Message(role="user", content=(TextBlock(text=_MARKER_BARE),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert len(msgs) == 2
+    assert msgs[1].content == (
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE))
+
+
+def test_interrupt_marker_repair_adds_no_note_over_a_success(tmp_path: Path) -> None:
+    """Nothing beneath the marker was cut off, so the 'cut off by that pause' note
+    would be false: the marker goes, the real result stays, no note."""
+    ok = ToolResultBlock(tool_use_id="r1", content="file body", is_error=False)
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="user", content=(ok,)),
+        Message(role="user", content=(TextBlock(text=_MARKER_BARE),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(ok,))]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_interrupt_marker_repair_leaves_complete_step_results(tmp_path: Path) -> None:
+    """A complete_step result is the complete_step-tail answer's to set: the marker
+    goes, but its result is neither restated as 'interrupted' nor framed by the note."""
+    rejected = ToolResultBlock(tool_use_id="c1", content=_REJECTION_BODY, is_error=True)
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c1", name="mcp__imp__complete_step",
+                         input={"status": "Success"}),)),
+        Message(role="user", content=(rejected,)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(rejected,))]
+
+
+def test_interrupt_marker_repair_adds_no_second_note(tmp_path: Path) -> None:
+    """A run that already holds the durability note is not given another."""
+    first = Message(role="user", content=(
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b2", name="mcp__imp__bash", input={"command": "test"}),)),
+        first,
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b2", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert _note_count(msgs) == 1
+    assert msgs[2:] == [first, Message(role="user", content=(
+        ToolResultBlock(tool_use_id="b2", content=_SYNTHETIC_BASH, is_error=True),))]
+
+
+def test_interrupt_marker_repair_keeps_an_orphan_error_result(tmp_path: Path) -> None:
+    """There is no call to restate it as, so the result stays as written."""
+    orphan = ToolResultBlock(tool_use_id="gone", content=_REJECTION_BODY, is_error=True)
+    msgs = [
+        Message(role="assistant", content=(TextBlock(text="working"),)),
+        Message(role="user", content=(orphan,)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(orphan,))]
+    assert _note_count(msgs) == 0
+
+
+def test_sweep_answers_parallel_fragments_in_a_new_turn(tmp_path: Path) -> None:
+    """Per-block parallel calls: both fragments are unanswered. imp's capture answers
+    one, the placeholder the other, in one new user turn with the note; each answer
+    is journaled as a tool_result event."""
+    from imp.agents.transcript import (
+        answer_unanswered_tool_uses_on_resume,
+        captured_result_key,
+    )
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+    ]
+    t = _write(tmp_path, msgs)
+    elog = InMemoryEventLog()
+
+    answer_unanswered_tool_uses_on_resume(
+        msgs, t, elog, "step:p/s",
+        captured={captured_result_key("read_file", {"path": "a.py"}): ("A BODY", False)})
+
+    assert msgs[3:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+    events = [e["payload"] for e in elog.read() if e["type"] == "tool_result"]
+    assert [(p["id"], p["error"]) for p in events] == [("r1", False), ("b1", True)]
+
+
+def test_sweep_prepends_results_to_the_trailing_user_run(tmp_path: Path) -> None:
+    """With user turns already trailing, the answers head the run's first turn and
+    the run's later turns are untouched."""
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    r2 = ToolResultBlock(tool_use_id="r2", content="B BODY", is_error=False)
+    human = Message(role="user", content=(TextBlock(text="use c.py"),))
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r2", name="mcp__imp__read_file", input={"path": "b.py"}),)),
+        Message(role="user", content=(r2,)),
+        human,
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[2:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True),
+            r2, TextBlock(text=RESUME_DURABILITY_NOTE))),
+        human,
+    ]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_sweep_answers_an_interleaved_earlier_fragment(tmp_path: Path) -> None:
+    """A fast result streamed back between fragments leaves the FIRST call unanswered
+    in an earlier assistant run; the sweep is global, so it is answered too."""
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r2", name="mcp__imp__read_file", input={"path": "b.py"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r2", content="B BODY", is_error=False),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r3", name="mcp__imp__read_file", input={"path": "c.py"}),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[4:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True),
+        ToolResultBlock(tool_use_id="r3", content=_SYNTHETIC_NON_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))]
+
+
+def test_sweep_adds_no_note_when_every_answer_is_a_captured_success(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.transcript import (
+        answer_unanswered_tool_uses_on_resume,
+        captured_result_key,
+    )
+
+    msgs = [Message(role="assistant", content=(
+        ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),))]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(
+        msgs, t, InMemoryEventLog(), "step:p/s",
+        captured={captured_result_key("read_file", {"path": "a.py"}): ("A BODY", False)})
+
+    assert msgs[1:] == [Message(role="user", content=(
+        ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),))]
+
+
+def test_sweep_adds_no_second_note_to_the_trailing_run(tmp_path: Path) -> None:
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+    ]
+    t = _write(tmp_path, msgs)
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, InMemoryEventLog(), "step:p/s")
+
+    assert msgs[2].content[0] == ToolResultBlock(
+        tool_use_id="r1", content=_SYNTHETIC_NON_BASH, is_error=True)
+    assert _note_count(msgs) == 1
+
+
+def test_sweep_is_a_no_op_when_everything_is_answered(tmp_path: Path) -> None:
+    from imp.agents.transcript import answer_unanswered_tool_uses_on_resume
+
+    path = tmp_path / "transcript.jsonl"
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r1", content="A BODY", is_error=False),)),
+    ]
+    t = _write(tmp_path, msgs)
+    before, bytes_before = list(msgs), path.read_bytes()
+    elog = InMemoryEventLog()
+
+    answer_unanswered_tool_uses_on_resume(msgs, t, elog, "step:p/s")
+
+    assert msgs == before and path.read_bytes() == bytes_before
+    assert not any(e["type"] == "tool_result" for e in elog.read())
 
 
 def test_unresolved_tool_result_content_states_uncertainty_without_advising_a_rerun(

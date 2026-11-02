@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
+from imp.agents.transcript import RESUME_STUB_NOTE
 from imp.engine.completion import build_continuation_fn
 from tests.anthropic_fakes import response as a_response
 from tests.anthropic_fakes import text as a_text
@@ -369,10 +370,11 @@ async def test_dangling_tool_use_repair_claude(tmp_path: Path) -> None:
                    for e in driven.control)
     assert created[0].opts.resume is None
     assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
-    # DANGLING native resume STREAMS a synth tool_result for t1.
+    # DANGLING native resume loads the synth t1 result; the delta is text only.
     streamed = created[0].queries[0]
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
     check_golden("dangling__claude", record(driven))
 
 

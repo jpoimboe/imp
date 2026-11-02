@@ -23,9 +23,13 @@ Read this when editing imp's engine/renderer or workflow prompts.
   live in `workflow.yaml`, scripts, and prompts.
 - **Claude session store.** The store body handed to native resume is a pure
   projection of imp's transcript — `message_to_session_records(_project_for_cli(
-  messages[:resume_base]))`, overwritten wholesale. Records the CLI wrote are
-  never merged in or counted; imp's transcript is the only source of truth for
-  resumed context.
+  messages[:resume_base]))`, overwritten wholesale, where `resume_base` (taken
+  after every resume repair) starts the trailing run of user turns without a
+  tool_result, the only part streamed. Records the CLI wrote are never merged in
+  or counted; imp's transcript is the only source of truth for resumed context.
+  At load the CLI splices a synthetic "No response requested." after a user-tail
+  body; imp counters it with a stream-only `RESUME_STUB_NOTE` at the head of the
+  streamed message, never persisted.
 - **Codex native session.** One run-scoped process owner linearizes cancellation
   with subprocess publication and identity-safe cleanup; a live hard stop captures
   the process tree before waking blocked driver I/O, and the wake also releases

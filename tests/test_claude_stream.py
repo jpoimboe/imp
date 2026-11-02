@@ -218,10 +218,10 @@ def test_project_leaves_a_dangling_tool_use_unanswered() -> None:
 
 
 def test_project_preserves_boundary_tool_results_in_place() -> None:
-    """A tool_result whose tool_use is absent from the input list is paired across
-    the resume_base split (the CLI already loaded the tool_use from the store
-    body). It is preserved in original order — dropping it would stream an empty
-    delta and deadlock the DANGLING_TOOL_USE / handback resumes."""
+    """A tool_result whose tool_use is absent from the input list is kept in its
+    original order, never dropped: the projection is total. Native resume never
+    splits a result from its tool_use (`_enter` cuts the body only before trailing
+    user-text turns), so this pins projection totality, not a streamed delta."""
     messages = [
         Message(role="user", content=(ToolResultBlock(
             tool_use_id="c0", content="REVISE: confirm the work is done.",
@@ -274,9 +274,10 @@ def test_stream_history_regroups_late_tool_results() -> None:
 
 
 def test_stream_history_keeps_a_boundary_result_delta_intact() -> None:
-    """The DANGLING_TOOL_USE / handback delta is one user turn whose tool_use lives
-    in the loaded session. It must survive the projection: an empty delta
-    deadlocks (claude-p never self-starts a loaded session)."""
+    """`_stream_history` keeps a one-turn delta whose tool_use lies outside it
+    instead of emitting nothing. Native resume never streams such a delta (every
+    repaired result is in the loaded body); this pins that no tool_result is
+    dropped."""
     delta = [Message(role="user", content=(ToolResultBlock(
         tool_use_id="c0", content="REVISE: fix the claim.", is_error=True),))]
     out = asyncio.run(_drain(_stream_history(delta)))
