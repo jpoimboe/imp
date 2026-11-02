@@ -14,7 +14,7 @@ from typing import Any
 
 import anyio
 
-from imp.remote.session.protocol import encode_query, parse_result
+from imp.cli import store_proxy
 
 _MUTATION_OPS = frozenset({"resume", "new", "edit", "abandon"})
 
@@ -67,7 +67,6 @@ def build_session_handler(
     control_root: Path, *, parent_id: str | None = None,
 ) -> Any:
     """Daemon on_query: mutation ops -> run_mutation, else -> run_query; both off-loop."""
-    from imp.cli import store_proxy
     from imp.cli.store import LocalStore
 
     store = LocalStore(control_root)
@@ -81,24 +80,8 @@ def build_session_handler(
     return _on_query
 
 
-async def _roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
-    stream = await anyio.connect_unix(sock)
-    try:
-        await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
-        chunks: list[bytes] = []
-        try:
-            while True:
-                chunks.append(await stream.receive())
-        except (anyio.EndOfStream, anyio.ClosedResourceError,
-                anyio.BrokenResourceError):
-            pass
-        return parse_result(b"".join(chunks).decode("utf-8").rstrip("\n"))
-    finally:
-        await stream.aclose()
-
-
 async def proxy_mutation_async(op: str, args: dict[str, Any]) -> Any:
-    return await _roundtrip(os.environ["IMP_SESSION_SOCKET"], op, args)
+    return await store_proxy.roundtrip(os.environ["IMP_SESSION_SOCKET"], op, args)
 
 
 def proxy_mutation(op: str, args: dict[str, Any]) -> Any:

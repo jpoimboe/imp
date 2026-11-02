@@ -135,10 +135,6 @@ async def test_the_default_attach_holds_a_lease_and_lease_false_does_not(
         async with attach(tmp_path, handle, lease=False):
             await wait_until(lambda: server.attached_count == 1)
             assert server.leased_count == 0
-        # close() awaits aclose() on every still-registered client, and the server
-        # drops a detached one only when its read loop wakes on EOF — a later
-        # scheduler turn. Closing before that lands raises InvalidStateError out of
-        # anyio's stream teardown, so wait for the drop rather than race it.
         await wait_until(lambda: server.attached_count == 0)
 
         await server.close()
