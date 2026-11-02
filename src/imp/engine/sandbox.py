@@ -1037,10 +1037,12 @@ def sandbox_available() -> bool:
         return False
 
 
-def _force_rmtree(path: Path) -> None:
-    """rmtree that also clears the mode-000 `work/work` dir overlayfs leaves in
-    its workdir (untraversable until chmod'd), so no overlay residue survives
-    under the state dir. Owner is the real uid, so the chmod always succeeds."""
+def force_rmtree(path: Path) -> None:
+    """rmtree that chmods real dirs 0o700 first (overlayfs work/work, read-only copies)."""
+    if os.path.islink(path):
+        return
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o700)
     for root, dirs, _files in os.walk(path):
         for d in dirs:
             p = os.path.join(root, d)
@@ -1136,7 +1138,7 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     upper, work, merged = probe / "upper", probe / "work", probe / "merged"
     try:
         for opt in (",userxattr", ""):
-            _force_rmtree(probe)
+            force_rmtree(probe)
             for d in (upper, work, merged):
                 d.mkdir(parents=True, exist_ok=True)
             r = subprocess.run(
@@ -1154,7 +1156,7 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     except (OSError, subprocess.SubprocessError):
         return None
     finally:
-        _force_rmtree(probe)
+        force_rmtree(probe)
 
 
 def make_home_layer(
@@ -1177,7 +1179,7 @@ def make_home_layer(
         return HomeLayer(home=home), None, (lambda: None)
     root.mkdir(parents=True, exist_ok=True)
     return (HomeLayer(home=home), OverlayRoot(path=str(root), userxattr=userxattr),
-            lambda: _force_rmtree(root))
+            lambda: force_rmtree(root))
 
 
 def _existing(paths: list[str]) -> tuple[str, ...]:

@@ -103,6 +103,37 @@ def test_unconfigure_noop_when_not_owned(tmp_path, monkeypatch):
     assert Path(live_home).is_dir()
 
 
+def test_unconfigure_reaps_read_only_subtrees(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    owned = tmp_path / "ipabc123"
+    home = tmp_path / "imphome"
+    planted = []
+    for root in (owned, home):
+        ro = root / "provider-auth"
+        ro.mkdir(parents=True)
+        (ro / "auth.json").write_text("{}")
+        (ro / "auth.json").chmod(0o400)
+        ro.chmod(0o500)
+        planted.append(ro)
+    monkeypatch.setattr(conftest, "_OWNED_BASETEMP", str(owned))
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", str(home))
+    try:
+        real_chmod = os.chmod
+        chmodded: list[str] = []
+        def _spy_chmod(p, mode, *a, **k):
+            chmodded.append(str(p))
+            return real_chmod(p, mode, *a, **k)
+        monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+        conftest.pytest_unconfigure(_config())
+        assert not owned.exists()
+        assert not home.exists()
+        assert all(str(ro) in chmodded for ro in planted)  # proves force_rmtree's chmod walk ran
+    finally:
+        for ro in planted:  # restore modes so tmp_path cleanup can reap on failure
+            if ro.exists():
+                ro.chmod(0o700)
+
+
 def test_configure_pins_imp_home_off_the_real_home(monkeypatch):
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)

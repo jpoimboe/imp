@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from imp.engine import archive as _archive
+from imp.engine.sandbox import force_rmtree
 from imp.paths import project_state_dir
 from imp.providers.codex_rollout import RolloutReadings
 
@@ -161,9 +162,9 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     # excludes a user-supplied --basetemp and xdist workers (which never set it),
     # so workers never race the controller's removal.
     if _OWNED_BASETEMP is not None:
-        shutil.rmtree(_OWNED_BASETEMP, ignore_errors=True)
+        force_rmtree(Path(_OWNED_BASETEMP))
     if _OWNED_IMP_HOME is not None:
-        shutil.rmtree(_OWNED_IMP_HOME, ignore_errors=True)
+        force_rmtree(Path(_OWNED_IMP_HOME))
 
 
 def pytest_collection_modifyitems(

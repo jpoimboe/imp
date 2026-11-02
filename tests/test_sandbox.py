@@ -24,8 +24,8 @@ from imp.engine.sandbox import (
     SandboxOpenFailed,
     SandboxPolicy,
     SandboxUnavailable,
-    _force_rmtree,
     build_sandbox_spawn,
+    force_rmtree,
     make_home_layer,
     prepare_spawn_policy,
     resolve_policy,
@@ -1834,15 +1834,83 @@ def test_force_rmtree_skips_symlinked_dirs(tmp_path: Path) -> None:
     # Verify the guard prevents mutating a directory outside the removed tree.
     outside = tmp_path / "outside"
     outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
     original_mode = os.stat(outside).st_mode
     tree = tmp_path / "tree"
     tree.mkdir()
     (tree / "real_subdir").mkdir()
     (tree / "link_to_outside").symlink_to(outside)
-    _force_rmtree(tree)
+    force_rmtree(tree)
     assert not tree.exists()
     assert outside.exists()
     assert os.stat(outside).st_mode == original_mode
+    assert (outside / "keep.txt").read_text() == "keep"
+
+
+def test_force_rmtree_removes_read_only_dirs_and_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tmp_path / "tree"
+    for sub in ("claude", "codex/nested"):
+        d = tree / sub
+        d.mkdir(parents=True)
+        (d / "auth.json").write_text("{}")
+        (d / "auth.json").chmod(0o400)
+    for d in (tree / "codex" / "nested", tree / "codex", tree / "claude"):
+        d.chmod(0o500)
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+    force_rmtree(tree)
+    assert not tree.exists()
+    for d in (tree / "claude", tree / "codex", tree / "codex" / "nested"):
+        assert str(d) in chmodded  # proves force_rmtree's chmod walk ran
+
+
+def test_force_rmtree_removes_a_read_only_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tmp_path / "tree"
+    (tree / "sub").mkdir(parents=True)
+    for f in (tree / "sub" / "f.txt", tree / "f.txt"):
+        f.write_text("x")
+        f.chmod(0o400)
+    (tree / "sub").chmod(0o500)
+    tree.chmod(0o500)
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+    force_rmtree(tree)
+    assert not tree.exists()
+    assert str(tree) in chmodded  # proves force_rmtree's chmod walk ran
+    assert str(tree / "sub") in chmodded
+
+
+def test_force_rmtree_on_a_missing_path_is_a_noop(tmp_path: Path) -> None:
+    force_rmtree(tmp_path / "absent")
+    assert not (tmp_path / "absent").exists()
+
+
+def test_force_rmtree_leaves_a_symlinked_root_and_its_target_alone(tmp_path: Path) -> None:
+    # os.walk descends through a symlinked root; an unguarded walk would chmod target subdirs.
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "sub" / "keep.txt").write_text("keep")
+    outside.chmod(0o755)
+    (outside / "sub").chmod(0o755)
+    link = tmp_path / "link"
+    link.symlink_to(outside)
+    force_rmtree(link)
+    assert link.is_symlink()
+    assert (outside / "sub" / "keep.txt").read_text() == "keep"
+    assert outside.stat().st_mode & 0o777 == 0o755
+    assert (outside / "sub").stat().st_mode & 0o777 == 0o755
 
 
 def test_prepare_spawn_policy_mints_a_distinct_layer_per_spawn(tmp_path):

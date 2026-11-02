@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 from imp.engine.env import PROVIDER_AUTH_ENV, ensure_provider_auth_dir
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
+from imp.engine.sandbox import force_rmtree
 from imp.providers import claude_token_refresh, codex_token_refresh
 from imp.providers.provider_auth import stage_provider_auth
 from tests.conftest import _git
@@ -42,6 +44,19 @@ def _ensure_builtin_providers() -> None:
     register_builtin_providers()
 
 
+@pytest.fixture
+def provider_auth_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    # Only the copy may authenticate: no API key or env OAuth token reaches either CLI.
+    # Staging reads these too, so clear them first.
+    for var in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    copy = tmp_path / "provider-auth"
+    ensure_provider_auth_dir(copy)
+    stage_provider_auth(copy, env=os.environ)
+    yield copy
+    force_rmtree(copy)
+
+
 def _refresh_token_digest(provider: str, path: Path) -> str | None:
     # A digest, so a failing comparison never prints a live refresh token.
     if not path.is_file():
@@ -58,13 +73,13 @@ def _snapshot(root: Path) -> dict[str, str]:
             for p in root.rglob("*")}
 
 
-def _set_read_only(root: Path, *, read_only: bool) -> None:
+def _set_read_only(root: Path) -> None:
     subdirs = [root / sub for _, sub in PROVIDER_AUTH_ENV]
     for d in subdirs:
         for f in d.iterdir():
-            f.chmod(0o400 if read_only else 0o600)
+            f.chmod(0o400)
     for d in (root, *subdirs):
-        d.chmod(0o500 if read_only else 0o700)
+        d.chmod(0o500)
 
 
 def _project(root: Path, provider: str) -> None:
@@ -107,18 +122,14 @@ def _project(root: Path, provider: str) -> None:
 ])
 @pytest.mark.anyio
 async def test_one_step_run_authenticates_from_the_read_only_copy(
-    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    provider: str, provider_auth_copy: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Only the copy may authenticate: no API key or env OAuth token reaches either CLI.
-    for var in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY"):
-        monkeypatch.delenv(var, raising=False)
+    copy = provider_auth_copy
     module = _MODULES[provider]
     canonical = module.canonical_dir(os.environ) / _CREDS[provider]
     canonical_refresh = _refresh_token_digest(provider, canonical)
 
-    copy = tmp_path / "provider-auth"
-    ensure_provider_auth_dir(copy)
-    stage_provider_auth(copy, env=os.environ)
     staged = copy / provider / _CREDS[provider]
     assert staged.is_file(), (
         f"no {provider} OAuth login to stage from {canonical}; {_LOGIN[provider]}")
@@ -140,11 +151,8 @@ async def test_one_step_run_authenticates_from_the_read_only_copy(
     quest = Quest.create(
         proj, title=f"live-ro-{provider}", quest_id=f"live-ro-{provider}", base_branch="main")
 
-    try:
-        _set_read_only(copy, read_only=True)
-        result = await run_quest(quest)
-    finally:
-        _set_read_only(copy, read_only=False)
+    _set_read_only(copy)
+    result = await run_quest(quest)
 
     events = list(quest.event_log().read())
     warnings = [str((e.get("payload") or {}).get("message", ""))
