@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.cli import narrative as nv
 from imp.cli.narrative import NarrativeBuilder
 from imp.cli.render_text import render_tree
 from imp.engine.shim import outer_imp_mismatch
+from tests.test_shim import _fake_installed_copy
 
 
 def _nodes(events: list[dict], cls: type) -> list:
@@ -59,7 +62,9 @@ def test_warning_tallies_into_summary() -> None:
     assert "harvest skipped: git fatal" in nb._warnings
 
 
-def test_outer_imp_mismatch_renders_as_a_counted_warning(tmp_path: Path) -> None:
+def test_outer_imp_mismatch_renders_as_a_counted_warning(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_installed_copy(tmp_path, monkeypatch)
     (tmp_path / "src" / "imp").mkdir(parents=True)
     (tmp_path / "src" / "imp" / "__init__.py").write_text("")
     message = outer_imp_mismatch(tmp_path)

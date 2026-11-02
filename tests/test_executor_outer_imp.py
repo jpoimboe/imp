@@ -1,6 +1,6 @@
-"""Run-start warning when the outer (running) imp is not the managed checkout's own
-src. Covers the emission gating: once per quest per process, never duplicated by the
-mid-run sandbox-policy rebuild, silent when the invariant holds."""
+"""Run-start warning when imp runs from an installed copy rather than a git checkout,
+against an imp checkout. Covers the emission gating: once per quest per process, never
+duplicated by the mid-run sandbox-policy rebuild, silent when running from a checkout."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,6 +18,7 @@ from tests.test_executor import (
     _seed_minimal_workflow,
     _seed_two_step_workflow,
 )
+from tests.test_shim import _fake_installed_copy
 
 _RUNNING_SRC = Path(imp.__file__).resolve().parent.parent
 
@@ -28,7 +29,7 @@ def anyio_backend() -> str:
 
 
 def _fake_imp_checkout(root: Path) -> None:
-    """Make `root` look like an imp checkout whose src is NOT the running one."""
+    """Make `root` look like an imp checkout: it has src/imp/__init__.py."""
     (root / "src" / "imp").mkdir(parents=True)
     (root / "src" / "imp" / "__init__.py").write_text("")
 
@@ -42,9 +43,10 @@ def _outer_imp_events(events: list[dict]) -> list[dict]:
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
 async def test_mismatched_outer_imp_warns_once_at_run_start(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _fake_imp_checkout(tmp_path)
+    installed = _fake_installed_copy(tmp_path, monkeypatch)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -55,8 +57,8 @@ async def test_mismatched_outer_imp_warns_once_at_run_start(
     assert len(warnings) == 1
     message = warnings[0]["payload"]["message"]
     assert message.startswith("outer imp mismatch: ")
-    assert str(_RUNNING_SRC) in message
-    assert str((tmp_path / "src").resolve()) in message
+    assert f"installed copy at {installed}," in message
+    assert message.endswith(f"`uv tool install --editable {tmp_path}`")
     assert warnings[0]["payload"]["detail"] == {}
 
 
@@ -88,6 +90,7 @@ async def test_project_root_flip_does_not_duplicate_the_warning(
 
     quest = _seed_two_step_workflow(tmp_path)
     _fake_imp_checkout(tmp_path)
+    _fake_installed_copy(tmp_path, monkeypatch)
     wt = project_state_dir(tmp_path) / "worktrees" / quest.id
     wt.mkdir(parents=True)
     sink: list[str] = []          # _FlipRunner uses its length to flip on step 1 only
@@ -104,11 +107,12 @@ async def test_project_root_flip_does_not_duplicate_the_warning(
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
 async def test_outer_imp_warning_silent_on_second_entry(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The daemon hold loop re-enters run_quest after every user reply; _SNAPSHOT_CAPTURED
     gates those later entries, so the warning is emitted at most once per process."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _fake_imp_checkout(tmp_path)
+    _fake_installed_copy(tmp_path, monkeypatch)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -130,7 +134,7 @@ async def test_outer_imp_warning_silent_on_second_entry(
 @pytest.mark.bare_sandbox
 async def test_matching_outer_imp_emits_nothing(
         tmp_path: Path) -> None:
-    """The control root's src IS the running src (reached via symlink): no warning."""
+    """Running from the real checkout, with the control root's src symlinked to it: no warning."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     (tmp_path / "src").symlink_to(_RUNNING_SRC, target_is_directory=True)
     _register_fake({"status": "Success"})
@@ -145,8 +149,9 @@ async def test_matching_outer_imp_emits_nothing(
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
 async def test_non_imp_project_emits_nothing(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)   # ordinary project: no src/imp
+    _fake_installed_copy(tmp_path, monkeypatch)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -160,11 +165,11 @@ async def test_non_imp_project_emits_nothing(
 @pytest.mark.bare_sandbox
 async def test_a_run_from_a_snapshot_of_this_checkout_emits_nothing(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pinned daemon runs from <quest home>/pinned-src/<token>, so the raw comparison
-    would mismatch on every imp-on-imp run. Resolved through the snapshot's source-root
-    — which names this checkout's src — the run start stays silent."""
+    """A pinned daemon runs from <quest home>/pinned-src/<token>. Resolved through the
+    snapshot's source-root, which names a checkout's src, the run start stays silent."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _fake_imp_checkout(tmp_path)
+    (tmp_path / ".git").mkdir()
     snapshot = quest.quest_dir / "pinned-src" / "tok"
     (snapshot / "imp").mkdir(parents=True)
     (snapshot / "imp" / "__init__.py").write_text("")
