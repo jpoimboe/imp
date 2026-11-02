@@ -2254,6 +2254,12 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
 
 
+def _row_seed_opening(control: Path, quest_id: str) -> str | None:
+    from imp.cli.store import _quest_meta
+    seed = (_quest_meta(control, quest_id) or {}).get("seed_opening")
+    return seed if isinstance(seed, str) else None
+
+
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
 
 
@@ -3491,11 +3497,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     """Render the sectioned overview for already-gathered rows."""
 
     def _name_text(r: _Row) -> str:
-        raw = r[4].strip()
-        if raw:
-            return raw
-        intent = intents.get(r[0])
-        return " ".join(intent.split()) if intent else "(unnamed)"
+        return quest_row.resolve_display_name(r[4], intents.get(r[0])).text
 
     specs: list[tuple[str, str | None, str]] = []
     for r in inflight:
@@ -3546,7 +3548,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.intents, history_label=label, now=now,
+                          intents=rows.display_intents, history_label=label, now=now,
                           color=color, name_cap=name_cap)
 
 
@@ -3570,6 +3572,7 @@ class _OverviewRows(NamedTuple):
     backlog: list[_Row]
     history: list[_Row]
     intents: dict[str, str | None]
+    display_intents: dict[str, str | None]
 
 
 def _overview_rows(control: Path, *, dispositions: set[str],
@@ -3590,10 +3593,15 @@ def _overview_rows(control: Path, *, dispositions: set[str],
     backlog = [r for r in backlog if _row_since(r, cutoff)]
     history = [r for r in history if _row_since(r, cutoff)]
     intents: dict[str, str | None] = {d.quest_id: d.intent_title for d in scanned}
+    display_intents: dict[str, str | None] = {
+        d.quest_id: quest_row.fallback_intent(d.intent_title, d.meta.get("seed_opening"))
+        for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
-    return _OverviewRows(inflight, backlog, history, intents)
+            display_intents[r[0]] = quest_row.fallback_intent(
+                intents[r[0]], _row_seed_opening(control, r[0]))
+    return _OverviewRows(inflight, backlog, history, intents, display_intents)
 
 
 def _filtered_overview_lines(control: Path, *, dispositions: set[str],
@@ -3604,7 +3612,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.intents, history_label="history:", now=now,
+                          intents=rows.display_intents, history_label="history:", now=now,
                           color=color, name_cap=quest_row.NAME_CAP)
 
 
