@@ -4,7 +4,7 @@
 
 Each provider owns its own alias→metadata table here (kept in the providers
 layer, never the renderer — see docs/internals/invariants.md "Layering invariants").
-`window` is a static fallback; for Claude Code the live SDK `rawMaxTokens`
+`window` is a static fallback; for codex the live rollout `token_count` window
 supersedes it once a turn completes. `cli_model` overrides the alias passed to
 the CLI/SDK when the alias is not the wire model id (e.g. the raw Anthropic API
 rejects the bracketed `claude-opus-4-8[1m]` form, so its entry sends
@@ -264,12 +264,12 @@ def context_threshold_crossed(
 def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
 ) -> bool:
-    """True when a provider's own reported LIVE context occupancy has reached the
-    handoff limit — claude's `get_context_usage()`, or codex's rollout
-    `token_count` record. Unlike context_threshold_crossed (which sums prompt
-    tokens against the static catalog window), this compares the provider's live
-    occupancy against `handoff_limit(context_window)`, the live window being
-    authoritative. Returns False without a live positive pair.
+    """True when codex's own reported LIVE context occupancy (its rollout
+    `token_count` record) has reached the handoff limit. Unlike
+    context_threshold_crossed (which sums prompt tokens against the static
+    catalog window), this compares live occupancy against
+    `handoff_limit(context_window)`, the live window being authoritative.
+    Returns False without a live positive pair.
     """
     limit = handoff_limit(context_window)
     if limit is None or not context_tokens or context_tokens <= 0:
