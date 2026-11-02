@@ -91,7 +91,7 @@ def _md_to_fragment(markdown: str) -> str:
     for m in _fold_markers(markdown):
         parts.append(_render_lines(lines[pos:m.line]))
         if isinstance(m, _FoldOpen):
-            # Part 1's _details emits the summary already HTML-escaped (safe to re-emit).
+            # render_markdown._details emits the summary already HTML-escaped (safe to re-emit).
             parts.append(f"<details>\n<summary>{m.summary}</summary>\n")
             depth += 1
             pos = m.line + 2
