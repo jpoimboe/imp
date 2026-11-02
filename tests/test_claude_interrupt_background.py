@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
+from claude_agent_sdk import ClaudeSDKClient, Transport
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
@@ -123,3 +127,88 @@ async def test_stalled_handoff_and_complete_step_interrupts_both_cancelled(
     assert client.interrupts == 2
     assert len(set(client.interrupt_tasks)) == 2
     assert all(t.done() and t.cancelled() for t in client.interrupt_tasks)
+
+
+_ASSISTANT_COMPLETING = {
+    "type": "assistant", "session_id": "s", "uuid": "a1",
+    "message": {
+        "id": "msg_1", "role": "assistant", "model": "claude-sonnet-4-6",
+        "content": [
+            {"type": "text", "text": "done"},
+            {"type": "tool_use", "id": "c1", "name": "mcp__imp__complete_step",
+             "input": {"status": "Success"}}]}}
+
+_RESULT_INTERRUPTED = {
+    "type": "result", "subtype": "error_during_execution", "is_error": True,
+    "duration_ms": 0, "duration_api_ms": 0, "num_turns": 1, "session_id": "s"}
+
+
+class InterruptAfterFloodTransport(Transport):
+    """A fake CLI that answers `interrupt` only after a stream_event flood larger
+    than the SDK's 100-message reader buffer: the live ordering that deadlocks
+    an inline `await client.interrupt()`."""
+
+    FLOOD = 150
+
+    def __init__(self) -> None:
+        self._out: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.writes: list[dict[str, Any]] = []
+
+    async def connect(self) -> None:
+        pass
+
+    async def write(self, data: str) -> None:
+        msg = json.loads(data)
+        self.writes.append(msg)
+        if msg["type"] == "user":
+            self._out.put_nowait(_ASSISTANT_COMPLETING)
+            return
+        if msg["type"] != "control_request":
+            return
+        rid = msg["request_id"]
+        is_interrupt = msg["request"]["subtype"] == "interrupt"
+        if is_interrupt:
+            for i in range(self.FLOOD):
+                self._out.put_nowait({
+                    "type": "stream_event", "uuid": f"e{i}", "session_id": "s",
+                    "event": {"type": "content_block_delta", "index": 0,
+                              "delta": {"type": "text_delta", "text": "x"}}})
+        self._out.put_nowait({"type": "control_response", "response": {
+            "subtype": "success", "request_id": rid, "response": {}}})
+        if is_interrupt:
+            self._out.put_nowait(_RESULT_INTERRUPTED)
+
+    async def read_messages(self) -> AsyncIterator[dict[str, Any]]:
+        while True:
+            frame = await self._out.get()
+            yield frame
+
+    async def close(self) -> None:
+        pass
+
+    def is_ready(self) -> bool:
+        return True
+
+    async def end_input(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_interrupt_reply_behind_a_full_reader_buffer_does_not_deadlock(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    transport = InterruptAfterFloodTransport()
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda opts: ClaudeSDKClient(opts, transport=transport))
+
+    # Well under the SDK's 60s control-request timeout an inline await would hit.
+    with anyio.fail_after(10):
+        async with contextlib.aclosing(runner.run(_inv(tmp_path, log))) as run:
+            events = [ev async for ev in run]
+
+    assert events[-1]["type"] == "agent_result"
+    assert events[-1]["payload"] == {"status": "Success"}
+    assert [w["request"]["subtype"] for w in transport.writes
+            if w["type"] == "control_request"] == ["initialize", "interrupt"]
