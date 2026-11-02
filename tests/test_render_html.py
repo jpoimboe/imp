@@ -6,7 +6,13 @@ from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
-from imp.cli.render_html import _md_to_fragment, render_html
+from imp.cli.render_html import (
+    _fold_markers,
+    _FoldClose,
+    _FoldOpen,
+    _md_to_fragment,
+    render_html,
+)
 from imp.cli.render_markdown import render_markdown, render_summary_markdown
 from imp.cli.render_summary import StepRow, SummaryHeader
 
@@ -278,6 +284,65 @@ def test_fragment_nested_folds_match_pre_rewrite_output() -> None:
         "</details>\n"
         "<p>trailing prose</p>\n"
     )
+
+
+def test_fold_markers_classify_opens_and_honored_closes() -> None:
+    md = "\n".join([
+        "<details>",                        # 0: open a
+        "<summary>a</summary>",
+        "",
+        "<details>",                        # 3: open b (summary kept raw)
+        "<summary>b &lt;c&gt;</summary>",
+        "",
+        "```",
+        "</details>",                       # 7: inside a fence, not a marker
+        "```",
+        "",
+        "</details>",                       # 10: closes b
+        "",
+        "<details>",                        # 12: no <summary> next, not a marker
+        "",
+        "</details>",                       # 14: closes a
+        "",
+        "</details>",                       # 16: nothing open, not a marker
+    ])
+    assert _fold_markers(md) == [
+        _FoldOpen(0, "a"), _FoldOpen(3, "b &lt;c&gt;"),
+        _FoldClose(10), _FoldClose(14),
+    ]
+
+
+def test_fragment_stray_details_after_fence_does_not_raise() -> None:
+    frag = _md_to_fragment("```\nfoo\n\n```\n<details>\nx\n<details>\n")
+    assert "<details>" not in frag                 # neither line opens a fold
+    assert frag.count("&lt;details&gt;") == 2      # both render as inert text
+
+
+def test_fragment_final_details_line_is_escaped_text() -> None:
+    frag = _md_to_fragment("text\n\n<details>")
+    assert "<details>" not in frag
+    assert "&lt;details&gt;" in frag
+
+
+def test_fragment_details_without_summary_line_is_not_a_fold() -> None:
+    frag = _md_to_fragment("<details>\nnot a summary\n\nbody\n\n</details>")
+    assert "<details>" not in frag
+    assert "<summary>" not in frag
+    assert "&lt;details&gt;" in frag
+    assert "&lt;/details&gt;" in frag              # its close has nothing to close
+    assert "body" in frag
+
+
+def test_fragment_top_level_close_without_open_is_escaped_text() -> None:
+    frag = _md_to_fragment("a\n\n</details>\n\nb")
+    assert "</details>" not in frag
+    assert "&lt;/details&gt;" in frag
+
+
+def test_fragment_deeply_nested_unclosed_folds_do_not_recurse() -> None:
+    frag = _md_to_fragment("<details>\n<summary>s</summary>\n" * 5000)
+    assert frag.count("<details>") == 5000
+    assert frag.count("</details>") == 5000        # all closed implicitly at end
 
 
 def _ev(eid, etype, agent_id=None, **payload):

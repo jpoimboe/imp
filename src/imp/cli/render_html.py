@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources as ir
+from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
 
@@ -27,6 +28,53 @@ def _code_lines(markdown: str) -> frozenset[int]:
         for n in range(tok.map[0], tok.map[1]))
 
 
+@dataclass(frozen=True)
+class _FoldOpen:
+    line: int
+    summary: str
+
+
+@dataclass(frozen=True)
+class _FoldClose:
+    line: int
+
+
+_SUMMARY_OPEN = "<summary>"
+_SUMMARY_CLOSE = "</summary>"
+
+
+def _fold_markers(markdown: str) -> list[_FoldOpen | _FoldClose]:
+    """imp's fold markers in order: a `<details>` line outside code followed by a
+    `<summary>…</summary>` line opens; a `</details>` line outside code closes the
+    innermost open fold. Any other such line is ordinary text."""
+    lines = markdown.split("\n")
+    code = _code_lines(markdown)
+    markers: list[_FoldOpen | _FoldClose] = []
+    depth = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if i not in code:
+            if (line == "<details>" and i + 1 < len(lines)
+                    and lines[i + 1].startswith(_SUMMARY_OPEN)
+                    and lines[i + 1].endswith(_SUMMARY_CLOSE)):
+                summary = lines[i + 1][len(_SUMMARY_OPEN):-len(_SUMMARY_CLOSE)]
+                markers.append(_FoldOpen(i, summary))
+                depth += 1
+                i += 2
+                continue
+            if line == "</details>" and depth:
+                markers.append(_FoldClose(i))
+                depth -= 1
+        i += 1
+    return markers
+
+
+def _render_lines(lines: list[str]) -> str:
+    text = "\n".join(lines).strip("\n")
+    return _MD.render(text) if text else ""
+
+
 def _md_to_fragment(markdown: str) -> str:
     """Convert imp-emitted Markdown to an inert HTML fragment.
 
@@ -34,49 +82,25 @@ def _md_to_fragment(markdown: str) -> str:
     stream: every Part 1 content path either HTML-escapes `<`/`>` or wraps text in
     a code fence, so a bare `<details>`/`</details>` line OUTSIDE a code fence is
     always imp's. Such folds are recognized structurally against markdown-it's own
-    code-block map and re-emitted as real tags wrapping the separately-converted
-    inner fragment; everything else goes through markdown-it with raw HTML disabled."""
+    code-block map and re-emitted as real tags around their converted content;
+    everything else goes through markdown-it with raw HTML disabled."""
     lines = markdown.split("\n")
-    code = _code_lines(markdown)
     parts: list[str] = []
-    buf: list[str] = []
-    i = 0
-
-    def flush() -> None:
-        text = "\n".join(buf).strip("\n")
-        buf.clear()
-        if text:
-            parts.append(_MD.render(text))
-
-    while i < len(lines):
-        line = lines[i]
-        if i not in code and line == "<details>":
-            flush()
-            # Part 1's _details always emits `<summary>...</summary>` on the next
-            # line, with the summary text already HTML-escaped (safe to re-emit).
-            summary = lines[i + 1][len("<summary>"):-len("</summary>")]
-            inner: list[str] = []
-            depth = 0
-            j = i + 2
-            while j < len(lines):
-                lj = lines[j]
-                if j not in code:
-                    if lj == "</details>":
-                        if depth == 0:
-                            break
-                        depth -= 1
-                    elif lj == "<details>":
-                        depth += 1
-                inner.append(lj)
-                j += 1
-            inner_html = _md_to_fragment("\n".join(inner).strip("\n"))
-            parts.append(
-                f"<details>\n<summary>{summary}</summary>\n{inner_html}</details>\n")
-            i = j + 1
-            continue
-        buf.append(line)
-        i += 1
-    flush()
+    pos = 0
+    depth = 0
+    for m in _fold_markers(markdown):
+        parts.append(_render_lines(lines[pos:m.line]))
+        if isinstance(m, _FoldOpen):
+            # Part 1's _details emits the summary already HTML-escaped (safe to re-emit).
+            parts.append(f"<details>\n<summary>{m.summary}</summary>\n")
+            depth += 1
+            pos = m.line + 2
+        else:
+            parts.append("</details>\n")
+            depth -= 1
+            pos = m.line + 1
+    parts.append(_render_lines(lines[pos:]))
+    parts.append("</details>\n" * depth)
     return "".join(parts)
 
 
