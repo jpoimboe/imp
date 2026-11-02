@@ -4,14 +4,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Literal, TextIO
 
 from imp.cli import palette as pal
 from imp.paths import display_path, imp_home
+from imp.providers import Readiness, provider_readiness
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
-from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
 
 
@@ -84,22 +83,14 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
     _emit_section(out, setting_rows, width=width, color=color)
 
     out.write("\nprovider keys (local check):\n")
-    defaults = iter_provider_defaults()
     for vendor in cfg.providers:
-        d = defaults.get(vendor)
-        # CLI-authenticated providers (claude, codex) declare env_var=None
-        # in the floor — they authenticate via `claude login` / `codex login`,
-        # not an API key. Don't fabricate a `CLAUDE_API_KEY not set` check
-        # (env_for would invent that name) for a provider that's correctly set up.
-        # An explicit provider_envs override means the operator opted into a key.
-        if d is not None and d.env_var is None and vendor not in cfg.provider_envs:
+        readiness = provider_readiness(vendor, cfg)
+        if readiness is Readiness.CLI_AUTHENTICATED:
             out.write(f"  ✓ {vendor:<14} (CLI-authenticated)\n")
-            continue
-        env = cfg.env_for(vendor)
-        present = bool(os.environ.get(env))
-        mark = "✓" if present else "✗"
-        suffix = "set" if present else f"{env} not set"
-        out.write(f"  {mark} {vendor:<14} {suffix}\n")
+        elif readiness is Readiness.KEY_SET:
+            out.write(f"  ✓ {vendor:<14} set\n")
+        else:
+            out.write(f"  ✗ {vendor:<14} {cfg.env_for(vendor)} not set\n")
 
     out.write("\navailable drivers:\n")
     enabled = (cfg.remote.get("driver") or {}).get("name")

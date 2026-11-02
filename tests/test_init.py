@@ -989,6 +989,7 @@ def test_host_success_lines_carry_engine_chrome(
 ) -> None:
     from imp.providers.paths import global_config_path
 
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
     user_path = global_config_path()
@@ -996,7 +997,7 @@ def test_host_success_lines_carry_engine_chrome(
     # This one prints before the theme is applied, so its gold is the ansi gold.
     assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
-    assert f"{DIM}  anthropic — set ANTHROPIC_API_KEY{RESET}" in msgs
+    assert f"{DIM}  anthropic — ready{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
@@ -1314,12 +1315,41 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
     assert (fresh / "imp" / "config.yaml").is_file()
 
 
+@pytest.mark.parametrize("initialized", [False, True])
+def test_cmd_init_hands_run_init_the_imp_config_settings_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialized: bool,
+) -> None:
+    import imp.cli.init as initmod
+    import imp.cli.main as m
+
+    if initialized:
+        (tmp_path / "imp").mkdir()
+        (tmp_path / "imp" / "config.yaml").write_text("default-workflow: default\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda _args: (False, False))
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(initmod, "run_init", lambda _root, **kw: seen.update(kw))
+
+    assert m._cmd_init(_init_args(non_interactive=False)) == 0
+    assert seen["settings_root"] == (tmp_path.resolve() if initialized else None)
+
+
+@pytest.mark.parametrize(("key", "anthropic_line"), [
+    (None, "  anthropic — set ANTHROPIC_API_KEY"),
+    ("sk-test", "  anthropic — ready"),
+])
 def test_picker_confirmation_hints_every_enabled_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    key: str | None, anthropic_line: str,
 ) -> None:
-    """claude gets a hint now — it used to be silently skipped for having no env var."""
+    """Every enabled provider gets a line: `ready`, or its floor auth hint."""
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
+    if key is None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", key)
     msgs: list[str] = []
 
     run_init(
@@ -1329,9 +1359,141 @@ def test_picker_confirmation_hints_every_enabled_provider(
     )
 
     enabled = msgs.index("Enabled: claude, anthropic")
-    assert msgs[enabled + 1] == "  claude — run `claude login`"
-    assert msgs[enabled + 2] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert msgs[enabled + 1:enabled + 3] == ["  claude — ready", anthropic_line]
     assert not any("set this env var" in m for m in msgs)
+
+
+def _plain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+
+def _write_machine_config(text: str) -> None:
+    from imp.providers.paths import global_config_path
+
+    cfg = global_config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(text)
+
+
+def test_fresh_init_reports_claude_ready_without_a_login_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+
+    enabled = msgs.index("Enabled: claude")
+    assert msgs[enabled + 1] == "  claude — ready"
+    assert not any("claude login" in m for m in msgs)
+
+
+_MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"
+_MY_KEY = "provider_envs: {anthropic: {env: MY_KEY}}\n"
+
+
+# One case per builtin row of the spec's decisions table (non-builtin names get
+# no init line; see test_readiness_lines_mark_ready_or_hint_and_skip_unknown_names).
+@pytest.mark.parametrize(("provider", "extra", "env", "expected"), [
+    ("claude", "", {}, "  claude — ready"),
+    ("codex", "", {}, "  codex — ready"),
+    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": "k"}, "  claude — ready"),
+    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": None}, "  claude — run `claude login`"),
+    ("anthropic", "", {"ANTHROPIC_API_KEY": "k"}, "  anthropic — ready"),
+    ("anthropic", "", {"ANTHROPIC_API_KEY": None}, "  anthropic — set ANTHROPIC_API_KEY"),
+    ("openai", "", {"OPENAI_API_KEY": None}, "  openai — set OPENAI_API_KEY"),
+    ("anthropic", _MY_KEY, {"MY_KEY": "k", "ANTHROPIC_API_KEY": None},
+     "  anthropic — ready"),
+    ("anthropic", _MY_KEY, {"MY_KEY": None, "ANTHROPIC_API_KEY": "k"},
+     "  anthropic — set ANTHROPIC_API_KEY"),
+])
+def test_init_readiness_verdict_matches_imp_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    provider: str, extra: str, env: dict[str, str | None], expected: str,
+) -> None:
+    import io
+
+    from imp.cli.config_cmd import render_config
+    from imp.providers.effective import load_effective_config
+
+    _plain(monkeypatch)
+    for var, val in env.items():
+        if val is None:
+            monkeypatch.delenv(var, raising=False)
+        else:
+            monkeypatch.setenv(var, val)
+    _write_machine_config(f"providers: [{provider}]\n{extra}")
+
+    out = io.StringIO()
+    render_config(load_effective_config(), out, state_dir=None, color=False)
+    lines = out.getvalue().splitlines()
+    key_rows = lines[lines.index("provider keys (local check):") + 1:]
+    mark = next(r.split()[0] for r in key_rows if r.split()[1:2] == [provider])
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks(provider),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    enabled = msgs.index(f"Enabled: {provider}")
+    assert msgs[enabled + 1] == expected
+    assert (expected == f"  {provider} — ready") == (mark == "✓")
+
+
+# The bad value sits beside a valid providers: list so init reuses it; without one,
+# init's provider repair rewrites the file and refuses the bad config before hints.
+@pytest.mark.parametrize("key_set", [True, False])
+def test_hint_step_degrades_to_floor_key_names_on_a_bad_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key_set: bool,
+) -> None:
+    _plain(monkeypatch)
+    if key_set:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    else:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _write_machine_config(
+        "providers: [claude, anthropic]\nprovider_envs: {anthropic: 5}\n")
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    enabled = msgs.index("Enabled: claude, anthropic")
+    assert msgs[enabled + 1:enabled + 3] == [
+        "  claude — ready",
+        "  anthropic — ready" if key_set else "  anthropic — set ANTHROPIC_API_KEY",
+    ]
+    assert "Committed imp/config.yaml." in msgs
+
+
+def test_reinit_hints_honor_the_project_layer_provider_envs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
+    _write_machine_config("providers: [anthropic]\n")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, settings_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    enabled = msgs.index("Enabled: anthropic")
+    assert msgs[enabled + 1] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert "Project already initialized (imp/config.yaml is committed)." in msgs
 
 
 def test_string_built_env_hints_are_gone_from_the_source_tree() -> None:

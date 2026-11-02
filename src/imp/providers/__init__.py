@@ -16,12 +16,15 @@ isolation is owned by conftest's autouse _reset_provider_registry fixture).
 from __future__ import annotations
 
 import importlib
+import os
+from enum import Enum, auto
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from imp.providers.base import Provider
+    from imp.providers.config import Config
 
 
 class BuiltinFloor(NamedTuple):
@@ -85,6 +88,39 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
 def auth_hint_lines(names: Iterable[str]) -> list[str]:
     """Indented `  <name> — <hint>` per name; a name outside the floor gets no line."""
     return [f"  {n} — {BUILTIN_FLOOR[n].auth_hint}" for n in names if n in BUILTIN_FLOOR]
+
+
+class Readiness(Enum):
+    """`imp config`'s local auth verdict for one provider."""
+
+    CLI_AUTHENTICATED = auto()
+    KEY_SET = auto()
+    KEY_UNSET = auto()
+
+    @property
+    def ready(self) -> bool:
+        return self is not Readiness.KEY_UNSET
+
+
+def provider_readiness(name: str, config: Config) -> Readiness:
+    """Logins (floor env_var None) are CLI-authenticated unless provider_envs opts into a key."""
+    from imp.providers.resolve import iter_provider_defaults
+
+    d = iter_provider_defaults().get(name)
+    if d is not None and d.env_var is None and name not in config.provider_envs:
+        return Readiness.CLI_AUTHENTICATED
+    return Readiness.KEY_SET if os.environ.get(config.env_for(name)) else Readiness.KEY_UNSET
+
+
+def readiness_lines(names: Iterable[str], config: Config) -> list[str]:
+    """`  <name> — ready` or `  <name> — <auth hint>`; names outside the floor get no line."""
+    lines: list[str] = []
+    for n in names:
+        if n not in BUILTIN_FLOOR:
+            continue
+        status = "ready" if provider_readiness(n, config).ready else BUILTIN_FLOOR[n].auth_hint
+        lines.append(f"  {n} — {status}")
+    return lines
 
 
 def selectable_providers() -> list[str]:
