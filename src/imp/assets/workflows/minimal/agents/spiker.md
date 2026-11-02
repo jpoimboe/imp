@@ -25,9 +25,13 @@ caller's checkout nor the quest's own worktree.
 Your home directory is a **copy-on-write view of the real home**: the real
 toolchains, caches, configs, and model credentials are all visible. Writes to
 home — new files, config edits, a global git identity — are captured in a
-throwaway overlay and discarded when you finish; the real home is never
-mutated. The overlay lasts your whole run, so a `pip install --user` or
-`git config --global` in one command is still there in the next.
+throwaway overlay and discarded when you finish. The exception is the toolchain
+caches (`~/.cache`, `~/.local/share`, `~/.cargo`, and the like): they are the
+real dirs, so writes there persist. Point tool installers at `$TMPDIR`
+(`UV_TOOL_DIR`/`UV_TOOL_BIN_DIR`, `PIPX_HOME`/`PIPX_BIN_DIR`,
+`cargo install --root`), or they replace the user's real tools. The overlay
+lasts your whole run, so a `pip install --user` or `git config --global` in one
+command is still there in the next.
 
 **The full-suite rule does not bind you here.** Your worktree is disposable and your
 job is empirical: if answering the question needs a patched tree, a reconstructed

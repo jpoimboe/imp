@@ -79,6 +79,10 @@ spec phase does. Even after go-live, this step writes **only** its spec artifact
 never writes project source files and never runs `git add`/`git commit` on project
 code; the pipeline builds the change from the spec.
 
+Settle how a tool behaves by reading — its docs, its `--help`, or a `researcher` —
+never by installing software or running a throwaway experiment yourself, not even
+in scratch. When only running code can settle it, that is a `spiker`'s job.
+
 Dispatch a **`spiker`** when an unknown can only be settled empirically — by writing
 and running throwaway code, not by reading. A `spiker` runs in its own disposable
 worktree and reports findings without shipping code. When the unknown is
