@@ -153,6 +153,22 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unknown store op {op!r}")
 
 
+async def _roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
+    stream = await anyio.connect_unix(sock)
+    try:
+        await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
+        chunks: list[bytes] = []
+        try:
+            while True:
+                chunks.append(await stream.receive())
+        except (anyio.EndOfStream, anyio.ClosedResourceError,
+                anyio.BrokenResourceError):
+            pass
+        return parse_result(b"".join(chunks).decode("utf-8").rstrip("\n"))
+    finally:
+        await stream.aclose()
+
+
 class ProxyStore:
     """Ships each Store op to the quest daemon over its session socket.
 
@@ -163,23 +179,8 @@ class ProxyStore:
     def __init__(self, path: str) -> None:
         self._path = path
 
-    async def _roundtrip(self, op: str, args: dict[str, Any]) -> Any:
-        stream = await anyio.connect_unix(self._path)
-        try:
-            await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
-            chunks: list[bytes] = []
-            try:
-                while True:
-                    chunks.append(await stream.receive())
-            except (anyio.EndOfStream, anyio.ClosedResourceError,
-                    anyio.BrokenResourceError):
-                pass
-            return parse_result(b"".join(chunks).decode("utf-8").rstrip("\n"))
-        finally:
-            await stream.aclose()
-
     def _call(self, op: str, args: dict[str, Any]) -> Any:
-        return anyio.run(self._roundtrip, op, args)
+        return anyio.run(_roundtrip, self._path, op, args)
 
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None:
         return cast(
