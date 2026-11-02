@@ -393,6 +393,7 @@ def test_compact_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> No
     result = handle_slash_line("/compact", quest=quest, output_fn=out.append)
     assert result == "/compact"
     assert not any("no such skill" in line for line in out)
+    assert out == []
 
 
 def test_compact_is_in_the_help_text() -> None:
@@ -423,3 +424,31 @@ def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
     # Keybindings block is unchanged: materialized=False still says "Leave...".
     assert "Leave this conversation; resume with imp resume <id>" in body
     assert "Pause and exit" not in body
+
+
+COMPACT_PRE_SESSION_REDIRECT = (
+    "/compact applies once the conversation is running — send a message first.")
+
+
+def test_compact_pre_session_shows_redirect_and_reprompts(tmp_path: Path) -> None:
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/compact", quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert out[0] == "> /compact"
+    assert COMPACT_PRE_SESSION_REDIRECT in out
+
+
+def test_help_pre_session_omits_compact() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append, materialized=False, pre_session=True)
+    assert not any(line.strip().startswith("/compact") for line in lines)
+
+
+def test_help_mid_session_lists_compact() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append, materialized=False, pre_session=False)
+    assert any(line.strip().startswith("/compact") for line in lines)

@@ -46,6 +46,9 @@ MATERIALIZED_LEAVE_REDIRECT = (
     "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
     "/abandon to tear it down.")
 
+PRE_SESSION_COMPACT_REDIRECT = (
+    "/compact applies once the conversation is running — send a message first.")
+
 PRE_SESSION_LEAVE_REDIRECT = (
     "/save, /shelve, and /clear apply to a conversation already under way — "
     "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
@@ -108,6 +111,10 @@ def handle_slash_line(
     if cmd == "abandon":
         return "/abandon"
     if cmd == "compact":
+        if pre_session:
+            _echo_command(text, output_fn, color=color)
+            output_fn(PRE_SESSION_COMPACT_REDIRECT)
+            return REPROMPT
         return "/compact"
     if cmd in ("save", "shelve", "clear"):
         if pre_session:
@@ -223,7 +230,8 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /provider [name]   Show or switch the provider for this quest")
-    out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
+    if not pre_session:
+        out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
     out("  /abandon           Abandon the current quest")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")

@@ -179,18 +179,19 @@ to score).
   `imp new` / `imp chat` intent prompt and the post-`/clear` prompt. The live `/help` is
   authoritative (read it and check it matches reality). The real client-side set is smaller
   than a "full nine": `/help`, `/skills`, `/model <m>`, `/sandbox [on|off]`,
-  `/provider [name]`, `/compact`, `/abandon`, and `/<skill>` at **every** prompt;
-  `imp chat` (and any pre-materialized conversation) additionally has `/save`,
-  `/shelve`, `/clear`. **There is no `/list`,
-  `/search`, or `/resume`** client-side. Each is handled without spending a model turn; Tab
-  completion covers them (`send("/sk\t")` → `/skills`), an unambiguous prefix fills and an
-  ambiguous one lists candidates; Up-arrow recalls previous input; Alt+Enter (`send("\x1b\r")`)
-  inserts a newline; Ctrl-C clears the buffer (and hints Ctrl-D once). **Note** (see
-  `slash.py`): an unknown `/<name>` is **not** rejected client-side — it is submitted to the
-  model verbatim (so a pasted path like `/home/user/foo.py` reaches the agent unchanged, and
-  a command-shaped typo like `/list` becomes model input — at `imp new` it may be read as the
-  quest intent, in chat the model may reply conversationally). Test that a pasted path submits
-  as ordinary input; treat any "unknown command" text as a model reply, not client output.
+  `/provider [name]`, `/abandon`, and `/<skill>` at **every** prompt. `/compact` applies only
+  once a conversation is running. `/save`, `/shelve`, and `/clear` also need a running
+  conversation, and only while the quest is not yet built (`imp chat` or any
+  pre-materialized conversation). At a pre-session prompt (opening intent, post-`/clear`,
+  inert-resume reply) each of these four prints a redirect and re-prompts, and `/help` there
+  omits them. **There is no `/list`, `/search`, or `/resume`** client-side. Each is handled
+  without spending a model turn; Tab completion covers them (`send("/sk\t")` → `/skills`), an
+  unambiguous prefix fills and an ambiguous one lists candidates; Up-arrow recalls previous
+  input; Alt+Enter (`send("\x1b\r")`) inserts a newline; Ctrl-C clears the buffer (and hints
+  Ctrl-D once). **Note** (see `slash.py`): an unmatched command-shaped `/<name>` (e.g. `/list`)
+  prints `Unknown command: /<name> — /help for the list` and re-prompts; only a path-shaped
+  token (holding `/` or `.`, e.g. `/home/user/foo.py`) is submitted to the model verbatim. Test
+  both: a typo errors client-side, and a pasted path submits as ordinary input.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
   (ask something about the repo), then `/save` — is the kept-as-draft messaging clear? Try
   `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
