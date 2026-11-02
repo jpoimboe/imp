@@ -729,8 +729,9 @@ def spaces_after(node: Any, *, full: bool) -> bool:
     return bool(
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
-                             nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+                             nv.PhaseNode, nv.StepNode, nv.StepHeaderNode,
+                             nv.BreadcrumbLine, nv.ErrorNode, nv.PauseNode,
+                             nv.RenameNode))
         or (isinstance(node, nv.ToolBurstFold) and node.calls)
         or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode,
                                         nv.EngineMessageNode)))
@@ -748,8 +749,9 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode,
-                             nv.MergedNode, nv.WarningsSummaryNode, nv.CompletedNode))
+        or isinstance(node, (nv.PhaseNode, nv.StepHeaderNode, nv.ErrorNode, nv.PauseNode,
+                             nv.RenameNode, nv.MergedNode, nv.WarningsSummaryNode,
+                             nv.CompletedNode))
     )
 
 
@@ -823,13 +825,9 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
 
 
 def _step_header_label(node: nv.StepNode) -> str:
-    """The step's own scrollback label — the single most-recent-wins `label` (the
-    step_started seed, or the agent's latest update_step_label push). The raw step
-    name is the loud fallback when a visible step somehow has no label, so the
-    omission is caught and fixed. This helper returns a phase-free label; both
-    `collapsed_step_line` and `header_line` prepend the owning phase's label (via
-    `compose_label`) to this result."""
-    return node.label or node.name
+    """The step's own phase-free header label, fixed when the header was emitted
+    (a later push never rewrites it). The raw step name is the loud fallback."""
+    return node.header_label or node.name
 
 
 def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
@@ -849,6 +847,28 @@ def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
             + pal.ansi(tail, *pal.NODE_COLORS["breadcrumb"], enabled=color))
 
 
+def _step_header(*, label: str, resumed: bool, phase_label: str | None,
+                 model: str | None, route_label: str | None, depth: int, color: bool,
+                 gutters: tuple[int, ...]) -> str:
+    """One step header line — a StepNode's own header and a StepHeaderNode alike."""
+    # The printed scrollback header prepends the owning phase's label (when set),
+    # so it reads e.g. `implementation phase · plan 1/1 · task 3/3`; compose_label
+    # drops a None phase_label, falling back to the step label alone.
+    # route_label carries no phase prefix, so compare it against the phase-free
+    # label: when they match, the edge reason is already the label — drop the
+    # duplicate suffix; when they differ (renamed step), keep it as the reason.
+    route = (pal.ansi(f" · {route_label}", *pal.NODE_COLORS["lifecycle"], enabled=color)
+             if route_label and route_label != label else "")
+    head = pal.ansi(compose_label([phase_label, label]), *pal.NODE_COLORS["step"],
+                    enabled=color)
+    if resumed:
+        head += pal.ansi(" (resume)", "gray", enabled=color)
+    if model:
+        # Gray to match the footer's model segment.
+        head += pal.ansi(f" · {model}", "gray", enabled=color)
+    return _gutter_indent(depth, gutters, color) + head + route
+
+
 def header_line(node: Any, *, depth: int, color: bool,
                 gutters: tuple[int, ...] = ()) -> str:
     """The single header line for a container node (PhaseNode / StepNode /
@@ -864,24 +884,10 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    own_label = _step_header_label(node)
-    # The printed scrollback header prepends the owning phase's label (when set),
-    # so it reads e.g. `implementation phase · plan 1/1 · task 3/3`; compose_label
-    # drops a None phase_label, falling back to the step label alone.
-    label = compose_label([node.phase_label, own_label])
-    # route_label carries no phase prefix, so compare it against the phase-free own
-    # label: when they match, the edge reason is already the step's label — drop the
-    # duplicate suffix; when they differ (renamed step), keep it as the reason.
-    route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
-                      enabled=color)
-             if node.route_label and node.route_label != own_label else "")
-    head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
-    if node.resumed:
-        head += pal.ansi(" (resume)", "gray", enabled=color)
-    if node.model:
-        # Gray to match the footer's model segment.
-        head += pal.ansi(f" · {node.model}", "gray", enabled=color)
-    return _gutter_indent(depth, gutters, color) + head + route
+    return _step_header(label=_step_header_label(node), resumed=node.resumed,
+                        phase_label=node.phase_label, model=node.model,
+                        route_label=node.route_label, depth=depth, color=color,
+                        gutters=gutters)
 
 
 def _subagent_field(sub: nv.SubagentFold, field: str) -> str | None:
@@ -1052,6 +1058,13 @@ def _render(node: Any, *, depth: int, full: bool = False,
         if cats >= _ALL_CATEGORIES and node.agent_result:
             yield from _render_output_args(node.agent_result, depth=depth,
                                            color=color, width=width, gutters=gutters)
+        return
+
+    if isinstance(node, nv.StepHeaderNode):
+        yield _step_header(label=node.label, resumed=node.resumed,
+                           phase_label=node.phase_label, model=node.model,
+                           route_label=node.route_label, depth=depth, color=color,
+                           gutters=gutters)
         return
 
     if isinstance(node, nv.AgentTextNode):

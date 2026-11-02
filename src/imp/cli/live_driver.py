@@ -440,7 +440,6 @@ class LiveDriver:
         self._pending_provider: str | None = None
         self._emitted_any = False
         self._emissions = 0
-        self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
         # Every event this driver consumed, and the accounting total derived from
         # them by the summary's own code — one computation, so the live figure and
@@ -475,7 +474,6 @@ class LiveDriver:
                 self._cost_stale = True
         self._builder.add(event)
         self._walk()
-        self._maybe_reemit_header()
         self._refresh_status()
 
     def seed_pending_reply(self, text: str) -> None:
@@ -697,10 +695,6 @@ class LiveDriver:
                         rt.header_line(child, depth=cur.depth, color=self._color,
                                        gutters=gutters),
                         depth=cur.depth, gutters=gutters)
-                    if isinstance(child, nv.StepNode):
-                        entry_act = self._builder.current_activity()
-                        self._last_header_position = (
-                            entry_act.position if entry_act is not None else None)
                 if not suppress and isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
                 child_depth = cur.depth
@@ -879,28 +873,6 @@ class LiveDriver:
 
     def clear_stop_ack(self) -> None:
         self._status.clear_stop_ack()
-
-    def _maybe_reemit_header(self) -> None:
-        # On a mid-step POSITION change, emit a fresh position-only header into the
-        # scrollback (deduped). A verb push or the internal phrase rotation does not
-        # move the position, so it never re-emits.
-        if not self._builder._step_stack:
-            return
-        activity = self._builder.current_activity()
-        position = activity.position if activity is not None else None
-        if position is None or position == self._last_header_position:
-            return
-        top = self._builder._step_stack[-1]
-        if rt.frame_suppressed(top) or rt.deferred_leaf(top):
-            return
-        self._prev_prose = True
-        self._print_lines(
-            [rt.header_line(top, depth=self._frontier_depth(), color=self._color,
-                            gutters=self._gutters())],
-            prose=True,
-            separator_indent=rt._gutter_indent(
-                self._frontier_depth(), self._gutters(), self._color))
-        self._last_header_position = position
 
     def _refresh_status(self) -> None:
         # The status line is TRANSIENT: it draws on the line just below the last

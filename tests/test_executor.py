@@ -7,6 +7,7 @@ import types
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -3082,6 +3083,114 @@ def test_step_started_payload_prefers_route_label_for_label() -> None:
     # No entering edge label -> fall back to the step's own template label.
     plain = State(id="t", step=None, step_attempt=0, status="running")
     assert _step_started_payload(step, plain)["label"] == "task 1/6"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("position_label", "resume", "route_label", "expected"),
+    [
+        (True, True, None, "task 2/2"),
+        (True, True, "fixing test failures", "fixing test failures"),
+        (True, False, None, "task 1/2"),
+        (False, True, None, "task 1/2"),
+    ],
+    ids=["resumed-position-step", "route-label-wins", "fresh-entry", "non-position-step"],
+)
+async def test_resumed_position_step_seeds_last_pushed_label(
+    tmp_path: Path, position_label: bool, resume: bool,
+    route_label: str | None, expected: str,
+) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    flag = ", position_label: true" if position_label else ""
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: impl\n    steps:\n"
+        f"      - {{name: lead, file: agents/writer.md, tier: low, label: \"task 1/2\"{flag}}}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_quest(tmp_path)
+    state = State.load(quest.state_dir)
+    state.has_started = True
+    state.step_label = "task 2/2"         # last position a prior process pushed
+    state.route_label = route_label
+    if resume:
+        state.resume_pending = "lead"     # a prior process paused here
+    state.save(quest.state_dir)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    started = next(e["payload"] for e in events if e["type"] == "step_started")
+    assert started["resumed"] is resume
+    assert started["label"] == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("step_label", "route_label", "expected"),
+    [
+        ("task 2/2", None, "task 2/2"),
+        ("fixing test failures", "fixing test failures", "fixing test failures"),
+    ],
+    ids=["no-route", "route-entered"],
+)
+async def test_resumed_position_step_label_survives_provider_retry(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+    step_label: str, route_label: str | None, expected: str,
+) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: impl\n    steps:\n"
+        "      - {name: lead, file: agents/writer.md, tier: low,"
+        " label: \"task 1/2\", position_label: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_quest(tmp_path)
+    state = State.load(quest.state_dir)
+    state.has_started = True
+    state.step_label = step_label
+    state.route_label = route_label
+    state.resume_pending = "lead"
+    state.save(quest.state_dir)
+    runner = _RateLimitThenSuccessRunner({"status": "Success"})
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    async def _no_sleep(_delay: float, _coord: object, **_kw: object) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    events: list[dict] = []
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert len([e for e in events if e["type"] == "agent_retry"]) == 1
+    started = [e["payload"] for e in events if e["type"] == "step_started"]
+    assert len(started) == 2
+    assert all(p["resumed"] is True for p in started)
+    assert [p["label"] for p in started] == [expected, expected]
+    assert ["route_label" in p for p in started] == [route_label is not None, False]
 
 
 @pytest.mark.anyio

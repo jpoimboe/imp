@@ -223,8 +223,14 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.StepNode):
-        yield _heading(level, esc(node.label or node.name))
+        resume = " (resume)" if node.resumed else ""
+        yield _heading(level, esc(rt._step_header_label(node) + resume))
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
+        return
+    if isinstance(node, nv.StepHeaderNode):
+        # Walked as a step child: one level up is the owning step's heading level.
+        resume = " (resume)" if node.resumed else ""
+        yield _heading(level - 1, esc(node.label + resume))
         return
     if isinstance(node, nv.AgentTextNode):
         text = node.text.strip()

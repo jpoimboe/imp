@@ -12,7 +12,7 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
-from tests._event_fixtures import ev
+from tests._event_fixtures import agent_text, ev, interrupted_task_lead_events, task_lead_started
 
 _MAX_LOOPS_COPY = (
     "a step kept sending work back and hit its loop limit; the quest is "
@@ -3956,3 +3956,111 @@ def test_the_round_resets_per_plan_and_is_never_derived_from_entry_count() -> No
         "planning phase · plan 2/2 · reviewing plan · complete · 5s",
         "planning phase · plan 2/2 · reviewing plan · complete · round 2 · 5s"]
     assert "round 5" not in out
+
+
+def test_step_header_node_renders_like_a_step_header() -> None:
+    node = nv.StepHeaderNode(label="task 1/2", resumed=True,
+                             phase_label="implementation phase · plan 1/1",
+                             model="opus", route_label="fixing test failures")
+    assert list(rt._render(node, depth=0, color=False, width=80)) == [
+        "implementation phase · plan 1/1 · task 1/2 (resume) · opus · fixing test failures"]
+    colored = next(rt._render(node, depth=0, color=True, width=80))
+    assert pal.ansi(" (resume)", "gray") in colored
+    # A route reason equal to the label is not repeated as a suffix.
+    same = nv.StepHeaderNode(label="task 2/2", resumed=False, phase_label=None,
+                             model=None, route_label="task 2/2")
+    assert list(rt._render(same, depth=0, color=False, width=80)) == ["task 2/2"]
+
+
+def test_step_header_node_is_spaced_like_a_header() -> None:
+    header = nv.StepHeaderNode(label="task 2/2", resumed=False, phase_label=None,
+                               model=None, route_label=None)
+    children = [nv.OutcomeLine(action={"verb": "continue"}), header,
+                nv.LiteralTextNode(text="after", color_role="lifecycle")]
+    assert list(rt._render_children(children, depth=0, color=False, width=80)) == [
+        "→ continue", "", "task 2/2", "", "after"]
+
+
+def test_continuation_resume_header_carries_its_route_reason() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2", model="opus"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", model="opus", resumed=True, restarted=False,
+                          route_label="fixing test failures"),
+        agent_text("7", "after"),
+    ])
+    assert lines == [
+        "", "── implementation phase · plan 1/1 ───", "",
+        "implementation phase · plan 1/1 · task 1/2 · opus", "",
+        "• before", "",
+        "implementation phase · plan 1/1 · task 1/2 (resume) · opus · fixing test failures",
+        "", "• after"]
+
+
+def test_hibernated_your_turn_replies_show_no_resume() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "question one?"),
+        ev("4", "workflow_paused", reason="awaiting_user"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", resumed=True, restarted=False),
+        agent_text("7", "answer one, question two?"),
+        ev("8", "workflow_paused", reason="awaiting_user"),
+        ev("9", "workflow_resumed"),
+        task_lead_started("10", resumed=True, restarted=False),
+        agent_text("11", "answer two"),
+    ])
+    assert "• answer two" in lines
+    assert not any("(resume)" in ln for ln in lines)
+    assert [ln for ln in lines if "· task " in ln] == [
+        "implementation phase · plan 1/1 · task 1/2 · m"]
+
+
+def test_resume_and_position_headers_each_head_their_own_segment() -> None:
+    assert _lines(interrupted_task_lead_events()) == [
+        "", "── implementation phase · plan 1/1 ───", "",
+        "implementation phase · plan 1/1 · task 1/2 · m", "",
+        "• first segment", "",
+        "implementation phase · plan 1/1 · task 1/2 (resume) · m", "",
+        "• second segment", "",
+        "implementation phase · plan 1/1 · task 2/2 · m", "",
+        "• third segment", "",
+        "implementation phase · plan 1/1 · task 2/2 · complete"]
+
+
+def test_verb_push_keeps_the_entry_label_in_the_header() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="writing plan",
+           phase_label="planning phase · plan 2/4"),
+        ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
+           label="addressing plan review feedback"),
+        agent_text("4", "done", agent_id="step:plan/plan-writer"),
+        ev("5", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert "planning phase · plan 2/4 · writing plan · m" in lines
+    # The breadcrumb still carries the most recent label.
+    assert "planning phase · plan 2/4 · addressing plan review feedback · complete" in lines
+
+
+def test_reopen_restart_reseeds_the_own_header() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "first segment"),
+        ev("4", "step_label_updated", agent_id="step:code/task-lead", label="task 2/2"),
+        ev("5", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("6", "workflow_resumed"),
+        task_lead_started("7", label="task 2/2", resumed=True, restarted=True),
+        agent_text("8", "again"),
+    ])
+    assert lines == [
+        "", "── implementation phase · plan 1/1 ───", "",
+        "implementation phase · plan 1/1 · task 2/2 (resume) · m", "",
+        "• again"]

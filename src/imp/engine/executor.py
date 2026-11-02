@@ -1761,14 +1761,18 @@ async def _route_agent(
     while True:
         attempt_native_resume_state = (
             read_native_resume_state(session_dir) if keep else None)
+        started_payload = {**_step_started_payload(step, state, quest, log),
+                           "resumed": is_resume, "restarted": restarted}
+        # Resume re-enters at the last pushed task; a route label (consumed into payload) wins.
+        if (is_resume and step.position_label and "route_label" not in started_payload
+                and state.step_label):
+            started_payload["label"] = state.step_label
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
             tier=step.tier, step_name=step.name,
             workflow=workflow, quest=quest, state=state, log=log,
             transcript_dir=session_dir,
-            step_started_payload_extras={
-                **_step_started_payload(step, state, quest, log),
-                "resumed": is_resume, "restarted": restarted},
+            step_started_payload_extras=started_payload,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
