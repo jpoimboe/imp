@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
+import os
+import signal
 from argparse import Namespace
 from types import SimpleNamespace
 
 import pytest
 
 import imp.cli.main as main
+from tests.async_wait import HANG_BACKSTOP
 
 
 class _TTY(io.StringIO):
@@ -198,6 +202,54 @@ async def test_cancel_at_opening_prompt_emits_discarded_spine(
     assert not out.endswith("discarded\n\n\n")   # exactly one trailing blank
     assert "> " not in out                       # no bare caret line
     assert "cancelled" not in out
+
+
+@pytest.fixture
+def leave_signal_sentinels():
+    """A guard regression must fail the test, not kill pytest with the raw signal."""
+    def _sentinel(signum, _frame):
+        raise AssertionError(f"signal {signum} escaped the opening-prompt guard")
+
+    prev = {sig: signal.signal(sig, _sentinel) for sig in (signal.SIGTERM, signal.SIGHUP)}
+    yield
+    for sig, handler in prev.items():
+        signal.signal(sig, handler)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("leave_mode", ["new", "chat"])
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
+async def test_leave_signal_at_opening_prompt_discards_like_ctrl_d(
+    stub_new, monkeypatch, capsys, leave_signal_sentinels, leave_mode, sig,
+) -> None:
+    # Same as Ctrl-D: discarded spine + one blank, draft torn down, rc 130, no pause block.
+    m = stub_new
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    discarded: list[str] = []
+    monkeypatch.setattr(
+        "imp.engine.abandon.discard_conversation", lambda quest: discarded.append(quest.id))
+
+    class _SignalledPrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            os.kill(os.getpid(), sig)
+            await asyncio.Event().wait()
+            raise AssertionError("the leave signal must cancel the blocked prompt")
+
+    monkeypatch.setattr(m, "Prompt", _SignalledPrompt)
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        rc = await m._async_cmd_new(_new_args(), leave_mode=leave_mode)
+
+    assert rc == 130
+    assert discarded == ["z9y8x7"]
+    out = capsys.readouterr().out
+    assert out.endswith("z9y8x7 · (unnamed) · discarded\n\n")
+    assert not out.endswith("discarded\n\n\n")
+    assert "paused" not in out
+    assert "SIGTERM" not in out and "SIGHUP" not in out
 
 
 @pytest.mark.anyio
