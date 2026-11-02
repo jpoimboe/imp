@@ -1138,7 +1138,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         make_interactive_solicit,
         run_session_client,
     )
-    from imp.cli.signals import install_process_group, prompt_sigint_guard
+    from imp.cli.signals import install_process_group, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1275,7 +1275,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_sandbox_sink: dict[str, bool] = {}
     if show_opening_prompt:
         try:
-            async with prompt_sigint_guard():
+            async with prompt_signal_guard():
                 reply = await _read_opening_message(
                     quest, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),

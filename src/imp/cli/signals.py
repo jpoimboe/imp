@@ -36,7 +36,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from anyio import TASK_STATUS_IGNORED
+from anyio import TASK_STATUS_IGNORED, CancelScope
 from anyio.abc import TaskStatus
 
 from imp.engine.quest import Quest
@@ -139,42 +139,56 @@ def _feed_prompt_ctrl_c() -> None:
         app.key_processor.process_keys()
 
 
-@contextlib.asynccontextmanager
-async def prompt_sigint_guard() -> AsyncIterator[None]:
-    """Bring an out-of-band SIGINT at a pre-coordinator prompt (the `imp new` /
-    `imp chat` opening prompt) under the 'never exits' invariant.
+class PromptLeave(EOFError):
+    """A leave signal at a guarded pre-session prompt; plain EOFError arms catch it."""
 
-    That prompt runs BEFORE any InterruptCoordinator receiver exists and uses
-    `prompt_async(handle_sigint=False)`, so an OS SIGINT would otherwise escape as
-    a raw KeyboardInterrupt above the caller's cleanup arm. This installs a
-    loop-level SIGINT handler that feeds a synthetic Ctrl-C into the running
-    prompt_toolkit app (its `c-c` binding clears the line / shows the ctrl-d hint),
-    exactly like a typed ctrl-c — it NEVER cancels the body and NEVER exits. Ctrl-d
-    (EOFError from the prompt) remains the only leave gesture. On exit the handler
-    is removed and the prior signal disposition RESTORED (not the asyncio default
-    that remove_signal_handler would leave). Where add_signal_handler is
-    unsupported (Windows) it degrades to a no-op."""
+    def __init__(self, trigger: str) -> None:
+        super().__init__(trigger)
+        self.trigger = trigger
+
+
+def _restore_signal_handlers(loop: asyncio.AbstractEventLoop, prev: dict[int, Any]) -> None:
+    for sig, handler in prev.items():
+        with _suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(sig)
+        # remove_signal_handler leaves the asyncio default, not the prior disposition.
+        with _suppress(TypeError, ValueError, OSError):
+            signal.signal(sig, handler)
+
+
+@contextlib.asynccontextmanager
+async def prompt_signal_guard() -> AsyncIterator[None]:
+    """Pre-session prompt signals: SIGINT feeds Ctrl-C; SIGTERM/SIGHUP raise PromptLeave."""
     loop = asyncio.get_running_loop()
+    scope = CancelScope()
+    trigger: str | None = None
 
     def _on_sigint() -> None:
         _feed_prompt_ctrl_c()
 
-    prev_handler = signal.getsignal(signal.SIGINT)
-    supported = True
+    def _on_leave(sig: int) -> None:
+        nonlocal trigger
+        if trigger is None:
+            trigger = _leave_reason_for_signal(sig)
+        scope.cancel()
+
+    prev = {sig: signal.getsignal(sig) for sig in _handled_signals()}
     try:
         loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        for sig in _leave_signals():
+            loop.add_signal_handler(sig, _on_leave, sig)
     except (NotImplementedError, RuntimeError, ValueError):
-        supported = False
-    if not supported:
-        yield  # unsupported (Windows) — degrade to a no-op guard
+        _restore_signal_handlers(loop, prev)
+        yield
         return
     try:
-        yield
+        with scope:
+            yield
     finally:
-        with _suppress(NotImplementedError, RuntimeError, ValueError):
-            loop.remove_signal_handler(signal.SIGINT)
-        with _suppress(TypeError, ValueError, OSError):
-            signal.signal(signal.SIGINT, prev_handler)
+        _restore_signal_handlers(loop, prev)
+    # Raised even when the cancel never landed (body finished first): a leave is never dropped.
+    if trigger is not None:
+        raise PromptLeave(trigger)
 
 
 def _reason_for_signal(sig: int) -> str:
