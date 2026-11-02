@@ -208,6 +208,78 @@ def test_indented_fence_in_prose_does_not_swallow_a_later_fold() -> None:
     assert "body" in frag
 
 
+_NESTED_FOLDS_FIXTURE = (
+    "# Step spec\n"
+    "\n"
+    "intro &lt;prose&gt;\n"
+    "\n"
+    "<details>\n"
+    "<summary>· reviewer &lt;r&gt;</summary>\n"
+    "\n"
+    "outer text\n"
+    "\n"
+    "<details>\n"
+    "<summary>thinking</summary>\n"
+    "\n"
+    "middle text\n"
+    "\n"
+    "<details>\n"
+    "<summary>2 calls</summary>\n"
+    "\n"
+    "```\n"
+    "· bash\n"
+    "  command=cat x\n"
+    "</details>\n"
+    "```\n"
+    "\n"
+    "note\n"
+    "\n"
+    "    indented a < b\n"
+    "    <details>\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "after inner\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "after middle\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "trailing prose\n"
+)
+
+
+def test_fragment_nested_folds_match_pre_rewrite_output() -> None:
+    assert _md_to_fragment(_NESTED_FOLDS_FIXTURE) == (
+        "<h1>Step spec</h1>\n"
+        "<p>intro &lt;prose&gt;</p>\n"
+        "<details>\n"
+        "<summary>· reviewer &lt;r&gt;</summary>\n"
+        "<p>outer text</p>\n"
+        "<details>\n"
+        "<summary>thinking</summary>\n"
+        "<p>middle text</p>\n"
+        "<details>\n"
+        "<summary>2 calls</summary>\n"
+        "<pre><code>· bash\n"
+        "  command=cat x\n"
+        "&lt;/details&gt;\n"
+        "</code></pre>\n"
+        "<p>note</p>\n"
+        "<pre><code>indented a &lt; b\n"
+        "&lt;details&gt;\n"
+        "</code></pre>\n"
+        "</details>\n"
+        "<p>after inner</p>\n"
+        "</details>\n"
+        "<p>after middle</p>\n"
+        "</details>\n"
+        "<p>trailing prose</p>\n"
+    )
+
+
 def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
