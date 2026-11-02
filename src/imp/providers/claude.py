@@ -93,6 +93,7 @@ from imp.agents.tools.spill import wrap_task_result
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
+    RESUME_STUB_NOTE,
     Transcript,
     answer_complete_step_on_resume,
     answer_unanswered_tool_uses_on_resume,
@@ -1667,9 +1668,10 @@ class ClaudeSession(ObserveSession):
         self._pending_complete = False
         self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
 
+        body = _project_for_cli(messages[:resume_base])
         if native_resume:
             await store.overwrite(skey, message_to_session_records(
-                _project_for_cli(messages[:resume_base]),
+                body,
                 session_id=skey["session_id"],
                 cwd=str(invocation.quest_context.project_root),
                 model=runner.model,
@@ -1707,7 +1709,12 @@ class ClaudeSession(ObserveSession):
         client = await client_ctx.__aenter__()
         runner._client = client
         self.runner._client_ctx = client_ctx
-        self._next_query: Any = _stream_history(messages[resume_base:])
+        streamed = messages[resume_base:]
+        # On --resume the CLI splices "No response requested." after a user-tail body.
+        if resume_dir is not None and body and body[-1].role == "user":
+            streamed = [Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),)),
+                        *streamed]
+        self._next_query: Any = _stream_history(streamed)
         self._last_raw: Any = None
         from imp.engine.reincarnation import handoff_path_for
         self._handoff_phase: str | None = None

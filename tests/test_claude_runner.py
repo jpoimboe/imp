@@ -15,6 +15,7 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
+from imp.agents.transcript import RESUME_STUB_NOTE
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
@@ -1741,7 +1742,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
     assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
     assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t0"
     # Only the trailing text turn streams as the delta.
-    assert _user_text_blob(created[0].queries[0]) == "also do Y"
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\nalso do Y"
 
 
 @pytest.mark.anyio
@@ -1867,7 +1868,7 @@ async def test_native_folded_tool_result_tail_gets_continuation_nudge(
     assert len(conts) == 1
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     # The streamed delta carries exactly that nudge (non-empty).
-    assert _user_text_blob(created[0].queries[0]) == RESUME_CONTINUE_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\n{RESUME_CONTINUE_NUDGE}"
 
 
 @pytest.mark.anyio
@@ -1912,7 +1913,7 @@ async def test_native_empty_delta_guard_selects_the_note_by_cause(
     conts = [e for e in log.read() if e["type"] == "engine_message"]
     assert len(conts) == 1
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
-    assert _user_text_blob(created[0].queries[0]) == RESUME_RETRY_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == f"{RESUME_STUB_NOTE}\n{RESUME_RETRY_NUDGE}"
 
 
 def _user_text_blob(replayed: list[Any]) -> str:
@@ -2028,8 +2029,9 @@ async def test_complete_step_tail_handback_is_not_streamed(tmp_path: Path) -> No
     delta = created[0].queries[0]
     # Exactly one streamed user turn, text only — no tool_result, no feedback.
     assert len(delta) == 1 and delta[0]["type"] == "user"
-    assert isinstance(delta[0]["message"]["content"], str)
-    assert "REVISE: rewrite plan.md" not in delta[0]["message"]["content"]
+    assert [b["type"] for b in delta[0]["message"]["content"]] == ["text", "text"]
+    assert delta[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
+    assert "REVISE: rewrite plan.md" not in json.dumps(delta)
 
 
 @pytest.mark.anyio
@@ -2053,7 +2055,8 @@ async def test_complete_step_tail_no_feedback_kicks_with_redo_nudge(tmp_path: Pa
 
     assert created[0].opts.resume is None
     assert created[0].opts.extra_args["resume"] == resume_session_id("step:p/s")
-    assert _user_text_blob(created[0].queries[0]).strip() == RESUME_REDO_NUDGE
+    assert (_user_text_blob(created[0].queries[0]).strip()
+            == f"{RESUME_STUB_NOTE}\n{RESUME_REDO_NUDGE}")
 
 
 @pytest.mark.anyio
@@ -2240,7 +2243,8 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     # The delta is one text-only user turn; the repair is not streamed.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert isinstance(streamed[0]["message"]["content"], str)
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
     # The flushed prefix (write + dangling read) is reconstructed with the synth
     # r2 result as the trailing native-session entry, right behind its call.
     reconciled = await store.load(skey)
@@ -2443,7 +2447,7 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert _user_text_blob(streamed) == RESUME_CONTINUE_NUDGE
+    assert _user_text_blob(streamed) == f"{RESUME_STUB_NOTE}\n{RESUME_CONTINUE_NUDGE}"
     # The completed pair folded into the store: 3 turns, ending on the tool_result.
     reconciled = await store.load(skey)
     assert len(reconciled) == 3
@@ -2628,7 +2632,9 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     assert opts.session_id is None
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == RESUME_CONTINUE_NUDGE
+    assert streamed[0]["message"]["content"] == [
+        {"type": "text", "text": RESUME_STUB_NOTE},
+        {"type": "text", "text": RESUME_CONTINUE_NUDGE}]
     reconciled = await store.load(skey)
     assert len(reconciled) == 5
     assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
@@ -2685,7 +2691,9 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
     # continuation nudge.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == RESUME_CONTINUE_NUDGE
+    assert streamed[0]["message"]["content"] == [
+        {"type": "text", "text": RESUME_STUB_NOTE},
+        {"type": "text", "text": RESUME_CONTINUE_NUDGE}]
     reconciled = await store.load(skey)
     assert len(reconciled) == 5
     assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
@@ -2757,7 +2765,8 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     # self-starts a loaded --resume session).
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert isinstance(streamed[0]["message"]["content"], str)
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
     # 4 original + 1 synth user turn + 1 nudge + 1 new assistant turn = 7.
     assert len(t.load()) == 7
     reconciled = await store.load(skey)
@@ -2820,7 +2829,8 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
     # the delta is one text-only user turn.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert isinstance(streamed[0]["message"]["content"], str)
+    assert [b["type"] for b in streamed[0]["message"]["content"]] == ["text", "text"]
+    assert streamed[0]["message"]["content"][0]["text"] == RESUME_STUB_NOTE
     # The dangling t1 turn and its synth result are reconstructed as the
     # trailing native-session entries.
     reconciled = await store.load(skey)

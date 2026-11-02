@@ -1,6 +1,7 @@
 # tests/test_claude_resume_boundary.py
 """Native-resume body/stream split: the loaded body holds every tool_result
-paired behind its tool_use; the stream is only the trailing user-text run."""
+paired behind its tool_use; the stream is the trailing user-text run, led by
+the stub note iff the body ends on a user turn."""
 from __future__ import annotations
 
 import json
@@ -15,6 +16,7 @@ from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_DURABILITY_NOTE,
     RESUME_REDO_NUDGE,
+    RESUME_STUB_NOTE,
     REWORK_RESULT_FRAME,
     Transcript,
     _synthetic_tool_result_content,
@@ -78,6 +80,7 @@ class _Resumed:
     session_id: str
     cwd: str
     events: list[dict[str, Any]]    # events.jsonl after the run
+    persisted: str                  # transcript.jsonl + events.jsonl text after the run
 
 
 async def _resume(
@@ -111,9 +114,12 @@ async def _resume(
     [ev async for ev in runner.run(inv)]
     skey = session_key(inv.quest_context.project_root, agent_id)
     body = await session_store_for(inv.transcript_dir).load(skey) or []
+    events = list(elog.read())
+    persisted = ((inv.transcript_dir / "transcript.jsonl").read_text()
+                 + json.dumps(events, default=str))
     return _Resumed(entered=entered[0], body=body, streamed=created[0].queries[0],
                     session_id=skey["session_id"], cwd=str(tmp_path),
-                    events=list(elog.read()))
+                    events=events, persisted=persisted)
 
 
 def _expected_body(r: _Resumed) -> list[Message]:
@@ -144,6 +150,10 @@ def _assert_boundary(r: _Resumed) -> list[Message]:
                 assert b.tool_use_id in issued, f"orphan result {b.tool_use_id}"
     assert len(r.streamed) == 1 and r.streamed[0]["type"] == "user"
     content = r.streamed[0]["message"]["content"]
+    noted = (not isinstance(content, str)
+             and content[0] == {"type": "text", "text": RESUME_STUB_NOTE})
+    assert noted == bool(body and body[-1].role == "user")
+    assert json.dumps(RESUME_STUB_NOTE) not in r.persisted
     assert isinstance(content, str) or not any(
         b.get("type") == "tool_result" for b in content)
     return body
@@ -153,7 +163,8 @@ def _streamed_text(r: _Resumed) -> str:
     content = r.streamed[0]["message"]["content"]
     if isinstance(content, str):
         return content
-    return "\n".join(b["text"] for b in content if b.get("type") == "text")
+    texts = [b["text"] for b in content if b.get("type") == "text"]
+    return "\n".join(texts[1:] if texts[:1] == [RESUME_STUB_NOTE] else texts)
 
 
 def _last_result(body: list[Message], tool_use_id: str) -> ToolResultBlock:
@@ -278,7 +289,14 @@ async def test_subagent_marker_interrupt_result_is_loaded(tmp_path: Path) -> Non
 async def test_all_user_text_history_streams_everything(tmp_path: Path) -> None:
     r = await _resume(tmp_path, [_u(_txt("DISPATCH"))])
     assert _assert_boundary(r) == []
-    assert _streamed_text(r) == "DISPATCH"
+    assert r.streamed[0]["message"]["content"] == "DISPATCH"
+
+
+@pytest.mark.anyio
+async def test_fresh_spawn_streams_no_stub_note(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [])
+    assert [d["message"]["content"] for d in r.streamed] == ["go"]
+    assert json.dumps(RESUME_STUB_NOTE) not in r.persisted
 
 
 def _captured(path: str, content: str) -> dict[str, Any]:
@@ -442,9 +460,10 @@ def _framed(feedback: str) -> str:
 
 def _assert_cs_tail(r: _Resumed, cs_id: str, *, result: tuple[object, bool],
                     streamed: list[str], feedback: str | None, changed: bool) -> None:
-    """AC1(e): cs's only result is `result`; no note, no marker; the stream is
-    `streamed`; the redo nudge trails once; the answer is journaled as an engine
-    continuation iff it changed, never as a tool_result event."""
+    """AC1(e): cs's only result is `result`; no durability note, no marker; the stream
+    is the stub note then `streamed`; the redo nudge trails once; the answer is
+    journaled as an engine continuation iff it changed, never as a tool_result
+    event."""
     results = [b for m in r.entered for b in m.content
                if isinstance(b, ToolResultBlock) and b.tool_use_id == cs_id]
     assert [(b.content, b.is_error) for b in results] == [result]
@@ -453,7 +472,8 @@ def _assert_cs_tail(r: _Resumed, cs_id: str, *, result: tuple[object, bool],
                    for m in run for b in m.content)
     assert not any(isinstance(b, TextBlock) and b.text in (_MARKER, _MARKER_TOOL)
                    for m in r.entered for b in m.content)
-    assert _streamed_text(r) == "\n".join(streamed)
+    assert [b["text"] for b in r.streamed[0]["message"]["content"]] == [
+        RESUME_STUB_NOTE, *streamed]
     assert sum(isinstance(b, TextBlock) and b.text == RESUME_REDO_NUDGE
                for m in run for b in m.content) == 1
     if feedback:

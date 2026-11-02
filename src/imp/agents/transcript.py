@@ -95,6 +95,14 @@ RESUME_REDO_NUDGE = (
     "when the work is done."
 )
 
+# Stream-only: the CLI splices a "No response requested." turn after a user-tail body at load.
+RESUME_STUB_NOTE = (
+    '[imp] The "No response requested." turn just above was inserted by the '
+    "Claude Code CLI when it reloaded this session. You did not write it and "
+    "nothing went wrong, so don't apologise for it or mention it. Carry on from "
+    "the turn before it."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SkillReply:

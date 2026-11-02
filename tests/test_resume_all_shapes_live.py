@@ -24,7 +24,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import RESUME_STUB_NOTE, Transcript
 from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -207,10 +207,12 @@ async def test_send_to_llm_store_backed_native_resume(
     # (which a replay fallback would send).
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
     assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
-               for b in streamed[0][0].content)
+               for b in delta.content)
 
 
 @pytest.mark.live("claude")
@@ -276,9 +278,11 @@ async def test_dangling_tool_use_store_backed_native_resume(
     assert events[-1]["type"] == "agent_result", events[-1]
     # The delta is one text-only user turn; the t1 result is in the loaded body.
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
-    assert any(isinstance(b, TextBlock) for b in streamed[0][0].content), streamed[0]
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
+    assert any(isinstance(b, TextBlock) for b in delta.content), streamed[0]
     assert not any(
         e["type"] == "error" and e["payload"].get("kind") == "transcript_invalid"
         for e in events)
@@ -385,9 +389,11 @@ async def test_complete_step_handback_native_resume(
         e for e in events if e["type"] == "error"]
     # The delta is one text-only user turn: the handback is not streamed.
     assert len(streamed) >= 1, streamed
-    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
-    assert any(isinstance(b, TextBlock) for b in streamed[0][0].content), streamed[0]
+    note, delta = streamed[0]
+    assert note == Message(role="user", content=(TextBlock(text=RESUME_STUB_NOTE),))
+    assert delta.role == "user", streamed[0]
+    assert not any(isinstance(b, ToolResultBlock) for b in delta.content)
+    assert any(isinstance(b, TextBlock) for b in delta.content), streamed[0]
     # On a rework resume NO success result is folded: the projection overwrite
     # writes [seed user, complete_step assistant, is_error feedback result] before
     # load; the live turn the batcher flushes afterward appends past it, so target
