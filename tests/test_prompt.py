@@ -41,6 +41,16 @@ def test_build_session_vi_mode() -> None:
     assert session.editing_mode == EditingMode.VI
 
 
+def test_build_session_modal_cursor_shape_only_in_vi_mode() -> None:
+    from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
+
+    from imp.cli.prompt import _build_session
+    assert isinstance(_build_session(None, editing_mode="vi").cursor, ModalCursorShapeConfig)
+    assert not isinstance(
+        _build_session(None, editing_mode="emacs").cursor, ModalCursorShapeConfig)
+    assert not isinstance(_build_session(None).cursor, ModalCursorShapeConfig)
+
+
 def test_build_session_has_no_app_background_and_reserves_no_menu_space() -> None:
     """AC1: the prompt region keeps the terminal default (no app bg fill) and
     prompt_toolkit holds no blank rows under the prompt — even under color + a

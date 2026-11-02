@@ -5,8 +5,9 @@
 One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
 EOFError — the CLI's signal handler catches both and triggers save-and-exit.
 
-A bare ESC is still owned by prompt_toolkit's built-in handling (meta-prefix
-in emacs mode; leaves insert mode in vi mode — see editing_mode plumbing).
+In vi mode a bare ESC enters normal mode, shown by a block cursor (bar in
+insert, underline in replace); in emacs mode prompt_toolkit discards a lone
+ESC after its key timeout.
 Alt+Enter (`escape c-m`) is bound by `_build_session` to insert a newline.
 
 History is in-memory and seeded at construction from the quest's durable
@@ -49,6 +50,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                    roster_models: Callable[[], list[str]] | None = None,
                    empty_hint: str = EMPTY_PROMPT_HINT) -> Any:
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
     from prompt_toolkit.enums import EditingMode
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
@@ -126,7 +128,8 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     session: Any = _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
         editing_mode=mode, erase_when_done=True,
-        multiline=True, reserve_space_for_menu=0, color_depth=color_depth)
+        multiline=True, reserve_space_for_menu=0, color_depth=color_depth,
+        cursor=ModalCursorShapeConfig() if mode == EditingMode.VI else None)
     if dot_state is not None:
         from imp.cli import vi_dot
 
