@@ -7,7 +7,7 @@ import json
 import pytest
 
 from imp.cli import narrative as nv
-from tests._event_fixtures import ev
+from tests._event_fixtures import agent_text, ev, task_lead_started
 
 
 def test_node_dataclasses_construct_and_default_collapsible() -> None:
@@ -2074,10 +2074,13 @@ def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
            phase="implement", model="m", provider="anthropic",
            label="reviewing code", resumed=True),
     ])
-    step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
-                for c in p.children if isinstance(c, nv.StepNode))
+    step = _only_step(tree)
     assert step.label == "reviewing code"
-    assert step.resumed is True
+    # A continuation marks its resume point, not the pre-pause header.
+    assert step.resumed is False
+    assert _headers(step) == [nv.StepHeaderNode(
+        label="reviewing code", resumed=True, phase_label=None, model="m",
+        route_label=None)]
 
 
 def test_resume_reentry_updates_position_label_on_step_node() -> None:
@@ -2100,6 +2103,10 @@ def test_resume_reentry_updates_position_label_on_step_node() -> None:
 def _only_step(tree: nv.NarrativeTree) -> nv.StepNode:
     return next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
                 for c in p.children if isinstance(c, nv.StepNode))
+
+
+def _headers(step: nv.StepNode) -> list[nv.StepHeaderNode]:
+    return [c for c in step.children if isinstance(c, nv.StepHeaderNode)]
 
 
 def test_routed_reentry_without_pause_or_resume_is_not_marked() -> None:
@@ -2130,15 +2137,22 @@ def test_replayed_resume_marks_step_and_header(restarted: bool) -> None:
            restarted=restarted),
     ])
     step = _only_step(tree)
-    assert step.resumed is True
-    assert " (resume)" in rt.header_line(step, depth=0, color=False)
+    if restarted:
+        assert step.resumed is True
+        assert " (resume)" in rt.header_line(step, depth=0, color=False)
+        assert _headers(step) == []
+    else:
+        assert step.resumed is False
+        assert "(resume)" not in rt.header_line(step, depth=0, color=False)
+        assert _headers(step) == [nv.StepHeaderNode(
+            label="task 1/2", resumed=True, phase_label=None, model="m",
+            route_label=None)]
 
 
 @pytest.mark.parametrize("reason", ["ctrl-c", "awaiting_user"])
 def test_in_session_resume_without_resumed_event_marks_step(reason: str) -> None:
     # The sequence an ATTACHED client receives: workflow_resumed is never
-    # broadcast, so only the pause is visible. Both reasons take an early return
-    # out of _h_workflow_paused and render no PauseNode.
+    # broadcast, so only the pause is visible. A your-turn reply is no resume.
     from imp.cli import render_text as rt
     tree = nv.build_tree([
         ev("1", "quest_created", quest_id=1, title="x"),
@@ -2149,8 +2163,14 @@ def test_in_session_resume_without_resumed_event_marks_step(reason: str) -> None
            model="m", provider="anthropic", label="task 1/2", resumed=True),
     ])
     step = _only_step(tree)
-    assert step.resumed is True
-    assert " (resume)" in rt.header_line(step, depth=0, color=False)
+    assert step.resumed is False
+    assert "(resume)" not in rt.header_line(step, depth=0, color=False)
+    if reason == "ctrl-c":
+        assert _headers(step) == [nv.StepHeaderNode(
+            label="task 1/2", resumed=True, phase_label=None, model="m",
+            route_label=None)]
+    else:
+        assert _headers(step) == []
 
 
 def test_crash_shaped_resume_without_a_pause_marks_step() -> None:
@@ -2164,7 +2184,10 @@ def test_crash_shaped_resume_without_a_pause_marks_step() -> None:
         ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
            model="m", provider="anthropic", label="task 1/2", resumed=True),
     ])
-    assert _only_step(tree).resumed is True
+    step = _only_step(tree)
+    assert step.resumed is False
+    assert _headers(step) == [nv.StepHeaderNode(
+        label="task 1/2", resumed=True, phase_label=None, model="m", route_label=None)]
 
 
 def test_retry_of_a_resumed_step_keeps_the_marker_and_refreshes_the_label() -> None:
@@ -2181,7 +2204,10 @@ def test_retry_of_a_resumed_step_keeps_the_marker_and_refreshes_the_label() -> N
            restarted=True),
     ])
     step = _only_step(tree)
-    assert step.resumed is True          # set-only never clears an earned marker
+    assert step.resumed is False
+    # The resume adds one header node; the retry adds none.
+    assert _headers(step) == [nv.StepHeaderNode(
+        label="task 1/2", resumed=True, phase_label=None, model="m", route_label=None)]
     assert step.label == "task 2/2"      # the existing label refresh still applies
 
 
@@ -2216,7 +2242,8 @@ def test_a_consumed_pause_does_not_latch_for_the_rest_of_the_session() -> None:
     ])
     steps = [c for p in tree.root.children if isinstance(p, nv.PhaseNode)
              for c in p.children if isinstance(c, nv.StepNode)]
-    assert [s.resumed for s in steps] == [True, False]
+    assert [s.resumed for s in steps] == [False, False]
+    assert [len(_headers(s)) for s in steps] == [1, 0]
 
 
 def test_a_resume_signal_alone_does_not_mark_a_fresh_step() -> None:
@@ -2251,6 +2278,116 @@ def test_resume_window_reuse_derives_the_flag_from_the_payload() -> None:
            model="m", provider="anthropic", label="task 1/2", resumed=False),
     ])
     assert _only_step(tree).resumed is False
+    assert _headers(_only_step(tree)) == []
+
+
+_PHASE = "implementation phase · plan 1/1"
+
+
+def _texts(step: nv.StepNode) -> list[str]:
+    return [c.text for c in step.children if isinstance(c, nv.AgentTextNode)]
+
+
+def test_on_stack_restart_keeps_children_and_appends_a_resume_header() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        task_lead_started("5", label="task 2/2", resumed=True, restarted=True),
+    ])
+    step = _only_step(tree)
+    assert _texts(step) == ["before"]
+    assert step.resumed is False
+    assert _headers(step) == [nv.StepHeaderNode(
+        label="task 2/2", resumed=True, phase_label=_PHASE, model="m", route_label=None)]
+
+
+def test_plain_retry_only_refreshes_the_live_label() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        task_lead_started("3", label="task 2/2", resumed=True, restarted=True),
+    ])
+    step = _only_step(tree)
+    assert _headers(step) == []
+    assert step.resumed is False
+    assert step.label == "task 2/2"
+
+
+def test_reopen_restart_adds_no_header_node() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", label="task 2/2", resumed=True, restarted=True),
+    ])
+    step = _only_step(tree)
+    assert _texts(step) == []
+    assert _headers(step) == []
+    assert step.resumed is True
+
+
+def test_hibernated_restart_after_a_solicit_clears_the_resume_mark() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", resumed=True, restarted=True),
+        ev("7", "workflow_paused", reason="awaiting_user"),
+        ev("8", "workflow_resumed"),
+        task_lead_started("9", label="task 2/2", resumed=True, restarted=True),
+        agent_text("10", "fresh"),
+    ])
+    step = _only_step(tree)
+    assert _texts(step) == ["fresh"]
+    assert _headers(step) == []
+    assert step.resumed is False
+    assert step.label == "task 2/2"
+
+
+def test_hidden_step_gains_no_resume_header() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2", show_label=False),
+        ev("3", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        task_lead_started("4", show_label=False, resumed=True),
+    ])
+    step = _only_step(tree)
+    assert _headers(step) == []
+    assert step.resumed is False
+
+
+def test_a_later_solicit_reply_keeps_an_earned_resume_mark() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("3", "workflow_resumed"),
+        task_lead_started("4", resumed=True, restarted=False),
+        ev("5", "workflow_paused", reason="awaiting_user"),
+        ev("6", "workflow_resumed"),
+        task_lead_started("7", resumed=True, restarted=False),
+    ])
+    step = _only_step(tree)
+    assert step.resumed is True
+    assert _headers(step) == []
+
+
+def test_hidden_step_gains_no_header_on_a_reopen_resume() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2", show_label=False),
+        ev("3", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        task_lead_started("5", show_label=False, resumed=True, restarted=False),
+    ])
+    step = _only_step(tree)
+    assert _headers(step) == []
+    assert step.resumed is False
 
 
 def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
@@ -3035,7 +3172,12 @@ def test_resume_continuation_preserves_pre_interrupt_children() -> None:
     assert texts == ["partial attempt", "fresh complete"]   # BOTH preserved
     assert build.start_ts == "2026-06-28T00:00:00+00:00"    # original clock kept
     assert build.closed is True
-    assert build.resumed is True
+    assert build.resumed is False
+    assert [type(c) for c in build.children
+            if isinstance(c, (nv.AgentTextNode, nv.StepHeaderNode))] == [
+        nv.AgentTextNode, nv.StepHeaderNode, nv.AgentTextNode]
+    assert _headers(build) == [nv.StepHeaderNode(
+        label="build", resumed=True, phase_label=None, model="m", route_label=None)]
 
 
 def test_resume_restart_clears_pre_interrupt_children() -> None:

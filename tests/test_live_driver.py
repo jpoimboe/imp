@@ -13,7 +13,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import LOG_CATEGORIES, render_tree
 from imp.cli.signals import InterruptCoordinator
-from tests._event_fixtures import _TTY, _two_phase_events, ev
+from tests._event_fixtures import _TTY, _two_phase_events, agent_text, ev, task_lead_started
 
 
 class _Pipe(io.StringIO):
@@ -2159,24 +2159,39 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
 
 
 def test_reemitted_header_marks_an_in_session_resume() -> None:
-    # awaiting_user renders no PauseNode, so the pause is invisible in the
-    # scrollback — and there is no workflow_resumed on this surface at all.
+    # An attached client never sees workflow_resumed: the ctrl-c pause alone
+    # makes the on-stack re-entry a resume, marked at the resume point only.
     drv, out = _driver()
     drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
-    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
-                    model="m", provider="anthropic", label="task 1/2",
-                    phase_label="implementation phase · plan 1/1", position_label=True))
-    drv.on_event(ev("3", "workflow_paused", reason="awaiting_user"))
-    drv.on_event(ev("4", "step_started", step="task-lead", kind="agent", phase="code",
-                    model="m", provider="anthropic", label="task 1/2",
-                    phase_label="implementation phase · plan 1/1", position_label=True,
-                    resumed=True))
+    drv.on_event(task_lead_started("2"))
     out.truncate(0)
     out.seek(0)
+    drv.on_event(ev("3", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"))
+    drv.on_event(task_lead_started("4", resumed=True))
     drv.on_event(ev("5", "step_label_updated", agent_id="step:code/task-lead",
                     label="task 2/2"))
-    body = "\n".join(_body(out))
-    assert "implementation phase · plan 1/1 · task 2/2 (resume)" in body
+    body = _body(out)
+    assert "implementation phase · plan 1/1 · task 1/2 (resume) · m" in body
+    assert "implementation phase · plan 1/1 · task 2/2 · m" in body
+    assert not any("task 2/2 (resume)" in ln for ln in body)
+
+
+def test_attach_resume_prints_the_resume_header_first() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    for e in [ev("1", "quest_created", quest_id=1, title="t"),
+              task_lead_started("2"),
+              agent_text("3", "first"),
+              ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+              ev("5", "workflow_resumed")]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    drv.on_event(task_lead_started("6", resumed=True, restarted=False))
+    drv.on_event(agent_text("7", "after"))
+    drv.finish()
+    assert [ln for ln in _body(out) if ln] == [
+        "implementation phase · plan 1/1 · task 1/2 (resume) · m", "• after"]
 
 
 def test_reemitted_header_does_not_mark_a_routed_reentry() -> None:

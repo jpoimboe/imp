@@ -12,7 +12,7 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
-from tests._event_fixtures import ev
+from tests._event_fixtures import agent_text, ev, task_lead_started
 
 _MAX_LOOPS_COPY = (
     "a step kept sending work back and hit its loop limit; the quest is "
@@ -3979,3 +3979,42 @@ def test_step_header_node_is_spaced_like_a_header() -> None:
                 nv.LiteralTextNode(text="after", color_role="lifecycle")]
     assert list(rt._render_children(children, depth=0, color=False, width=80)) == [
         "→ continue", "", "task 2/2", "", "after"]
+
+
+def test_continuation_resume_header_carries_its_route_reason() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2", model="opus"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", model="opus", resumed=True, restarted=False,
+                          route_label="fixing test failures"),
+        agent_text("7", "after"),
+    ])
+    assert lines == [
+        "", "── implementation phase · plan 1/1 ───", "",
+        "implementation phase · plan 1/1 · task 1/2 · opus", "",
+        "• before", "",
+        "implementation phase · plan 1/1 · task 1/2 (resume) · opus · fixing test failures",
+        "", "• after"]
+
+
+def test_hibernated_your_turn_replies_show_no_resume() -> None:
+    lines = _lines([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "question one?"),
+        ev("4", "workflow_paused", reason="awaiting_user"),
+        ev("5", "workflow_resumed"),
+        task_lead_started("6", resumed=True, restarted=False),
+        agent_text("7", "answer one, question two?"),
+        ev("8", "workflow_paused", reason="awaiting_user"),
+        ev("9", "workflow_resumed"),
+        task_lead_started("10", resumed=True, restarted=False),
+        agent_text("11", "answer two"),
+    ])
+    assert "• answer two" in lines
+    assert not any("(resume)" in ln for ln in lines)
+    assert [ln for ln in lines if "· task " in ln] == [
+        "implementation phase · plan 1/1 · task 1/2 · m"]
