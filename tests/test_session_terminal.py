@@ -51,7 +51,7 @@ class _NullDriver:
     every gate, as no-ops. Subclasses override only what they record."""
 
     def on_event(self, _event: dict[str, Any]) -> None: ...
-    def finish(self) -> None: ...
+    def finish(self, **_kw: object) -> None: ...
     def clear_stop_ack(self) -> None: ...
 
 
@@ -80,13 +80,15 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
 
     rendered: list[str] = []
     prompts: list[str] = []
+    finishes: list[bool] = []
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
-        def finish(self) -> None:
+        def finish(self, *, interrupted: bool) -> None:
             rendered.append("__finish__")
+            finishes.append(interrupted)
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -116,6 +118,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
     assert prompts == ["your name?"]
     assert rendered == [
         "step_started", "awaiting_user_input", "user_message", "__finish__"]
+    assert finishes == [False]
 
 
 @pytest.mark.anyio
@@ -139,7 +142,7 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     client_returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -238,7 +241,7 @@ async def test_repeat_ctrl_c_forces_silent_daemon_run_after_delivery_starts(
         def on_event(self, event: dict[str, Any]) -> None:
             seen.append(event["type"])
 
-        def finish(self) -> None:
+        def finish(self, **_kw: object) -> None:
             ...
 
     async def attach(
@@ -324,7 +327,7 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -383,7 +386,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(30):
         async with anyio.create_task_group() as tg:
@@ -443,7 +446,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
         def on_event(self, event: dict[str, Any]) -> None:
             if event.get("type") == "step_started":
                 stepped.set()
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -503,7 +506,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
@@ -558,7 +561,7 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, text: str) -> None:
             echoed.append(text)
 
@@ -610,7 +613,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, text: str) -> None:
             echoed.append(text)
 
@@ -665,7 +668,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -717,7 +720,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
         event_count = 0
         def on_event(self, _event: dict[str, Any]) -> None:
             _Driver.event_count += 1
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     coord = InterruptCoordinator()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -773,7 +776,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
@@ -827,7 +830,7 @@ async def test_shelve_slash_command_records_shelve_intent(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
@@ -877,7 +880,7 @@ async def test_abandon_slash_command_records_abandon_intent(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
@@ -918,7 +921,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -974,7 +977,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -1426,7 +1429,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
@@ -1479,7 +1482,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(30):   # deadlock backstop only
@@ -1525,7 +1528,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(30):   # deadlock backstop only
@@ -1594,7 +1597,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     leave_state: dict[str, str] = {}
     client_done = anyio.Event()
@@ -1676,7 +1679,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     coord = InterruptCoordinator()
     with anyio.fail_after(60):       # whole-scenario liveness backstop
@@ -1728,7 +1731,7 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -1777,7 +1780,7 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -1827,7 +1830,7 @@ async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> 
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -1893,12 +1896,14 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
         raise AssertionError("no gate fired; solicit must not be called")
 
     stepped = anyio.Event()
+    finishes: list[bool] = []
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None:
             if event.get("type") == "step_started":
                 stepped.set()
-        def finish(self) -> None: ...
+        def finish(self, *, interrupted: bool) -> None:
+            finishes.append(interrupted)
 
     with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -1930,6 +1935,7 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
             tg.cancel_scope.cancel()
 
     assert survived == [True]
+    assert finishes == [True]
 
 
 @pytest.mark.anyio
@@ -1970,7 +1976,7 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
         def on_event(self, event: dict[str, Any]) -> None:
             if event.get("type") == "step_started":
                 stepped.set()
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -2016,9 +2022,12 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
+    finishes: list[bool] = []
+
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, *, interrupted: bool) -> None:
+            finishes.append(interrupted)
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2043,6 +2052,8 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
             await server.close()
             tg.cancel_scope.cancel()
 
+    assert finishes == [True]
+
 
 @pytest.mark.anyio
 async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Path) -> None:
@@ -2061,7 +2072,7 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2102,7 +2113,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2150,7 +2161,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2209,7 +2220,7 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2271,7 +2282,7 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
 
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2326,7 +2337,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2388,7 +2399,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
-        def finish(self) -> None:
+        def finish(self, **_kw: object) -> None:
             rendered.append("__finish__")
 
     async def _attach_a(
@@ -2463,7 +2474,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event.get("type"))
 
-        def finish(self) -> None:
+        def finish(self, **_kw: object) -> None:
             rendered.append("__finish__")
 
     async def _attach(
@@ -2515,7 +2526,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2570,7 +2581,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2622,7 +2633,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2687,7 +2698,7 @@ async def test_local_echo_not_invoked_on_leave_command(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     async def _attach(
@@ -2753,7 +2764,7 @@ async def test_local_echo_not_invoked_on_abandon(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2799,7 +2810,7 @@ async def test_mid_conversation_model_sends_control_not_input(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2865,7 +2876,7 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2925,7 +2936,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(30):   # deadlock backstop only
@@ -2986,7 +2997,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
         def set_unsandboxed(self, value: bool) -> None:
             marker.append(value)
@@ -3061,7 +3072,7 @@ async def test_sandbox_off_resolves_the_parked_gate_without_reprompting(
             if event.get("type") == "script_output":
                 log.append("confirm:" + event["payload"]["stdout"])
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
         def append_committed_reply(self, text: str) -> None:
             log.append("caret:" + text)
@@ -3138,7 +3149,7 @@ async def test_sandbox_on_reprompts_with_confirmation_after_caret(
             if event.get("type") == "script_output":
                 log.append("confirm:" + event["payload"]["stdout"])
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
         def append_committed_reply(self, text: str) -> None:
             log.append("caret:" + text)
@@ -3200,7 +3211,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
         def set_unsandboxed(self, value: bool) -> None:
             flips.append(value)
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -3256,7 +3267,7 @@ async def test_client_intercepts_provider_marker_without_routing_to_driver(
         def set_pending_provider(self, name: str | None) -> None:
             markers.append(name)
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -3321,7 +3332,7 @@ async def test_interrupt_pause_sends_no_disposition_frame(tmp_path: Path) -> Non
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -3377,7 +3388,7 @@ async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     returned = anyio.Event()
     with anyio.fail_after(30):   # deadlock backstop only
@@ -3423,7 +3434,7 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         client = SessionClient(sock, "c1", "T", on_event=on_event)
@@ -3481,7 +3492,7 @@ async def test_interrupt_record_after_gate_leaves_title_idle(
 
     class _Driver(_NullDriver):
         def on_event(self, event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -3548,7 +3559,7 @@ async def test_only_a_live_interrupt_delivery_start_arms_the_force_quit_offer(
     class _Driver:
         def on_event(self, event: dict[str, Any]) -> None:
             seen.append((event.get("type"), bool(event.get("_replay"))))
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -3630,7 +3641,7 @@ async def test_terminal_client_reports_cut_ending_on_oversized_frame(
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event["type"])
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -3666,7 +3677,7 @@ async def test_terminal_client_reports_cut_when_a_leave_cancels_the_loop(
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
@@ -3721,7 +3732,7 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
         def on_event(self, event: dict[str, Any]) -> None:
             rendered.append(event["type"])
 
-        def finish(self) -> None:
+        def finish(self, **_kw: object) -> None:
             # Runs inside run_terminal_client's finally, before the watchdog is
             # joined — so this is where an armed poller is still observable.
             spawned.update(
@@ -3788,7 +3799,7 @@ async def test_provider_switch_reprompts_and_reaches_the_daemon(
         def on_event(self, event: dict[str, Any]) -> None:
             log.append("event:" + str(event.get("type")))
 
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
         def append_committed_reply(self, text: str) -> None:
             log.append("caret:" + text)
@@ -4233,7 +4244,7 @@ async def test_terminal_client_returns_the_witness_of_the_events_it_rendered(
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
+        def finish(self, **_kw: object) -> None: ...
 
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
