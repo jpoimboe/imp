@@ -35,6 +35,7 @@ class _FakeQuest:
         self.id = "z9y8x7"
         self.title = ""
         self.control_root = tmp_path
+        self.materialized = False          # the opening prompt is always a draft
         self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
         (self.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
         self._events = tmp_path / "events.jsonl"
@@ -65,6 +66,11 @@ async def test_pre_session_abandon_tears_down_and_exits(
         return teardown_rc
 
     monkeypatch.setattr(main, "_abandon_local", _fake_abandon)
+
+    async def _never_asked(question: str) -> bool:
+        raise AssertionError("the opening prompt must not confirm")
+
+    monkeypatch.setattr("imp.cli.abandon_confirm.ask_keypress_confirm", _never_asked)
 
     with pytest.raises(SystemExit) as excinfo:
         await main._read_intent_line(

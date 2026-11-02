@@ -164,7 +164,7 @@ def test_non_backlog_non_interactive_runs_headless(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        quest, *, driver, coord, solicit, seed_opening=None, status=None,
+        quest, *, driver, coord, solicit, confirm, seed_opening=None, status=None,
         leave_mode=None, title=None, stream=None,
         non_interactive=False, autonomous=False, leave_state=None,
         model=None, opening_unsandboxed=False,

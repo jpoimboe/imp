@@ -24,6 +24,7 @@ from tests.test_session_run import (
     _leaving,
     _make_quest,
     _never,
+    _no_confirm,
     _NullDriver,
     _watched,
 )
@@ -99,7 +100,7 @@ async def test_each_ending_exits_with_its_contract_code(
     coord = InterruptCoordinator()
     coord._interrupted = interrupted
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert rc == expected
@@ -118,7 +119,8 @@ async def test_a_gold_failure_pause_exits_1_and_keeps_its_gold_block(
 
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new",
+        stream=_watched())
 
     head = capsys.readouterr().out.split("\n")[0]
     assert rc == 1

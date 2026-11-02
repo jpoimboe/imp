@@ -14,9 +14,11 @@ import pytest
 
 import imp.cli.main as m
 import imp.cli.signals as sig
+from imp.cli.exit_codes import ExitCode
 from imp.cli.render_summary import build_summary, summary_totals
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests._event_fixtures import ev
 from tests.async_wait import HANG_BACKSTOP
@@ -793,3 +795,91 @@ async def test_the_inert_row_stays_bare_without_a_reading_or_a_priced_turn(
     row = await _inert_toolbar(monkeypatch, ch)
     assert row == bare
     assert "n/a" not in row and "—" not in row
+
+
+def _seed_built(tmp_path: Path) -> Quest:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="C", quest_id="c", base_branch="main")
+    (ch.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
+    return ch
+
+
+def _fake_confirm(monkeypatch, answer: bool) -> list[str]:
+    asked: list[str] = []
+
+    async def _confirm(question: str) -> bool:
+        asked.append(question)
+        return answer
+
+    monkeypatch.setattr("imp.cli.abandon_confirm.ask_keypress_confirm", _confirm)
+
+    def _no_input(prompt: str = "") -> str:
+        raise AssertionError("inert /abandon must use the keypress confirm, not input()")
+
+    monkeypatch.setattr("builtins.input", _no_input)
+    return asked
+
+
+_C_QUESTION = ("Abandon c? This removes its worktree and branch imp/c (no commits). "
+               "[y/N] ")
+
+
+@pytest.mark.anyio
+async def test_inert_abandon_built_confirm_tears_down(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    ch = _seed_built(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kw: _QueueInertPrompt(["/abandon"], **kw))
+    asked = _fake_confirm(monkeypatch, True)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await m._inert_ask_line(ch)
+
+    assert excinfo.value.code == ExitCode.USER_ENDED
+    assert asked == [_C_QUESTION]
+    assert capsys.readouterr().out == (
+        "> /abandon\n"
+        "Abandoned c · removed worktree and branch imp/c (no commits).\n")
+    assert not (project_state_dir(tmp_path) / "worktrees" / "c").exists()
+
+
+@pytest.mark.anyio
+async def test_inert_abandon_built_decline_keeps_and_reasks(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    ch = _seed_built(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _QueueInertPrompt(["/abandon", "real answer"], **kw))
+    asked = _fake_confirm(monkeypatch, False)
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "real answer"          # the > line was asked again
+    assert asked == [_C_QUESTION]
+    assert capsys.readouterr().out == "> /abandon\nKept c.\n\n"
+    assert (project_state_dir(tmp_path) / "worktrees" / "c").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "c").exists()
+
+
+@pytest.mark.anyio
+async def test_inert_abandon_draft_never_confirms(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    ch = _seed(tmp_path)
+    (ch.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kw: _QueueInertPrompt(["/abandon"], **kw))
+    asked = _fake_confirm(monkeypatch, False)
+    torn: list[str] = []
+    monkeypatch.setattr(m, "_abandon_local",
+                        lambda control, qid: torn.append(qid) or 0)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await m._inert_ask_line(ch)
+
+    assert excinfo.value.code == ExitCode.USER_ENDED
+    assert asked == []
+    assert torn == ["c"]
+    assert capsys.readouterr().out == ""

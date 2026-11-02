@@ -511,6 +511,14 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _commit_work(quest: Any, n: int) -> None:
+    """Make `n` commits on the quest's branch, putting it `n` ahead of its base."""
+    for i in range(n):
+        (quest.project_root / f"work{i}.txt").write_text(str(i))
+        assert _git(quest.project_root, "add", "-A").returncode == 0
+        assert _git(quest.project_root, "commit", "-qm", f"work {i}").returncode == 0
+
+
 def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
     """Park `root` mid `rebase -i HEAD~2` at an edit step; returns env for `--continue`."""
     edit_first = (

@@ -552,7 +552,9 @@ _LEAVE_TAILS: dict[str, str] = {
 }
 
 
-def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> None:
+def _emit_leave_block(
+    quest: Quest, disposition: str, *, intent: str | None, removed: str | None = None,
+) -> None:
     """The closing block for a leave the daemon applies, whichever client sent it."""
     color = should_use_color(sys.stdout)
     print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
@@ -561,6 +563,8 @@ def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> 
         print(_resume_line(quest.id))
     elif disposition == CONTROL_ARCHIVE:
         print(_resume_line(quest.id, " — or find it later with imp search"))
+    elif disposition == CONTROL_ABANDON and removed is not None:
+        print(f"removed: {removed}")
     print()
 
 
@@ -574,7 +578,8 @@ def _print_leave_disposition(
     USER_ENDED when a leave was handled, None to fall through to the next row.
     """
     if leave_state.get("intent") == "abandon":
-        _emit_leave_block(quest, CONTROL_ABANDON, intent=intent)
+        _emit_leave_block(quest, CONTROL_ABANDON, intent=intent,
+                          removed=leave_state.get("removed"))
         return ExitCode.USER_ENDED
     disposition = leave_state.get("disposition")
     if disposition is not None:
@@ -774,6 +779,7 @@ async def _read_intent_line(
     """Read one pre-session intent line, capturing `/model` into `model_sink`
     and `/sandbox` into `sandbox_sink`."""
     from imp.agents.skills import load_user_skill
+    from imp.cli.abandon_confirm import abandon_question, ask_keypress_confirm, removal_description
     from imp.cli.slash import ask_line_with_slash
     from imp.remote.session.protocol import SkillRequest
     while True:
@@ -796,6 +802,13 @@ async def _read_intent_line(
                 sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
+            removed = removal_description(quest)
+            if removed is not None:
+                print(pal.caret(enabled=color) + line)
+                if not await ask_keypress_confirm(abandon_question(quest.id, removed)):
+                    print(f"Kept {quest.id}.")
+                    print()
+                    continue
             # No daemon pre-session. Torn down is user-ended; a failed teardown keeps its rc.
             rc = _abandon_local(quest.control_root, quest.id)
             raise SystemExit(ExitCode.USER_ENDED if rc == 0 else rc)
@@ -830,7 +843,11 @@ async def _run_cleared_session(
     """Open a fresh imp new-style draft in place after /clear."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
-    from imp.cli.session_run import make_interactive_solicit, run_session_client
+    from imp.cli.session_run import (
+        make_interactive_confirm,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
@@ -885,8 +902,9 @@ async def _run_cleared_session(
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, model=cleared_model,
@@ -1036,7 +1054,9 @@ async def _run_fresh_session(
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1062,7 +1082,7 @@ async def _run_fresh_session(
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             status=status, non_interactive=True,
             leave_mode=quest.create_mode,
             autonomous=autonomous, stream=watched)
@@ -1079,8 +1099,9 @@ async def _run_fresh_session(
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
             autonomous=autonomous, stream=watched)
@@ -1137,7 +1158,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     from imp.cli.live_status import LiveStatus
     from imp.cli.mutation_proxy import proxy_mutation_async
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1323,7 +1346,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             status=status,
             title=term_title,
             leave_mode=leave_mode,
@@ -1345,8 +1368,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
@@ -1441,7 +1465,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.live_status import LiveStatus
     from imp.cli.mutation_proxy import proxy_mutation_async
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1516,7 +1542,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             resume=True, status=status, non_interactive=True,
             leave_mode=quest.create_mode, autonomous=autonomous,
             provider=pending_provider, stream=watched)
@@ -1543,8 +1569,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             resume=True, status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
             autonomous=autonomous, provider=pending_provider, stream=watched)
@@ -1608,7 +1635,11 @@ async def _resume_inert(
     from imp.cli.live_status import LiveStatus
     from imp.cli.narrative import carrier_from_events
     from imp.cli.render_summary import build_summary, summary_totals
-    from imp.cli.session_run import make_interactive_solicit, run_session_client
+    from imp.cli.session_run import (
+        make_interactive_confirm,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
@@ -1642,8 +1673,9 @@ async def _resume_inert(
             inner = make_interactive_solicit(
                 quest, status=status, driver=driver, coord=coord)
             solicit = make_buffered_solicit(line, inner)
+            confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
             return await run_session_client(
-                quest, driver=driver, coord=coord, solicit=solicit,
+                quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
                 resume=True, status=status, leave_state=leave_state,
                 leave_mode=quest.create_mode,
                 title=term_title, autonomous=autonomous,
@@ -3083,6 +3115,7 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
     worktree removal (records live inside the worktree); `git branch -D` AFTER
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
+    from imp.cli.abandon_confirm import removal_description
     from imp.engine import worktree
     from imp.engine.abandon import tear_down_quest
     from imp.engine.errors import LoadError, LoadErrors
@@ -3098,19 +3131,22 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
         return 0, f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."
 
     token = quest.id
+    removed = removal_description(quest)
+    done = (f"Abandoned {token}." if removed is None
+            else f"Abandoned {token} · removed {removed}.")
     if session_is_resident(control, quest_id):
         try:
             _deliver_abandon_resident(quest_id)
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
-            return 0, f"Abandoned {token}."
+            return 0, done
     try:
         tear_down_quest(quest)
     except LockHeld as e:
         return 2, (f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
                    f"stop it before abandoning")
-    return 0, f"Abandoned {token}."
+    return 0, done
 
 
 def _abandon_local(control: Path, quest_id: str) -> int:
@@ -3185,33 +3221,19 @@ async def _pick_abandon_matches(
     )
 
 
-def _cmd_abandon(args: argparse.Namespace) -> int:
+def _resolve_abandon_target(control: Path, token: str | None) -> str | int:
     import anyio
 
-    from imp.cli.mutation_proxy import proxy_mutation
     from imp.engine.archive import read as archive_read
-    token = args.token
-    if os.environ.get("IMP_SESSION_SOCKET"):
-        if token is None or not token.strip():
-            _emit_cli_error("abandon needs a quest token in a sandboxed session")
-            return 2
-        return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
-    control = _control_root()
     if token is None or not token.strip():
-        target = anyio.run(_pick_abandon_target, control)
-        if isinstance(target, int):
-            return target
-        return _abandon_local(control, target)
+        return anyio.run(_pick_abandon_target, control)
     matches = _abandon_match_rows(control, token)
     if len(matches) >= 2:
-        target = anyio.run(_pick_abandon_matches, control, token, matches)
-        if isinstance(target, int):
-            return target
-        return _abandon_local(control, target)
+        return anyio.run(_pick_abandon_matches, control, token, matches)
     if len(matches) == 1:
-        return _abandon_local(control, matches[0][0])
+        return matches[0][0]
     try:
-        quest_id = _resolve_id(control, token)
+        return _resolve_id(control, token)
     except SystemExit:
         # No live/backlog match, and _resolve_id found nothing live either. A
         # quest whose worktree was already removed (crash between abandon's
@@ -3222,11 +3244,52 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon_local(control, hits[0])
+            return hits[0]
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         _emit_cli_error(f"no quest matches {token!r}")
         return 2
-    return _abandon_local(control, quest_id)
+
+
+def _abandon_approved(control: Path, quest_id: str) -> bool:
+    from imp.cli.abandon_confirm import abandon_question, removal_description
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
+    try:
+        quest = Quest.load(control, quest_id)
+    except (LoadError, LoadErrors):
+        return True
+    removed = removal_description(quest)
+    if removed is None:
+        return True
+    # __main__'s SIGINT handler exits 130; Ctrl-C here must decline instead.
+    prev = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        answer = input(abandon_question(quest.id, removed))
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    finally:
+        signal.signal(signal.SIGINT, prev)
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _cmd_abandon(args: argparse.Namespace) -> int:
+    from imp.cli.mutation_proxy import proxy_mutation
+    token = args.token
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        if token is None or not token.strip():
+            _emit_cli_error("abandon needs a quest token in a sandboxed session")
+            return 2
+        return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
+    control = _control_root()
+    target = _resolve_abandon_target(control, token)
+    if isinstance(target, int):
+        return target
+    if not args.yes and _interactive() and not _abandon_approved(control, target):
+        _emit_human([f"Kept {target}."])
+        return ExitCode.USER_ENDED
+    return _abandon_local(control, target)
 
 
 def apply_edit(
@@ -4584,12 +4647,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
             "Tear down a materialized quest — its worktree, branch, and state — "
-            "or discard a pure backlog idea. With no token, pick from a list."),
+            "or discard a pure backlog idea. With no token, pick from a list. "
+            "On a terminal, confirm before tearing down a quest that has a "
+            "worktree; pass --yes to skip."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
         help="Quest id or short token identifying which quest to abandon "
              "(omit on a tty to pick from a list).")
+    p_abandon.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation before tearing down a quest that has a worktree.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(

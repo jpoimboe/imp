@@ -16,6 +16,7 @@ import pytest
 from imp.agents.transcript import SkillReply
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
+from imp.cli.session_run import confirm_unasked, make_headless_solicit
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
@@ -34,6 +35,10 @@ from imp.remote.session.socket_server import SessionSocket
 from tests._session_fakes import serve_raw_frames
 from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
+
+
+async def _no_confirm(question: str) -> bool:
+    raise AssertionError(f"unexpected confirm: {question!r}")
 
 
 class _TTYStream(io.StringIO):
@@ -103,7 +108,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -145,7 +150,7 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
                 client_returned.set()
 
             tg.start_soon(_client)
@@ -249,7 +254,7 @@ async def test_repeat_ctrl_c_forces_silent_daemon_run_after_delivery_starts(
     async def run_client() -> None:
         await run_terminal_client(
             attach=attach, driver=_Driver(), coord=client_coord,
-            solicit=solicit, leave_mode="new")
+            solicit=solicit, confirm=_no_confirm, leave_mode="new")
         client_done.set()
 
     with anyio.fail_after(120):
@@ -330,7 +335,7 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
                 returned.set()
 
             tg.start_soon(_client)
@@ -388,7 +393,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             await wait_until(
@@ -448,7 +453,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             await wait_until(lambda: server.attached_count == 1)
@@ -509,7 +514,8 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -564,7 +570,8 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=client_coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=client_coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -615,7 +622,8 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -667,7 +675,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -724,7 +732,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -777,7 +785,8 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", leave_state=leave_state, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_state=leave_state, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -830,7 +839,8 @@ async def test_shelve_slash_command_records_shelve_intent(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", leave_state=leave_state, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_state=leave_state, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -879,7 +889,8 @@ async def test_abandon_slash_command_records_abandon_intent(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", leave_state=leave_state, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_state=leave_state, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -930,7 +941,8 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -987,7 +999,8 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -995,109 +1008,390 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
     assert idle not in s.getvalue()
 
 
+def _seed_built(tmp_path: Path, quest_id: str) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="B", quest_id=quest_id, base_branch="main")
+
+
+def _gate_server(tmp_path: Path) -> tuple[str, SessionServer]:
+    sock = str(tmp_path / "s.sock")
+    return sock, SessionServer(sock, hibernate=False)
+
+
+def _question(quest_id: str) -> str:
+    return (f"Abandon {quest_id}? This removes its worktree and branch "
+            f"imp/{quest_id} (no commits). [y/N] ")
+
+
+class _GateDriver(_NullDriver):
+    """Records the caret echo and emitted lines, in order."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def append_committed_reply(self, text: str) -> None:
+        self.lines.append(f"> {text}")
+
+    def emit_lines(self, lines: list[str]) -> None:
+        self.lines.extend(lines)
+
+
+async def _answer_one_gate(
+    sock: str, server: SessionServer, quest_id: str, control_root: Path, *,
+    solicit: Any, confirm: Any, driver: _GateDriver, leave_state: dict[str, str],
+    coord: InterruptCoordinator | None = None,
+) -> list[str]:
+    """Open one `reply?` gate and return the replies the run received."""
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        received.append(reply)
+        return reply
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, quest_id, "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver,
+                    coord=coord if coord is not None else InterruptCoordinator(),
+                    solicit=solicit, confirm=confirm, quest_id=quest_id,
+                    control_root=control_root, leave_state=leave_state, leave_mode="new")
+
+            tg.start_soon(_client)
+    return received
+
+
+async def _answer_elsewhere(
+    sock: str, server: SessionServer, quest_id: str, control_root: Path, *,
+    solicit: Any, confirm: Any, driver: _GateDriver, leave_state: dict[str, str],
+    opened: anyio.Event, cancelled: anyio.Event,
+) -> list[str]:
+    """Once `opened` fires, a second client answers the gate. The run stays live until
+    `cancelled` fires, so only that answer can cancel the local prompt."""
+    received: list[str] = []
+    released = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        received.append(reply)
+        await released.wait()
+        return reply
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, quest_id, "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver, coord=InterruptCoordinator(),
+                    solicit=solicit, confirm=confirm, quest_id=quest_id,
+                    control_root=control_root, leave_state=leave_state, leave_mode="new")
+
+            tg.start_soon(_client)
+            await opened.wait()
+            raw = await anyio.connect_unix(sock)
+            await raw.send((encode_attach("cB", "T", True) + "\n").encode())
+            await raw.send((encode_input("remote-answer") + "\n").encode())
+            await cancelled.wait()
+            released.set()
+            await raw.aclose()
+    return received
+
+
+async def _abandon_reply(_prompt: str, _interrupt: bool = False) -> str:
+    return "/abandon"
+
+
 @pytest.mark.anyio
-async def test_abandon_records_materialized_false_for_unmaterialized_draft(
-    tmp_path: Path,
-) -> None:
+async def test_abandon_on_a_draft_never_confirms(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="D", quest_id="ab1", base_branch="main")
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
-
-    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(30):   # deadlock backstop only
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        return await user_chat_input_fn("reply?")
-
-    coord = InterruptCoordinator()
-
-    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, "ab1", "T", on_event=on_event)
-        await client.connect()
-        return client
-
-    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/abandon"
-
-    class _Driver(_NullDriver):
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-        def append_committed_reply(self, _text: str) -> None: ...
-
+    sock, server = _gate_server(tmp_path)
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(30):   # deadlock backstop only
-        async with anyio.create_task_group() as tg:
-            await server.open()
-            tg.start_soon(server.serve, run_fn)
+    driver = _GateDriver()
 
-            async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="ab1", control_root=tmp_path,
-                    leave_state=leave_state, leave_mode="new")
-
-            tg.start_soon(_client)
+    await _answer_one_gate(
+        sock, server, "ab1", tmp_path, solicit=_abandon_reply, confirm=_no_confirm,
+        driver=driver, leave_state=leave_state)
 
     assert server.abandoned
-    assert leave_state["intent"] == "abandon"
-    assert leave_state["materialized"] == ""
+    assert leave_state == {"intent": "abandon"}
+    assert driver.lines == ["> /abandon"]
 
 
 @pytest.mark.anyio
-async def test_abandon_records_materialized_true_for_materialized_change(
+async def test_draft_abandon_answered_elsewhere_is_not_echoed(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="D", quest_id="ab1e", base_branch="main")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            return "/abandon"   # the local result wins the tick the remote answer lands
+        raise AssertionError("only cancellation ends the solicit")
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab1e", tmp_path, solicit=_solicit, confirm=_no_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == []
+
+
+@pytest.mark.anyio
+async def test_abandon_on_a_built_quest_confirms_before_abandoning(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab2")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    asked: list[str] = []
+
+    async def _confirm(question: str) -> bool:
+        assert not server.abandoned   # no abandon control before the answer
+        assert leave_state == {}      # no abandon intent before the answer
+        asked.append(question)
+        return True
+
+    driver = _GateDriver()
+    await _answer_one_gate(
+        sock, server, "ab2", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state)
+
+    assert asked == [_question("ab2")]
+    assert server.abandoned
+    assert leave_state == {
+        "intent": "abandon", "removed": "worktree and branch imp/ab2 (no commits)"}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_declined_keeps_the_quest_and_reasks_the_gate(
     tmp_path: Path,
 ) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
-    meta_path = ch.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    meta["materialized"] = True
-    meta_path.write_text(json.dumps(meta))
+    _seed_built(tmp_path, "ab3")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    replies = iter(["/abandon", "keep going"])
+    solicited: list[str] = []
 
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
+        solicited.append(prompt)
+        return next(replies)
+
+    async def _decline(_question: str) -> bool:
+        return False
+
+    driver = _GateDriver()
+    received = await _answer_one_gate(
+        sock, server, "ab3", tmp_path, solicit=_solicit, confirm=_decline,
+        driver=driver, leave_state=leave_state)
+
+    assert solicited == ["reply?", "reply?"]   # the same gate, asked again
+    assert received == ["keep going"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon", "Kept ab3."]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirm_is_cancelled_by_an_answer_from_elsewhere(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab4")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return True   # unreachable: only cancellation ends it
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab4", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirmed_as_the_gate_is_answered_elsewhere_is_dropped(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab4b")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            return True   # y lands in the tick the remote answer cancels the gate
+        raise AssertionError("only cancellation ends the confirm")
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab4b", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_reask_is_cancelled_by_an_answer_from_elsewhere(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab5")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+    calls = 0
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "/abandon"
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return "late local reply"   # unreachable: only cancellation ends it
+
+    async def _decline(_question: str) -> bool:
+        return False
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab5", tmp_path, solicit=_solicit, confirm=_decline,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert calls == 2
+    assert received == ["remote-answer"]   # no local reply reached the gate
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon", "Kept ab5."]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirm_is_cancelled_by_escalation(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab6")
+    sock, server = _gate_server(tmp_path)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(30):   # deadlock backstop only
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        return await user_chat_input_fn("reply?")
-
-    coord = InterruptCoordinator()
+        return str(await user_chat_input_fn("reply?"))
 
     async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, "ab2", "T", on_event=on_event)
+        client = SessionClient(sock, "ab6", "T", on_event=on_event)
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/abandon"
+    opened = anyio.Event()
+    cancelled = anyio.Event()
 
-    class _Driver(_NullDriver):
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-        def append_committed_reply(self, _text: str) -> None: ...
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return True   # unreachable: only cancellation ends it
 
+    coord = InterruptCoordinator()
+    driver = _GateDriver()
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(30):   # deadlock backstop only
+    endings: list[StreamEnding] = []
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
 
             async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="ab2", control_root=tmp_path,
-                    leave_state=leave_state, leave_mode="new")
+                ending, _witness = await run_terminal_client(
+                    attach=_attach, driver=driver, coord=coord,
+                    solicit=_abandon_reply, confirm=_confirm, quest_id="ab6",
+                    control_root=tmp_path, leave_state=leave_state, leave_mode="new")
+                endings.append(ending)
 
             tg.start_soon(_client)
+            await opened.wait()
+            assert coord.escalation_event is not None
+            coord.escalation_event.set()   # force-quit / Ctrl-\ / terminal gone
+            await wait_until(lambda: endings)
+            tg.cancel_scope.cancel()
+
+    assert cancelled.is_set()
+    assert endings == [StreamEnding.CUT]
+    assert driver.lines == ["> /abandon"]   # no "Kept ab6."
+    assert not server.abandoned
+    assert leave_state == {}
+
+
+@pytest.mark.anyio
+async def test_headless_abandon_on_a_built_quest_proceeds_unasked(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab7")
+    sock, server = _gate_server(tmp_path)
+    coord = InterruptCoordinator()
+    leave_state: dict[str, str] = {}
+
+    await _answer_one_gate(
+        sock, server, "ab7", tmp_path, solicit=make_headless_solicit("/abandon", coord),
+        confirm=confirm_unasked, driver=_GateDriver(), leave_state=leave_state,
+        coord=coord)
 
     assert server.abandoned
-    assert leave_state["intent"] == "abandon"
-    assert leave_state["materialized"] == "1"
+    assert leave_state == {
+        "intent": "abandon", "removed": "worktree and branch imp/ab7 (no commits)"}
 
 
 @pytest.mark.anyio
@@ -1144,7 +1438,8 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", leave_state=leave_state, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_state=leave_state, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1195,7 +1490,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", control_root=tmp_path,
+                    solicit=_solicit, confirm=_no_confirm, quest_id="c1", control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -1241,7 +1536,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c2", control_root=tmp_path,
+                    solicit=_solicit, confirm=_no_confirm, quest_id="c2", control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -1316,7 +1611,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id=quest.id, control_root=tmp_path,
+                    solicit=_solicit, confirm=_no_confirm, quest_id=quest.id, control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
                 client_done.set()
 
@@ -1396,7 +1691,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1458,7 +1753,8 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1506,7 +1802,8 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1554,7 +1851,7 @@ async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> 
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit,
+                    coord=coord, solicit=_solicit, confirm=_no_confirm,
                     on_title=seen.append, leave_mode="new")
 
             tg.start_soon(_client)
@@ -1612,7 +1909,7 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             loop = asyncio.get_running_loop()
@@ -1684,7 +1981,7 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             loop = asyncio.get_running_loop()
@@ -1732,7 +2029,7 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
                 returned.set()
 
             tg.start_soon(_client)
@@ -1775,7 +2072,7 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
                 returned.set()
 
             tg.start_soon(_client)
@@ -1830,7 +2127,8 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1877,7 +2175,8 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1935,7 +2234,8 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -1996,7 +2296,8 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2048,7 +2349,8 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2113,7 +2415,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
             async def _client_a() -> None:
                 await run_terminal_client(
                     attach=_attach_a, driver=_Driver(),
-                    coord=coord, solicit=_solicit_a, leave_mode="new")
+                    coord=coord, solicit=_solicit_a, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client_a)
             await gate_reached.wait()
@@ -2185,7 +2487,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2240,7 +2542,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2289,7 +2591,8 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", local_echo=echoed.append, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2341,7 +2644,8 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="cA", local_echo=echoed.append, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="cA", local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
             await gate_reached.wait()
@@ -2406,7 +2710,7 @@ async def test_local_echo_not_invoked_on_leave_command(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", leave_state=leave_state,
+                    solicit=_solicit, confirm=_no_confirm, quest_id="c1", leave_state=leave_state,
                     local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
@@ -2460,7 +2764,8 @@ async def test_local_echo_not_invoked_on_abandon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id="c1", local_echo=echoed.append, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2505,7 +2810,7 @@ async def test_mid_conversation_model_sends_control_not_input(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2571,6 +2876,7 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord, solicit=_solicit,
+                    confirm=_no_confirm,
                     quest_id=quest.id, control_root=tmp_path,
                     leave_state={}, leave_mode="new")
                 returned.set()
@@ -2630,7 +2936,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1",
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, quest_id="c1",
                     local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
@@ -2693,7 +2999,8 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
             # Wait for the daemon broadcast to round-trip and light the marker
@@ -2774,7 +3081,8 @@ async def test_sandbox_off_resolves_the_parked_gate_without_reprompting(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
             await wait_until(lambda: "ret" in result and len(log) == 2)
@@ -2850,7 +3158,8 @@ async def test_sandbox_on_reprompts_with_confirmation_after_caret(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
             await wait_until(lambda: "ret" in result and len(log) == 2)
@@ -2912,7 +3221,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -2968,7 +3277,7 @@ async def test_client_intercepts_provider_marker_without_routing_to_driver(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -3023,6 +3332,7 @@ async def test_interrupt_pause_sends_no_disposition_frame(tmp_path: Path) -> Non
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord, solicit=_solicit,
+                    confirm=_no_confirm,
                     quest_id=quest.id, control_root=tmp_path,
                     leave_state={}, leave_mode="new")
                 returned.set()
@@ -3078,6 +3388,7 @@ async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord, solicit=_solicit,
+                    confirm=_no_confirm,
                     quest_id=quest.id, control_root=tmp_path,
                     leave_state=leave_state, leave_mode="chat")
                 returned.set()
@@ -3135,7 +3446,8 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, local_echo=echoed.append, leave_mode="new")
+                    solicit=_solicit,
+                    confirm=_no_confirm, local_echo=echoed.append, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -3192,7 +3504,8 @@ async def test_interrupt_record_after_gate_leaves_title_idle(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+                    coord=coord, solicit=_solicit,
+                    confirm=_no_confirm, title=title, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -3268,7 +3581,7 @@ async def test_only_a_live_interrupt_delivery_start_arms_the_force_quit_offer(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             await wait_until(lambda: ("replay_complete", False) in seen)
@@ -3325,7 +3638,7 @@ async def test_terminal_client_reports_cut_ending_on_oversized_frame(
                 sock, good.encode("utf-8") + b"\n" + b"x" * (_MAX_FRAME + 1), tg)
             ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(),
-                coord=coord, solicit=_solicit, leave_mode="new")
+                coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
             tg.cancel_scope.cancel()
 
     assert ending is StreamEnding.CUT
@@ -3363,7 +3676,7 @@ async def test_terminal_client_reports_cut_when_a_leave_cancels_the_loop(
             async def _client() -> None:
                 ending, _witness = await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, leave_mode="new")
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
                 endings.append(ending)
 
             tg.start_soon(_client)
@@ -3421,7 +3734,7 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
             await serve_raw_frames(sock, good.encode("utf-8") + b"\n", tg)
             ending, _witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(), coord=coord,
-                solicit=_solicit, leave_mode="new", stream=watched)
+                solicit=_solicit, confirm=_no_confirm, leave_mode="new", stream=watched)
             tg.cancel_scope.cancel()
 
     assert ending is StreamEnding.CUT
@@ -3496,7 +3809,7 @@ async def test_provider_switch_reprompts_and_reaches_the_daemon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, quest_id="c1",
+                    coord=coord, solicit=_solicit, confirm=_no_confirm, quest_id="c1",
                     leave_mode="new")
 
             tg.start_soon(_client)
@@ -3578,7 +3891,7 @@ async def test_stop_ack_ends_when_a_gate_is_answered_without_a_prompt(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=driver, coord=coord,
-                    solicit=_solicit, leave_mode="new")
+                    solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
 
@@ -3633,7 +3946,7 @@ async def test_stop_ack_ends_when_the_gate_is_answered_elsewhere(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=driver, coord=coord,
-                    solicit=_solicit, leave_mode="new")
+                    solicit=_solicit, confirm=_no_confirm, leave_mode="new")
 
             tg.start_soon(_client)
             await gate_reached.wait()
@@ -3929,7 +4242,7 @@ async def test_terminal_client_returns_the_witness_of_the_events_it_rendered(
                 intent.encode("utf-8") + b"\n" + merged.encode("utf-8") + b"\n", tg)
             ending, witness = await run_terminal_client(
                 attach=_attach, driver=_Driver(),
-                coord=coord, solicit=_solicit, leave_mode="new")
+                coord=coord, solicit=_solicit, confirm=_no_confirm, leave_mode="new")
             tg.cancel_scope.cancel()
 
     assert ending is StreamEnding.CUT          # the peer closed with no end frame
