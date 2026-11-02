@@ -829,7 +829,7 @@ async def _run_cleared_session(
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import make_interactive_solicit, run_session_client
-    from imp.cli.signals import InterruptCoordinator
+    from imp.cli.signals import InterruptCoordinator, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.abandon import discard_conversation
@@ -855,10 +855,11 @@ async def _run_cleared_session(
         # A `/sandbox off|on` typed at this reopened prompt lands here; empty when none.
         cleared_sandbox_sink: dict[str, bool] = {}
         try:
-            reply = await _read_intent_line(
-                prompt, quest, color=color, width=_term_width(),
-                model_sink=cleared_model_sink,
-                sandbox_sink=cleared_sandbox_sink)
+            async with prompt_signal_guard():
+                reply = await _read_intent_line(
+                    prompt, quest, color=color, width=_term_width(),
+                    model_sink=cleared_model_sink,
+                    sandbox_sink=cleared_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
