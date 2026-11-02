@@ -2,9 +2,12 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import bisect
 import html
 import json
+import re
 from collections.abc import Callable, Iterator
+from itertools import groupby
 from typing import Any
 
 from markdown_it import MarkdownIt
@@ -15,7 +18,7 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
-from imp.cli.render_html import _fold_markers
+from imp.cli.render_html import _MD, _fold_markers
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
@@ -48,11 +51,63 @@ def _escape_all(text: str) -> str:
     render_text's control-byte guard), then HTML-escape the three significant
     characters so a `<script>` in a tool result or agent turn renders as visible
     text, never a live tag."""
-    return html.escape(rt._caret_escape(rt._strip_sgr(text)), quote=False)
+    return _html_escape(rt._caret_escape(rt._strip_sgr(text)))
+
+
+_TICKS = re.compile(r"`+")
+
+
+def _html_escape(text: str) -> str:
+    return html.escape(text, quote=False)
+
+
+def _verbatim(text: str) -> str:
+    return text
+
+
+def _escape_outside_spans(text: str) -> str:
+    starts: dict[int, list[int]] = {}
+    for m in _TICKS.finditer(text):
+        starts.setdefault(m.end() - m.start(), []).append(m.start())
+    out: list[str] = []
+    done = i = 0
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] != "`":
+            i += 1
+            continue
+        end = i
+        while end < len(text) and text[end] == "`":
+            end += 1
+        closers = starts.get(end - i, [])
+        k = bisect.bisect_left(closers, end)
+        if k == len(closers):
+            i = end
+            continue
+        close = closers[k] + end - i
+        out += [_html_escape(text[done:i]), text[i:close]]
+        done = i = close
+    out.append(_html_escape(text[done:]))
+    return "".join(out)
 
 
 def _md_escape(text: str) -> str:
-    return _escape_all(text)
+    """HTML-escape outside code only; the document guard falls back to full escape."""
+    text = rt._caret_escape(rt._strip_sgr(text))
+    lines = text.split("\n")
+    how: list[_Esc] = [_escape_outside_spans] * len(lines)
+    tokens = _MD.parse(text)
+    # Blockquote regions go last, overriding code: their `>` markers must be escaped in both passes.
+    for kinds, esc in (({"fence", "code_block"}, _verbatim),
+                       ({"blockquote_open"}, _html_escape)):
+        for tok in tokens:
+            if tok.map and tok.type in kinds:
+                a, b = tok.map
+                how[a:b] = [esc] * (b - a)
+    groups = groupby(zip(how, lines, strict=True), key=lambda p: p[0])
+    return "\n".join(esc("\n".join(line for _, line in group)) for esc, group in groups)
 
 
 def _commit_block(footer: str, commits: list[dict[str, str]], esc: _Esc) -> str:

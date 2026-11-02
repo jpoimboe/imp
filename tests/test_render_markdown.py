@@ -1,12 +1,19 @@
 # tests/test_render_markdown.py
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+from markdown_it import MarkdownIt
+
 from imp.cli import narrative as nv
 from imp.cli import render_markdown as rm
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
-from imp.cli.render_html import _fold_markers, _FoldOpen
+from imp.cli.render_html import _fold_markers, _FoldOpen, render_html
 from imp.cli.render_markdown import (
     _accept,
     _details,
@@ -1142,3 +1149,205 @@ def test_summary_markdown_guard_picks_pass_c_or_full_escape(monkeypatch) -> None
     assert kept.startswith("# `a -> b` — q\n")
     fallback = render_summary_markdown([], header=header("<b>x</b>"))
     assert fallback.startswith("# &lt;b&gt;x&lt;/b&gt; — q\n")
+
+
+_SAFE_FOLD_HTML = re.compile(r"<details>\n<summary>[^<>]*</summary>\n|</details>\n")
+
+
+def _raw_html(md: str) -> list[str]:
+    tokens = MarkdownIt("commonmark", {"html": True}).enable("table").parse(md)
+    out: list[str] = []
+    while tokens:
+        tok = tokens.pop()
+        if tok.type in ("html_inline", "html_block"):
+            out.append(tok.content)
+        tokens.extend(tok.children or [])
+    return out
+
+
+def _assert_safe(md: str, *, folds: int = 0) -> None:
+    assert all(_SAFE_FOLD_HTML.fullmatch(h) for h in _raw_html(md))
+    page = render_html(md)
+    assert "<script" not in page and "<img" not in page
+    assert page.count("<details>") == folds
+
+
+def _full_escape(render: Callable[[], str]) -> str:
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(rm, "_md_escape", _escape_all)
+        return render()
+
+
+def _agent_events(*texts: str) -> list[dict]:
+    return [_ev("2", "step_started", step="s", kind="agent", phase="p",
+                model="m", provider="anthropic"),
+            *(_ev(f"a{i}", "agent_message", agent_id="step:p/s", provider="anthropic",
+                  model="m", stop_reason="end_turn", usage={},
+                  raw={"content": [{"type": "text", "text": t}]})
+              for i, t in enumerate(texts))]
+
+
+def _node_tree(*nodes: Any) -> nv.NarrativeTree:
+    root = nv.WorkflowNode(title="t")
+    root.children = list(nodes)
+    return nv.NarrativeTree(root=root)
+
+
+def test_md_escape_passes_code_spans_verbatim() -> None:
+    assert _md_escape("Use `a -> b` & <x>") == "Use `a -> b` &amp; &lt;x&gt;"
+    assert _md_escape("``a ` <b>`` <c>") == "``a ` <b>`` &lt;c&gt;"
+    assert _md_escape("x `a\n<b>\nc` <d>") == "x `a\n<b>\nc` &lt;d&gt;"
+
+
+def test_md_escape_escapes_unclosed_and_backslashed_backticks() -> None:
+    assert _md_escape("a `` <b> ` c") == "a `` &lt;b&gt; ` c"
+    assert _md_escape("\\`<b>` y") == "\\`&lt;b&gt;` y"
+    assert _md_escape("\\``<b>`") == "\\``<b>`"
+
+
+def test_md_escape_passes_code_blocks_verbatim() -> None:
+    assert _md_escape("<a>\n```\n<b>\n```\n<c>") == "&lt;a&gt;\n```\n<b>\n```\n&lt;c&gt;"
+    assert _md_escape("- x\n\n  ~~~\n  <b>\n  ~~~") == "- x\n\n  ~~~\n  <b>\n  ~~~"
+
+
+def test_md_escape_fully_escapes_blockquote_regions() -> None:
+    assert _md_escape("> ```\n> <b>\n> ```\n\n`<c>`") == (
+        "&gt; ```\n&gt; &lt;b&gt;\n&gt; ```\n\n`<c>`")
+    assert _md_escape("- i\n\n  > `<b>`") == "- i\n\n  &gt; `&lt;b&gt;`"
+
+
+def test_md_escape_handles_tabs_lazy_continuation_and_quoted_list_fences() -> None:
+    assert _md_escape("x\n\n\tif a < b:") == "x\n\n\tif a < b:"
+    assert _md_escape("-\tx\n\n\t```\n\t<b>\n\t```") == "-\tx\n\n\t```\n\t<b>\n\t```"
+    assert _md_escape("> `<a>`\nlazy `<b>` <c>\n\n`<d>`") == (
+        "&gt; `&lt;a&gt;`\nlazy `&lt;b&gt;` &lt;c&gt;\n\n`<d>`")
+    assert _md_escape("> - x\n>\n>   ```\n>   <b>\n>   ```\n\n`<c>`") == (
+        "&gt; - x\n&gt;\n&gt;   ```\n&gt;   &lt;b&gt;\n&gt;   ```\n\n`<c>`")
+
+
+def test_agent_code_span_is_escaped_exactly_once() -> None:
+    md = _md(_agent_events("Use `_cmd_*(args) -> int`"))
+    assert "Use `_cmd_*(args) -> int`" in md
+    page = render_html(md)
+    assert "<code>_cmd_*(args) -&gt; int</code>" in page
+    assert "&amp;gt;" not in page and "&amp;lt;" not in page
+
+
+@pytest.mark.parametrize("text", [
+    "Before:\n```\nif a < b:\n```",
+    "Before:\n~~~\nif a < b:\n~~~",
+    "Before:\n\n    if a < b:",
+    "<div>\n```\nif a < b:\n```",
+])
+def test_agent_code_block_is_escaped_exactly_once(text: str) -> None:
+    md = _md(_agent_events(text))
+    assert "if a < b:" in md
+    page = render_html(md)
+    assert "<pre><code>if a &lt; b:\n</code></pre>" in page
+    assert "&amp;lt;" not in page
+
+
+def test_agent_html_outside_code_still_escapes() -> None:
+    md = _md(_agent_events("<script> <b>x</b> & `ok`"))
+    assert "&lt;script&gt; &lt;b&gt;x&lt;/b&gt; &amp; `ok`" in md
+
+
+_IMG = "<img src=x onerror=alert(1)>"
+
+
+@pytest.mark.parametrize(("tree", "show", "folds"), [
+    (nv.build_tree(_agent_events("x `a\n<details>\nb`")), None, 0),
+    (nv.build_tree(_agent_events("[a](b`c) <script> `d`")), None, 0),
+    (_node_tree(nv.ErrorNode(
+        message="```\n<script>alert(1)</script>\n<details>\n```")), None, 0),
+    (_node_tree(nv.MergedNode(quest_id="q", base="main", commits=[
+        {"sha": _SHA_A, "subject": f"    {_IMG}"}])), None, 0),
+    (nv.build_tree(_agent_events(
+        "```\nfoo", f"```\n<details>\n<summary>{_IMG}</summary>\n```")), None, 0),
+    (_node_tree(nv.TiersResolvedNode(rows=[
+        {"tier": "`", "provider": f"`{_IMG}`", "model": "m",
+         "differ_tier": None, "differ_from": None}])), frozenset({"tiers"}), 1),
+    (nv.build_tree(_agent_events("```\nfoo", "```\n<details>\nx\n<details>")),
+     None, 0),
+    (nv.build_tree(_agent_events(
+        "x `" + "\n<details>\n<summary>s</summary>" * 5000 + "\n`")), None, 0),
+    (nv.build_tree(_agent_events(
+        f"[a](b`c) <![CDATA[>{_IMG}]]> `d`")), None, 0),
+], ids=["span-details", "link-backtick", "error-fence", "commit-indent",
+        "cross-text-fence", "tier-spans", "stray-details", "deep-folds", "cdata"])
+def test_hostile_document_falls_back_to_full_escape(
+        tree: nv.NarrativeTree, show: frozenset[str] | None, folds: int) -> None:
+    md = render_markdown(tree, full=False, show=show)
+    assert md == _full_escape(lambda: render_markdown(tree, full=False, show=show))
+    _assert_safe(md, folds=folds)
+
+
+def test_summary_step_code_span_is_safe_and_verbatim() -> None:
+    header = SummaryHeader(workflow="imp", quest_id="q", status="merged",
+                           total_seconds=1.0)
+
+    def rows(step: str) -> list[StepRow]:
+        return [StepRow(phase="p", step=step, start_ts="2026-01-01T00:00:00+00:00",
+                        end_ts="2026-01-01T00:00:01+00:00")]
+    hostile = render_summary_markdown(rows(f"`{_IMG}`"), header=header)
+    _assert_safe(hostile)
+    kept = render_summary_markdown(rows("`a -> b`"), header=header)
+    assert "| `a -> b` |" in kept
+
+
+def _burst_named(name: str) -> list[dict]:
+    return [_ev("2", "step_started", step="s", kind="agent", phase="p",
+                model="m", provider="anthropic"),
+            _ev("4", "tool_call", agent_id="step:p/s", id="b1", name=name,
+                input={"command": "ls"}),
+            _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+                content="ok", error=False)]
+
+
+def test_burst_recap_summary_is_escaped_exactly_once() -> None:
+    md = _md(_burst_named("`<x>`"), show=frozenset({"tools"}))
+    for doc in (md, render_html(md)):
+        assert "<summary>1 call · `&lt;x&gt;`</summary>" in doc
+        assert "&amp;" not in doc
+
+
+def test_hidden_tools_recap_keeps_its_code_span_verbatim() -> None:
+    assert "1 call · `<x>`" in _md(_burst_named("`<x>`"))
+
+
+def _subagent_named(name: str) -> list[dict]:
+    events = _subagent_events()
+    events[1]["payload"]["input"]["subagent_name"] = name
+    return events
+
+
+def test_full_subagent_label_is_escaped_exactly_once() -> None:
+    md = _md(_subagent_named("`<x>`"), full=True)
+    assert "**`<x>`**" in md
+    page = render_html(md)
+    assert "<strong><code>&lt;x&gt;</code></strong>" in page
+    assert "&amp;lt;" not in page
+
+
+def test_inline_subagent_status_keeps_its_code_span_verbatim() -> None:
+    assert "· `a -> b` · m" in _md(_subagent_named("`a -> b`"))
+
+
+def test_commit_subject_and_error_keep_code_spans_verbatim() -> None:
+    md = render_markdown(_node_tree(
+        nv.ErrorNode(message="`a -> b`"),
+        nv.MergedNode(quest_id="q", base="main",
+                      commits=[{"sha": _SHA_A, "subject": "`a -> b`"}])), full=False)
+    assert "> **error:** `a -> b`" in md
+    assert "- `4091ab6d` `a -> b`" in md
+
+
+@pytest.mark.parametrize(("quoted", "escaped"), [
+    ("> ```\n> if a < b:\n> ```", "&gt; ```\n&gt; if a &lt; b:\n&gt; ```"),
+    ("- item\n\n  > ```\n  > if a < b:\n  > ```",
+     "- item\n\n  &gt; ```\n  &gt; if a &lt; b:\n  &gt; ```"),
+])
+def test_blockquoted_code_does_not_force_a_fallback(quoted: str, escaped: str) -> None:
+    md = _md(_agent_events(quoted, "Use `a -> b`"))
+    assert escaped in md
+    assert "Use `a -> b`" in md
