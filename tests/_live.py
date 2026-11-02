@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
@@ -286,6 +286,50 @@ def native_denial_miss(patch_error: str, exec_error: str) -> str | None:
             f"exec_error={exec_error!r} carries no denial language (the model "
             f"likely never attempted the native shell write)")
     return "; ".join(misses) or None
+
+
+def call_args(payload: dict[str, Any]) -> dict[str, Any]:
+    """`tool_call` payloads store the SDK's `arguments` under `"input"` verbatim —
+    a dict on 0.153.2 but a JSON string on other shapes."""
+    raw = payload.get("input") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+_MCP_WRITE_TARGET = "mcp_written.txt"
+
+
+def mcp_write_miss(root: Path, records: list[dict[str, Any]]) -> str | None:
+    """None when the last imp `write_file` call on root/mcp_written.txt succeeded
+    and wrote its `content`; a note when no call targeted it — a bad draw, e.g.
+    a code-mode `tools.write_file` that records no tool_call. A targeting call
+    that errored or did not land raises: that is an MCP-write regression."""
+    target = (root / _MCP_WRITE_TARGET).resolve()
+    calls = [r["payload"] for r in records if r.get("type") == "tool_call"]
+
+    def targets(payload: dict[str, Any]) -> bool:
+        path = call_args(payload).get("path")
+        return (payload.get("name") == "write_file" and isinstance(path, str)
+                and (root / path).resolve() == target)
+
+    hit_at = next((i for i in range(len(records) - 1, -1, -1)
+                   if records[i].get("type") == "tool_call"
+                   and targets(records[i]["payload"])), None)
+    if hit_at is None:
+        names = [p.get("name") for p in calls]
+        return f"never called write_file on {_MCP_WRITE_TARGET} (tool calls: {names})"
+    hit = records[hit_at]["payload"]
+    result = next((r["payload"] for r in records[hit_at + 1:]
+                   if r.get("type") == "tool_result"
+                   and r["payload"].get("id") == hit["id"]), None)
+    assert result is not None and result.get("error") is False, (hit, result)
+    content = call_args(hit).get("content")
+    assert isinstance(content, str) and target.read_bytes() == content.encode(), hit
+    return None
 
 
 def build_isolated_venv(
