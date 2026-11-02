@@ -904,7 +904,7 @@ class NarrativeBuilder:
         fold.running = False
         fold.terminal_state = "interrupted"
 
-    def _mark_direct_descendant_subtrees_interrupted(self) -> None:
+    def mark_subagents_interrupted(self) -> None:
         for fold in list(self._sub_by_agent_id.values()):
             self._mark_descendant_subtree_interrupted(fold)
 
@@ -1714,7 +1714,7 @@ def _h_awaiting_user_input(
     # boundary, so flush unconditionally. Mirrors the un-hold loop below and the
     # flush in _h_agent_message / _h_user_message.
     self._flush_burst()
-    self._mark_direct_descendant_subtrees_interrupted()
+    self.mark_subagents_interrupted()
     # Un-hold any held narration in the current container: the prose carried by
     # the agent_message context the human must read to answer, and the agent is now blocked
     # settled, NOT a trailing narration that could still fold into a step

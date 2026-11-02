@@ -532,9 +532,11 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
-    def finish(self, *, exit_block: bool = True) -> None:
+    def finish(self, *, exit_block: bool = True, interrupted: bool = False) -> None:
         """Flush the block; exit_block descends past the owned blank (end_run) else resets."""
         self._status.clear_stop_ack()      # the ack never outlives the run
+        if interrupted:
+            self._builder.mark_subagents_interrupted()
         self._builder.finalize()
         self._walk(force=True)
         if exit_block:

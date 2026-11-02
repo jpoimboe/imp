@@ -434,7 +434,9 @@ async def run_terminal_client(
             gate_recv.close()
             await resolved_send.aclose()
             resolved_recv.close()
-            driver.finish()
+            leaving = (coord.escalation_event is not None
+                       and coord.escalation_event.is_set())
+            driver.finish(interrupted=leaving)
             if title is not None:
                 title.reset()
             # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /save /
@@ -445,8 +447,7 @@ async def run_terminal_client(
             # CONTROL_INTERRUPT_LEAVE so workflow_paused records the truth rather
             # than the lease-drop "detached". Abandon has its own frame path and
             # never sets the escalation event; a natural completion leaves it unset.
-            if (coord.escalation_event is not None
-                    and coord.escalation_event.is_set()):
+            if leaving:
                 action = None
                 intent = (
                     leave_state.get("intent") if leave_state is not None
