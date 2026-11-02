@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 
+from imp.cli.abandon_confirm import abandon_question, removal_description
 from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
@@ -273,15 +274,44 @@ async def run_terminal_client(
                             gate_state["elsewhere"] = True
                             scope.cancel()
 
+                def _removal() -> str | None:
+                    if control_root is None:
+                        return None
+                    try:
+                        return removal_description(Quest.load(control_root, quest_id))
+                    except (LoadError, LoadErrors):
+                        return None
+
+                async def _solicit_reply(
+                    prompt: str, interrupt: bool,
+                ) -> tuple[str | SkillRequest, str | None]:
+                    """The gate's reply, plus what a confirmed /abandon removes; a
+                    declined /abandon asks the same gate again."""
+                    while True:
+                        reply = await solicit(prompt, interrupt)
+                        if not (isinstance(reply, str) and reply.strip() == "/abandon"):
+                            return reply, None
+                        removed = _removal()
+                        if removed is None:
+                            return reply, None
+                        driver.append_committed_reply("/abandon")
+                        if await confirm(abandon_question(quest_id, removed)):
+                            # No await before the gate exits: late remote answers read as elsewhere.
+                            return reply, removed
+                        driver.emit_lines([f"Kept {quest_id}."])
+
                 async def _answer_gates() -> None:
                     try:
                         async for prompt, interrupt in gate_recv:
                             gate_state["elsewhere"] = False
                             reply: str | SkillRequest = ""
+                            removed: str | None = None
+                            # Spans the abandon confirm and its re-ask, so an answer
+                            # from another client cancels those too.
                             with anyio.CancelScope() as scope:
                                 gate_state["scope"] = scope
                                 try:
-                                    reply = await solicit(prompt, interrupt)
+                                    reply, removed = await _solicit_reply(prompt, interrupt)
                                 finally:
                                     gate_state["scope"] = None
                                     # The ack belongs to this gate's gesture round, which
@@ -304,25 +334,21 @@ async def run_terminal_client(
                                 await client.send_skill_request(
                                     reply.name, reply.args)
                                 continue
-                            # Echo a recognized control command before handling (non-reconciling).
+                            # Echo a recognized control command before handling
+                            # (non-reconciling); a built quest's /abandon was
+                            # echoed before its confirm.
                             control = reply.strip()
-                            if (control in ("/abandon", "/save", "/shelve", "/clear",
+                            if (control in ("/save", "/shelve", "/clear",
                                             "/sandbox on", "/sandbox off", "/compact")
                                     or control.startswith("/model ")
-                                    or control.startswith("/provider ")):
+                                    or control.startswith("/provider ")
+                                    or (control == "/abandon" and removed is None)):
                                 driver.append_committed_reply(control)
                             if reply.strip() == "/abandon":
                                 if leave_state is not None:
                                     leave_state["intent"] = "abandon"
-                                    if control_root is not None:
-                                        try:
-                                            reloaded = Quest.load(
-                                                control_root, quest_id)
-                                            leave_state["materialized"] = (
-                                                "1" if reloaded.materialized
-                                                else "")
-                                        except (LoadError, LoadErrors):
-                                            leave_state["materialized"] = ""
+                                    if removed is not None:
+                                        leave_state["removed"] = removed
                                 await controls.abandon()
                                 return
                             if reply.strip() == "/save":

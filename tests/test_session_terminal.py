@@ -16,6 +16,7 @@ import pytest
 from imp.agents.transcript import SkillReply
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
+from imp.cli.session_run import confirm_unasked, make_headless_solicit
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
@@ -1007,109 +1008,390 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
     assert idle not in s.getvalue()
 
 
+def _seed_built(tmp_path: Path, quest_id: str) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="B", quest_id=quest_id, base_branch="main")
+
+
+def _gate_server(tmp_path: Path) -> tuple[str, SessionServer]:
+    sock = str(tmp_path / "s.sock")
+    return sock, SessionServer(sock, hibernate=False)
+
+
+def _question(quest_id: str) -> str:
+    return (f"Abandon {quest_id}? This removes its worktree and branch "
+            f"imp/{quest_id} (no commits). [y/N] ")
+
+
+class _GateDriver(_NullDriver):
+    """Records the caret echo and emitted lines, in order."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def append_committed_reply(self, text: str) -> None:
+        self.lines.append(f"> {text}")
+
+    def emit_lines(self, lines: list[str]) -> None:
+        self.lines.extend(lines)
+
+
+async def _answer_one_gate(
+    sock: str, server: SessionServer, quest_id: str, control_root: Path, *,
+    solicit: Any, confirm: Any, driver: _GateDriver, leave_state: dict[str, str],
+    coord: InterruptCoordinator | None = None,
+) -> list[str]:
+    """Open one `reply?` gate and return the replies the run received."""
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        received.append(reply)
+        return reply
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, quest_id, "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver,
+                    coord=coord if coord is not None else InterruptCoordinator(),
+                    solicit=solicit, confirm=confirm, quest_id=quest_id,
+                    control_root=control_root, leave_state=leave_state, leave_mode="new")
+
+            tg.start_soon(_client)
+    return received
+
+
+async def _answer_elsewhere(
+    sock: str, server: SessionServer, quest_id: str, control_root: Path, *,
+    solicit: Any, confirm: Any, driver: _GateDriver, leave_state: dict[str, str],
+    opened: anyio.Event, cancelled: anyio.Event,
+) -> list[str]:
+    """Once `opened` fires, a second client answers the gate. The run stays live until
+    `cancelled` fires, so only that answer can cancel the local prompt."""
+    received: list[str] = []
+    released = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        received.append(reply)
+        await released.wait()
+        return reply
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, quest_id, "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=driver, coord=InterruptCoordinator(),
+                    solicit=solicit, confirm=confirm, quest_id=quest_id,
+                    control_root=control_root, leave_state=leave_state, leave_mode="new")
+
+            tg.start_soon(_client)
+            await opened.wait()
+            raw = await anyio.connect_unix(sock)
+            await raw.send((encode_attach("cB", "T", True) + "\n").encode())
+            await raw.send((encode_input("remote-answer") + "\n").encode())
+            await cancelled.wait()
+            released.set()
+            await raw.aclose()
+    return received
+
+
+async def _abandon_reply(_prompt: str, _interrupt: bool = False) -> str:
+    return "/abandon"
+
+
 @pytest.mark.anyio
-async def test_abandon_records_materialized_false_for_unmaterialized_draft(
-    tmp_path: Path,
-) -> None:
+async def test_abandon_on_a_draft_never_confirms(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="D", quest_id="ab1", base_branch="main")
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
-
-    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(30):   # deadlock backstop only
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        return await user_chat_input_fn("reply?")
-
-    coord = InterruptCoordinator()
-
-    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, "ab1", "T", on_event=on_event)
-        await client.connect()
-        return client
-
-    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/abandon"
-
-    class _Driver(_NullDriver):
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-        def append_committed_reply(self, _text: str) -> None: ...
-
+    sock, server = _gate_server(tmp_path)
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(30):   # deadlock backstop only
-        async with anyio.create_task_group() as tg:
-            await server.open()
-            tg.start_soon(server.serve, run_fn)
+    driver = _GateDriver()
 
-            async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, confirm=_no_confirm, quest_id="ab1", control_root=tmp_path,
-                    leave_state=leave_state, leave_mode="new")
-
-            tg.start_soon(_client)
+    await _answer_one_gate(
+        sock, server, "ab1", tmp_path, solicit=_abandon_reply, confirm=_no_confirm,
+        driver=driver, leave_state=leave_state)
 
     assert server.abandoned
-    assert leave_state["intent"] == "abandon"
-    assert leave_state["materialized"] == ""
+    assert leave_state == {"intent": "abandon"}
+    assert driver.lines == ["> /abandon"]
 
 
 @pytest.mark.anyio
-async def test_abandon_records_materialized_true_for_materialized_change(
+async def test_draft_abandon_answered_elsewhere_is_not_echoed(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="D", quest_id="ab1e", base_branch="main")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            return "/abandon"   # the local result wins the tick the remote answer lands
+        raise AssertionError("only cancellation ends the solicit")
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab1e", tmp_path, solicit=_solicit, confirm=_no_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == []
+
+
+@pytest.mark.anyio
+async def test_abandon_on_a_built_quest_confirms_before_abandoning(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab2")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    asked: list[str] = []
+
+    async def _confirm(question: str) -> bool:
+        assert not server.abandoned   # no abandon control before the answer
+        assert leave_state == {}      # no abandon intent before the answer
+        asked.append(question)
+        return True
+
+    driver = _GateDriver()
+    await _answer_one_gate(
+        sock, server, "ab2", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state)
+
+    assert asked == [_question("ab2")]
+    assert server.abandoned
+    assert leave_state == {
+        "intent": "abandon", "removed": "worktree and branch imp/ab2 (no commits)"}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_declined_keeps_the_quest_and_reasks_the_gate(
     tmp_path: Path,
 ) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
-    meta_path = ch.quest_dir / "quest.json"
-    meta = json.loads(meta_path.read_text())
-    meta["materialized"] = True
-    meta_path.write_text(json.dumps(meta))
+    _seed_built(tmp_path, "ab3")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    replies = iter(["/abandon", "keep going"])
+    solicited: list[str] = []
 
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
+        solicited.append(prompt)
+        return next(replies)
+
+    async def _decline(_question: str) -> bool:
+        return False
+
+    driver = _GateDriver()
+    received = await _answer_one_gate(
+        sock, server, "ab3", tmp_path, solicit=_solicit, confirm=_decline,
+        driver=driver, leave_state=leave_state)
+
+    assert solicited == ["reply?", "reply?"]   # the same gate, asked again
+    assert received == ["keep going"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon", "Kept ab3."]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirm_is_cancelled_by_an_answer_from_elsewhere(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab4")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return True   # unreachable: only cancellation ends it
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab4", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirmed_as_the_gate_is_answered_elsewhere_is_dropped(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab4b")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            return True   # y lands in the tick the remote answer cancels the gate
+        raise AssertionError("only cancellation ends the confirm")
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab4b", tmp_path, solicit=_abandon_reply, confirm=_confirm,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert received == ["remote-answer"]
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon"]
+
+
+@pytest.mark.anyio
+async def test_abandon_reask_is_cancelled_by_an_answer_from_elsewhere(
+    tmp_path: Path,
+) -> None:
+    _seed_built(tmp_path, "ab5")
+    sock, server = _gate_server(tmp_path)
+    leave_state: dict[str, str] = {}
+    opened = anyio.Event()
+    cancelled = anyio.Event()
+    calls = 0
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "/abandon"
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return "late local reply"   # unreachable: only cancellation ends it
+
+    async def _decline(_question: str) -> bool:
+        return False
+
+    driver = _GateDriver()
+    received = await _answer_elsewhere(
+        sock, server, "ab5", tmp_path, solicit=_solicit, confirm=_decline,
+        driver=driver, leave_state=leave_state, opened=opened, cancelled=cancelled)
+
+    assert calls == 2
+    assert received == ["remote-answer"]   # no local reply reached the gate
+    assert not server.abandoned
+    assert leave_state == {}
+    assert driver.lines == ["> /abandon", "Kept ab5."]
+
+
+@pytest.mark.anyio
+async def test_abandon_confirm_is_cancelled_by_escalation(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab6")
+    sock, server = _gate_server(tmp_path)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(30):   # deadlock backstop only
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        return await user_chat_input_fn("reply?")
-
-    coord = InterruptCoordinator()
+        return str(await user_chat_input_fn("reply?"))
 
     async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, "ab2", "T", on_event=on_event)
+        client = SessionClient(sock, "ab6", "T", on_event=on_event)
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/abandon"
+    opened = anyio.Event()
+    cancelled = anyio.Event()
 
-    class _Driver(_NullDriver):
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-        def append_committed_reply(self, _text: str) -> None: ...
+    async def _confirm(_question: str) -> bool:
+        opened.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            cancelled.set()
+            raise
+        return True   # unreachable: only cancellation ends it
 
+    coord = InterruptCoordinator()
+    driver = _GateDriver()
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(30):   # deadlock backstop only
+    endings: list[StreamEnding] = []
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
 
             async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, confirm=_no_confirm, quest_id="ab2", control_root=tmp_path,
-                    leave_state=leave_state, leave_mode="new")
+                ending, _witness = await run_terminal_client(
+                    attach=_attach, driver=driver, coord=coord,
+                    solicit=_abandon_reply, confirm=_confirm, quest_id="ab6",
+                    control_root=tmp_path, leave_state=leave_state, leave_mode="new")
+                endings.append(ending)
 
             tg.start_soon(_client)
+            await opened.wait()
+            assert coord.escalation_event is not None
+            coord.escalation_event.set()   # force-quit / Ctrl-\ / terminal gone
+            await wait_until(lambda: endings)
+            tg.cancel_scope.cancel()
+
+    assert cancelled.is_set()
+    assert endings == [StreamEnding.CUT]
+    assert driver.lines == ["> /abandon"]   # no "Kept ab6."
+    assert not server.abandoned
+    assert leave_state == {}
+
+
+@pytest.mark.anyio
+async def test_headless_abandon_on_a_built_quest_proceeds_unasked(tmp_path: Path) -> None:
+    _seed_built(tmp_path, "ab7")
+    sock, server = _gate_server(tmp_path)
+    coord = InterruptCoordinator()
+    leave_state: dict[str, str] = {}
+
+    await _answer_one_gate(
+        sock, server, "ab7", tmp_path, solicit=make_headless_solicit("/abandon", coord),
+        confirm=confirm_unasked, driver=_GateDriver(), leave_state=leave_state,
+        coord=coord)
 
     assert server.abandoned
-    assert leave_state["intent"] == "abandon"
-    assert leave_state["materialized"] == "1"
+    assert leave_state == {
+        "intent": "abandon", "removed": "worktree and branch imp/ab7 (no commits)"}
 
 
 @pytest.mark.anyio
