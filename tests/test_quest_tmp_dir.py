@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
+from imp.engine.abandon import archive_conversation, discard_conversation, tear_down_quest
 from imp.engine.env import ensure_quest_tmp_dir
+from imp.engine.executor import _archive_and_reap
 from imp.engine.quest import Quest
 from imp.remote.session.attach import spawn_session_daemon
 from tests.conftest import _seed_control
@@ -281,3 +284,55 @@ def test_ensure_quest_tmp_dir_leaves_pre_existing_ancestors_above_the_parent_alo
     assert root.stat().st_mode & 0o777 == 0o755
     assert quest_dir.stat().st_mode & 0o777 == 0o700
     assert leaf.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.fixture
+def plant_read_only() -> Iterator[Callable[[Path], Path]]:
+    """Plant a credential-copy-shaped subtree: a 0o500 dir holding a 0o400 file."""
+    planted: list[Path] = []
+
+    def plant(parent: Path) -> Path:
+        ro = parent / "provider-auth"
+        ro.mkdir()
+        (ro / "auth.json").write_text("{}")
+        (ro / "auth.json").chmod(0o400)
+        ro.chmod(0o500)
+        planted.append(ro)
+        return ro
+
+    yield plant
+    for ro in planted:  # on failure, let the per-test temp-root's plain rmtree reap it
+        if ro.exists():
+            ro.chmod(0o700)
+
+
+def _reap_merged(quest: Quest) -> None:
+    _archive_and_reap(quest, quest.event_log())
+
+
+@pytest.mark.parametrize("teardown", [
+    pytest.param(_reap_merged, id="archive_and_reap"),
+    pytest.param(tear_down_quest, id="tear_down_quest"),
+    pytest.param(archive_conversation, id="archive_conversation"),
+    pytest.param(discard_conversation, id="discard_conversation"),
+])
+def test_quest_end_removes_a_read_only_tmp_subtree(
+    tmp_path: Path, plant_read_only: Callable[[Path], Path],
+    teardown: Callable[[Quest], None], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="T", quest_id="roend", base_branch="main")
+    ensure_quest_tmp_dir(ch.tmp_dir)
+    ro = plant_read_only(ch.tmp_dir)
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+
+    teardown(ch)
+
+    assert not ch.tmp_dir.exists()
+    assert str(ro) in chmodded  # proves force_rmtree's chmod walk ran

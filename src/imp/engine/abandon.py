@@ -4,8 +4,6 @@
 live home; on a built-out quest also pop the merge queue and remove the worktree + branch."""
 from __future__ import annotations
 
-import shutil
-
 from imp.engine import merge_queue, worktree
 from imp.engine.quest import Quest
 from imp.engine.sandbox import force_rmtree
@@ -42,7 +40,7 @@ def tear_down_quest(quest: Quest) -> None:
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
     force_rmtree(quest.quest_dir)
-    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    force_rmtree(quest.tmp_dir)
     force_rmtree(quest.var_tmp_dir)
 
 
@@ -73,7 +71,7 @@ def archive_conversation(quest: Quest) -> None:
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
     force_rmtree(quest.quest_dir)
-    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    force_rmtree(quest.tmp_dir)
     force_rmtree(quest.var_tmp_dir)
 
 
@@ -98,5 +96,5 @@ def discard_conversation(quest: Quest) -> None:
     with ProjectLock(quest.quest_dir / "lock").acquire():
         pass
     force_rmtree(quest.quest_dir)
-    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    force_rmtree(quest.tmp_dir)
     force_rmtree(quest.var_tmp_dir)

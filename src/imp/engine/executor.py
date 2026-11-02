@@ -1032,7 +1032,7 @@ def _archive_and_reap(quest: Quest, log: EventLog) -> None:
     else:
         force_rmtree(quest.quest_dir)
     # No other reaper touches these, and the archive never reads them.
-    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    force_rmtree(quest.tmp_dir)
     session_socket_path(quest.id).unlink(missing_ok=True)
     force_rmtree(quest.var_tmp_dir)
 
