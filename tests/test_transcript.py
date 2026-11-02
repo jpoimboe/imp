@@ -10,11 +10,14 @@ from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
+    RESUME_REDO_NUDGE,
     REWORK_RESULT_FRAME,
     ContinuationNote,
     SkillReply,
     Transcript,
+    answer_complete_step_on_resume,
     balance_success_on_resume,
+    complete_step_tail,
     deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
@@ -456,6 +459,142 @@ def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path
     t.append(msgs[0])
     assert synthesize_native_success_on_resume(
         msgs, t, InMemoryEventLog(), "x") is None
+
+
+_CS = ToolUseBlock(id="c0", name="mcp__imp__complete_step", input={"status": "Success"})
+_REDO = Message(role="user", content=(TextBlock(text=RESUME_REDO_NUDGE),))
+
+
+def _cs_user(*blocks: TextBlock | ToolResultBlock) -> Message:
+    return Message(role="user", content=blocks)
+
+
+def _cs_history(*tail: Message) -> list[Message]:
+    return [_cs_user(TextBlock(text="go")),
+            Message(role="assistant", content=(_CS,)), *tail]
+
+
+def _cs_answer(tmp_path: Path, msgs: list[Message], feedback: str | None,
+               ) -> tuple[list[Message], InMemoryEventLog, Transcript]:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    t.rewrite(msgs)
+    elog = InMemoryEventLog()
+    cs = complete_step_tail(msgs)
+    assert cs == _CS
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", cs, feedback)
+    assert t.load() == msgs
+    return msgs, elog, t
+
+
+def _cs_results(msgs: list[Message]) -> list[ToolResultBlock]:
+    return [b for m in msgs for b in m.content
+            if isinstance(b, ToolResultBlock) and b.tool_use_id == "c0"]
+
+
+@pytest.mark.parametrize("tail", [
+    (),
+    (_cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),),
+    (_cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),
+     _cs_user(TextBlock(text="OLD FEEDBACK"))),
+])
+def test_complete_step_tail_finds_the_call_under_user_turns(
+        tail: tuple[Message, ...]) -> None:
+    assert complete_step_tail(_cs_history(*tail)) == _CS
+
+
+def test_complete_step_tail_none_off_a_complete_step_tail() -> None:
+    bash = ToolUseBlock(id="b1", name="bash", input={"cmd": "x"})
+    assert complete_step_tail(_cs_history(
+        _cs_user(ToolResultBlock(tool_use_id="c0", content="step complete")),
+        Message(role="assistant", content=(TextBlock(text="all done"),)))) is None
+    assert complete_step_tail([_cs_user(TextBlock(text="go")),
+                               Message(role="assistant", content=(bash,))]) is None
+    assert complete_step_tail([]) is None
+    assert complete_step_tail([_cs_user(TextBlock(text="go"))]) is None
+    assert complete_step_tail(
+        [Message(role="system", content=(TextBlock(text="sys"),))]) is None
+
+
+def test_answer_complete_step_rework_replaces_stored_result_in_place(
+        tmp_path: Path) -> None:
+    fb = "REVISE: fix X"
+    stored = ToolResultBlock(tool_use_id="c0", content=[{"type": "text", "text": "step complete"}])
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(_cs_user(stored)), fb)
+    framed = ToolResultBlock(tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + fb,
+                             is_error=True)
+    assert msgs[2:] == [_cs_user(framed), _REDO]
+    evs = list(elog.read())
+    assert [(e["type"], e["payload"]["subtype"]) for e in evs] == [
+        ("engine_message", "continuation"), ("engine_message", "continuation")]
+    assert evs[0]["payload"]["content"] == [{
+        "type": "tool_result", "tool_use_id": "c0",
+        "content": REWORK_RESULT_FRAME + "\n\n" + fb, "is_error": True}]
+    assert evs[1]["payload"]["content"] == [{"type": "text", "text": RESUME_REDO_NUDGE}]
+
+
+def test_answer_complete_step_goto_keeps_stored_success(tmp_path: Path) -> None:
+    stored = ToolResultBlock(tool_use_id="c0", content=[{"type": "text", "text": "step complete"}])
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(_cs_user(stored)), None)
+    assert msgs[2:] == [_cs_user(stored), _REDO]
+    assert [e["payload"]["content"] for e in elog.read()] == [
+        [{"type": "text", "text": RESUME_REDO_NUDGE}]]
+
+
+def test_answer_complete_step_goto_answers_a_dangling_call(tmp_path: Path) -> None:
+    msgs, elog, _ = _cs_answer(tmp_path, _cs_history(), None)
+    ok = ToolResultBlock(tool_use_id="c0", content="previous step output recorded; resuming")
+    assert msgs[2:] == [_cs_user(ok), _REDO]
+    assert [e["type"] for e in elog.read()] == ["engine_message", "engine_message"]
+    assert not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+                   for m in msgs for b in m.content)
+
+
+def test_answer_complete_step_goto_overrides_a_cli_rejection(tmp_path: Path) -> None:
+    rejected = ToolResultBlock(tool_use_id="c0", content="rejected", is_error=True)
+    msgs, _, _ = _cs_answer(
+        tmp_path, _cs_history(_cs_user(rejected), _cs_user(TextBlock(text="hi"))), None)
+    ok = ToolResultBlock(tool_use_id="c0", content="previous step output recorded; resuming")
+    assert msgs[2:] == [_cs_user(ok), _cs_user(TextBlock(text="hi")), _REDO]
+
+
+def test_answer_complete_step_prepends_to_the_trailing_run(tmp_path: Path) -> None:
+    fb = "REVISE: fix X"
+    msgs, elog, _ = _cs_answer(
+        tmp_path, _cs_history(_cs_user(TextBlock(text="OLD FEEDBACK"))), fb)
+    framed = ToolResultBlock(tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + fb,
+                             is_error=True)
+    assert msgs[2:] == [_cs_user(framed, TextBlock(text="OLD FEEDBACK")), _REDO]
+    assert [e["payload"]["content"] for e in elog.read()] == [
+        [{"type": "tool_result", "tool_use_id": "c0",
+          "content": REWORK_RESULT_FRAME + "\n\n" + fb, "is_error": True}],
+        [{"type": "text", "text": RESUME_REDO_NUDGE}]]
+
+
+def test_answer_complete_step_reapplied_plainly_keeps_the_rework(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "REVISE: fix X")
+    before = list(msgs)
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, None)
+    assert msgs == before and list(elog.read()) == []
+    assert sum(m == _REDO for m in msgs) == 1
+
+
+def test_answer_complete_step_rework_replaces_an_earlier_rework(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "F1")
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, "F2")
+    assert _cs_results(msgs) == [ToolResultBlock(
+        tool_use_id="c0", content=REWORK_RESULT_FRAME + "\n\n" + "F2", is_error=True)]
+    assert msgs[-1] == _REDO and sum(m == _REDO for m in msgs) == 1
+    assert [e["type"] for e in elog.read()] == ["engine_message"]
+
+
+def test_answer_complete_step_rework_same_feedback_is_a_no_op(tmp_path: Path) -> None:
+    msgs, _, t = _cs_answer(tmp_path, _cs_history(), "F1")
+    before = list(msgs)
+    elog = InMemoryEventLog()
+    answer_complete_step_on_resume(msgs, t, elog, "step:p/s", _CS, "F1")
+    assert msgs == before and list(elog.read()) == []
 
 
 def test_deliver_engine_continuation_journals_internal_event_not_user_message(

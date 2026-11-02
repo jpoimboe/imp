@@ -356,6 +356,19 @@ def unanswered_tool_uses(messages: list[Message]) -> list[ToolUseBlock]:
             if isinstance(b, ToolUseBlock) and b.id not in answered]
 
 
+def complete_step_tail(messages: list[Message]) -> ToolUseBlock | None:
+    """The complete_step tool_use in the last assistant turn when only user turns
+    follow it: dangling, under its stored "step complete" result, or already
+    answered by an earlier resume. Read after the marker repair has dropped claude's
+    interrupt marker."""
+    start = _trailing_user_start(messages)
+    if start == 0 or messages[start - 1].role != "assistant":
+        return None
+    return next((b for b in messages[start - 1].content
+                 if isinstance(b, ToolUseBlock)
+                 and canonicalize_tool_name(b.name) == "complete_step"), None)
+
+
 def _resume_result(
     tu: ToolUseBlock, captured: dict[str, tuple[str, bool]] | None,
 ) -> ToolResultBlock:
@@ -457,6 +470,57 @@ def answer_unanswered_tool_uses_on_resume(
         transcript.rewrite(messages)
     for rb in results:
         elog.append_tool_result(agent_id=agent_id, block=rb)
+
+
+def answer_complete_step_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, cs: ToolUseBlock, feedback: str | None,
+) -> None:
+    """Answer a complete_step tail on a claude rework or backward-goto resume.
+
+    Rework (`feedback`): cs's result becomes the framed feedback, is_error. Goto: an
+    existing success or framed-feedback result is kept (a paused rework resumed
+    plainly), else cs gets a success result. A changed result replaces the old one
+    in place, else heads the trailing user run, else forms a new user turn, and is
+    journaled as an engine continuation, never a tool_result event. No durability
+    note. Then RESUME_REDO_NUDGE trails, unless it already does.
+    """
+    start = _trailing_user_start(messages)
+    hit = next(((i, j, b) for i in range(start, len(messages))
+                for j, b in enumerate(messages[i].content)
+                if isinstance(b, ToolResultBlock) and b.tool_use_id == cs.id), None)
+    old = hit[2] if hit is not None else None
+    if feedback:
+        new = ToolResultBlock(tool_use_id=cs.id, is_error=True,
+                              content=REWORK_RESULT_FRAME + "\n\n" + feedback)
+    elif old is not None and (not old.is_error or (
+            isinstance(old.content, str)
+            and old.content.startswith(REWORK_RESULT_FRAME))):
+        new = old
+    else:
+        new = ToolResultBlock(tool_use_id=cs.id, is_error=False,
+                              content="previous step output recorded; resuming")
+    if new != old:
+        if hit is not None:
+            i, j, _ = hit
+            content = list(messages[i].content)
+            content[j] = new
+            messages[i] = Message(role="user", content=tuple(content))
+            transcript.rewrite(messages)
+        elif start < len(messages):
+            messages[start] = Message(
+                role="user", content=(new, *messages[start].content))
+            transcript.rewrite(messages)
+        else:
+            turn = Message(role="user", content=(new,))
+            messages.append(turn)
+            transcript.append(turn)
+        elog.append_engine_message(
+            agent_id=agent_id, message=Message(role="user", content=(new,)),
+            subtype="continuation")
+    if messages[-1] != Message(role="user", content=(TextBlock(text=RESUME_REDO_NUDGE),)):
+        deliver_engine_continuation(
+            messages, transcript, elog, agent_id, RESUME_REDO_NUDGE)
 
 
 def balance_success_on_resume(
