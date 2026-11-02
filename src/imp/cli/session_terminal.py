@@ -38,6 +38,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.cli.terminal_watchdog import WatchedStream, terminal_gone, watch_terminal
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
+from imp.engine.state import classify_pause_halt
 from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_LEAVE,
@@ -70,10 +71,11 @@ class TerminalOutcome:
 @dataclass(frozen=True)
 class WitnessedPause:
     """A workflow_paused seen this segment. `info` is None when its reason folds to
-    nothing — `awaiting_user`, or a payload carrying no reason — which is the bare
-    `paused` block, not the absence of a pause."""
+    nothing (`awaiting_user`, or no reason): the bare `paused` block. `failed` is
+    classify_pause_halt's verdict, independent of the block's colour."""
 
     info: _PauseInfo | None
+    failed: bool
 
 
 class RunWitness:
@@ -129,7 +131,10 @@ class RunWitness:
         """The outer option: None when no pause was witnessed this segment."""
         if self._paused is None:
             return None
-        return WitnessedPause(info=self._folded_reason())
+        failed = classify_pause_halt(
+            str(self._paused.get("reason") or ""),
+            self._paused.get("interrupt_reason")) == "error"
+        return WitnessedPause(info=self._folded_reason(), failed=failed)
 
     def terminal(self) -> TerminalOutcome | None:
         """The segment-terminal event witnessed, if any. One slot, so witnessing two

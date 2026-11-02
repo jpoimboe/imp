@@ -3708,14 +3708,14 @@ def test_run_witness_awaiting_user_pause_is_witnessed_with_no_renderable_reason(
     witness = RunWitness()
     witness.note({"type": "workflow_paused", "payload": {"reason": "awaiting_user"}})
     # The outer option says "a pause happened"; the inner None says "nothing to render".
-    assert witness.paused() == WitnessedPause(info=None)
+    assert witness.paused() == WitnessedPause(info=None, failed=False)
 
 
 def test_run_witness_reasonless_pause_is_witnessed_with_no_renderable_reason() -> None:
     from imp.cli.session_terminal import RunWitness, WitnessedPause
     witness = RunWitness()
     witness.note({"type": "workflow_paused", "payload": {}})
-    assert witness.paused() == WitnessedPause(info=None)
+    assert witness.paused() == WitnessedPause(info=None, failed=True)
 
 
 def test_run_witness_pause_folds_the_causal_errors_agent_text() -> None:
@@ -3727,7 +3727,7 @@ def test_run_witness_pause_folds_the_causal_errors_agent_text() -> None:
         "message": "overloaded_error"}})
     witness.note({"type": "workflow_paused", "payload": {"reason": "api"}})
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="api", cause="API Error 400 — overloaded\ntrace"))
+        info=_PauseInfo(base="api", cause="API Error 400 — overloaded\ntrace"), failed=True)
 
 
 def test_run_witness_pause_falls_back_to_the_errors_message() -> None:
@@ -3737,7 +3737,7 @@ def test_run_witness_pause_falls_back_to_the_errors_message() -> None:
     witness.note({"type": "error", "payload": {"message": "internal boom"}})
     witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="internal_error", cause="internal boom"))
+        info=_PauseInfo(base="internal_error", cause="internal boom"), failed=True)
 
 
 def test_run_witness_pause_drops_an_error_a_later_step_start_recovered() -> None:
@@ -3749,7 +3749,7 @@ def test_run_witness_pause_drops_an_error_a_later_step_start_recovered() -> None
     witness.note({"type": "workflow_paused", "payload": {
         "reason": "interrupt", "interrupt_reason": "interrupt"}})
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="interrupt", cause=None))
+        info=_PauseInfo(base="interrupt", cause=None), failed=False)
 
 
 def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> None:
@@ -3764,7 +3764,35 @@ def test_run_witness_pause_prefers_interrupt_reason_over_the_plain_reason() -> N
         witness.note(event)
     seen = witness.paused()
     assert seen is not None
-    assert seen == WitnessedPause(info=_PauseInfo(base="ctrl-d", cause=None))
+    assert seen == WitnessedPause(
+        info=_PauseInfo(base="ctrl-d", cause=None), failed=False)
+
+
+@pytest.mark.parametrize(("payload", "failed"), [
+    pytest.param({"reason": "awaiting_user"}, False, id="awaiting-user"),
+    pytest.param({"reason": "awaiting_turn"}, False, id="awaiting-turn"),
+    pytest.param({"reason": "interrupt", "interrupt_reason": "ctrl-c"}, False,
+                 id="headless-ctrl-c"),
+    pytest.param({"reason": "api", "interrupt_reason": "sigterm"}, False,
+                 id="interrupt-over-error"),
+    pytest.param({"reason": "api"}, True, id="api"),
+    pytest.param({"reason": "terminated"}, True, id="terminated"),
+    pytest.param({"reason": "max_loops"}, True, id="max-loops"),
+    pytest.param({"reason": "script_blocked"}, True, id="script-blocked"),
+    pytest.param({"reason": "sandbox_spawn_failed"}, True, id="sandbox-spawn-failed"),
+    pytest.param({"reason": "unknown_step"}, True, id="unknown-step"),
+    pytest.param({"reason": "clean_tree"}, True, id="clean-tree"),
+    pytest.param({}, True, id="reasonless"),
+])
+def test_run_witness_pause_failure_is_the_engines_classification(
+    payload: dict[str, str], failed: bool,
+) -> None:
+    from imp.cli.session_terminal import RunWitness
+    witness = RunWitness()
+    witness.note({"type": "workflow_paused", "payload": payload})
+    seen = witness.paused()
+    assert seen is not None
+    assert seen.failed is failed
 
 
 def test_run_witness_keeps_the_terminal_event_it_saw() -> None:
@@ -3810,7 +3838,7 @@ def test_run_witness_after_a_resume_reports_the_fresh_pause_only() -> None:
     witness.note({"type": "workflow_paused", "payload": {"reason": "max_loops"}})
     assert witness.terminal() is None
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="max_loops", cause=None))
+        info=_PauseInfo(base="max_loops", cause=None), failed=True)
 
 
 def test_run_witness_after_a_resume_reports_a_fresh_merge() -> None:
@@ -3835,7 +3863,7 @@ def test_run_witness_a_second_pause_does_not_inherit_the_first_pauses_cause() ->
     witness.note({"type": "workflow_paused", "payload": {
         "reason": "interrupt", "interrupt_reason": "interrupt"}})
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="interrupt", cause=None))
+        info=_PauseInfo(base="interrupt", cause=None), failed=False)
 
 
 def test_run_witness_pause_is_bare_when_the_error_carries_no_cause_fields() -> None:
@@ -3846,7 +3874,7 @@ def test_run_witness_pause_is_bare_when_the_error_carries_no_cause_fields() -> N
         "category": "internal", "kind": "ValueError"}})
     witness.note({"type": "workflow_paused", "payload": {"reason": "internal_error"}})
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="internal_error", cause=None))
+        info=_PauseInfo(base="internal_error", cause=None), failed=True)
 
 
 def test_run_witness_pause_keeps_only_the_final_attempts_error() -> None:
@@ -3863,7 +3891,7 @@ def test_run_witness_pause_keeps_only_the_final_attempts_error() -> None:
     ):
         witness.note(event)
     assert witness.paused() == WitnessedPause(
-        info=_PauseInfo(base="retry_ceiling", cause="final failure"))
+        info=_PauseInfo(base="retry_ceiling", cause="final failure"), failed=True)
 
 
 @pytest.mark.anyio

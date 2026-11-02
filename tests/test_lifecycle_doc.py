@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+from imp.cli.exit_codes import ExitCode
 
 DOC = Path("docs/guide/lifecycle.md")
 
@@ -69,3 +72,12 @@ def test_lifecycle_places_the_quest_home_outside_the_checkout() -> None:
 def test_lifecycle_documents_worktree_setup_on_go_live() -> None:
     body = DOC.read_text()
     assert "re-runs it on every `create_and_enter_worktree` call" in body
+
+
+def test_lifecycle_exit_code_table_matches_the_exit_code_constants() -> None:
+    body = DOC.read_text()
+    assert "\n## Exit codes\n" in body
+    section = body.split("\n## Exit codes\n", 1)[1].split("\n## ", 1)[0]
+    codes = [int(c) for c in re.findall(r"^\| (\d+) \|", section, flags=re.M)]
+    assert codes == sorted(int(code) for code in ExitCode)
+    assert "| 130 | You ended it and nothing failed" in section

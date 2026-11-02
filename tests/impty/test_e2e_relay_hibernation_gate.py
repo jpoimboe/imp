@@ -28,6 +28,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -86,9 +87,11 @@ _ATTACH_POLL = (
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 
-def _seed_scripted_gate_project(root: Path) -> Path:
-    """Seed a scripted-provider repo whose single workflow step is an agent that
-    calls bash (polling for the cli_attached marker) then ends its turn to yield.
+def _seed_scripted_gate_project(
+    root: Path, *, turns: list[dict[str, Any]] | None = None
+) -> Path:
+    """Seed the interactive one-step gate workflow whose scripted agent plays
+    `turns`, defaulting to the cli_attached poll then a bare turn-end.
     Returns script.json."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
@@ -111,15 +114,16 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         "default-workflow: default\ndefault-base: main\n")
     (project_state_dir(root) / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
-    script_path.write_text(json.dumps(
-        {"default": [
+    if turns is None:
+        turns = [
             {"text": "setting up",
              "tools": [
                  {"name": "create_and_enter_worktree", "input": {}},
                  {"name": "bash", "input": {"command": _ATTACH_POLL}},
              ]},
             {"text": "waiting for you"},
-        ]}))
+        ]
+    script_path.write_text(json.dumps({"default": turns}))
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
     return script_path

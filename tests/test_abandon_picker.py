@@ -30,13 +30,13 @@ def _async_return(value):
 
 
 @pytest.mark.anyio
-async def test_abandon_picker_empty_prints_and_exits_2(
+async def test_abandon_picker_empty_prints_and_exits_0(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     monkeypatch.setattr(s, "_status_rows", lambda c: [])
     rc = await m._pick_abandon_target(tmp_path)
     out = capsys.readouterr().out
-    assert rc == 2
+    assert rc == 0
     assert "Nothing to abandon." in out
 
 
@@ -88,6 +88,23 @@ async def test_abandon_picker_tty_multiple_uses_selection(
     assert await m._pick_abandon_target(tmp_path) == "bbb222"
 
 
+@pytest.mark.anyio
+async def test_abandon_picker_cancel_exits_130_abandon_cancelled(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    rows = [_row("aaa111", last="2026-06-11T00:00:00+00:00"),
+            _row("bbb222", last="2026-06-10T00:00:00+00:00")]
+    monkeypatch.setattr(s, "_status_rows", lambda c: rows)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_picker(candidates, *, now, color, header, selected_index):
+        return None
+
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
+    assert await m._pick_abandon_target(tmp_path) == 130
+    assert capsys.readouterr().err == "imp: abandon cancelled\n"
+
+
 def test_cmd_abandon_no_token_routes_through_picker(
     monkeypatch, tmp_path: Path,
 ) -> None:
@@ -109,13 +126,13 @@ def test_cmd_abandon_no_token_picker_rc_short_circuits(
     monkeypatch, tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_pick_abandon_target", _async_return(2))
+    monkeypatch.setattr(m, "_pick_abandon_target", _async_return(130))
 
     def boom_abandon(*a, **k):
         raise AssertionError("_abandon called despite picker rc")
 
     monkeypatch.setattr(m, "_abandon_local", boom_abandon)
-    assert m._cmd_abandon(argparse.Namespace(token=None, yes=False)) == 2
+    assert m._cmd_abandon(argparse.Namespace(token=None, yes=False)) == 130
 
 
 def test_cmd_abandon_with_token_skips_picker(

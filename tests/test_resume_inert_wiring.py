@@ -379,11 +379,11 @@ async def test_inert_ask_line_ctrl_d_retains_caret(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
-async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
+async def test_resume_inert_ctrl_d_retains_caret_parks_and_exits_130(
     exc: type[BaseException], monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # AC7: cancel at the inert prompt parks the quest, returns 0, caret kept.
+    # Ctrl-D at the inert prompt parks the quest and exits 130, caret kept.
     ch = _seed(tmp_path)
     before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     monkeypatch.setattr(m, "should_use_color", lambda _s: False)
@@ -392,7 +392,7 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
 
     rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
-    assert rc == 0
+    assert rc == 130
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before                       # nothing launched -> quest parked
     out = capsys.readouterr().out
@@ -447,12 +447,12 @@ async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
 
 @pytest.mark.anyio
 @_LEAVE_SIGNALS
-async def test_resume_inert_leave_signal_parks_and_returns_zero(
+async def test_resume_inert_leave_signal_parks_and_exits_130(
     leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
     signal_sentinels: Callable[[int, object], None],
 ) -> None:
-    # Through the whole inert-resume flow: rc 0, nothing launched or journaled,
+    # Through the whole inert-resume flow: rc 130, nothing launched or journaled,
     # the quest still parked, and the pause block is the last thing printed.
     ch = _seed(tmp_path)
     before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
@@ -465,7 +465,7 @@ async def test_resume_inert_leave_signal_parks_and_returns_zero(
         rc = await m._resume_inert(
             ch, "Which DB should I use?", marker="resuming", notice=None)
 
-    assert rc == 0
+    assert rc == 130
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before
     assert State.load(ch.state_dir).status == "paused"

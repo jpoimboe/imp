@@ -224,7 +224,7 @@ async def test_an_abandon_sent_by_another_client_renders_the_abandoned_block(
 
     out = capsys.readouterr().out
     assert server.abandoned
-    assert rc_holder["rc"] == 0
+    assert rc_holder["rc"] == 130
     assert out.endswith(f"{quest.id} · T · abandoned\n\n")
     assert "lost the connection" not in out
 
@@ -311,10 +311,6 @@ async def test_run_session_client_returns_130_when_user_interrupted(
         return ""
 
     coord = InterruptCoordinator()
-    # The durable `interrupted` flag (set by signal_pause on a real Ctrl-C) is what
-    # the closing block's one remap rule reads for 130 — set it ALONE (should_pause
-    # stays False) so this test fails if that rule regresses to reading should_pause.
-    coord._interrupted = True
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
         leave_mode="new", stream=_watched())
@@ -1409,7 +1405,7 @@ async def test_end_frame_with_a_genuine_pause_renders_the_pause_summary(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     assert out.split("\n")[0] == "paused"
     assert f"resume: imp resume {quest.id}" in out
     assert "lost the connection" not in out
@@ -1652,7 +1648,7 @@ async def test_an_end_frame_disposition_renders_that_leaves_block(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == f"{quest.id} · T · " + tail.format(id=quest.id) + "\n"
 
 
@@ -1674,7 +1670,7 @@ async def test_an_end_frame_disposition_outranks_a_witnessed_pause(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == f"{quest.id} · T · abandoned\n\n"
 
 
@@ -1694,7 +1690,7 @@ async def test_the_clients_own_leave_outranks_the_end_frame_disposition(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == (f"{quest.id} · T · shelved\n"
                    f"resume: imp resume {quest.id} — or find it later with imp search\n\n")
 
@@ -1715,7 +1711,7 @@ async def test_ctrl_d_leave_still_renders_its_pause_block(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     # The WHOLE buffer, not a prefix: AC 5 asks for byte-identical leave rendering.
     assert out == (
         "> Ctrl-D\n"                       # the caret shadow of the keystroke
@@ -1741,7 +1737,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     assert out == (
         "paused · SIGTERM\n"               # a signal typed nothing: no caret shadow
         f"{quest.id} · T\n"
@@ -1766,7 +1762,7 @@ async def test_save_leave_still_renders_saved_as_draft(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == (
         f"{quest.id} · T · saved as draft\n"
         f"resume: imp resume {quest.id}\n"
@@ -1792,7 +1788,7 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == (
         f"{quest.id} · T · saved as draft\n"
         f"resume: imp resume {quest.id}\n"
@@ -1818,7 +1814,7 @@ async def test_shelve_leave_still_renders_shelved(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc == 130
     assert out == (
         f"{quest.id} · T · shelved\n"
         f"resume: imp resume {quest.id} — or find it later with imp search\n"
@@ -1842,7 +1838,7 @@ async def test_headless_gate_detach_still_renders_the_bare_pause(
         solicit=lambda _p: _never(), leave_mode="new",
         non_interactive=True, stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     # No leave_reason, so no qualifier: the bare pause block, exactly as today.
     assert out == (
         "paused\n"
@@ -1871,7 +1867,7 @@ async def test_abandon_renders_abandoned_with_the_escalation_event_unset(
     out = capsys.readouterr().out
     # The leave_state arm carries this one: escalation is never set for /abandon.
     assert coord.escalation_event is None
-    assert rc == 0
+    assert rc == 130
     assert out == f"{quest.id} · T · abandoned\n\n"      # no resume line for an abandon
 
 
@@ -1987,7 +1983,7 @@ async def test_witnessed_awaiting_user_pause_renders_the_bare_block(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     assert out == (
         "paused\n"
         f"{quest.id} · T\n"
@@ -2099,7 +2095,7 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
         solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     assert out == (
         "> Ctrl-D\n"
         "paused · Ctrl-D\n"
@@ -2135,7 +2131,7 @@ async def test_headless_detach_on_a_resumed_quest_renders_the_bare_pause(
         solicit=lambda _p: _never(), leave_mode="new",
         non_interactive=True, stream=_watched())
     out = capsys.readouterr().out
-    assert rc == 1
+    assert rc == 130
     assert out == (
         "paused\n"
         f"{quest.id} · T\n"

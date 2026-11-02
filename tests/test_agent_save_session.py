@@ -116,7 +116,7 @@ async def test_agent_save_ends_with_saved_as_draft(
             tg.start_soon(_client)
 
     out = capsys.readouterr().out
-    assert rc["rc"] == 0
+    assert rc["rc"] == 130
     assert "lost the connection" not in out
     assert out.endswith(f"{QID} · x · saved as draft\nresume: imp resume {QID}\n\n")
 

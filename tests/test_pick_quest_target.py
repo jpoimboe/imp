@@ -33,7 +33,7 @@ async def test_empty_routes_to_on_empty() -> None:
 
     rc = await m._pick_quest_target(
         control=Path("."), rows=[], header="h",
-        on_empty=on_empty, on_non_tty=lambda rows: 0)
+        on_empty=on_empty, on_cancel=lambda: 0, on_non_tty=lambda rows: 0)
     assert rc == 7
     assert called["empty"]
 
@@ -49,7 +49,7 @@ async def test_non_tty_routes_to_on_non_tty(monkeypatch) -> None:
 
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a")], header="h",
-        on_empty=lambda: 0, on_non_tty=on_non_tty)
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=on_non_tty)
     assert rc == 9
     assert seen["rows"][0][0] == "a"
 
@@ -65,7 +65,7 @@ async def test_non_interactive_flag_routes_to_on_non_tty(monkeypatch) -> None:
 
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a")], header="h",
-        on_empty=lambda: 0, on_non_tty=on_non_tty,
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=on_non_tty,
         non_interactive=True)
     assert rc == 9
     assert seen["rows"][0][0] == "a"
@@ -81,7 +81,7 @@ async def test_tty_lone_auto_selects_without_drawing_picker(monkeypatch) -> None
     monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("solo")], header="h",
-        on_empty=lambda: 0, on_non_tty=lambda rows: 0)
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=lambda rows: 0)
     assert rc == "solo"
 
 
@@ -98,7 +98,7 @@ async def test_tty_multiple_runs_picker_with_header_and_index(monkeypatch) -> No
     monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a"), _row("b")], header="Pick one?",
-        on_empty=lambda: 0, on_non_tty=lambda rows: 0, selected_index=1)
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=lambda rows: 0, selected_index=1)
     assert rc == "b"
     assert captured["header"] == "Pick one?"
     assert captured["selected_index"] == 1
@@ -120,7 +120,7 @@ async def test_pick_quest_target_threads_phase_and_step_label(monkeypatch) -> No
     ]
     await m._pick_quest_target(
         control=Path("."), rows=rows, header="h",
-        on_empty=lambda: 0, on_non_tty=lambda rows: 0)
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=lambda rows: 0)
     assert captured["candidates"][0].phase_label == "implement phase"
     assert captured["candidates"][0].step_label == "coding"
     assert captured["candidates"][1].phase_label == "verify phase"
@@ -128,7 +128,7 @@ async def test_pick_quest_target_threads_phase_and_step_label(monkeypatch) -> No
 
 
 @pytest.mark.anyio
-async def test_picker_cancel_returns_2(monkeypatch) -> None:
+async def test_picker_cancel_routes_to_on_cancel(monkeypatch) -> None:
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
@@ -137,5 +137,5 @@ async def test_picker_cancel_returns_2(monkeypatch) -> None:
     monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a"), _row("b")], header="h",
-        on_empty=lambda: 0, on_non_tty=lambda rows: 0)
-    assert rc == 2
+        on_empty=lambda: 0, on_cancel=lambda: 11, on_non_tty=lambda rows: 0)
+    assert rc == 11

@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NoReturn
 from imp import __version__
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
+from imp.cli.exit_codes import ExitCode
 from imp.cli.help_format import (
     TAGLINE,
     ImpParser,
@@ -565,27 +566,27 @@ def _emit_leave_block(quest: Quest, disposition: str, *, intent: str | None) -> 
 
 def _print_leave_disposition(
     quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
-) -> int | None:
+) -> ExitCode | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
     The disposition itself is applied by the daemon after it releases the lock;
-    here we only echo what was (or is being) done, on the shared spine. Returns 0
-    when a leave was handled, None to fall through to the normal exit-code path.
+    here we only echo what was (or is being) done, on the shared spine. Returns
+    USER_ENDED when a leave was handled, None to fall through to the next row.
     """
     if leave_state.get("intent") == "abandon":
         _emit_leave_block(quest, CONTROL_ABANDON, intent=intent)
-        return 0
+        return ExitCode.USER_ENDED
     disposition = leave_state.get("disposition")
     if disposition is not None:
         _emit_leave_block(quest, disposition, intent=intent)
-        return 0
+        return ExitCode.USER_ENDED
     if leave_state.get("send_failed"):
         color = should_use_color(sys.stdout)
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color, intent=intent))
         print(_resume_line(quest.id))
         print()
-        return 0
+        return ExitCode.USER_ENDED
     return None
 
 
@@ -731,7 +732,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print(file=sys.stderr)
         _emit_cli_error("init cancelled")
-        return 130
+        return ExitCode.USER_ENDED
     if sys.stdout.isatty():
         print()
     return 0
@@ -795,8 +796,9 @@ async def _read_intent_line(
                 sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
-            # No daemon pre-session; _abandon_local's rc threads out through SystemExit.
-            raise SystemExit(_abandon_local(quest.control_root, quest.id))
+            # No daemon pre-session. Torn down is user-ended; a failed teardown keeps its rc.
+            rc = _abandon_local(quest.control_root, quest.id)
+            raise SystemExit(ExitCode.USER_ENDED if rc == 0 else rc)
         return line
 
 
@@ -866,7 +868,7 @@ async def _run_cleared_session(
             print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
                                 color=color))
             print()
-            return 130
+            return ExitCode.USER_ENDED
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
         cleared_unsandboxed = bool(cleared_sandbox_sink.get("unsandboxed"))
@@ -1290,7 +1292,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                                 color=color))
             print()
             discard_conversation(quest)   # drop the just-minted draft on cancel
-            return 130
+            return ExitCode.USER_ENDED
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
@@ -2497,7 +2499,7 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
             _follow_poll_loop, driver, tail, status, control, quest_id, home)
     except KeyboardInterrupt:
         status.reset()
-        return 130
+        return ExitCode.USER_ENDED
 
 
 async def _follow_poll_loop(
@@ -2936,7 +2938,12 @@ def _resume_picker_empty(control: Path) -> int:
         print(pal.ansi(
             f"({past} past quest{plural} — see `imp list --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
-    return 0
+    return ExitCode.OK
+
+
+def _picker_cancelled(verb: str) -> ExitCode:
+    _emit_cli_error(f"{verb} cancelled")
+    return ExitCode.USER_ENDED
 
 
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
@@ -2958,6 +2965,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
+    on_cancel: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int],
     selected_index: int = 0,
     non_interactive: bool = False,
@@ -2978,7 +2986,7 @@ async def _pick_quest_target(
         candidates, now=datetime.now(UTC),
         color=should_use_color(sys.stdout),
         header=header, selected_index=selected_index)
-    return chosen if chosen is not None else 2
+    return chosen if chosen is not None else on_cancel()
 
 
 _RESUME_PICKER_HEADER = (
@@ -3013,6 +3021,7 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
         rows=_resumable_rows(control),
         header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
+        on_cancel=lambda: _picker_cancelled("resume"),
         on_non_tty=_resume_picker_non_tty,
         non_interactive=non_interactive,
     )
@@ -3032,6 +3041,7 @@ async def _resolve_resume_target(
             rows=matches,
             header=_RESUME_PICKER_HEADER,
             on_empty=lambda: _resume_picker_empty(control),
+            on_cancel=lambda: _picker_cancelled("resume"),
             on_non_tty=_resume_picker_non_tty,
             non_interactive=non_interactive,
         )
@@ -3131,7 +3141,7 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
 
 def _abandon_picker_empty() -> int:
     _emit_human(["Nothing to abandon."])
-    return 2
+    return ExitCode.OK
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:
@@ -3150,6 +3160,7 @@ async def _pick_abandon_target(control: Path) -> str | int:
         rows=_abandon_rows(control),
         header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
+        on_cancel=lambda: _picker_cancelled("abandon"),
         on_non_tty=_abandon_picker_non_tty,
     )
 
@@ -3169,6 +3180,7 @@ async def _pick_abandon_matches(
         rows=rows,
         header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
+        on_cancel=lambda: _picker_cancelled("abandon"),
         on_non_tty=_non_tty,
     )
 

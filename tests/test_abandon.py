@@ -1,3 +1,4 @@
+import argparse
 import os
 import shutil
 import uuid
@@ -5,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _abandon_local
+from imp.cli.main import _abandon, _abandon_local, _cmd_abandon
 from imp.cli.store import _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import discard_conversation, tear_down_quest
@@ -62,6 +63,20 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     assert state_json is not None and b'"abandoned"' in state_json
     events = archive_read.read_events(tmp_path, "feat")
     assert events is not None and b"quest_abandoned" in events
+
+
+def test_imp_abandon_with_a_token_exits_0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    monkeypatch.setattr("imp.cli.main._control_root", lambda: tmp_path)
+
+    rc = _cmd_abandon(argparse.Namespace(token="feat", yes=False))
+
+    assert rc == 0                      # the command succeeded, not a user-ended leave
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
 
 
 def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:

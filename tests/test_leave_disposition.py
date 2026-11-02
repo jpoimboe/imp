@@ -67,7 +67,7 @@ def test_disposition_abandon_prints_spine_no_torn_down(
     ch = Quest.create_draft(
         tmp_path, title="Dark mode", quest_id="ab1", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert out == "ab1 · Dark mode · abandoned\n\n"
     assert "torn down" not in out
@@ -82,7 +82,7 @@ def test_disposition_abandon_materialized_also_has_no_torn_down_line(
     ch = Quest.create_draft(
         tmp_path, title="Big feature", quest_id="ab2", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon", "materialized": "1"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert out == "ab2 · Big feature · abandoned\n\n"
     assert "torn down" not in out
@@ -96,7 +96,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     ch = _draft_with_exchange(tmp_path, "fast1")
     with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = m._print_leave_disposition(ch, {"disposition": "archive"})
-    assert rc == 0
+    assert rc == 130
     assert (project_state_dir(tmp_path) / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
@@ -113,7 +113,7 @@ def test_print_leave_disposition_save_prints_saved_as_draft_spine(
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "bk1")
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "· saved as draft" in out
     assert "kept as draft" not in out
@@ -130,7 +130,7 @@ def test_print_leave_disposition_discard_prints_discarded_spine(
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "dx1")   # title="Draft"
     rc = m._print_leave_disposition(ch, {"disposition": "discard"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert out == "dx1 · Draft · discarded\n\n"
     assert "imp resume" not in out
@@ -150,7 +150,7 @@ def test_print_leave_disposition_send_failed_prints_running_spine(
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "sf1")
     rc = m._print_leave_disposition(ch, {"send_failed": "1"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "· left running" in out
     assert "resume: imp resume sf1" in out
@@ -213,7 +213,7 @@ def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
     ch = _titleless_draft_with_intent(tmp_path, "tl1", "when I hit save it crashed")
     rc = m._print_leave_disposition(
         ch, {"disposition": "archive"}, intent="when I hit save it crashed")
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "tl1 · > when I hit save it crashed · shelved" in out
     assert "(unnamed)" not in out
@@ -225,7 +225,7 @@ def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
     _seed_control(tmp_path)
     ch = _titleless_draft_with_intent(tmp_path, "tl3", "make dark mode work")
     rc = m._print_leave_disposition(ch, {"intent": "abandon"}, intent="make dark mode work")
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "tl3 · > make dark mode work · abandoned" in out
     assert "(unnamed)" not in out
@@ -237,7 +237,7 @@ def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
     _seed_control(tmp_path)
     ch = _titleless_draft_with_intent(tmp_path, "tl4", "fix the login crash")
     rc = m._print_leave_disposition(ch, {"send_failed": "1"}, intent="fix the login crash")
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "tl4 · > fix the login crash · left running" in out
     assert "(unnamed)" not in out
@@ -249,7 +249,7 @@ def test_leave_disposition_titleless_no_prompt_shows_unnamed(
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="", quest_id="tl2", base_branch="main")
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "tl2 · (unnamed) · saved as draft" in out
     assert "> (unnamed)" not in out
@@ -262,7 +262,7 @@ def test_leave_disposition_renders_the_intent_it_is_handed(
     ch = _titleless_draft_with_intent(tmp_path, "tl5", "the log's own intent")
     rc = m._print_leave_disposition(
         ch, {"disposition": "save"}, intent="what the client witnessed")
-    assert rc == 0
+    assert rc == 130
     out = capsys.readouterr().out
     assert "tl5 · > what the client witnessed · saved as draft" in out
     assert "the log's own intent" not in out     # the spine no longer re-reads the log

@@ -49,8 +49,12 @@ def _fake_quest(tmp_path: Path) -> _FakeQuest:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(("teardown_rc", "exit_code"), [
+    pytest.param(0, 130, id="torn-down"),
+    pytest.param(3, 3, id="teardown-failed"),
+])
 async def test_pre_session_abandon_tears_down_and_exits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, teardown_rc: int, exit_code: int,
 ) -> None:
     quest = _fake_quest(tmp_path)
     calls: dict[str, object] = {}
@@ -58,7 +62,7 @@ async def test_pre_session_abandon_tears_down_and_exits(
     def _fake_abandon(control, quest_id):
         calls["control"] = control
         calls["quest_id"] = quest_id
-        return 3                       # non-zero proves the rc is threaded, not hardcoded
+        return teardown_rc
 
     monkeypatch.setattr(main, "_abandon_local", _fake_abandon)
 
@@ -66,7 +70,7 @@ async def test_pre_session_abandon_tears_down_and_exits(
         await main._read_intent_line(
             _QueuePrompt(["/abandon"]), quest, color=False, width=80)
 
-    assert excinfo.value.code == 3
+    assert excinfo.value.code == exit_code
     assert calls["control"] == tmp_path
     assert calls["quest_id"] == "z9y8x7"
 
