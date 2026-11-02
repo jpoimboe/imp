@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.cli.abandon_confirm import ask_keypress_confirm
 from imp.cli.exit_codes import ExitCode
 from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
@@ -302,3 +303,31 @@ def make_interactive_solicit(
             allow_empty=interrupt)
 
     return _solicit
+
+
+def make_interactive_confirm(
+    *, status: Any, driver: Any, coord: InterruptCoordinator,
+) -> Callable[[str], Awaitable[bool]]:
+    """The session's single-keypress confirm, framed like a solicit turn so the
+    status footer, the Ctrl-D reader and SIGINT routing yield the tty to it."""
+
+    async def _confirm(question: str) -> bool:
+        coord.set_at_prompt(True)
+        try:
+            async with coord.tty_quiesced():
+                with status.suspend():
+                    driver.prepare_for_prompt()
+                    try:
+                        return await ask_keypress_confirm(question)
+                    finally:
+                        driver.flush_deferred()
+        finally:
+            coord.set_at_prompt(False)
+            coord.rearm_signal_handlers()
+
+    return _confirm
+
+
+async def confirm_unasked(_question: str) -> bool:
+    """A headless session has no one to ask: a delivered /abandon proceeds."""
+    return True
