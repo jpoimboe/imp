@@ -843,7 +843,11 @@ async def _run_cleared_session(
     """Open a fresh imp new-style draft in place after /clear."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
-    from imp.cli.session_run import make_interactive_solicit, run_session_client
+    from imp.cli.session_run import (
+        make_interactive_confirm,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
@@ -898,8 +902,9 @@ async def _run_cleared_session(
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, model=cleared_model,
@@ -1049,7 +1054,9 @@ async def _run_fresh_session(
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1075,7 +1082,7 @@ async def _run_fresh_session(
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             status=status, non_interactive=True,
             leave_mode=quest.create_mode,
             autonomous=autonomous, stream=watched)
@@ -1092,8 +1099,9 @@ async def _run_fresh_session(
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
             autonomous=autonomous, stream=watched)
@@ -1150,7 +1158,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     from imp.cli.live_status import LiveStatus
     from imp.cli.mutation_proxy import proxy_mutation_async
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1336,7 +1346,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             status=status,
             title=term_title,
             leave_mode=leave_mode,
@@ -1358,8 +1368,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
@@ -1454,7 +1465,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.live_status import LiveStatus
     from imp.cli.mutation_proxy import proxy_mutation_async
     from imp.cli.session_run import (
+        confirm_unasked,
         make_headless_solicit,
+        make_interactive_confirm,
         make_interactive_solicit,
         run_session_client,
     )
@@ -1529,7 +1542,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm_unasked,
             resume=True, status=status, non_interactive=True,
             leave_mode=quest.create_mode, autonomous=autonomous,
             provider=pending_provider, stream=watched)
@@ -1556,8 +1569,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
+        confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
         return await run_session_client(
-            quest, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
             resume=True, status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
             autonomous=autonomous, provider=pending_provider, stream=watched)
@@ -1621,7 +1635,11 @@ async def _resume_inert(
     from imp.cli.live_status import LiveStatus
     from imp.cli.narrative import carrier_from_events
     from imp.cli.render_summary import build_summary, summary_totals
-    from imp.cli.session_run import make_interactive_solicit, run_session_client
+    from imp.cli.session_run import (
+        make_interactive_confirm,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
@@ -1655,8 +1673,9 @@ async def _resume_inert(
             inner = make_interactive_solicit(
                 quest, status=status, driver=driver, coord=coord)
             solicit = make_buffered_solicit(line, inner)
+            confirm = make_interactive_confirm(status=status, driver=driver, coord=coord)
             return await run_session_client(
-                quest, driver=driver, coord=coord, solicit=solicit,
+                quest, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
                 resume=True, status=status, leave_state=leave_state,
                 leave_mode=quest.create_mode,
                 title=term_title, autonomous=autonomous,

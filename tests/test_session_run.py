@@ -30,6 +30,10 @@ from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
 
 
+async def _no_confirm(question: str) -> bool:
+    raise AssertionError(f"unexpected confirm: {question!r}")
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -168,7 +172,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
-                    quest, driver=_Driver(), coord=coord, solicit=_solicit,
+                    quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm,
                     leave_mode="new", stream=_watched())
 
             tg.start_soon(_go)
@@ -212,7 +216,8 @@ async def test_an_abandon_sent_by_another_client_renders_the_abandoned_block(
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
                     quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-                    solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+                    solicit=lambda _p: _never(),
+                    confirm=_no_confirm, leave_mode="new", stream=_watched())
 
             tg.start_soon(_go)
             await wait_until(lambda: server.leased_count == 1)
@@ -275,7 +280,8 @@ async def test_run_session_client_starts_status_tick_when_provided(
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
                     quest, driver=_Driver(), coord=coord,
-                    solicit=_solicit, status=_Status(), leave_mode="new", stream=_watched())
+                    solicit=_solicit,
+                    confirm=_no_confirm, status=_Status(), leave_mode="new", stream=_watched())
 
             tg.start_soon(_go)
             await wait_until(lambda: "rc" in rc_holder)
@@ -312,7 +318,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm,
         leave_mode="new", stream=_watched())
     assert rc == 130
 
@@ -528,7 +534,7 @@ async def test_run_session_client_threads_resume_into_attach(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit, resume=True,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm, resume=True,
         leave_mode="new", stream=_watched())
 
     assert captured["resume"] is True
@@ -570,7 +576,7 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     assert rc == 3                       # distinct daemon-startup-failure code
     out = capsys.readouterr().out
     assert f"resume: imp resume {quest.id}" not in out   # NOT the paused summary
@@ -598,7 +604,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     assert rc == 0                       # NOT rc=3: change already completed
     captured = capsys.readouterr()
     assert "startup failed" not in (captured.out + captured.err)
@@ -625,7 +631,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
@@ -654,7 +660,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
 
     assert captured["leave_mode"] == "new"
     # The foreground does NOT apply the disposition — the daemon owns it.
@@ -685,7 +691,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="chat", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="chat", stream=_watched())
 
     assert captured["leave_mode"] == "chat"
     assert (project_state_dir(tmp_path) / "quests" / "c1").exists()
@@ -713,7 +719,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     title = captured["title"]
@@ -743,7 +749,7 @@ async def test_run_session_client_passes_control_root(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert captured["control_root"] == quest.control_root
@@ -786,7 +792,7 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert rc == 3
@@ -821,7 +827,7 @@ async def test_run_session_client_threads_provided_leave_state(
     coord = InterruptCoordinator()
     ls: dict[str, str] = {}
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_state=ls, leave_mode="new", stream=_watched())
 
     assert ls["intent"] == "clear"        # the caller's dict surfaced the signal
@@ -867,7 +873,8 @@ async def test_run_session_client_reuses_passed_in_title(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), title=sentinel, leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(),
+        confirm=_no_confirm, title=sentinel, leave_mode="new", stream=_watched())
 
     assert captured["title"] is sentinel   # the exact instance flowed through
     assert rc == 0
@@ -916,7 +923,8 @@ async def test_run_session_client_threads_autonomous_into_attach(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit, autonomous=True,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        confirm=_no_confirm, autonomous=True,
         leave_mode="new", stream=_watched())
     assert rc == 0
     assert captured["autonomous"] is True
@@ -945,7 +953,7 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert rc == 3
@@ -1059,7 +1067,7 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
     driver = _NullDriver()
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=driver, coord=coord, solicit=lambda _p: _never(),
+        quest, driver=driver, coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert captured["local_echo"] == driver.seed_pending_reply
@@ -1088,7 +1096,7 @@ async def test_run_session_client_installs_startup_status(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_Driver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert installed == [True]           # called exactly once
@@ -1133,7 +1141,7 @@ async def test_run_session_client_threads_model(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm,
         model="anthropic:claude-fable-5", leave_mode="new", stream=_watched())
 
     assert rc == 0
@@ -1178,7 +1186,7 @@ async def test_run_session_client_threads_opening_unsandboxed(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm,
         opening_unsandboxed=True, leave_mode="new", stream=_watched())
 
     assert rc == 0
@@ -1225,7 +1233,7 @@ async def test_daemon_layout_downgrade_surfaces_message_directly(
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(), confirm=_no_confirm,
         leave_mode="new", stream=_watched())
 
     assert rc == 2                                       # clean user error, not the crash rc 3
@@ -1263,7 +1271,7 @@ async def test_run_session_client_registers_ack_hook_when_interactive(
     coord = InterruptCoordinator()
     drv = _Driver()
     rc = await run_session_client(
-        quest, driver=drv, coord=coord, solicit=_solicit,
+        quest, driver=drv, coord=coord, solicit=_solicit, confirm=_no_confirm,
         leave_mode="new", non_interactive=False, stream=_watched())
 
     assert rc == 0
@@ -1298,7 +1306,7 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, confirm=_no_confirm,
         leave_mode="new", non_interactive=True, stream=_watched())
 
     assert rc == 0
@@ -1351,7 +1359,7 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
@@ -1374,7 +1382,7 @@ async def test_cut_ending_on_a_stale_paused_quest_reports_lost_connection(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert rc == 4
@@ -1403,7 +1411,7 @@ async def test_end_frame_with_a_genuine_pause_renders_the_pause_summary(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out.split("\n")[0] == "paused"
@@ -1472,7 +1480,7 @@ async def test_watched_stream_reaches_the_fallback_title_and_the_terminal_client
     coord = InterruptCoordinator()
     await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=watched)
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=watched)
 
     # The fallback TerminalTitle and run_terminal_client hold the SAME wrapper.
     assert seen["title_stream"] is watched
@@ -1498,7 +1506,7 @@ async def test_cut_ending_on_a_live_run_reports_lost_connection(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert coord.escalation_event is None        # no deliberate-leave mark was set
@@ -1526,7 +1534,7 @@ async def test_cut_ending_with_no_resolvable_status_reports_lost_connection(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 4
     assert out.split("\n")[0] == "lost the connection to the run"
@@ -1548,7 +1556,7 @@ async def test_end_frame_with_done_state_renders_the_completed_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out.split("\n")[0] == f"{quest.id} · T · done · commits on imp/{quest.id}"
@@ -1572,7 +1580,7 @@ async def test_end_frame_with_merged_state_renders_the_completed_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
@@ -1596,7 +1604,7 @@ async def test_end_frame_with_merge_blocked_state_renders_the_merge_blocked_bloc
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out.split("\n")[0] == (
@@ -1646,7 +1654,7 @@ async def test_an_end_frame_disposition_renders_that_leaves_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == f"{quest.id} · T · " + tail.format(id=quest.id) + "\n"
@@ -1668,7 +1676,7 @@ async def test_an_end_frame_disposition_outranks_a_witnessed_pause(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == f"{quest.id} · T · abandoned\n\n"
@@ -1688,7 +1696,7 @@ async def test_the_clients_own_leave_outranks_the_end_frame_disposition(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (f"{quest.id} · T · shelved\n"
@@ -1709,7 +1717,7 @@ async def test_ctrl_d_leave_still_renders_its_pause_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     # The WHOLE buffer, not a prefix: AC 5 asks for byte-identical leave rendering.
@@ -1735,7 +1743,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -1760,7 +1768,7 @@ async def test_save_leave_still_renders_saved_as_draft(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -1786,7 +1794,7 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -1812,7 +1820,7 @@ async def test_shelve_leave_still_renders_shelved(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -1835,7 +1843,7 @@ async def test_headless_gate_detach_still_renders_the_bare_pause(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new",
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new",
         non_interactive=True, stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
@@ -1863,7 +1871,7 @@ async def test_abandon_renders_abandoned_with_the_escalation_event_unset(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     # The leave_state arm carries this one: escalation is never set for /abandon.
     assert coord.escalation_event is None
@@ -1896,7 +1904,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     # The witnessed payload names the base (the quest's own attribute is `main`),
@@ -1922,7 +1930,7 @@ async def test_witnessed_completion_renders_done_with_no_quest_home_at_all(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out == f"{quest.id} · T · done · commits on imp/{quest.id}\n\n"
@@ -1949,7 +1957,7 @@ async def test_witnessed_merge_blocked_renders_the_payloads_reason_and_note(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert rc == 1
@@ -1981,7 +1989,7 @@ async def test_witnessed_awaiting_user_pause_renders_the_bare_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -2008,7 +2016,7 @@ async def test_witnessed_loop_limit_pause_renders_the_qualified_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (
@@ -2037,7 +2045,7 @@ async def test_witnessed_error_pause_renders_the_error_reason_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (
@@ -2067,7 +2075,7 @@ async def test_a_witnessed_outcome_preempts_a_keystroke_leave_and_prints_no_care
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out == f"{quest.id} · T · merged into main\n\n"
@@ -2093,7 +2101,7 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
@@ -2128,7 +2136,7 @@ async def test_headless_detach_on_a_resumed_quest_renders_the_bare_pause(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new",
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new",
         non_interactive=True, stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
@@ -2161,7 +2169,7 @@ async def test_a_resumed_merge_blocked_never_outranks_this_segments_pause(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out.split("\n")[0] == "paused · loop limit"
@@ -2188,7 +2196,7 @@ async def test_a_resumed_merge_blocked_then_a_merge_renders_merged(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
@@ -2210,7 +2218,7 @@ async def test_end_frame_with_nothing_witnessed_reports_a_crash_when_stderr_has_
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (
@@ -2234,7 +2242,7 @@ async def test_end_frame_with_nothing_witnessed_reports_no_outcome(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (
@@ -2264,7 +2272,7 @@ async def test_a_replayed_pause_then_resume_then_a_cut_reports_lost_connection(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 4
     assert out.split("\n")[0] == "lost the connection to the run"
@@ -2292,7 +2300,7 @@ async def test_a_replayed_pause_then_resume_then_an_end_frame_reports_the_crash(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (

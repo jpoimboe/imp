@@ -44,7 +44,7 @@ def test_new_non_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        quest: Quest, *, driver: object, coord: object, solicit: object,
+        quest: Quest, *, driver: object, coord: object, solicit: object, confirm: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         title: object = None,
@@ -99,7 +99,7 @@ def test_new_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        quest: Quest, *, driver: object, coord: object, solicit: object,
+        quest: Quest, *, driver: object, coord: object, solicit: object, confirm: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         leave_state: object = None, title: object = None,

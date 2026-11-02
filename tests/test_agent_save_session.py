@@ -22,6 +22,10 @@ from tests.conftest import _git, _init_repo, write_agent_md
 QID = "2026-09-22-agsave"
 
 
+async def _no_confirm(question: str) -> bool:
+    raise AssertionError(f"unexpected confirm: {question!r}")
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -110,7 +114,7 @@ async def test_agent_save_ends_with_saved_as_draft(
             async def _client() -> None:
                 rc["rc"] = await run_session_client(
                     quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-                    solicit=_never, leave_mode="new",
+                    solicit=_never, confirm=_no_confirm, leave_mode="new",
                     stream=WatchedStream(io.StringIO()))
 
             tg.start_soon(_client)

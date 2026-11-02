@@ -180,6 +180,7 @@ async def run_session_client(
     driver: Any,
     coord: InterruptCoordinator,
     solicit: Callable[[str, bool], Awaitable[str | SkillRequest]],
+    confirm: Callable[[str], Awaitable[bool]],
     status: Any = None,
     resume: bool = False,
     leave_mode: str,
@@ -221,7 +222,7 @@ async def run_session_client(
         driver.install_startup_status()
         try:
             ending, witness = await run_terminal_client(
-                attach=attach, driver=driver, coord=coord, solicit=solicit,
+                attach=attach, driver=driver, coord=coord, solicit=solicit, confirm=confirm,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
                 stream=stream, provider=provider,

@@ -122,3 +122,15 @@ async def test_confirm_flushes_tty_stdin_before_the_widget_reads(
             assert await _confirm_for(_Framing())("Abandon x? [y/N] ") is True
     assert flushed == [(0, termios.TCIFLUSH)]
     assert capsys.readouterr().out == "Abandon x? [y/N] y\n"
+
+
+@pytest.mark.parametrize("client", ["run_terminal_client", "run_session_client"])
+def test_session_clients_require_a_confirm(client: str) -> None:
+    import inspect
+
+    from imp.cli import session_terminal
+
+    fn = getattr(session_run if client == "run_session_client" else session_terminal, client)
+    param = inspect.signature(fn).parameters["confirm"]
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default is inspect.Parameter.empty

@@ -14,6 +14,10 @@ from imp.remote.session.socket_server import SessionSocket
 from tests.async_wait import wait_until
 
 
+async def _no_confirm(question: str) -> bool:
+    raise AssertionError(f"unexpected confirm: {question!r}")
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -46,7 +50,7 @@ async def _drive(sock: str, provider: str | None) -> list[tuple[str, str | None]
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, leave_mode="new", provider=provider)
+                    solicit=_solicit, confirm=_no_confirm, leave_mode="new", provider=provider)
 
             tg.start_soon(_client)
             await wait_until(lambda: server.attached_count == 1)

@@ -175,6 +175,7 @@ async def run_terminal_client(
     driver: Any,
     coord: InterruptCoordinator,
     solicit: Callable[[str, bool], Awaitable[str | SkillRequest]],
+    confirm: Callable[[str], Awaitable[bool]],
     quest_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,

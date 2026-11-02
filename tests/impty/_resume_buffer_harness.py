@@ -34,6 +34,10 @@ BUFFERED = "BUFFEREDANSWER"
 BLOCK = "NARRATIVEBLOCK"
 
 
+async def _no_confirm(question: str) -> bool:
+    raise AssertionError(f"unexpected confirm: {question!r}")
+
+
 def _ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dict[str, Any]:
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
@@ -111,7 +115,7 @@ async def main() -> None:
         tg.start_soon(server.serve, run_fn)
         tg.start_soon(_gesture)
         await run_terminal_client(
-            attach=_attach, driver=driver, coord=coord, solicit=solicit,
+            attach=_attach, driver=driver, coord=coord, solicit=solicit, confirm=_no_confirm,
             quest_id=quest.id, control_root=quest.control_root,
             leave_state={}, leave_mode="new",
             local_echo=driver.seed_pending_reply)

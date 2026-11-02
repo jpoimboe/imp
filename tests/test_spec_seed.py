@@ -94,7 +94,7 @@ def test_new_positional_delivers_verbatim_seed(
     captured: dict[str, object] = {}
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
+                           solicit: object, confirm: object,
                            leave_mode: object = None,
                            status: object = None,
                            title: object = None,
@@ -125,7 +125,7 @@ def test_new_title_flag_sets_quest_title(
     captured: dict[str, object] = {}
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
+                           solicit: object, confirm: object,
                            leave_mode: object = None,
                            status: object = None,
                            title: object = None,
@@ -233,7 +233,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
     captured: dict[str, object] = {}
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
+                           solicit: object, confirm: object,
                            status: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
@@ -276,7 +276,7 @@ def test_opening_prompt_empty_reply_reprompts(
     captured: dict[str, object] = {}
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
+                           solicit: object, confirm: object,
                            status: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
@@ -321,7 +321,7 @@ def test_new_creates_unmaterialized_draft(
     captured: dict[str, object] = {}
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
+                           solicit: object, confirm: object,
                            leave_mode: object = None,
                            status: object = None,
                            title: object = None,
