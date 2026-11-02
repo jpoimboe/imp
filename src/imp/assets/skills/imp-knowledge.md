@@ -126,7 +126,7 @@ list the directory.
 Using imp — relevant in any project:
 
 - `guide/what-is-imp.md` — the quest model and the six phases, end to end.
-- `guide/lifecycle.md` — statuses, zones, drafts, and what a left conversation becomes.
+- `guide/lifecycle.md` — statuses, zones, drafts, what a left conversation becomes, and the exit-code table.
 - `guide/features.md` — the capability catalog, one section per capability.
 - `guide/introspection.md` — answering a live-state question from ground truth: the workflow snapshot, event timelines, the summary ledger, keeping output bounded.
 - `guide/memory.md` — what imp remembers, where it lives, how to inspect it.

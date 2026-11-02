@@ -87,6 +87,19 @@ the draft stays in your active list, rather than being archived. Likewise, a ren
 not archived — the rename (a design formed), not the entry point, is what keeps
 it in the active list; and `save_as_draft` never moves anything to the backlog.
 
+## Exit codes
+
+A script can tell from imp's exit code alone how a run ended:
+
+| Code | Meaning |
+|---|---|
+| 0 | Finished: merged or done, or the command succeeded |
+| 1 | The run stopped on a failure (error pause, merge blocked, crash) |
+| 2 | Usage error: bad arguments, no such quest |
+| 3 | The session failed to start |
+| 4 | Lost the connection to the run (it may still be running) |
+| 130 | You ended it and nothing failed: left, paused, saved, shelved, discarded, abandoned or cancelled. A left quest is resumable with `imp resume`. |
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

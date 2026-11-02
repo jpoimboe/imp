@@ -88,7 +88,7 @@ styles its own line.
   (the one the client prints for its own leave), an `end` frame that carried no
   outcome is the daemon-died block, a stream cut before anything could be
   witnessed is the lost-connection block. The exit code carries the error signal
-  for scripts.
+  for scripts; the codes are tabled in `guide/lifecycle.md` (*Exit codes*).
 - **Non-quest CLI usage/lookup errors → one `imp:` message.** Bad arguments, no such
   quest, unknown command, and similar usage errors emit one
   `imp: <message>` on **stderr** via `_emit_cli_error`, which centralizes the
@@ -127,6 +127,7 @@ and cursor moves included.
 - `internals/architecture.md` — the engine and renderer these surfaces are built on.
 - `internals/invariants.md` — the layering rules that constrain renderer changes.
 - `guide/introspection.md` — reading a quest's live state rather than styling it.
+- `guide/lifecycle.md` — the exit-code contract scripts read.
 - The full corpus index is the `imp-knowledge` skill's *More depth* section.
 
 ---
