@@ -563,3 +563,25 @@ def test_render_shows_configured_worktree_setup(
                  if ln.strip().startswith("worktree_setup ")), None)
     assert line is not None and "uv sync --all-extras" in line
     assert line.rstrip().endswith("[imp/config.yaml]")
+
+
+def test_provider_key_lines_keep_their_three_shapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
+        "providers: [claude, anthropic, openai, codex]\n"
+        "provider_envs: {codex: {env: MY_CODEX_KEY}}\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MY_CODEX_KEY", raising=False)
+    out = io.StringIO()
+    render_config(load_effective_config(), out, state_dir=None, color=False)
+    assert _block(out.getvalue().splitlines(), "provider keys (local check):") == [
+        "  ✓ claude         (CLI-authenticated)",
+        "  ✓ anthropic      set",
+        "  ✗ openai         OPENAI_API_KEY not set",
+        "  ✗ codex          MY_CODEX_KEY not set",
+    ]
