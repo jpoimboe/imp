@@ -1567,23 +1567,18 @@ class ClaudeSession(ObserveSession):
             if cs is not None:
                 answer_complete_step_on_resume(
                     messages, transcript, elog, aid, cs, invocation.retry_feedback)
-            elif tail_step_completed and invocation.retry_feedback:
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
             elif tail_step_completed:
                 deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                answer_unanswered_tool_uses_on_resume(
-                    messages, transcript, elog, aid, captured=captured)
-            elif (invocation.retry_feedback
-                    and classify_resume(existing) is not ResumeState.AWAITING_USER):
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
+                    messages, transcript, elog, aid,
+                    invocation.retry_feedback or RESUME_REDO_NUDGE)
             # After the chain, so a complete_step tail is answered first.
             answer_unanswered_tool_uses_on_resume(
                 messages, transcript, elog, aid, captured=captured)
             resume_state = classify_resume(messages)
+            if (invocation.retry_feedback and cs is None and not tail_step_completed
+                    and resume_state is not ResumeState.AWAITING_USER):
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
                     self.messages = messages

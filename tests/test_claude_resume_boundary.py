@@ -265,13 +265,24 @@ async def test_retry_feedback_over_result_tail_streams_feedback(tmp_path: Path) 
     assert _streamed_text(r) == "REVISE: again"
 
 
+@pytest.mark.parametrize("feedback", [None, "REVISE: x"])
 @pytest.mark.anyio
-async def test_awaiting_user_streams_the_reply(tmp_path: Path) -> None:
+async def test_awaiting_user_streams_the_reply(
+        tmp_path: Path, feedback: str | None) -> None:
+    asked: list[object] = []
+
+    def _ask(prompt: object) -> str:
+        asked.append(prompt)
+        return "keep going"
+
     r = await _resume(tmp_path, [*_PRIOR, _a(_txt("which file next?"))],
-                      user_input_fn=lambda _p: "keep going")
+                      user_input_fn=_ask, retry_feedback=feedback)
     body = _assert_boundary(r)
     assert body[-1].role == "assistant"
     assert _streamed_text(r) == "keep going"
+    assert len(asked) == 1
+    assert "REVISE: x" not in json.dumps(r.streamed)
+    assert "REVISE: x" not in r.persisted
 
 
 @pytest.mark.anyio
@@ -414,17 +425,31 @@ async def test_dangling_call_under_several_user_turns(
         ["use c.txt", *([feedback] if feedback else [])])
 
 
+@pytest.mark.parametrize("feedback", [None, "REVISE: use c.txt"])
 @pytest.mark.anyio
-async def test_prose_over_unanswered_call_resumes_as_send_to_llm(tmp_path: Path) -> None:
+async def test_prose_over_unanswered_call_resumes_as_send_to_llm(
+        tmp_path: Path, feedback: str | None) -> None:
     asked: list[Any] = []
     r = await _resume(
         tmp_path, [*_PRIOR, _a(_read("t1", "b.txt")), _a(_txt("checking b.txt"))],
-        user_input_fn=lambda p: asked.append(p) or "reply")
+        user_input_fn=lambda p: asked.append(p) or "reply",
+        retry_feedback=feedback)
     body = _assert_boundary(r)
     _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
                      swept={"t1"}, note=True)
     assert body[-1].role == "user" and asked == []
-    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+    assert _streamed_text(r) == (feedback or RESUME_CONTINUE_NUDGE)
+
+
+@pytest.mark.anyio
+async def test_dangling_tail_delivers_retry_feedback(tmp_path: Path) -> None:
+    r = await _resume(
+        tmp_path, [*_PRIOR, _a(_read("t1", "b.txt"))],
+        retry_feedback="REVISE: use c.txt")
+    _assert_boundary(r)
+    _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
+                     swept={"t1"}, note=True)
+    assert _streamed_text(r) == "REVISE: use c.txt"
 
 
 @pytest.mark.anyio
