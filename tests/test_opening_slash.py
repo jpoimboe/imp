@@ -122,6 +122,23 @@ async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
 
 
 @pytest.mark.anyio
+async def test_opening_prompt_compact_shows_redirect_not_intent(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    quest = SimpleNamespace(id="z9y8x7", title="",
+                            control_root=Path("/checkouts/imp"))
+    reply = await main._read_opening_message(
+        quest, leave_mode="new", banner_shown=False, color=False,
+        width=80, editing_mode="emacs",
+        _prompt_factory=lambda: _QueuePrompt(["/compact", "real intent"]))
+    assert reply == "real intent"
+    out = capsys.readouterr().out
+    assert (
+        "/compact applies once the conversation is running — send a message first."
+        in out)
+
+
+@pytest.mark.anyio
 async def test_opening_prompt_leading_slash_path_submits_as_input(
     tmp_path: Path,
 ) -> None:
