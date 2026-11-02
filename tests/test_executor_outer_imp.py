@@ -1,6 +1,7 @@
 """Run-start warning when imp runs from an installed copy rather than a git checkout,
-against an imp checkout. Covers the emission gating: once per quest per process, never
-duplicated by the mid-run sandbox-policy rebuild, silent when running from a checkout."""
+against an imp checkout. Covers the emission gating: once per project per installed
+copy, never duplicated by the mid-run sandbox-policy rebuild, silent (and unrecorded)
+when running from a checkout."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +14,7 @@ from imp.engine.quest import Quest
 from imp.engine.sandbox import SandboxPolicy, _inactive
 from imp.paths import project_state_dir
 from tests.test_executor import (
+    _make_quest,
     _register_fake,
     _register_flip,
     _seed_minimal_workflow,
@@ -40,6 +42,10 @@ def _outer_imp_events(events: list[dict]) -> list[dict]:
             and e.get("payload", {}).get("source") == "outer_imp"]
 
 
+def _warned_record(root: Path) -> Path:
+    return project_state_dir(root) / "outer-imp-warned"
+
+
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
 async def test_mismatched_outer_imp_warns_once_at_run_start(
@@ -60,6 +66,7 @@ async def test_mismatched_outer_imp_warns_once_at_run_start(
     assert f"installed copy at {installed}," in message
     assert message.endswith(f"`uv tool install --editable {tmp_path}`")
     assert warnings[0]["payload"]["detail"] == {}
+    assert _warned_record(tmp_path).read_text() == f"{installed}\n"
 
 
 @pytest.mark.anyio
@@ -108,8 +115,9 @@ async def test_project_root_flip_does_not_duplicate_the_warning(
 @pytest.mark.bare_sandbox
 async def test_outer_imp_warning_silent_on_second_entry(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The daemon hold loop re-enters run_quest after every user reply; _SNAPSHOT_CAPTURED
-    gates those later entries, so the warning is emitted at most once per process."""
+    """The daemon hold loop re-enters run_quest after every user reply; the warning is
+    emitted at most once — _SNAPSHOT_CAPTURED gates later entries in-process. The
+    project's outer-imp-warned record is removed first so only that gate can explain it."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _fake_imp_checkout(tmp_path)
     _fake_installed_copy(tmp_path, monkeypatch)
@@ -122,12 +130,65 @@ async def test_outer_imp_warning_silent_on_second_entry(
     from imp.engine.archive import read as archive_read
     archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     before_second = len(events)
+    _warned_record(tmp_path).unlink()
     await run_quest(quest, on_event=events.append)              # same process, 2nd entry
 
     # Liveness: the second entry really ran, so the count below is a gated
     # emission and not a run that bailed before the run-start block.
     assert len(events) > before_second
     assert len(_outer_imp_events(events)) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_outer_imp_warning_silent_for_a_second_quest_in_the_same_project(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A distinct quest is not gated by _SNAPSHOT_CAPTURED, so only the record can
+    silence it."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _fake_imp_checkout(tmp_path)
+    installed = _fake_installed_copy(tmp_path, monkeypatch)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    await run_quest(quest, on_event=events.append)
+    assert len(_outer_imp_events(events)) == 1
+
+    assert _warned_record(tmp_path).read_text().strip() == str(installed)
+    assert not (installed.parent / ".git").exists()   # not silenced as a checkout
+    second = _make_quest(tmp_path, quest_id="second-quest")
+    before_second = len(events)
+    result = await run_quest(second, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert len(events) > before_second                # the second run reached run start
+    assert len(_outer_imp_events(events)) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_outer_imp_warning_reemitted_for_a_different_installed_copy(
+        tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _fake_imp_checkout(tmp_path)
+    installed = _fake_installed_copy(tmp_path, monkeypatch)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    await run_quest(quest, on_event=events.append)
+    assert _warned_record(tmp_path).read_text().strip() == str(installed)
+
+    other = _fake_installed_copy(tmp_path_factory.mktemp("other"), monkeypatch)
+    second = _make_quest(tmp_path, quest_id="second-quest")
+    before_second = len(events)
+    result = await run_quest(second, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    second_warnings = _outer_imp_events(events[before_second:])
+    assert len(second_warnings) == 1
+    assert f"installed copy at {other}," in second_warnings[0]["payload"]["message"]
+    assert _warned_record(tmp_path).read_text() == f"{other}\n"
 
 
 @pytest.mark.anyio
@@ -144,6 +205,7 @@ async def test_matching_outer_imp_emits_nothing(
 
     assert result is RunResult.COMPLETED
     assert _outer_imp_events(events) == []
+    assert not _warned_record(tmp_path).exists()
 
 
 @pytest.mark.anyio
@@ -159,6 +221,7 @@ async def test_non_imp_project_emits_nothing(
 
     assert result is RunResult.COMPLETED
     assert _outer_imp_events(events) == []
+    assert not _warned_record(tmp_path).exists()
 
 
 @pytest.mark.anyio
@@ -182,3 +245,4 @@ async def test_a_run_from_a_snapshot_of_this_checkout_emits_nothing(
 
     assert result is RunResult.COMPLETED
     assert _outer_imp_events(events) == []
+    assert not _warned_record(tmp_path).exists()

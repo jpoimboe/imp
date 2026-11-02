@@ -9,9 +9,10 @@ import sys
 from pathlib import Path
 
 import imp
-from imp.paths import SOURCE_ROOT_MARKER
+from imp.paths import SOURCE_ROOT_MARKER, project_state_dir
 
 _SHIM_DIRNAME = "imp-shim"
+_WARNED_RECORD = "outer-imp-warned"
 
 
 def imp_shim_dir(quest_dir: Path) -> Path:
@@ -40,7 +41,7 @@ def write_imp_shim(quest_dir: Path) -> Path:
 
 def outer_imp_mismatch(control_root: Path) -> str | None:
     """Message when imp runs from an installed copy, not a git checkout, against an imp
-    checkout; None otherwise."""
+    checkout not yet warned about that copy; records the copy. None otherwise."""
     if not (control_root / "src" / "imp" / "__init__.py").exists():
         return None
     running_src = Path(imp.__file__).resolve().parent.parent
@@ -50,6 +51,10 @@ def outer_imp_mismatch(control_root: Path) -> str | None:
         running_src = Path(marker.read_text().strip()).resolve()
     if (running_src.parent / ".git").exists():
         return None
+    record = project_state_dir(control_root) / _WARNED_RECORD
+    if record.is_file() and record.read_text().strip() == str(running_src):
+        return None
+    record.write_text(f"{running_src}\n")
     return (
         f"outer imp mismatch: imp is running from an installed copy at {running_src}, so "
         "changes merged in this checkout won't take effect until it is reinstalled in "
