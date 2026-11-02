@@ -403,7 +403,7 @@ async def test_claude_load_skill_flush_orders_below_narration(
 
     state = _RunState()
 
-    async def _fake_flush(*_args: Any, **_kwargs: Any) -> None:
+    def _fake_flush(*_args: Any, **_kwargs: Any) -> None:
         # Stand in for _run's real _flush_llm_group: commit the turn's
         # accumulated narration prose as an agent_message event.
         ctx.event_log.append_agent_message(

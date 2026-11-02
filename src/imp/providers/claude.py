@@ -120,6 +120,7 @@ from imp.engine.drivers import driver_allowed_tools
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.catalog import context_tokens_from_usage, limits_for
 from imp.providers.claude_config_dir import (
     fill_resume_config_dir,
     make_config_dir,
@@ -455,10 +456,10 @@ class _RunState:
     # Per-tool wall-time (ms) keyed by SDK tool_use_id, written by the MCP
     # wrapper and read once by the receive loop when it appends the tool_result.
     tool_durations: dict[str, float] = field(default_factory=dict)
-    # The flush-lock-guarded _flush_llm_group closure, assigned once by _run so
+    # The session's _flush_llm_group, assigned once by ClaudeSession._enter so
     # the out-of-band _impl sub_agent path can commit accumulated parent prose
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
-    # None until _run assigns it (pre-loop); _impl guards on that.
+    # None until _enter assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
     # imp tools currently executing, keyed by captured_result_key. Every entry is
     # closed out: a returning wrapper resolves and pops it, a cancelled one
@@ -860,11 +861,10 @@ def _wrap_one(
                     label = sub_def.label if sub_def is not None else None
                     # Commit any accumulated parent prose as an agent_message BEFORE
                     # this eager tool_call, so narration renders above the sub_agent
-                    # fold it introduces (parity with ordinary tools). The flush's
-                    # lock makes this wait for any in-flight receive-loop flush's
-                    # emit. None until _run assigns the closure (pre-loop).
+                    # fold it introduces (parity with ordinary tools). None until _enter
+                    # assigns the closure (pre-loop).
                     if state.flush_llm_group is not None:
-                        await state.flush_llm_group()
+                        state.flush_llm_group()
                     # Stamp the call block-tracked (id_ns="block"), matching the
                     # outcome-carrying result below and dispatch.py: the narrative
                     # reads awaits_result from the CALL, so an unstamped call leaves
@@ -920,8 +920,8 @@ def _wrap_one(
                 # load_skill appends its skill_load event from inside async_invoke,
                 # so the event log lands narration-then-load (parity with the eager
                 # sub_agent flush above). No-ops when no llm group is open; None
-                # until _run assigns the closure (pre-loop).
-                await state.flush_llm_group()
+                # until _enter assigns the closure (pre-loop).
+                state.flush_llm_group()
             tuid = args.get("__tool_use_id__", "")
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
@@ -1690,7 +1690,6 @@ class ClaudeSession(ObserveSession):
         self._stream_cur_msg_id: str | None = None
         self._stream_cur_usage: dict[str, Any] = {}
         self._stream_cur_stop_reason: Any = None
-        self._flush_lock = asyncio.Lock()
         state.flush_llm_group = self._flush_llm_group
 
         runner._spawn_token_expiry = canonical_expires_at()
@@ -1727,51 +1726,48 @@ class ClaudeSession(ObserveSession):
         self._pending_complete = False
         return rec
 
-    async def _flush_llm_group(self, backstop_stop_reason: Any = None) -> None:
-        # Serialize every flush on one per-run lock (see the old closure): the
-        # eager sub_agent flush in _impl blocks here until the in-flight prose
-        # emit completes, then sees the group closed and no-ops.
-        async with self._flush_lock:
-            if not self._llm_group_open:
-                return
-            client = self.runner._client
-            cu_fields = await _context_usage_fields(client)
-            harvested = (self._stream_usage_by_msg.pop(self._llm_group_key, None)
-                         if self._llm_group_key is not None else None)
-            if harvested is not None:
-                usage, harvested_stop = harvested
-                stop = harvested_stop if harvested_stop is not None else (
-                    self._llm_stop_reason if self._llm_stop_reason is not None
-                    else backstop_stop_reason)
-            else:
-                usage = self._llm_usage
-                stop = self._llm_stop_reason if self._llm_stop_reason is not None \
-                    else backstop_stop_reason
-            out_tok = usage.get("output_tokens")
-            self._flushed_output_tokens = out_tok if isinstance(out_tok, int) else None
-            self._flushed_stop_reason = stop
-            self.elog.append_agent_message(
-                agent_id=self.aid, provider=self.invocation.provider_name,
-                model=self._llm_model or self.runner.model,
-                raw={"content": self._llm_blocks, "stop_reason": stop,
-                     "usage": usage},
-                usage=usage, stop_reason=stop,
-                auth_mode=self._auth_mode,
-                provider_error=classifies_as_provider_error(
-                    self._llm_tail_text,
-                    output_tokens=self._flushed_output_tokens,
-                    stop_reason=self._flushed_stop_reason),
-                handoff=self._handoff_phase == "instruction_sent",
-                message_id=self._llm_group_key,
-                context_window=cu_fields.get("context_window"),
-                context_tokens=cu_fields.get("context_tokens"))
-            self._llm_group_open = False
-            self._llm_group_key = None
-            self._llm_blocks = []
-            self._llm_tail_text = ""
-            self._llm_model = None
-            self._llm_stop_reason = None
-            self._llm_usage = {}
+    def _flush_llm_group(self, backstop_stop_reason: Any = None) -> None:
+        # Must stay synchronous: an await here would let _impl's eager flush
+        # interleave with the receive loop's and emit the prose group twice.
+        if not self._llm_group_open:
+            return
+        harvested = (self._stream_usage_by_msg.pop(self._llm_group_key, None)
+                     if self._llm_group_key is not None else None)
+        if harvested is not None:
+            usage, harvested_stop = harvested
+            stop = harvested_stop if harvested_stop is not None else (
+                self._llm_stop_reason if self._llm_stop_reason is not None
+                else backstop_stop_reason)
+        else:
+            usage = self._llm_usage
+            stop = self._llm_stop_reason if self._llm_stop_reason is not None \
+                else backstop_stop_reason
+        out_tok = usage.get("output_tokens")
+        self._flushed_output_tokens = out_tok if isinstance(out_tok, int) else None
+        self._flushed_stop_reason = stop
+        info = limits_for("claude", self.runner.model)
+        self.elog.append_agent_message(
+            agent_id=self.aid, provider=self.invocation.provider_name,
+            model=self._llm_model or self.runner.model,
+            raw={"content": self._llm_blocks, "stop_reason": stop,
+                 "usage": usage},
+            usage=usage, stop_reason=stop,
+            auth_mode=self._auth_mode,
+            provider_error=classifies_as_provider_error(
+                self._llm_tail_text,
+                output_tokens=self._flushed_output_tokens,
+                stop_reason=self._flushed_stop_reason),
+            handoff=self._handoff_phase == "instruction_sent",
+            message_id=self._llm_group_key,
+            context_window=info.window if info is not None else None,
+            context_tokens=context_tokens_from_usage(usage) or None)
+        self._llm_group_open = False
+        self._llm_group_key = None
+        self._llm_blocks = []
+        self._llm_tail_text = ""
+        self._llm_model = None
+        self._llm_stop_reason = None
+        self._llm_usage = {}
 
     async def _receive(self) -> Any:
         coord = self.invocation.coordinator
@@ -1884,10 +1880,10 @@ class ClaudeSession(ObserveSession):
                     if (self._llm_group_open and mid is not None
                             and self._llm_group_key is not None
                             and mid != self._llm_group_key):
-                        await self._flush_llm_group()
+                        self._flush_llm_group()
                     # Split at the classifying boundary so error prose gets its own node.
                     if matches_error_prose(_text_of(imp_msg)) and self._llm_blocks:
-                        await self._flush_llm_group()
+                        self._flush_llm_group()
                     frag = _serialize_claude_message(raw)
                     if not self._llm_group_open:
                         self._llm_group_open = True
@@ -1923,7 +1919,7 @@ class ClaudeSession(ObserveSession):
                         if sdk_context_threshold_crossed(
                                 cu_fields.get("context_tokens"),
                                 cu_fields.get("context_window")):
-                            await self._flush_llm_group()
+                            self._flush_llm_group()
                             self.runner._handoff_requested = True
                             self._handoff_phase = "interrupt_requested"
                             with contextlib.suppress(Exception):
@@ -1931,7 +1927,7 @@ class ClaudeSession(ObserveSession):
                             return
                     if any(isinstance(b, ToolUseBlock)
                            for b in imp_msg.content):
-                        await self._flush_llm_group()
+                        self._flush_llm_group()
                     for b in imp_msg.content:
                         if isinstance(b, ToolUseBlock):
                             if b.name in CC_WEB_BUILTIN_TO_NORM:
@@ -1954,7 +1950,7 @@ class ClaudeSession(ObserveSession):
                                         block=ToolUseBlock(
                                             id=b.id, name="complete_step",
                                             input=b.input))
-                                    await self._flush_llm_group()
+                                    self._flush_llm_group()
                                     self.runner._complete_requested = True
                                     with contextlib.suppress(Exception):
                                         await client.interrupt()
@@ -1983,7 +1979,7 @@ class ClaudeSession(ObserveSession):
                                 block=ToolUseBlock(id=b.id, name=canon,
                                                    input=b.input))
             elif imp_msg.role == "user":
-                await self._flush_llm_group()
+                self._flush_llm_group()
                 for b in imp_msg.content:
                     if isinstance(b, ToolResultBlock):
                         if b.tool_use_id in self._web_calls:
@@ -2050,7 +2046,7 @@ class ClaudeSession(ObserveSession):
         ctx = self.ctx
         invocation = self.invocation
         runner = self.runner
-        await self._flush_llm_group(
+        self._flush_llm_group(
             backstop_stop_reason=getattr(raw, "stop_reason", None))
         elog.append_query_result(
             agent_id=aid,
