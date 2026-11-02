@@ -4,6 +4,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from imp.cli import main
 from imp.cli.store import make_store
 from imp.engine import archive
@@ -591,3 +593,126 @@ def test_quest_json_omits_seed_opening_for_an_unstarted_draft(tmp_path: Path) ->
     assert "seed_opening" not in data
     assert data["title"] is None
     assert data["intent"] is None
+
+
+def _title_row(lines: list[str]) -> str:
+    return next(ln for ln in lines if "title:" in ln)
+
+
+def _titleless_with_intent(control: Path, quest_id: str, intent: str) -> None:
+    q = Quest.create(control, title="", quest_id=quest_id, base_branch="main")
+    q.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent", "content": [{"type": "text", "text": intent}]})
+
+
+def test_quest_card_titles_a_titleless_quest_by_its_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "_display_width", lambda: 200)
+    _seed_control(tmp_path)
+    opening = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
+    _titleless_with_intent(tmp_path, "2026-06-20-tl001", opening)
+    lines = main._detail_card(tmp_path, "2026-06-20-tl001", now=_NOW, color=False)
+    assert _title_row(lines) == "title:" + " " * 9 + opening
+    assert "(unnamed)" not in "\n".join(lines)
+
+
+def test_quest_card_dims_the_fallback_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "_display_width", lambda: 200)
+    _seed_control(tmp_path)
+    _titleless_with_intent(tmp_path, "2026-06-20-tl002", "summarize\n  foo.py")
+    lines = main._detail_card(tmp_path, "2026-06-20-tl002", now=_NOW, color=True)
+    assert _title_row(lines) == (
+        pal.ansi("title:", "dim") + " " * 9 + pal.ansi("summarize foo.py", "dim"))
+
+
+def test_quest_card_titles_an_unstarted_draft_by_its_seed_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.create import create_draft_quest
+    monkeypatch.setattr(main, "_display_width", lambda: 200)
+    _seed_control(tmp_path)
+    q = create_draft_quest(tmp_path, "summarize\n  foo.py")
+    lines = main._detail_card(tmp_path, q.id, now=_NOW, color=False)
+    assert _title_row(lines) == "title:" + " " * 9 + "summarize foo.py"
+
+
+def test_quest_card_clips_a_long_fallback_title_to_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "_display_width", lambda: 40)
+    _seed_control(tmp_path)
+    opening = "summarize " + "y" * 100
+    _titleless_with_intent(tmp_path, "2026-06-20-tl003", opening)
+    lines = main._detail_card(tmp_path, "2026-06-20-tl003", now=_NOW, color=False)
+    # 15-col label + 24 text cols + "…" = 40 display cols
+    assert _title_row(lines) == "title:" + " " * 9 + opening[:24] + "…"
+    assert lines[lines.index("intent:") + 1] == opening   # full text under intent:
+
+
+def test_quest_card_clipped_fallback_title_stays_dim_without_bleed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "_display_width", lambda: 40)
+    _seed_control(tmp_path)
+    opening = "summarize " + "y" * 100
+    _titleless_with_intent(tmp_path, "2026-06-20-tl004", opening)
+    lines = main._detail_card(tmp_path, "2026-06-20-tl004", now=_NOW, color=True)
+    assert _title_row(lines) == (
+        pal.ansi("title:", "dim") + " " * 9 + pal.ansi(opening[:24] + "…", "dim"))
+
+
+def test_quest_card_real_title_stays_plain_and_unclipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "_display_width", lambda: 40)
+    _seed_control(tmp_path)
+    title = "a deliberately long real title that is wider than forty columns"
+    Quest.create(tmp_path, title=title, quest_id="2026-06-20-tt001", base_branch="main")
+    lines = main._detail_card(tmp_path, "2026-06-20-tt001", now=_NOW, color=True)
+    assert _title_row(lines) == pal.ansi("title:", "dim") + " " * 9 + title
+
+
+def test_quest_card_unnamed_placeholder_is_dim(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="", quest_id="2026-06-20-un001", base_branch="main")
+    lines = main._detail_card(tmp_path, "2026-06-20-un001", now=_NOW, color=True)
+    assert _title_row(lines) == (
+        pal.ansi("title:", "dim") + " " * 9 + pal.ansi("(unnamed)", "dim"))
+
+
+def test_backlog_card_titles_a_titleless_brief_by_its_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "_display_width", lambda: 200)
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="", quest_id="2026-06-20-bk001",
+                       base_branch="main", origin="idea",
+                       seed_opening="Brief one\n\nmore body")
+    lines = main._detail_card(tmp_path, "2026-06-20-bk001", now=_NOW, color=True)
+    assert _title_row(lines) == (
+        pal.ansi("title:", "dim") + " " * 6 + pal.ansi("Brief one more body", "dim"))
+    idx = lines.index(pal.ansi("intent:", "dim"))
+    assert lines[idx + 1] == "Brief one\n\nmore body"   # full brief under intent:
+
+
+def test_backlog_card_clips_a_long_seed_title_to_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "_display_width", lambda: 40)
+    _seed_control(tmp_path)
+    seed = "Brief " + "z" * 100
+    Quest.create_draft(tmp_path, title="", quest_id="2026-06-20-bk002",
+                       base_branch="main", origin="idea", seed_opening=seed)
+    lines = main._detail_card(tmp_path, "2026-06-20-bk002", now=_NOW, color=False)
+    # 12-col label + 27 text cols + "…" = 40 display cols
+    assert _title_row(lines) == "title:" + " " * 6 + seed[:27] + "…"
+    assert lines[-1] == seed

@@ -1881,6 +1881,16 @@ def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
     return pal.ansi(label, "dim", enabled=color) + " " * (width - len(label)) + value
 
 
+def _card_title_row(title: str, intent: str | None, width: int, *, color: bool) -> str:
+    """The `title:` row: a real title plain, else the dim fallback clipped to one line."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.TITLE:
+        return _card_field("title:", resolved.text, width, color=color)
+    value = pal.ansi(resolved.text, "dim", enabled=color)
+    return pal.clip_display(_card_field("title:", value, width, color=color),
+                            _display_width())
+
+
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
                   color: bool) -> list[str]:
     from imp.cli.store import make_store
@@ -1890,7 +1900,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     created = meta.get("created_at")
     lines = [
         _card_field("id:", meta["id"], 12, color=color),
-        _card_field("title:", meta.get("title") or "(unnamed)", 12, color=color),
+        _card_title_row(meta.get("title") or "", meta.get("seed_opening"), 12,
+                        color=color),
         _card_field("status:", "backlog", 12, color=color),
         _card_field("provenance:", meta.get("origin", "draft"), 12, color=color),
         _card_field("readiness:", readiness, 12, color=color),
@@ -2018,7 +2029,9 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
     from imp.cli.store import _INFLIGHT
     lines = [
         _card_field("id:", card.quest_id, 15, color=color),
-        _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
+        _card_title_row(card.title,
+                        quest_row.fallback_intent(card.intent, card.seed_opening),
+                        15, color=color),
         _card_field(
             "status:",
             quest_row.display_word(card.status),
