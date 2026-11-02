@@ -31,6 +31,11 @@ ENUMERATE_SENTENCE = (
     "say — is one grill question: show the actual values with recommended defaults for the "
     "user to correct. What is banned is the *unenumerated deferral* —"
 )
+SETTLE_BY_READING_PARA = (
+    "Settle how a tool behaves by reading — its docs, its `--help`, or a `researcher` — "
+    "never by installing software or running a throwaway experiment yourself, not even "
+    "in scratch. When only running code can settle it, that is a `spiker`'s job."
+)
 
 
 def _render_agent(workflow: str, agent: str) -> str:
@@ -368,3 +373,15 @@ def test_one_question_rule_still_renders(agent: str) -> None:
     # AC5b: the shared live-gate rule stays in both default-workflow gates.
     assert "One question at a time" in _render_agent("default", agent)
 
+
+@pytest.mark.parametrize(("workflow", "agent"), [
+    ("default", "threshold"),
+    ("minimal", "front-door"),
+])
+def test_front_door_settles_tool_behavior_by_reading(workflow: str, agent: str) -> None:
+    flat = _render_agent(workflow, agent)
+    # Immediately before the spiker-dispatch paragraph, in both design chats.
+    assert (
+        SETTLE_BY_READING_PARA + " Dispatch a **`spiker`** when an unknown can only be "
+        "settled empirically"
+    ) in flat
