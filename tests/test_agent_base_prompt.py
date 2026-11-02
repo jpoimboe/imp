@@ -197,6 +197,23 @@ def test_user_facing_note_contains_top_level_output_contract() -> None:
     ) in flat
 
 
+_STATE_PATHS_PARAGRAPH = (
+    "Never point the user at a quest's state files — `.imp/quests/…`, `deferred.md`, "
+    "`progress.md`, spec or plan paths; they can't reach them. Quote what matters in "
+    "your message, or name the command that shows it: `imp show <id>`, "
+    "`imp show <id> spec`, `imp log <id>`."
+)
+
+
+def test_user_facing_note_forbids_pointing_at_quest_state_files() -> None:
+    flat = " ".join(_USER_FACING_NOTE.split())
+    assert _STATE_PATHS_PARAGRAPH in flat
+    assert flat.index("describe the effect in plain language.") < flat.index(
+        _STATE_PATHS_PARAGRAPH)
+    assert flat.index(_STATE_PATHS_PARAGRAPH) < flat.index(
+        "Write updates so the reader can pick up cold")
+
+
 def test_top_level_invocation_contains_user_facing_note(tmp_path: Path) -> None:
     inv = _build(tmp_path, name="rev", body="BODY")
     assert "Users see only your text output" in inv.system_prompt
