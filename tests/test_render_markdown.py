@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
+from imp.cli import render_markdown as rm
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
+from imp.cli.render_html import _fold_markers, _FoldOpen
 from imp.cli.render_markdown import (
+    _accept,
     _details,
     _escape_all,
     _md_escape,
+    _same_tokens,
     _subagent_status_label,
     render_markdown,
     render_summary_markdown,
@@ -1074,3 +1078,67 @@ def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
     assert out.index("| total |") < out.index("| ↳ claude |")
     assert ("codex: quota below measurement resolution; the weekly gauge did"
             " not move during this run") in out
+
+
+def test_accept_when_c_differs_only_inside_code() -> None:
+    assert _accept("Use `a -> b`", "Use `a -&gt; b`")
+    assert _accept("```\nif a < b:\n```", "```\nif a &lt; b:\n```")
+    assert _accept("| `a -> b` | x |\n|---|---|\n| 1 | 2 |",
+                   "| `a -&gt; b` | x |\n|---|---|\n| 1 | 2 |")
+
+
+def test_same_tokens_rejects_added_raw_html() -> None:
+    assert not _same_tokens("<b>x</b>", "&lt;b&gt;x&lt;/b&gt;")
+
+
+def test_same_tokens_rejects_a_changed_summary_line() -> None:
+    fold = "<details>\n<summary>{}</summary>\n\nbody\n\n</details>"
+    assert not _same_tokens(fold.format("`<x>`"), fold.format("`&lt;x&gt;`"))
+
+
+def test_same_tokens_rejects_a_cdata_section() -> None:
+    assert not _same_tokens(
+        "[a](b`c) <![CDATA[><img src=x onerror=alert(1)>]]> `d`",
+        "[a](b`c) &lt;![CDATA[&gt;&lt;img src=x onerror=alert(1)&gt;]]&gt; `d`")
+
+
+def test_same_tokens_rejects_a_changed_link_destination() -> None:
+    assert not _same_tokens("[a](x&lt;y)", "[a](x&amp;lt;y)")
+
+
+def test_fold_markers_catch_a_forged_fold_inside_a_code_span() -> None:
+    c = "x `\n<details>\n<summary>s</summary>\n`"
+    e = "x `\n&lt;details&gt;\n&lt;summary&gt;s&lt;/summary&gt;\n`"
+    assert _fold_markers(c) == [_FoldOpen(1, "s")]
+    assert _fold_markers(e) == []
+    assert not _accept(c, e)
+
+
+def _literal_tree(text: str) -> nv.NarrativeTree:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.LiteralTextNode(text=text)]
+    return nv.NarrativeTree(root=root)
+
+
+def test_render_markdown_falls_back_to_full_escape_on_structural_change(
+        monkeypatch) -> None:
+    monkeypatch.setattr(rm, "_md_escape", lambda s: s)
+    out = render_markdown(_literal_tree("<b>x</b>"), full=False)
+    assert out == "# t\n\n&lt;b&gt;x&lt;/b&gt;\n"
+
+
+def test_render_markdown_keeps_pass_c_when_structure_matches(monkeypatch) -> None:
+    monkeypatch.setattr(rm, "_md_escape", lambda s: s)
+    out = render_markdown(_literal_tree("Use `a -> b`"), full=False)
+    assert out == "# t\n\nUse `a -> b`\n"
+
+
+def test_summary_markdown_guard_picks_pass_c_or_full_escape(monkeypatch) -> None:
+    monkeypatch.setattr(rm, "_md_escape", lambda s: s)
+    def header(workflow: str) -> SummaryHeader:
+        return SummaryHeader(workflow=workflow, quest_id="q", status="running",
+                             total_seconds=1.0)
+    kept = render_summary_markdown([], header=header("`a -> b`"))
+    assert kept.startswith("# `a -> b` — q\n")
+    fallback = render_summary_markdown([], header=header("<b>x</b>"))
+    assert fallback.startswith("# &lt;b&gt;x&lt;/b&gt; — q\n")

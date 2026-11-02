@@ -7,11 +7,15 @@ import json
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
+from imp.cli.render_html import _fold_markers
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
@@ -311,6 +315,41 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
     return
 
 
+_VIEWER = MarkdownIt("commonmark", {"html": True}).enable("table")
+_ESCAPED_CONTENT = frozenset({"inline", "text", "code_inline", "fence", "code_block"})
+
+
+def _token_keys(markdown: str) -> list[tuple[int, Token]]:
+    """A raw-HTML-passing viewer's tokens in preorder with their depth, stripped of
+    children and of the `content` its renderer escapes."""
+    keys: list[tuple[int, Token]] = []
+    stack = [(0, tok) for tok in reversed(_VIEWER.parse(markdown))]
+    while stack:
+        depth, tok = stack.pop()
+        stack.extend((depth + 1, child) for child in reversed(tok.children or []))
+        tok.children = None
+        if tok.type in _ESCAPED_CONTENT:
+            tok.content = ""
+        keys.append((depth, tok))
+    return keys
+
+
+def _same_tokens(c: str, e: str) -> bool:
+    return _token_keys(c) == _token_keys(e)
+
+
+def _accept(c: str, e: str) -> bool:
+    tokens_match = _same_tokens(c, e)
+    markers_match = _fold_markers(c) == _fold_markers(e)
+    return tokens_match and markers_match
+
+
+def _guarded(render: Callable[[_Esc], str]) -> str:
+    """Pass C (`_md_escape`) when it is structurally the full-escape pass E, else E."""
+    c, e = render(_md_escape), render(_escape_all)
+    return c if c == e or _accept(c, e) else e
+
+
 def _narrative_document(tree: nv.NarrativeTree, *, full: bool, cats: frozenset[str],
                         esc: _Esc) -> str:
     blocks = [b for b in _walk(tree.root, full=full, cats=cats, level=1, esc=esc) if b]
@@ -321,7 +360,7 @@ def render_markdown(tree: nv.NarrativeTree, *, full: bool,
                     show: frozenset[str] | None = None) -> str:
     """Render a NarrativeTree to a Markdown document string."""
     cats = rt._resolve_cats(full, show)
-    return _narrative_document(tree, full=full, cats=cats, esc=_md_escape)
+    return _guarded(lambda esc: _narrative_document(tree, full=full, cats=cats, esc=esc))
 
 
 _MD_HEADER = "| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
@@ -390,4 +429,4 @@ def render_summary_markdown(summary: list[StepRow], *, header: SummaryHeader,
                             quota: QuotaColumn | QuotaFallback | None = None,
                             ) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
-    return _summary_document(summary, header, quota, _md_escape)
+    return _guarded(lambda esc: _summary_document(summary, header, quota, esc))
