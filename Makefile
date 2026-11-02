@@ -82,6 +82,7 @@ _LIVE_TEST_FILES := \
   tests/test_mid_step_resume_live.py \
   tests/test_openai_gate_feedback_resume_live.py \
   tests/test_resume_all_shapes_live.py \
+  tests/test_claude_resume_stub_live.py \
   tests/test_native_session_resume_live.py \
   tests/test_relay_hibernation_live.py \
   tests/test_codex_provider_live.py \
