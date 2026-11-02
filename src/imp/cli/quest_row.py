@@ -36,6 +36,15 @@ def resolve_display_name(title: str | None, intent: str | None) -> ResolvedName:
     return ResolvedName("(unnamed)", NameKind.UNNAMED)
 
 
+def fallback_intent(intent: str | None, seed_opening: str | None) -> str | None:
+    """The titleless-name source: the events-derived intent, else seed_opening; blank is absent."""
+    if intent and intent.strip():
+        return intent
+    if seed_opening and seed_opening.strip():
+        return seed_opening
+    return None
+
+
 def relative_age(then_iso: str | None, *, now: datetime) -> str:
     if not then_iso:
         return "-"

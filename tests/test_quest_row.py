@@ -4,6 +4,7 @@ import pytest
 
 from imp.cli.quest_row import (
     NAME_MIN,
+    fallback_intent,
     format_quest_line,
     header_line,
     name_budget,
@@ -541,3 +542,25 @@ def test_overview_widths_name_cap_inert_when_name_already_narrow(monkeypatch):
     # region = 61; NAME is already 20 (< 60), so name_cap=60 is inert.
     rows = [("running", "x" * 40, "y" * 20)]
     assert overview_widths(rows, name_cap=60) == overview_widths(rows)
+
+
+def test_fallback_intent_prefers_the_events_intent():
+    assert fallback_intent("fix the login crash", "seeded brief") == "fix the login crash"
+
+
+def test_fallback_intent_falls_back_to_seed_opening_when_intent_absent():
+    assert fallback_intent(None, "seeded brief") == "seeded brief"
+
+
+def test_fallback_intent_treats_a_blank_intent_as_absent():
+    assert fallback_intent("  \n\t ", "seeded brief") == "seeded brief"
+
+
+def test_fallback_intent_is_none_when_both_are_blank_or_absent():
+    assert fallback_intent(None, None) is None
+    assert fallback_intent("", "   ") is None
+
+
+def test_fallback_intent_returns_text_unflattened():
+    # Flattening/clipping is the resolver's and caller's job, not the source picker's.
+    assert fallback_intent(None, "line one\n  line two") == "line one\n  line two"
