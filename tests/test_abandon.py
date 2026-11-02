@@ -13,7 +13,7 @@ from imp.engine.abandon import discard_conversation, tear_down_quest
 from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 from imp.paths import project_state_dir
-from tests.conftest import _git, _seed_control
+from tests.conftest import _commit_work, _git, _seed_control
 
 _var_tmp_writable = pytest.mark.skipif(
     not os.access("/var/tmp", os.W_OK),
@@ -354,7 +354,7 @@ def test_abandon_returns_rc_and_message_without_printing(
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     rc, message = _abandon(tmp_path, "feat")
     assert rc == 0
-    assert message == "Abandoned feat."
+    assert message == "Abandoned feat · removed worktree and branch imp/feat (no commits)."
     assert capsys.readouterr().out == ""        # pure: teardown no longer prints
 
 
@@ -365,7 +365,8 @@ def test_abandon_local_emits_message_and_returns_rc(
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
-    assert "Abandoned feat." in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "Abandoned feat · removed worktree and branch imp/feat (no commits).\n")
 
 
 def test_tear_down_quest_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
@@ -462,3 +463,33 @@ def test_tear_down_quest_force_reaps_overlay_residue_in_quest_home(
         if residue.exists():
             residue.chmod(0o700)
         shutil.rmtree(ch.quest_dir, ignore_errors=True)
+
+
+def test_abandon_summary_count_captured_before_local_teardown(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    _commit_work(ch, 2)
+    rc, message = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert message == "Abandoned feat · removed worktree and branch imp/feat (2 commits)."
+    assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
+
+
+def test_abandon_summary_count_captured_before_resident_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    _commit_work(ch, 1)
+    monkeypatch.setattr("imp.remote.daemon.directory.session_is_resident",
+                        lambda _ctrl, _cid: True)
+
+    def _daemon_tears_down(cid: str) -> None:
+        tear_down_quest(Quest.load(tmp_path, cid))
+
+    monkeypatch.setattr(m, "_deliver_abandon_resident", _daemon_tears_down)
+    rc, message = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert message == "Abandoned feat · removed worktree and branch imp/feat (1 commit)."
+    assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # daemon tore down

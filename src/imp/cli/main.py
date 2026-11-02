@@ -3083,6 +3083,7 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
     worktree removal (records live inside the worktree); `git branch -D` AFTER
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
+    from imp.cli.abandon_confirm import removal_description
     from imp.engine import worktree
     from imp.engine.abandon import tear_down_quest
     from imp.engine.errors import LoadError, LoadErrors
@@ -3098,19 +3099,22 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
         return 0, f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."
 
     token = quest.id
+    removed = removal_description(quest)
+    done = (f"Abandoned {token}." if removed is None
+            else f"Abandoned {token} · removed {removed}.")
     if session_is_resident(control, quest_id):
         try:
             _deliver_abandon_resident(quest_id)
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
-            return 0, f"Abandoned {token}."
+            return 0, done
     try:
         tear_down_quest(quest)
     except LockHeld as e:
         return 2, (f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
                    f"stop it before abandoning")
-    return 0, f"Abandoned {token}."
+    return 0, done
 
 
 def _abandon_local(control: Path, quest_id: str) -> int:

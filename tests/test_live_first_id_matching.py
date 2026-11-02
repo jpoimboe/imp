@@ -155,7 +155,9 @@ def test_abandon_resolves_a_live_token_with_an_unreadable_journal(
 
     result = run_mutation(tmp_path, "abandon", {"token": "livid"})
 
-    assert result == {"returncode": 0, "message": "Abandoned livid1."}
+    assert result == {
+        "returncode": 0,
+        "message": "Abandoned livid1 · removed worktree and branch imp/livid1 (no commits)."}
     assert not (project_state_dir(tmp_path) / "quests" / LIVE).exists()
 
 

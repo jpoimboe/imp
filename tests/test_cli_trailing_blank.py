@@ -534,7 +534,7 @@ def test_abandon_resident_delivery_trailing_blank_on_tty(
     rc = m._abandon_local(tmp_path, "feat")
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == "Abandoned feat.\n\n"
+    assert out == "Abandoned feat · removed worktree and branch imp/feat (no commits).\n\n"
 
 
 def test_abandon_tear_down_trailing_blank_on_tty(
@@ -550,7 +550,7 @@ def test_abandon_tear_down_trailing_blank_on_tty(
     rc = m._abandon_local(tmp_path, "feat")
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == "Abandoned feat.\n\n"
+    assert out == "Abandoned feat · removed worktree and branch imp/feat (no commits).\n\n"
 
 
 def test_conventions_doc_records_trailing_blank_rule() -> None:
