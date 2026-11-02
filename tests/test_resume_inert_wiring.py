@@ -5,6 +5,7 @@ import asyncio
 import os
 import signal
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -425,7 +426,8 @@ _LEAVE_SIGNALS = pytest.mark.parametrize(
 @_LEAVE_SIGNALS
 async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
     leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], signal_sentinels: None,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    signal_sentinels: Callable[[int, object], None],
 ) -> None:
     # A signal leave at the inert prompt prints the standard signal-leave block
     # (no caret: nothing was typed) and maps to None like Ctrl-D.
@@ -447,7 +449,8 @@ async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
 @_LEAVE_SIGNALS
 async def test_resume_inert_leave_signal_parks_and_returns_zero(
     leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], signal_sentinels: None,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    signal_sentinels: Callable[[int, object], None],
 ) -> None:
     # Through the whole inert-resume flow: rc 0, nothing launched or journaled,
     # the quest still parked, and the pause block is the last thing printed.

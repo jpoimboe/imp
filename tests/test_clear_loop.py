@@ -7,6 +7,7 @@ import io
 import os
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -141,7 +142,7 @@ async def test_run_cleared_session_cancel_emits_discarded_spine(
     "leave_sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
 async def test_run_cleared_session_leave_signal_discards_like_ctrl_d(
     leave_sig: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str], signal_sentinels: None,
+    capsys: pytest.CaptureFixture[str], signal_sentinels: Callable[[int, object], None],
 ) -> None:
     # A leave signal at the reopened prompt == Ctrl-D there: the discarded spine,
     # one trailing blank, the draft gone, exit 130 — no pause block, no trigger.
@@ -175,7 +176,8 @@ async def test_run_cleared_session_leave_signal_discards_like_ctrl_d(
 
 @pytest.mark.anyio
 async def test_run_cleared_session_out_of_band_sigint_feeds_ctrl_c_and_continues(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_sentinels: None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    signal_sentinels: Callable[[int, object], None],
 ) -> None:
     # An OS-level SIGINT at the reopened prompt goes to the prompt's Ctrl-C
     # binding. It never exits: the line typed afterwards still starts the session.

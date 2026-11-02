@@ -204,23 +204,11 @@ async def test_cancel_at_opening_prompt_emits_discarded_spine(
     assert "cancelled" not in out
 
 
-@pytest.fixture
-def leave_signal_sentinels():
-    """A guard regression must fail the test, not kill pytest with the raw signal."""
-    def _sentinel(signum, _frame):
-        raise AssertionError(f"signal {signum} escaped the opening-prompt guard")
-
-    prev = {sig: signal.signal(sig, _sentinel) for sig in (signal.SIGTERM, signal.SIGHUP)}
-    yield
-    for sig, handler in prev.items():
-        signal.signal(sig, handler)
-
-
 @pytest.mark.anyio
 @pytest.mark.parametrize("leave_mode", ["new", "chat"])
 @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
 async def test_leave_signal_at_opening_prompt_discards_like_ctrl_d(
-    stub_new, monkeypatch, capsys, leave_signal_sentinels, leave_mode, sig,
+    stub_new, monkeypatch, capsys, signal_sentinels, leave_mode, sig,
 ) -> None:
     # Same as Ctrl-D: discarded spine + one blank, draft torn down, rc 130, no pause block.
     m = stub_new
