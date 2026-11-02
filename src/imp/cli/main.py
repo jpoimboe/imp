@@ -2941,6 +2941,11 @@ def _resume_picker_empty(control: Path) -> int:
     return ExitCode.OK
 
 
+def _picker_cancelled(verb: str) -> ExitCode:
+    _emit_cli_error(f"{verb} cancelled")
+    return ExitCode.USER_ENDED
+
+
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
@@ -2960,6 +2965,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
+    on_cancel: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int],
     selected_index: int = 0,
     non_interactive: bool = False,
@@ -2980,7 +2986,7 @@ async def _pick_quest_target(
         candidates, now=datetime.now(UTC),
         color=should_use_color(sys.stdout),
         header=header, selected_index=selected_index)
-    return chosen if chosen is not None else 2
+    return chosen if chosen is not None else on_cancel()
 
 
 _RESUME_PICKER_HEADER = (
@@ -3015,6 +3021,7 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
         rows=_resumable_rows(control),
         header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
+        on_cancel=lambda: _picker_cancelled("resume"),
         on_non_tty=_resume_picker_non_tty,
         non_interactive=non_interactive,
     )
@@ -3034,6 +3041,7 @@ async def _resolve_resume_target(
             rows=matches,
             header=_RESUME_PICKER_HEADER,
             on_empty=lambda: _resume_picker_empty(control),
+            on_cancel=lambda: _picker_cancelled("resume"),
             on_non_tty=_resume_picker_non_tty,
             non_interactive=non_interactive,
         )
@@ -3152,6 +3160,7 @@ async def _pick_abandon_target(control: Path) -> str | int:
         rows=_abandon_rows(control),
         header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
+        on_cancel=lambda: _picker_cancelled("abandon"),
         on_non_tty=_abandon_picker_non_tty,
     )
 
@@ -3171,6 +3180,7 @@ async def _pick_abandon_matches(
         rows=rows,
         header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
+        on_cancel=lambda: _picker_cancelled("abandon"),
         on_non_tty=_non_tty,
     )
 

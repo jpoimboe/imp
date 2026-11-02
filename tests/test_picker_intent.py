@@ -46,7 +46,7 @@ async def test_pick_quest_target_threads_intent(
     monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rc = await m._pick_quest_target(
         control=tmp_path, rows=[row, row], header="pick",
-        on_empty=lambda: 0, on_non_tty=None)
+        on_empty=lambda: 0, on_cancel=lambda: 0, on_non_tty=None)
     assert rc == "c1"
     assert captured["c"][0].intent == "add dark mode"
 
@@ -83,6 +83,7 @@ async def test_pick_quest_target_skips_event_load_for_titled_rows(
         rows=[titled_row, untitled_row],
         header="pick",
         on_empty=lambda: 0,
+        on_cancel=lambda: 0,
         on_non_tty=None,
     )
 

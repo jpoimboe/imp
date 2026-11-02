@@ -91,6 +91,23 @@ async def test_two_matches_open_scoped_picker_interactive(
 
 
 @pytest.mark.anyio
+async def test_two_matches_scoped_picker_cancel_exits_130_resume_cancelled(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_resumable_matches",
+                        lambda c, t: ([_row("lodo40"), _row("lodo77")], None))
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_picker(candidates, *, now, color, header, selected_index):
+        return None
+
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
+    assert await m._resolve_resume_target(
+        tmp_path, "lodo", non_interactive=False) == 130
+    assert capsys.readouterr().err == "imp: resume cancelled\n"
+
+
+@pytest.mark.anyio
 async def test_two_matches_non_tty_errors_pass_token(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:

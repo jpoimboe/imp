@@ -34,6 +34,8 @@ def test_the_exit_codes_are_exactly_the_contract_six() -> None:
     main._abandon_picker_empty,
     main._run_cleared_session,
     main._follow_live,
+    main._pick_quest_target,
+    main._picker_cancelled,
 ], ids=lambda fn: fn.__name__)
 def test_endings_return_named_exit_codes(fn: Callable[..., Any]) -> None:
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))

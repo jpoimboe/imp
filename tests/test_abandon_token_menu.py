@@ -48,6 +48,21 @@ async def test_pick_abandon_matches_interactive_selection(
 
 
 @pytest.mark.anyio
+async def test_pick_abandon_matches_cancel_exits_130_abandon_cancelled(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_picker(candidates, *, now, color, header, selected_index):
+        return None
+
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
+    rows = [_row("lodo40"), _row("lodo77")]
+    assert await m._pick_abandon_matches(tmp_path, "lodo", rows) == 130
+    assert capsys.readouterr().err == "imp: abandon cancelled\n"
+
+
+@pytest.mark.anyio
 async def test_pick_abandon_matches_non_tty_token_specific(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
@@ -126,14 +141,14 @@ def test_cmd_abandon_two_matches_picker_rc_short_circuits(
                         lambda c, t: [_row("lodo40"), _row("lodo77")])
 
     async def fake_pick(control, token, rows):
-        return 2
+        return 130
 
     def boom_abandon(*a, **k):
         raise AssertionError("_abandon called despite picker rc")
 
     monkeypatch.setattr(m, "_pick_abandon_matches", fake_pick)
     monkeypatch.setattr(m, "_abandon_local", boom_abandon)
-    assert m._cmd_abandon(argparse.Namespace(token="lodo", yes=False)) == 2
+    assert m._cmd_abandon(argparse.Namespace(token="lodo", yes=False)) == 130
 
 
 def test_cmd_abandon_zero_matches_archive_recovery(

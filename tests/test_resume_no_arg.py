@@ -105,8 +105,8 @@ async def test_multiple_interactive_uses_picker_selection(
 
 
 @pytest.mark.anyio
-async def test_multiple_interactive_cancel_returns_2(
-    monkeypatch, tmp_path: Path,
+async def test_multiple_interactive_cancel_exits_130_resume_cancelled(
+    monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     rows = [_row("2026-06-11-aaa111", "paused", "2026-06-11T00:00:00+00:00"),
             _row("2026-06-10-bbb222", "new", "2026-06-10T00:00:00+00:00")]
@@ -117,4 +117,5 @@ async def test_multiple_interactive_cancel_returns_2(
         return None
 
     monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
-    assert await m._pick_resume_target(tmp_path, non_interactive=False) == 2
+    assert await m._pick_resume_target(tmp_path, non_interactive=False) == 130
+    assert capsys.readouterr().err == "imp: resume cancelled\n"
