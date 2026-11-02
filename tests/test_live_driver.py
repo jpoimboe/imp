@@ -395,6 +395,32 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
     assert not any("→ status" in ln for ln in body)   # no outcome ever
 
 
+def test_finish_interrupted_marks_open_subagents_interrupted() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "tool_call", agent_id="sub:4", id="t2", name="sub_agent",
+           input={"subagent_name": "helper"}),
+        ev("6", "agent_message", agent_id="sub:5",
+           raw={"content": [{"type": "text", "text": "deep work"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    top = drv._builder._sub_by_agent_id["sub:4"]
+    nested = top.nested._sub_by_agent_id["sub:5"]
+    assert nested.running is True
+    # A torn-down run (mid-run leave) closes the live view like Ctrl-C does.
+    drv.finish(interrupted=True)
+    body = _body(out)
+    assert any(ln.strip() == "reviewer · interrupted" for ln in body)
+    assert not any("· running" in ln for ln in body)
+    assert nested.terminal_state == "interrupted"
+    assert nested.running is False
+
+
 def test_subagent_body_parity_with_render_tree() -> None:
     # The stated invariant: snapshot (imp log) and live stay BYTE-IDENTICAL via the
     # shared subagent_status_row helper. Both now collapse the subagent to one
