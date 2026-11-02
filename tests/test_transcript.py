@@ -1045,9 +1045,10 @@ def test_interrupt_marker_repair_ignores_ordinary_text_tail(tmp_path: Path) -> N
     assert path.read_bytes() == bytes_before
 
 
-def test_interrupt_marker_left_alone_after_dangling_tool_use(tmp_path: Path) -> None:
+def test_interrupt_marker_dropped_over_an_unanswered_tool_use(tmp_path: Path) -> None:
     """Criterion 6(a): interrupt between turns — the marker sits on an assistant turn
-    with a dangling tool_use. Untouched: repairing it would strand an assistant tail."""
+    with a dangling tool_use. The marker goes; the unanswered-tool_use sweep then
+    answers b1, so no assistant tail is stranded."""
     path = tmp_path / "transcript.jsonl"
     t = Transcript(path)
     msgs = [
@@ -1058,13 +1059,12 @@ def test_interrupt_marker_left_alone_after_dangling_tool_use(tmp_path: Path) -> 
     ]
     for m in msgs:
         t.append(m)
-    before = list(msgs)
-    bytes_before = path.read_bytes()
+    beneath = msgs[:2]
 
     repair_interrupt_marker_on_resume(msgs, t)
 
-    assert msgs == before
-    assert path.read_bytes() == bytes_before
+    assert msgs == beneath
+    assert Transcript(path).load() == beneath
 
 
 def test_interrupt_marker_left_alone_after_plain_assistant_text(tmp_path: Path) -> None:
@@ -1190,6 +1190,174 @@ def test_interrupt_marker_repair_keeps_the_note_when_a_recovered_result_failed(
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["w1"].is_error is True
     assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
+
+
+def _write(tmp_path: Path, msgs: list[Message]) -> Transcript:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    return t
+
+
+def _note_count(msgs: list[Message]) -> int:
+    return sum(1 for m in msgs for b in m.content
+               if isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE)
+
+
+def test_interrupt_marker_repair_restates_every_per_block_rejection(
+    tmp_path: Path,
+) -> None:
+    """claude writes one Message per block: a parallel-call interrupt is one rejection
+    turn per outstanding call, then the marker. Every rejection is restated — the
+    first from imp's capture, the second as the bash placeholder resolved by id two
+    turns back — and the note lands once, on the last restated turn."""
+    from imp.agents.transcript import captured_result_key
+
+    sub = ToolUseBlock(id="s1", name="mcp__imp__sub_agent",
+                       input={"subagent_name": "coder", "task_description": "t"})
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(sub,)),
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="s1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+    captured = {captured_result_key("sub_agent", dict(sub.input)): ("coder done", False)}
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    assert msgs[3:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="s1", content="coder done", is_error=False),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+    ]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_interrupt_marker_repair_keeps_user_text_after_the_marker(tmp_path: Path) -> None:
+    """A real human turn after the marker survives untouched; the run beneath the
+    marker is still repaired."""
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    human = Message(role="user", content=(TextBlock(text="sandbox is off"),))
+    msgs = [
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+        human,
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+            TextBlock(text=RESUME_DURABILITY_NOTE))),
+        human,
+    ]
+
+
+def test_interrupt_marker_repair_drops_every_marker_up_to_the_last(tmp_path: Path) -> None:
+    bash = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"})
+    msgs = [
+        Message(role="assistant", content=(bash,)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+        Message(role="user", content=(TextBlock(text=_MARKER_BARE),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert len(msgs) == 2
+    assert msgs[1].content == (
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE))
+
+
+def test_interrupt_marker_repair_adds_no_note_over_a_success(tmp_path: Path) -> None:
+    """Nothing beneath the marker was cut off, so the 'cut off by that pause' note
+    would be false: the marker goes, the real result stays, no note."""
+    ok = ToolResultBlock(tool_use_id="r1", content="file body", is_error=False)
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "a.py"}),)),
+        Message(role="user", content=(ok,)),
+        Message(role="user", content=(TextBlock(text=_MARKER_BARE),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(ok,))]
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_interrupt_marker_repair_leaves_complete_step_results(tmp_path: Path) -> None:
+    """A complete_step result is the complete_step-tail answer's to set: the marker
+    goes, but its result is neither restated as 'interrupted' nor framed by the note."""
+    rejected = ToolResultBlock(tool_use_id="c1", content=_REJECTION_BODY, is_error=True)
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c1", name="mcp__imp__complete_step",
+                         input={"status": "Success"}),)),
+        Message(role="user", content=(rejected,)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(rejected,))]
+
+
+def test_interrupt_marker_repair_adds_no_second_note(tmp_path: Path) -> None:
+    """A run that already holds the durability note is not given another."""
+    first = Message(role="user", content=(
+        ToolResultBlock(tool_use_id="b1", content=_SYNTHETIC_BASH, is_error=True),
+        TextBlock(text=RESUME_DURABILITY_NOTE)))
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make"}),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b2", name="mcp__imp__bash", input={"command": "test"}),)),
+        first,
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b2", content=_REJECTION_BODY, is_error=True),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert _note_count(msgs) == 1
+    assert msgs[2:] == [first, Message(role="user", content=(
+        ToolResultBlock(tool_use_id="b2", content=_SYNTHETIC_BASH, is_error=True),))]
+
+
+def test_interrupt_marker_repair_keeps_an_orphan_error_result(tmp_path: Path) -> None:
+    """There is no call to restate it as, so the result stays as written."""
+    orphan = ToolResultBlock(tool_use_id="gone", content=_REJECTION_BODY, is_error=True)
+    msgs = [
+        Message(role="assistant", content=(TextBlock(text="working"),)),
+        Message(role="user", content=(orphan,)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    t = _write(tmp_path, msgs)
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs[1:] == [Message(role="user", content=(orphan,))]
+    assert _note_count(msgs) == 0
 
 
 def test_unresolved_tool_result_content_states_uncertainty_without_advising_a_rerun(

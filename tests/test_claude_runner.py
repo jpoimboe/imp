@@ -2570,7 +2570,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from imp.providers.claude_session_store import (
         message_to_session_records,
         session_key,
@@ -2620,27 +2620,26 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
 
     opts = created[0].opts
     # In-place-repair shape WITH a store takes the native path (not fallback).
-    # Its last turn is the user interrupt marker, so it classifies as SEND_TO_LLM:
-    # native resume STREAMS that trailing user turn to kick the next turn (an empty
-    # delta would deadlock). claude-p pairs the dangling t1 from its loaded session
-    # — imp injects no synthetic tool_result. Live acceptance: the SEND_TO_LLM
-    # round-trip in tests/test_resume_all_shapes_live.py.
+    # The marker over the unanswered t1 is dropped and t1's placeholder result is
+    # loaded right behind it; the stream is the continuation nudge (an empty delta
+    # would deadlock). Live acceptance: tests/test_resume_all_shapes_live.py.
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
-    # The flushed prefix (through the dangling t1 turn) stays in the native
-    # session; only the interrupt marker is streamed, not written to the store.
+    assert streamed[0]["message"]["content"] == RESUME_CONTINUE_NUDGE
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
+    assert len(reconciled) == 5
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert "[Request interrupted by user]" not in json.dumps(reconciled)
 
 
 @pytest.mark.anyio
 async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from imp.providers.claude_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -2681,15 +2680,17 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
     assert opts.resume is None
     assert opts.extra_args["resume"] == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # SEND_TO_LLM STREAMS the trailing user interrupt marker to kick the turn;
-    # claude-p pairs the dangling t1 from its (reconstructed) loaded session.
+    # The marker over the unanswered t1 is dropped and t1's placeholder result is
+    # reconstructed into the native session right behind it; the stream is the
+    # continuation nudge.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
-    # The flushed prefix (through the dangling t1 turn) was reconstructed into
-    # the native session; only the interrupt marker is streamed, not stored.
+    assert streamed[0]["message"]["content"] == RESUME_CONTINUE_NUDGE
     reconciled = await store.load(skey)
-    assert len(reconciled) == 4
+    assert len(reconciled) == 5
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t1"
+    assert "[Request interrupted by user]" not in json.dumps(reconciled)
 
 
 @pytest.mark.anyio

@@ -336,69 +336,91 @@ def _is_interrupt_marker(msg: Message) -> bool:
             and _INTERRUPT_MARKER_RE.match(block.text.strip()) is not None)
 
 
+def _trailing_user_start(messages: list[Message]) -> int:
+    i = len(messages)
+    while i > 0 and messages[i - 1].role == "user":
+        i -= 1
+    return i
+
+
+def _has_durability_note(msg: Message) -> bool:
+    return any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msg.content)
+
+
+def unanswered_tool_uses(messages: list[Message]) -> list[ToolUseBlock]:
+    """Every tool_use in `messages` whose id has no tool_result anywhere in `messages`."""
+    answered = {b.tool_use_id for m in messages for b in m.content
+                if isinstance(b, ToolResultBlock)}
+    return [b for m in messages if m.role == "assistant" for b in m.content
+            if isinstance(b, ToolUseBlock) and b.id not in answered]
+
+
+def _resume_result(
+    tu: ToolUseBlock, captured: dict[str, tuple[str, bool]] | None,
+) -> ToolResultBlock:
+    hit = (captured.get(captured_result_key(tu.name, tu.input))
+           if captured is not None else None)
+    if hit is not None:
+        return ToolResultBlock(tool_use_id=tu.id, content=hit[0], is_error=hit[1])
+    return ToolResultBlock(tool_use_id=tu.id,
+                           content=_synthetic_tool_result_content(tu.name),
+                           is_error=True)
+
+
 def repair_interrupt_marker_on_resume(
     messages: list[Message], transcript: Transcript,
     captured: dict[str, tuple[str, bool]] | None = None,
 ) -> None:
     """Strip claude-p's interrupt framing before resume classification.
 
-    On a cooperative mid-tool interrupt claude-p writes two turns of its own into
-    the transcript: a tool_result telling the model its call was REJECTED and it
-    must stop, then a text-only '[Request interrupted by user …]' marker turn. The
-    marker makes the tail look like a human turn, so the resume continuation nudge
-    is suppressed and the rejection copy is the model's only framing.
+    On an interrupt claude-p writes its own turns, one Message per block: an is_error
+    "rejected, STOP" tool_result per outstanding call, then a text-only
+    '[Request interrupted by user …]' marker, possibly followed by real user text.
+    The marker makes the tail look like a human turn and the rejection copy is the
+    model's only framing.
 
-    Drop the marker and restate every is_error result in the turn beneath it as an
-    interruption — from `captured` when the call really completed, else the synthetic
-    body — then rewrite the transcript. Journals nothing: the pause already recorded
+    Within the trailing user run, find the last marker; R is the run's non-marker
+    turns before it. Unless R holds no tool_result and every tool_use is answered
+    (a lone marker over prose), drop every marker up to the last and restate each
+    is_error result in R as an interruption — imp's captured result when the call
+    really completed, else the synthetic body; tool_uses resolve by id anywhere.
+    complete_step results are left for the complete_step-tail answer. Turns after
+    the last marker are untouched. Journals nothing: the pause already recorded
     these results in the event log, so a second entry would falsify it.
 
-    The durability note is appended unless every restated result was recovered from
-    `captured` as a success, matching repair_dangling_tool_use_on_resume.
+    The durability note is appended to R's last turn only when some result was
+    restated as a placeholder or a captured error and R does not already hold it.
     """
-    if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
+    start = _trailing_user_start(messages)
+    markers = [i for i in range(start, len(messages))
+               if _is_interrupt_marker(messages[i])]
+    if not markers:
         return
-    target = messages[-2]
-    # Repair the marker and the rejection it sits on as one unit, never the marker
-    # alone: dropping a lone marker would expose an assistant tail to AWAITING_USER,
-    # which a subagent (no user_input_fn) cannot serve.
-    if target.role != "user" or not any(
-            isinstance(b, ToolResultBlock) for b in target.content):
+    last_marker = markers[-1]
+    run = [m for m in messages[start:last_marker] if not _is_interrupt_marker(m)]
+    if not any(isinstance(b, ToolResultBlock) for m in run for b in m.content) \
+            and not unanswered_tool_uses(messages):
         return
-    tool_uses = {
-        b.id: b
-        for m in messages[-3:-2] if m.role == "assistant"
-        for b in m.content if isinstance(b, ToolUseBlock)
-    }
-    blocks: list[ContentBlock] = []
-    restated_any = False
-    all_recovered = True
-    for b in target.content:
-        # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
-        if isinstance(b, ToolResultBlock) and b.is_error:
-            restated_any = True
-            tu = tool_uses.get(b.tool_use_id)
-            hit = (captured.get(captured_result_key(tu.name, tu.input))
-                   if tu is not None and captured is not None else None)
-            if hit is not None:
-                blocks.append(ToolResultBlock(
-                    tool_use_id=b.tool_use_id, content=hit[0], is_error=hit[1]))
-                if hit[1]:
-                    all_recovered = False
-            else:
-                all_recovered = False
-                blocks.append(ToolResultBlock(
-                    tool_use_id=b.tool_use_id,
-                    content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
-                    is_error=True))
-        else:
+    tool_uses = {b.id: b for m in messages if m.role == "assistant"
+                 for b in m.content if isinstance(b, ToolUseBlock)}
+    cut_off = False
+    repaired: list[Message] = []
+    for m in run:
+        blocks: list[ContentBlock] = []
+        for b in m.content:
+            tu = (tool_uses.get(b.tool_use_id)
+                  if isinstance(b, ToolResultBlock) and b.is_error else None)
+            # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
+            if tu is not None and canonicalize_tool_name(tu.name) != "complete_step":
+                b = _resume_result(tu, captured)
+                cut_off = cut_off or b.is_error
             blocks.append(b)
-    # Same gate as _all_captured_success: hedging a recovered success argues against imp's record.
-    if not (restated_any and all_recovered) and not any(
-            isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
-            for b in blocks):
-        blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
-    messages[-2:] = [Message(role="user", content=tuple(blocks))]
+        repaired.append(Message(role="user", content=tuple(blocks)))
+    if cut_off and not any(_has_durability_note(m) for m in repaired):
+        repaired[-1] = Message(role="user", content=(
+            *repaired[-1].content, TextBlock(text=RESUME_DURABILITY_NOTE)))
+    messages[start:last_marker + 1] = repaired
     transcript.rewrite(messages)
 
 
