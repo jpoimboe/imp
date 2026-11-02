@@ -130,6 +130,11 @@ def _to_config(merged: dict[str, Any]) -> Config:
     )
 
 
+def floor_config() -> Config:
+    """The provider-code floor alone — no project, global, or local layer."""
+    return _to_config(merge_layers([_floor_layer()])[0])
+
+
 def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfig:
     """Build the floor, then merge project ← global ← local on top.
 

@@ -932,8 +932,11 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
     providers_override: list[str] | None = None,
+    settings_root: Path | None = None,
 ) -> None:
-    from imp.providers import auth_hint_lines
+    from imp.engine.errors import LoadError
+    from imp.providers import readiness_lines
+    from imp.providers.effective import floor_config, load_effective_config
     from imp.providers.paths import global_config_path
 
     color_on = pal.should_use_color(sys.stdout)
@@ -970,7 +973,12 @@ def run_init(
     if repaired:
         _set_user_providers(user_path, providers)
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
-    for line in auth_hint_lines(providers):
+    try:
+        readiness_cfg = load_effective_config(control_root=settings_root).config
+    except LoadError:
+        # Advisory lines only: a bad layer still surfaces through `imp config` and runs.
+        readiness_cfg = floor_config()
+    for line in readiness_lines(providers, readiness_cfg):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
     if wrote_user_config and theme != "ansi":
         output_fn(pal.ansi(

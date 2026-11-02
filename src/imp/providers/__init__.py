@@ -112,6 +112,17 @@ def provider_readiness(name: str, config: Config) -> Readiness:
     return Readiness.KEY_SET if os.environ.get(config.env_for(name)) else Readiness.KEY_UNSET
 
 
+def readiness_lines(names: Iterable[str], config: Config) -> list[str]:
+    """`  <name> — ready` or `  <name> — <auth hint>`; names outside the floor get no line."""
+    lines: list[str] = []
+    for n in names:
+        if n not in BUILTIN_FLOOR:
+            continue
+        status = "ready" if provider_readiness(n, config).ready else BUILTIN_FLOOR[n].auth_hint
+        lines.append(f"  {n} — {status}")
+    return lines
+
+
 def selectable_providers() -> list[str]:
     """Floor entries a quest can be pinned to, in floor order: a full tier table
     is what keeps a pinned resolve from failing at the tier map."""

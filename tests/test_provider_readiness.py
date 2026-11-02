@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers import Readiness, provider_readiness
+from imp.providers import Readiness, provider_readiness, readiness_lines
 from imp.providers.config import Config
 
 
@@ -66,3 +66,27 @@ def test_the_readiness_rule_has_no_copy_in_the_cli() -> None:
         text = (cli / name).read_text()
         assert "env_var is None" not in text, name
         assert "provider_envs" not in text, name
+
+
+def test_readiness_lines_mark_ready_or_hint_and_skip_unknown_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert readiness_lines(["housecat", "claude", "anthropic", "openai"], Config()) == [
+        "  claude — ready",
+        "  anthropic — ready",
+        "  openai — set OPENAI_API_KEY",
+    ]
+
+
+def test_floor_config_carries_only_the_builtin_key_names() -> None:
+    from imp.providers.effective import floor_config
+    from imp.providers.paths import global_config_path
+
+    cfg = global_config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("provider_envs: {anthropic: {env: MY_KEY}}\n")
+
+    assert floor_config().provider_envs == {
+        "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
