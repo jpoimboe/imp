@@ -732,7 +732,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print(file=sys.stderr)
         _emit_cli_error("init cancelled")
-        return 130
+        return ExitCode.USER_ENDED
     if sys.stdout.isatty():
         print()
     return 0
@@ -796,8 +796,9 @@ async def _read_intent_line(
                 sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
-            # No daemon pre-session; _abandon_local's rc threads out through SystemExit.
-            raise SystemExit(_abandon_local(quest.control_root, quest.id))
+            # No daemon pre-session. Torn down is user-ended; a failed teardown keeps its rc.
+            rc = _abandon_local(quest.control_root, quest.id)
+            raise SystemExit(ExitCode.USER_ENDED if rc == 0 else rc)
         return line
 
 
@@ -867,7 +868,7 @@ async def _run_cleared_session(
             print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
                                 color=color))
             print()
-            return 130
+            return ExitCode.USER_ENDED
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
         cleared_unsandboxed = bool(cleared_sandbox_sink.get("unsandboxed"))
@@ -1291,7 +1292,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                                 color=color))
             print()
             discard_conversation(quest)   # drop the just-minted draft on cancel
-            return 130
+            return ExitCode.USER_ENDED
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
@@ -2498,7 +2499,7 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
             _follow_poll_loop, driver, tail, status, control, quest_id, home)
     except KeyboardInterrupt:
         status.reset()
-        return 130
+        return ExitCode.USER_ENDED
 
 
 async def _follow_poll_loop(
@@ -2937,7 +2938,7 @@ def _resume_picker_empty(control: Path) -> int:
         print(pal.ansi(
             f"({past} past quest{plural} — see `imp list --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
-    return 0
+    return ExitCode.OK
 
 
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
@@ -3132,7 +3133,7 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
 
 def _abandon_picker_empty() -> int:
     _emit_human(["Nothing to abandon."])
-    return 2
+    return ExitCode.OK
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:

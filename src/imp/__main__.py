@@ -3,9 +3,11 @@
 import signal
 import sys
 
+from imp.cli.exit_codes import ExitCode
+
 
 def _exit_130_on_sigint(_signum: int, _frame: object) -> None:
-    raise SystemExit(130)
+    raise SystemExit(ExitCode.USER_ENDED)
 
 
 # Module-level (before the heavy imp.cli.main import) so a SIGINT during the
@@ -24,7 +26,7 @@ def main() -> int:
 
         return _cli_main()
     except KeyboardInterrupt:
-        return 130
+        return ExitCode.USER_ENDED
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from imp.cli import main, session_run
+from imp.cli import inert_resume, main, session_run
 from imp.cli.exit_codes import ExitCode
 
 
@@ -29,8 +29,13 @@ def test_the_exit_codes_are_exactly_the_contract_six() -> None:
     session_run._closing_block,
     session_run.run_session_client,
     main._print_leave_disposition,
+    inert_resume.run_inert_resume,
+    main._resume_picker_empty,
+    main._abandon_picker_empty,
+    main._run_cleared_session,
+    main._follow_live,
 ], ids=lambda fn: fn.__name__)
-def test_session_endings_return_named_exit_codes(fn: Callable[..., Any]) -> None:
+def test_endings_return_named_exit_codes(fn: Callable[..., Any]) -> None:
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
     literal_returns = [
         node.lineno for node in ast.walk(tree)

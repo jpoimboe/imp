@@ -826,6 +826,23 @@ def test_cmd_init_rejects_internal_memory_workflow(tmp_path, monkeypatch, capsys
     assert not (tmp_path / "imp").exists()
 
 
+def test_cmd_init_ctrl_c_prints_cancelled_and_exits_user_ended(
+    tmp_path, monkeypatch, capsys
+):
+    import imp.cli.main as m
+    from imp.cli.exit_codes import ExitCode
+
+    def interrupted(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive", interrupted)
+    rc = m._cmd_init(_init_args())
+
+    assert rc == ExitCode.USER_ENDED
+    assert "imp: init cancelled" in capsys.readouterr().err.splitlines()
+
+
 def test_cmd_init_rejects_bad_workflow_on_the_interactive_path(
     tmp_path, monkeypatch, capsys
 ):

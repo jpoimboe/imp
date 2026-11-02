@@ -306,7 +306,7 @@ async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -
     rc = await run_inert_resume(
         question="Pending Q?", ask_line=ask_line, launch=launch)
 
-    assert rc == 0
+    assert rc == 130
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before              # launch never ran -> no events appended
 

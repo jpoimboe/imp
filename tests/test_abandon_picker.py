@@ -30,13 +30,13 @@ def _async_return(value):
 
 
 @pytest.mark.anyio
-async def test_abandon_picker_empty_prints_and_exits_2(
+async def test_abandon_picker_empty_prints_and_exits_0(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     monkeypatch.setattr(s, "_status_rows", lambda c: [])
     rc = await m._pick_abandon_target(tmp_path)
     out = capsys.readouterr().out
-    assert rc == 2
+    assert rc == 0
     assert "Nothing to abandon." in out
 
 

@@ -233,7 +233,7 @@ def test_abandon_picker_empty_trailing_blank_on_tty(
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     rc = m._abandon_picker_empty()
-    assert rc == 2
+    assert rc == 0
     assert capsys.readouterr().out == "Nothing to abandon.\n\n"
 
 
@@ -311,7 +311,7 @@ def test_abandon_picker_empty_unchanged_when_piped(
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
     rc = m._abandon_picker_empty()
-    assert rc == 2
+    assert rc == 0
     assert capsys.readouterr().out == "Nothing to abandon.\n"
 
 

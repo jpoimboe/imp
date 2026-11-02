@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from imp.cli.exit_codes import ExitCode
 from imp.engine.quest import Quest
 from imp.engine.resume_gate import unanswered_bare_gate
 from imp.remote.session.protocol import SkillRequest
@@ -55,7 +56,8 @@ async def run_inert_resume(
     ask_line: Callable[[], Awaitable[str | None]],
     launch: Callable[[str], Awaitable[int]],
 ) -> int:
-    """Print the question; loop until a non-blank line (launch it) or None (return 0).
+    """Print the question; loop until a non-blank line (launch it) or None (the
+    user left: USER_ENDED).
 
     The question is blank-padded on both sides so it neither fuses with the
     `<id> · resuming` header above nor with the input prompt below."""
@@ -63,6 +65,6 @@ async def run_inert_resume(
     while True:
         line = await ask_line()
         if line is None:
-            return 0
+            return ExitCode.USER_ENDED
         if line.strip():
             return await launch(line)
