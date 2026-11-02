@@ -3685,3 +3685,39 @@ def test_current_activity_keeps_the_provider_while_a_subagent_runs() -> None:
     assert act is not None
     assert act.verb == "subagent(coder)"        # sanity: the subagent branch ran
     assert (act.provider, act.model) == ("openai", "gpt-6.1-sol")
+
+
+_NO_DETAIL = object()
+
+
+@pytest.mark.parametrize(("etype", "key"), [
+    ("warning", "message"),
+    ("runner_warning", "message"),
+    ("sandbox_overlay_unavailable", "reason"),
+])
+@pytest.mark.parametrize(("detail", "expected"), [
+    ({}, ""),
+    (_NO_DETAIL, ""),
+    ("plain detail", "plain detail"),
+    ({"stderr_tail": "a\nb"}, "a\nb"),
+])
+def test_warning_detail_is_text_never_dict_repr(
+    etype: str, key: str, detail: object, expected: str,
+) -> None:
+    from imp.cli.render_text import render_tree
+
+    payload: dict = {key: "heads up", "category": "notice"}
+    if detail is not _NO_DETAIL:
+        payload["detail"] = detail
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", etype, agent_id="step:p/s", **payload),
+    ])
+    step = tree.root.children[0].children[0]
+    [node] = [c for c in step.children if isinstance(c, nv.ErrorNode)]
+    assert node.detail == expected
+
+    lines = list(render_tree(tree, color=False))
+    assert not any("{" in line for line in lines)
+    if expected == "":
+        assert lines[-1] == "warning: heads up"
