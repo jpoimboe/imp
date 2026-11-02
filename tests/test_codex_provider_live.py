@@ -377,7 +377,7 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
         # (c) the MCP write landed. A run that never called write_file on the
         # target (e.g. tried it from code-mode `exec`) is a bad draw; a call
         # that failed or did not land raises inside the helper.
-        mcp_miss = mcp_write_miss(root, _records(root))
+        mcp_miss = mcp_write_miss(root, _records(root / "events.jsonl"))
         if mcp_miss is not None:
             notes.append(f"#{attempt + 1} {mcp_miss}")
             continue
@@ -427,15 +427,6 @@ def _reader_inv(root: Path) -> AgentInvocation:
     )
 
 
-def _records(root: Path) -> list[dict[str, Any]]:
-    ev_path = root / "events.jsonl"
-    return [
-        json.loads(ln)
-        for ln in (ev_path.read_text().splitlines() if ev_path.exists() else [])
-        if ln.strip()
-    ]
-
-
 @pytest.mark.anyio
 async def test_codex_live_omitted_optional_arg_reaches_python_default(
     tmp_path: Path,
@@ -474,7 +465,7 @@ async def test_codex_live_omitted_optional_arg_reaches_python_default(
         if reason is not None:
             pytest.skip(reason)
 
-        recs = _records(root)
+        recs = _records(root / "events.jsonl")
         results = {r["payload"]["id"]: r["payload"]
                    for r in recs if r.get("type") == "tool_result"}
         for rec in recs:
