@@ -27,6 +27,9 @@ Read this when editing imp's engine/renderer or workflow prompts.
   after every resume repair) starts the trailing run of user turns without a
   tool_result, the only part streamed. Records the CLI wrote are never merged in
   or counted; imp's transcript is the only source of truth for resumed context.
+  At load the CLI splices a synthetic "No response requested." after a user-tail
+  body; imp counters it with a stream-only `RESUME_STUB_NOTE` at the head of the
+  streamed message, never persisted.
 - **Codex native session.** One run-scoped process owner linearizes cancellation
   with subprocess publication and identity-safe cleanup; a live hard stop captures
   the process tree before waking blocked driver I/O, and the wake also releases
