@@ -774,6 +774,7 @@ async def _read_intent_line(
     """Read one pre-session intent line, capturing `/model` into `model_sink`
     and `/sandbox` into `sandbox_sink`."""
     from imp.agents.skills import load_user_skill
+    from imp.cli.abandon_confirm import abandon_question, ask_keypress_confirm, removal_description
     from imp.cli.slash import ask_line_with_slash
     from imp.remote.session.protocol import SkillRequest
     while True:
@@ -796,6 +797,13 @@ async def _read_intent_line(
                 sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
+            removed = removal_description(quest)
+            if removed is not None:
+                print(pal.caret(enabled=color) + line)
+                if not await ask_keypress_confirm(abandon_question(quest.id, removed)):
+                    print(f"Kept {quest.id}.")
+                    print()
+                    continue
             # No daemon pre-session. Torn down is user-ended; a failed teardown keeps its rc.
             rc = _abandon_local(quest.control_root, quest.id)
             raise SystemExit(ExitCode.USER_ENDED if rc == 0 else rc)
