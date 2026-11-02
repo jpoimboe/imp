@@ -97,3 +97,47 @@ async def test_pick_quest_target_skips_event_load_for_titled_rows(
     untitled = next(c for c in candidates if c.quest_id == "u1")
     assert titled.intent is None
     assert untitled.intent == "add dark mode"
+
+
+def _two_resumables(control: Path) -> str:
+    from imp.create import create_draft_quest
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    _seed_control(control)
+    draft = create_draft_quest(control, "summarize\n  foo.py")
+    Quest.create_draft(control, title="Other work", quest_id="oth001",
+                       base_branch="main", origin="idea")
+    return draft.id
+
+
+@pytest.mark.anyio
+async def test_non_tty_resume_candidates_name_an_unstarted_draft_by_its_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    qid = _two_resumables(tmp_path)
+    rc = await m._resolve_resume_target(tmp_path, None, non_interactive=True)
+    assert rc == 2
+    err = capsys.readouterr().err
+    row = next(ln for ln in err.splitlines() if ln.startswith(qid))
+    assert "summarize foo.py" in row
+    assert "(unnamed)" not in err
+
+
+@pytest.mark.anyio
+async def test_tty_resume_picker_names_an_unstarted_draft_by_its_seed_opening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    qid = _two_resumables(tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+    captured: dict[str, list] = {}
+
+    async def fake_picker(candidates, *, now, color, header, selected_index):
+        captured["c"] = candidates
+        return candidates[0].quest_id
+
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
+    await m._pick_resume_target(tmp_path, non_interactive=False)
+    by_id = {c.quest_id: c for c in captured["c"]}
+    assert by_id[qid].intent == "summarize\n  foo.py"
+    assert by_id["oth001"].intent is None

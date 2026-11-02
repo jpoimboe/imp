@@ -288,10 +288,10 @@ async def test_real_blank_token_behaves_like_no_token(tmp_path: Path) -> None:
     assert none_res == blank_res == "lodo40"
 
 
-def test_resume_picker_non_tty_header_normalized(capsys) -> None:
+def test_resume_picker_non_tty_header_normalized(capsys, tmp_path: Path) -> None:
     # AC 5: the no-prefix "Multiple resumable quests" header becomes a canonical
     # imp: line; the candidate rows still print beneath it.
-    rc = m._resume_picker_non_tty([_row("lodo40"), _row("lodo77")])
+    rc = m._resume_picker_non_tty(tmp_path, [_row("lodo40"), _row("lodo77")])
     assert rc == 2
     err = capsys.readouterr().err
     assert "imp: multiple resumable quests — pass a token; candidates:" in err

@@ -1819,7 +1819,9 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
         print(quest_row.format_quest_line(
             quest_id=card.quest_id, title=card.title, status=card.status,
             step=card.step, step_label=card.step_label, last_iso=card.last,
-            now=now, color=color, name_width=name_w), file=sys.stderr)
+            now=now, color=color, name_width=name_w,
+            intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
+            file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -2258,6 +2260,14 @@ def _row_seed_opening(control: Path, quest_id: str) -> str | None:
     from imp.cli.store import _quest_meta
     seed = (_quest_meta(control, quest_id) or {}).get("seed_opening")
     return seed if isinstance(seed, str) else None
+
+
+def _row_display_intent(control: Path, r: _Row) -> str | None:
+    """A title-less row's human name source: its opening prompt, else its seed_opening."""
+    if r[4].strip():
+        return None
+    return quest_row.fallback_intent(_resolve_row_intent(control, r),
+                                     _row_seed_opening(control, r[0]))
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
@@ -2988,7 +2998,7 @@ def _picker_cancelled(verb: str) -> ExitCode:
     return ExitCode.USER_ENDED
 
 
-def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
+def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
@@ -3000,7 +3010,8 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
+            name_width=name_w, intent=_row_display_intent(control, r)),
+            file=sys.stderr)
     return 2
 
 
@@ -3022,7 +3033,7 @@ async def _pick_quest_target(
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
         step_label=r[6], phase_label=r[7],
-        intent=_resolve_row_intent(control, r))
+        intent=_row_display_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -3064,7 +3075,7 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
         header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
         on_cancel=lambda: _picker_cancelled("resume"),
-        on_non_tty=_resume_picker_non_tty,
+        on_non_tty=lambda rows: _resume_picker_non_tty(control, rows),
         non_interactive=non_interactive,
     )
 
@@ -3084,7 +3095,7 @@ async def _resolve_resume_target(
             header=_RESUME_PICKER_HEADER,
             on_empty=lambda: _resume_picker_empty(control),
             on_cancel=lambda: _picker_cancelled("resume"),
-            on_non_tty=_resume_picker_non_tty,
+            on_non_tty=lambda rows: _resume_picker_non_tty(control, rows),
             non_interactive=non_interactive,
         )
     if len(matches) == 1:
