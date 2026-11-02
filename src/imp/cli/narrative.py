@@ -144,6 +144,17 @@ class StepNode:
 
 
 @dataclass
+class StepHeaderNode:
+    """A mid-step header (a resume point or a position change); fields fixed at creation."""
+    label: str
+    resumed: bool
+    phase_label: str | None
+    model: str | None
+    route_label: str | None
+    collapsible = False
+
+
+@dataclass
 class AgentTextNode:
     payload: dict[str, Any]            # the agent_message payload
     _cache: Any = field(default=None, repr=False)  # cached RenderedMessage (F5)

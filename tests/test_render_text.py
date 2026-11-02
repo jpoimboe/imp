@@ -3956,3 +3956,26 @@ def test_the_round_resets_per_plan_and_is_never_derived_from_entry_count() -> No
         "planning phase · plan 2/2 · reviewing plan · complete · 5s",
         "planning phase · plan 2/2 · reviewing plan · complete · round 2 · 5s"]
     assert "round 5" not in out
+
+
+def test_step_header_node_renders_like_a_step_header() -> None:
+    node = nv.StepHeaderNode(label="task 1/2", resumed=True,
+                             phase_label="implementation phase · plan 1/1",
+                             model="opus", route_label="fixing test failures")
+    assert list(rt._render(node, depth=0, color=False, width=80)) == [
+        "implementation phase · plan 1/1 · task 1/2 (resume) · opus · fixing test failures"]
+    colored = next(rt._render(node, depth=0, color=True, width=80))
+    assert pal.ansi(" (resume)", "gray") in colored
+    # A route reason equal to the label is not repeated as a suffix.
+    same = nv.StepHeaderNode(label="task 2/2", resumed=False, phase_label=None,
+                             model=None, route_label="task 2/2")
+    assert list(rt._render(same, depth=0, color=False, width=80)) == ["task 2/2"]
+
+
+def test_step_header_node_is_spaced_like_a_header() -> None:
+    header = nv.StepHeaderNode(label="task 2/2", resumed=False, phase_label=None,
+                               model=None, route_label=None)
+    children = [nv.OutcomeLine(action={"verb": "continue"}), header,
+                nv.LiteralTextNode(text="after", color_role="lifecycle")]
+    assert list(rt._render_children(children, depth=0, color=False, width=80)) == [
+        "→ continue", "", "task 2/2", "", "after"]
