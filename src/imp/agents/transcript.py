@@ -217,7 +217,6 @@ def captured_result_key(name: str, tool_input: dict[str, Any]) -> str:
 
 def repair_dangling_tool_use_on_resume(
     messages: list[Message], transcript: Transcript,
-    feedback: str | None = None,
     captured: dict[str, tuple[str, bool]] | None = None,
 ) -> tuple[ToolResultBlock, ...] | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
@@ -242,31 +241,7 @@ def repair_dangling_tool_use_on_resume(
     empty, so `is not None` is still the 'transcript was already balanced' signal.
     The Message is mutated in place in `messages` and `transcript`; callers iterate
     the returned tuple to emit one tool_result event per synthesized block.
-
-    When `feedback` is given (claude native rework), the shape-1
-    dangling `complete_step` block's is_error result carries the framed feedback
-    (`REWORK_RESULT_FRAME + "\\n\\n" + feedback`) instead of the synthetic
-    "interrupted" filler, so the model reads its own completion sent back in the
-    loaded session. Rework tails are always shape-1 (a dangling `complete_step`
-    assistant turn), so shape-2 ignores `feedback`.
     """
-    def _result_for(tu: ToolUseBlock) -> ToolResultBlock:
-        if captured is not None:
-            key = captured_result_key(tu.name, tu.input)
-            if key in captured:
-                content, is_err = captured[key]
-                return ToolResultBlock(
-                    tool_use_id=tu.id, content=content, is_error=is_err)
-        if feedback is not None and canonicalize_tool_name(tu.name) == "complete_step":
-            return ToolResultBlock(
-                tool_use_id=tu.id,
-                content=REWORK_RESULT_FRAME + "\n\n" + feedback,
-                is_error=True)
-        return ToolResultBlock(
-            tool_use_id=tu.id,
-            content=_synthetic_tool_result_content(tu.name),
-            is_error=True)
-
     def _all_captured_success(tus: list[ToolUseBlock]) -> bool:
         if captured is None:
             return False
@@ -286,7 +261,7 @@ def repair_dangling_tool_use_on_resume(
         ]
         if not tool_uses:
             return None
-        result_blocks = tuple(_result_for(tu) for tu in tool_uses)
+        result_blocks = tuple(_resume_result(tu, captured) for tu in tool_uses)
         note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
                 if not _all_captured_success(tool_uses) else ())
         repair = Message(role="user", content=(*result_blocks, *note))
@@ -306,7 +281,7 @@ def repair_dangling_tool_use_on_resume(
         unmatched = [tu for tu in tool_uses if tu.id not in matched]
         if not unmatched:
             return None
-        result_blocks = tuple(_result_for(tu) for tu in unmatched)
+        result_blocks = tuple(_resume_result(tu, captured) for tu in unmatched)
         # Anthropic requires tool_result blocks at the head of the user turn; the
         # original interrupt text follows, and the durability note frames the
         # (error-shaped) reconstructed results last.
@@ -580,47 +555,6 @@ def balance_success_on_resume(
     if wrapper_text and not feedback_delivered:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
-    messages.append(injected)
-    transcript.append(injected)
-    elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
-    return injected
-
-
-def synthesize_native_success_on_resume(
-    messages: list[Message], transcript: Transcript, elog: EventLog,
-    agent_id: str,
-) -> Message | None:
-    """Balance a trailing complete_step tool_use for NATIVE corrective resume.
-
-    The targeted step's transcript ends with a SUCCESSFUL complete_step tool_use
-    (no tool_result). Synthesize a non-error, success-shaped result and append it
-    as a NEW user turn so the loaded native session is balanced — no dangling
-    tool_use for claude-p to auto-pair with an is_error placeholder. Unlike
-    balance_success_on_resume this adds NO durability note and NO wrapper feedback:
-    the result is genuinely in the faithful loaded session, and the handback rides
-    the streamed delta. Any other trailing tool_use is a real interruption and gets
-    error-flavored content. Returns the appended Message, or None when the tail
-    carries no tool_use to balance.
-    """
-    last = messages[-1] if messages else None
-    tool_uses = (
-        [b for b in last.content if isinstance(b, ToolUseBlock)]
-        if last is not None and last.role == "assistant" else []
-    )
-    result_blocks: list[ToolResultBlock] = []
-    for tu in tool_uses:
-        if canonicalize_tool_name(tu.name) == "complete_step":
-            result_blocks.append(ToolResultBlock(
-                tool_use_id=tu.id,
-                content="previous step output recorded; resuming",
-                is_error=False))
-        else:
-            result_blocks.append(ToolResultBlock(
-                tool_use_id=tu.id,
-                content=_synthetic_tool_result_content(tu.name), is_error=True))
-    if not result_blocks:
-        return None
-    injected = Message(role="user", content=tuple(result_blocks))
     messages.append(injected)
     transcript.append(injected)
     elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")

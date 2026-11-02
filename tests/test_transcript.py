@@ -23,7 +23,6 @@ from imp.agents.transcript import (
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
-    synthesize_native_success_on_resume,
     unresolved_tool_result_content,
 )
 from imp.engine.state import InMemoryEventLog
@@ -409,58 +408,6 @@ def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> No
     assert [e["type"] for e in log.read()] == ["user_message"]
 
 
-def test_synthesize_native_success_appends_result_only_no_notes(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="begin"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="c0", name="complete_step",
-                         input={"status": "Success"}),)),
-    ]
-    for m in msgs:
-        t.append(m)
-    elog = InMemoryEventLog()
-
-    injected = synthesize_native_success_on_resume(msgs, t, elog, "step:p/s")
-
-    # Exactly one new trailing user turn carrying a SUCCESS-shaped result.
-    assert injected is msgs[-1] and injected.role == "user"
-    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
-    texts = [b for b in injected.content if isinstance(b, TextBlock)]
-    assert len(results) == 1 and results[0].tool_use_id == "c0"
-    assert results[0].is_error is False
-    assert results[0].content == "previous step output recorded; resuming"
-    # NO durability note and NO feedback — the handback rides the streamed delta.
-    assert texts == []
-    # Persisted to disk and audit-logged exactly once as an engine_message.
-    assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
-    assert [e["type"] for e in elog.read()] == ["engine_message"]
-
-
-def test_synthesize_native_success_error_flavors_non_complete_step(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="assistant", content=(
-        ToolUseBlock(id="b1", name="bash", input={"cmd": "x"}),))]
-    t.append(msgs[0])
-
-    injected = synthesize_native_success_on_resume(msgs, t, InMemoryEventLog(), "x")
-
-    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
-    assert len(results) == 1 and results[0].tool_use_id == "b1"
-    # A genuine non-complete_step interrupt is error-flavored, not "succeeded".
-    assert results[0].is_error is True
-    # No durability note / wrapper feedback on the error-flavored path either.
-    assert [b for b in injected.content if isinstance(b, TextBlock)] == []
-
-
-def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
-    t.append(msgs[0])
-    assert synthesize_native_success_on_resume(
-        msgs, t, InMemoryEventLog(), "x") is None
-
-
 _CS = ToolUseBlock(id="c0", name="mcp__imp__complete_step", input={"status": "Success"})
 _REDO = Message(role="user", content=(TextBlock(text=RESUME_REDO_NUDGE),))
 
@@ -623,31 +570,6 @@ def test_deliver_engine_continuation_journals_internal_event_not_user_message(
     assert cont["payload"] == {
         "role": "user", "subtype": "continuation",
         "content": [{"type": "text", "text": "CONTINUE NOW"}]}
-
-
-def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="c0", name="complete_step", input={"status": "Success"}),)),
-    ]
-    for m in msgs:
-        t.append(m)
-    synth = repair_dangling_tool_use_on_resume(
-        msgs, t, feedback="REVISE: rewrite plan.md")
-    assert synth is not None and len(synth) == 1
-    rb = synth[0]
-    assert rb.tool_use_id == "c0"
-    # The dangling complete_step is paired with an is_error result whose content
-    # IS the framed feedback (not the synthetic "interrupted" filler).
-    assert rb.is_error is True
-    assert rb.content == REWORK_RESULT_FRAME + "\n\n" + "REVISE: rewrite plan.md"
-    # Appended as a trailing user turn (repair shape) with the durability note.
-    assert msgs[-1].role == "user"
-    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
-               for b in msgs[-1].content)
-    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
 
 
 def test_repair_prefers_captured_success_over_synthetic(tmp_path: Path) -> None:

@@ -94,13 +94,14 @@ from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
     Transcript,
+    answer_complete_step_on_resume,
     answer_unanswered_tool_uses_on_resume,
     captured_result_key,
+    complete_step_tail,
     deliver_continuation_reply,
     deliver_engine_continuation,
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
-    synthesize_native_success_on_resume,
     unanswered_tool_uses,
     unresolved_tool_result_content,
 )
@@ -305,24 +306,6 @@ def _stream_start(messages: list[Message]) -> int:
            and not _contains_tool_result(messages[i - 1])):
         i -= 1
     return i
-
-
-def _tail_has_complete_step(messages: list[Message]) -> bool:
-    """True when the transcript's last turn is an assistant turn whose tool_use is
-    a `complete_step` awaiting its result.
-
-    A bare backward goto answers it with a SUCCESS result via
-    `synthesize_native_success_on_resume` (claude-p's own pairing would inject an
-    `is_error`, telling the agent its accepted work failed) and kicks the stream
-    with a redo nudge; a rework answers it with the is_error feedback result
-    instead. Either answer is loaded in the session body right behind the call."""
-    last = messages[-1] if messages else None
-    if last is None or last.role != "assistant":
-        return False
-    return any(
-        isinstance(b, ToolUseBlock) and _canon_tool_name(b.name) == "complete_step"
-        for b in last.content
-    )
 
 
 def _drain_interject_message(coordinator: Any, elog: Any,
@@ -1577,21 +1560,12 @@ class ClaudeSession(ObserveSession):
         if existing:
             messages = existing
             self.tool_calls_used = 0  # per-invocation; never inherit history
-            tail_is_complete_step = _tail_has_complete_step(existing)
+            cs = complete_step_tail(existing)
             tail_step_completed = (
                 classify_resume(existing) is ResumeState.STEP_COMPLETED)
-            if tail_is_complete_step and invocation.retry_feedback:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript, feedback=invocation.retry_feedback,
-                    captured=captured)
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            elif tail_is_complete_step:
-                synthesize_native_success_on_resume(
-                    messages, transcript, elog, aid)
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            if cs is not None:
+                answer_complete_step_on_resume(
+                    messages, transcript, elog, aid, cs, invocation.retry_feedback)
             elif tail_step_completed and invocation.retry_feedback:
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, invocation.retry_feedback)

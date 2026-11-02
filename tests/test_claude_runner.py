@@ -3595,7 +3595,7 @@ async def test_complete_step_tail_native_resumes_with_store_body(
         tmp_path: Path) -> None:
     """A resume whose tail is a `complete_step` tool_use takes the NATIVE path even
     when a store body is present (the needs_imp_balance veto is gone): imp folds a
-    SUCCESS result into the loaded session via synthesize_native_success_on_resume,
+    SUCCESS result into the loaded session via answer_complete_step_on_resume,
     so claude-p resumes its own session by id rather than re-streaming a replay."""
     from imp.agents.runner import ToolUseBlock
     from imp.agents.transcript import Transcript

@@ -427,3 +427,128 @@ async def test_subagent_prose_over_unanswered_call_resumes(tmp_path: Path) -> No
     _assert_repaired(r, kept={}, placeholders={"t1": "mcp__imp__read_file"},
                      swept={"t1"}, note=True)
     assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+def _trailing_run(msgs: list[Message]) -> list[Message]:
+    start = len(msgs)
+    while start > 0 and msgs[start - 1].role == "user":
+        start -= 1
+    return msgs[start:]
+
+
+def _framed(feedback: str) -> str:
+    return REWORK_RESULT_FRAME + "\n\n" + feedback
+
+
+def _assert_cs_tail(r: _Resumed, cs_id: str, *, result: tuple[object, bool],
+                    streamed: list[str], feedback: str | None, changed: bool) -> None:
+    """AC1(e): cs's only result is `result`; no note, no marker; the stream is
+    `streamed`; the redo nudge trails once; the answer is journaled as an engine
+    continuation iff it changed, never as a tool_result event."""
+    results = [b for m in r.entered for b in m.content
+               if isinstance(b, ToolResultBlock) and b.tool_use_id == cs_id]
+    assert [(b.content, b.is_error) for b in results] == [result]
+    run = _trailing_run(r.entered)
+    assert not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+                   for m in run for b in m.content)
+    assert not any(isinstance(b, TextBlock) and b.text in (_MARKER, _MARKER_TOOL)
+                   for m in r.entered for b in m.content)
+    assert _streamed_text(r) == "\n".join(streamed)
+    assert sum(isinstance(b, TextBlock) and b.text == RESUME_REDO_NUDGE
+               for m in run for b in m.content) == 1
+    if feedback:
+        assert feedback not in json.dumps(r.streamed)
+    assert not any(e["type"] == "tool_result" and e["payload"]["id"] == cs_id
+                   for e in r.events)
+    answers = [e for e in r.events if e["type"] == "engine_message" and any(
+        b.get("type") == "tool_result" and b.get("tool_use_id") == cs_id
+        for b in e["payload"]["content"])]
+    assert len(answers) == (1 if changed else 0)
+    assert _assert_boundary(r)[-1].role == "user"
+
+
+_STORED_CS = [_u(_txt("go")), _a(_cs("c0")), _u(_tr("c0", "step complete")),
+              _u(_txt(_MARKER))]
+
+
+def _cs_expected(feedback: str | None, goto: tuple[object, bool],
+                 ) -> tuple[tuple[object, bool], bool]:
+    return ((_framed(feedback), True), True) if feedback else (goto, goto[0] != "step complete")
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: fix X"])
+@pytest.mark.anyio
+async def test_stored_complete_step_tail(tmp_path: Path, feedback: str | None) -> None:
+    r = await _resume(tmp_path, list(_STORED_CS),
+                      balance_on_resume=True, retry_feedback=feedback)
+    result, changed = _cs_expected(feedback, ("step complete", False))
+    _assert_cs_tail(r, "c0", result=result, streamed=[RESUME_REDO_NUDGE],
+                    feedback=feedback, changed=changed)
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: fix X"])
+@pytest.mark.anyio
+async def test_stored_complete_step_tail_keeps_earlier_text(
+        tmp_path: Path, feedback: str | None) -> None:
+    r = await _resume(tmp_path, [*_STORED_CS, _u(_txt("OLD FEEDBACK"))],
+                      balance_on_resume=True, retry_feedback=feedback)
+    result, changed = _cs_expected(feedback, ("step complete", False))
+    _assert_cs_tail(r, "c0", result=result,
+                    streamed=["OLD FEEDBACK", RESUME_REDO_NUDGE],
+                    feedback=feedback, changed=changed)
+
+
+_OK = ("previous step output recorded; resuming", False)
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: fix X"])
+@pytest.mark.anyio
+async def test_dangling_complete_step_race(tmp_path: Path, feedback: str | None) -> None:
+    r = await _resume(tmp_path, [_u(_txt("go")), _a(_cs("c0"))],
+                      balance_on_resume=True, retry_feedback=feedback)
+    result, changed = _cs_expected(feedback, _OK)
+    _assert_cs_tail(r, "c0", result=result, streamed=[RESUME_REDO_NUDGE],
+                    feedback=feedback, changed=changed)
+
+
+@pytest.mark.parametrize("feedback", [None, "REVISE: fix X"])
+@pytest.mark.anyio
+async def test_rejected_complete_step_race(tmp_path: Path, feedback: str | None) -> None:
+    r = await _resume(tmp_path, [
+        _u(_txt("go")), _a(_cs("c0")), _u(_tr("c0", _REJECTED, is_error=True)),
+        _u(_txt(_MARKER_TOOL))], balance_on_resume=True, retry_feedback=feedback)
+    result, changed = _cs_expected(feedback, _OK)
+    _assert_cs_tail(r, "c0", result=result, streamed=[RESUME_REDO_NUDGE],
+                    feedback=feedback, changed=changed)
+
+
+@pytest.mark.parametrize(("feedback", "kept"), [
+    ("F1", "F1"), ("F2", "F2"), (None, "F1")])
+@pytest.mark.anyio
+async def test_complete_step_re_resume(
+        tmp_path: Path, feedback: str | None, kept: str) -> None:
+    r = await _resume(tmp_path, [
+        _u(_txt("go")), _a(_cs("c0")), _u(_tr("c0", _framed("F1"), is_error=True)),
+        _u(_txt(RESUME_REDO_NUDGE))], balance_on_resume=True, retry_feedback=feedback)
+    _assert_cs_tail(r, "c0", result=(_framed(kept), True), streamed=[RESUME_REDO_NUDGE],
+                    feedback=feedback, changed=kept != "F1")
+
+
+@pytest.mark.anyio
+async def test_complete_step_rework_sweeps_an_earlier_call(tmp_path: Path) -> None:
+    fb = "REVISE: fix X"
+    r = await _resume(tmp_path, [*_PRIOR, _a(_read("t1", "b.txt")), _a(_cs("c0"))],
+                      balance_on_resume=True, retry_feedback=fb)
+    _assert_boundary(r)
+    results = {b.tool_use_id: b for m in r.entered for b in m.content
+               if isinstance(b, ToolResultBlock)}
+    assert (results["c0"].content, results["c0"].is_error) == (_framed(fb), True)
+    assert results["t1"].content == _synthetic_tool_result_content("mcp__imp__read_file")
+    assert results["t1"].is_error
+    run = _trailing_run(r.entered)
+    assert sum(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for m in run for b in m.content) == 1
+    assert [e["payload"]["id"] for e in r.events if e["type"] == "tool_result"
+            and e["payload"]["id"] in ("t1", "c0")] == ["t1"]
+    assert _streamed_text(r) == RESUME_REDO_NUDGE
+    assert fb not in json.dumps(r.streamed)
