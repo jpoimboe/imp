@@ -78,12 +78,12 @@ def _render_lines(lines: list[str]) -> str:
 def _md_to_fragment(markdown: str) -> str:
     """Convert imp-emitted Markdown to an inert HTML fragment.
 
-    imp's own `<details>`/`<summary>` fold markers are the ONLY raw HTML in the
-    stream: every Part 1 content path either HTML-escapes `<`/`>` or wraps text in
-    a code fence, so a bare `<details>`/`</details>` line OUTSIDE a code fence is
-    always imp's. Such folds are recognized structurally against markdown-it's own
-    code-block map and re-emitted as real tags around their converted content;
-    everything else goes through markdown-it with raw HTML disabled."""
+    Content outside code is HTML-escaped and code carries verbatim text, and
+    render_markdown only emits output whose fold markers match its fully escaped
+    rendering, where every fold marker is imp's. Folds are recognized against
+    markdown-it's own code-block map and re-emitted as real tags around their
+    converted content; everything else goes through markdown-it with raw HTML
+    disabled."""
     lines = markdown.split("\n")
     parts: list[str] = []
     pos = 0
