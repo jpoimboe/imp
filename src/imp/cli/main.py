@@ -1570,8 +1570,10 @@ def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
 
 async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | None:
     """Read one line at inert resume through the shared slash-aware reader
-    (session-verb rejection, /help, /skills, empty-submit guard); EOF / Ctrl-C
-    retains the `> ` caret and maps to None — the quest stays parked."""
+    (session-verb rejection, /help, /skills, empty-submit guard). EOF / Ctrl-C
+    retains the `> ` caret; a leave signal prints its pause block. Both map to
+    None — the quest stays parked."""
+    from imp.cli.signals import PromptLeave, prompt_signal_guard
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
@@ -1581,12 +1583,17 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
     prompt.seed_history(
         _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
     try:
-        return await _read_intent_line(
-            prompt, quest, color=color, width=width, toolbar=toolbar)
+        async with prompt_signal_guard():
+            line = await _read_intent_line(
+                prompt, quest, color=color, width=width, toolbar=toolbar)
+    except PromptLeave as leave:
+        _emit_leave_pause(quest, leave.trigger)
+        return None
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
         print()
         return None
+    return line
 
 
 async def _resume_inert(
