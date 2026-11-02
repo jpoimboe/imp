@@ -1133,7 +1133,14 @@ def test_spiker_prose_documents_copy_on_write_home() -> None:
     assert "model credentials are all visible" in low   # AC5: real creds visible
     assert "discarded when you finish" in low
     assert "the overlay lasts your whole run" in low
-    assert "the real home is never mutated" in low
+    assert "the real home is never mutated" not in low
+    assert "~/.local/share" in low
+    assert "writes there persist" in low
+    assert "point tool installers at `$tmpdir`" in low
+    assert "uv_tool_dir" in low
+    # Spiker still installs freely.
+    assert "install dependencies" in low
+    assert "install whatever dependencies you need" in low
     # the stale worktree-lifetime promise is gone — the run's keeper mints one layer.
     assert "discarded when the worktree is torn down" not in low
     assert "must survive teardown belongs in the worktree" not in low
