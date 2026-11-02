@@ -120,7 +120,11 @@ from imp.engine.drivers import driver_allowed_tools
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_BUILTIN_TOOLS
 from imp.providers.base import Provider
-from imp.providers.catalog import context_tokens_from_usage, limits_for
+from imp.providers.catalog import (
+    context_threshold_crossed,
+    context_tokens_from_usage,
+    limits_for,
+)
 from imp.providers.claude_config_dir import (
     fill_resume_config_dir,
     make_config_dir,
@@ -631,7 +635,6 @@ def _cc_thinking_posture(
     if tier in ("medium", "high"):
         return {"type": "adaptive", "display": "summarized"}, "high"
     if tier == "low":
-        from imp.providers.catalog import limits_for
         info = limits_for("claude", model)
         if info is not None and info.adaptive_only:
             return {"type": "adaptive", "display": "summarized"}, "low"
@@ -1389,25 +1392,6 @@ def quota_from_rate_limit_info(info: Any) -> QuotaReading | None:
                         windows=tuple(windows), raw=block)
 
 
-async def _context_usage_fields(client: Any) -> dict[str, Any]:
-    try:
-        cu = await client.get_context_usage()
-    except Exception:
-        return {}
-    if cu is None:
-        return {}
-
-    def _field(obj: Any, name: str) -> Any:
-        if isinstance(obj, dict):
-            return obj.get(name)
-        return getattr(obj, name, None)
-
-    return {
-        "context_window": _field(cu, "rawMaxTokens"),
-        "context_tokens": _field(cu, "totalTokens"),
-    }
-
-
 _NO_RESULT_SENTINEL = object()
 
 
@@ -1905,26 +1889,23 @@ class ClaudeSession(ObserveSession):
                     # interrupt path — signal the running query and let the SDK
                     # close this turn balanced, then continue with a plain
                     # handoff-instruction increment (handled in _is_terminal).
-                    # A completing turn wins over a crossing, and probing the
-                    # SDK costs a round trip, so skip the probe on one.
+                    # A completing turn wins over a crossing. Occupancy is the
+                    # open API message's message_start usage: the CLI yields the
+                    # AssistantMessage before that message's message_stop.
                     if (self._handoff_phase is None
                             and not any(
                                 isinstance(b, ToolUseBlock)
                                 and _canon_tool_name(b.name) == "complete_step"
-                                for b in imp_msg.content)):
-                        from imp.providers.catalog import (
-                            sdk_context_threshold_crossed,
-                        )
-                        cu_fields = await _context_usage_fields(client)
-                        if sdk_context_threshold_crossed(
-                                cu_fields.get("context_tokens"),
-                                cu_fields.get("context_window")):
-                            self._flush_llm_group()
-                            self.runner._handoff_requested = True
-                            self._handoff_phase = "interrupt_requested"
-                            with contextlib.suppress(Exception):
-                                await client.interrupt()
-                            return
+                                for b in imp_msg.content)
+                            and context_threshold_crossed(
+                                self._stream_cur_usage, "claude",
+                                self.runner.model)):
+                        self._flush_llm_group()
+                        self.runner._handoff_requested = True
+                        self._handoff_phase = "interrupt_requested"
+                        with contextlib.suppress(Exception):
+                            await client.interrupt()
+                        return
                     if any(isinstance(b, ToolUseBlock)
                            for b in imp_msg.content):
                         self._flush_llm_group()
