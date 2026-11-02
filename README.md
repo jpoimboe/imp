@@ -405,6 +405,8 @@ git clone https://github.com/jpoimboe/imp && cd imp
 uv tool install .
 ```
 
+Working on imp itself? Install with `uv tool install --editable .` instead, so changes merged in your checkout take effect without reinstalling.
+
 ### New project (greenfield)
 
 ```bash

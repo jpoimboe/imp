@@ -30,6 +30,7 @@ A project's runtime state lives **outside** its checkout, in a per-project state
 | `worktrees/<id>/` | the quest's git worktree, on branch `imp/<id>` |
 | `archive/` | completed quests: content-addressed blobs, per-quest records, SQLite index |
 | `config.yaml` | the local config layer (`imp config set --local`) |
+| `outer-imp-warned` | the installed-copy path imp was last warned about running from (the run-start `outer imp mismatch` warning), so each project hears about a given install once |
 | `remote-control.log`, `remote-control.pid` | the session daemon's files |
 
 The checkout holds no imp state. A quest **worktree** holds exactly one imp path — the symlink `.imp/quests/<id>` pointing at that quest's home — which is why an agent running in a worktree still addresses its home by the unchanged worktree-relative path, and why `.imp/` is still gitignored. An agent running in the main checkout (a draft, before go-live) has no worktree and no symlink, so it is given the home's absolute path instead.

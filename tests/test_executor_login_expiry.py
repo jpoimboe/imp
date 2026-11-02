@@ -1,6 +1,6 @@
 """Run-start advisory when the saved Claude login is near the end of its window.
 
-Modelled on tests/test_executor_outer_imp.py — the sibling once-per-run advisory.
+Modelled on tests/test_executor_outer_imp.py — the sibling run-start advisory.
 """
 from __future__ import annotations
 
