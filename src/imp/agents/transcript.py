@@ -243,12 +243,12 @@ def repair_dangling_tool_use_on_resume(
     The Message is mutated in place in `messages` and `transcript`; callers iterate
     the returned tuple to emit one tool_result event per synthesized block.
 
-    When `feedback` is given (the claude native rework delta), the shape-1
+    When `feedback` is given (claude native rework), the shape-1
     dangling `complete_step` block's is_error result carries the framed feedback
     (`REWORK_RESULT_FRAME + "\\n\\n" + feedback`) instead of the synthetic
-    "interrupted" filler, so `claude-p` pairs the dangling call against the
-    model's own revision instruction. Rework tails are always shape-1 (a dangling
-    `complete_step` assistant turn), so shape-2 ignores `feedback`.
+    "interrupted" filler, so the model reads its own completion sent back in the
+    loaded session. Rework tails are always shape-1 (a dangling `complete_step`
+    assistant turn), so shape-2 ignores `feedback`.
     """
     def _result_for(tu: ToolUseBlock) -> ToolResultBlock:
         if captured is not None:

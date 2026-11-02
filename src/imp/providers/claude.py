@@ -309,13 +309,11 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     """True when the transcript's last turn is an assistant turn whose tool_use is
     a `complete_step` awaiting its result.
 
-    On a non-rework resume of this shape (bare backward goto) imp folds a SUCCESS
-    result into the loaded session via `synthesize_native_success_on_resume`
-    (claude-p's own pairing would inject an `is_error` for the dangling
-    `complete_step`, telling the agent its already-accepted work failed) and kicks
-    the delta with a redo nudge. On a rework resume the `complete_step` is left
-    dangling instead, and the is_error feedback result streams as the delta
-    claude-p pairs it against."""
+    A bare backward goto answers it with a SUCCESS result via
+    `synthesize_native_success_on_resume` (claude-p's own pairing would inject an
+    `is_error`, telling the agent its accepted work failed) and kicks the stream
+    with a redo nudge; a rework answers it with the is_error feedback result
+    instead. Either answer is loaded in the session body right behind the call."""
     last = messages[-1] if messages else None
     if last is None or last.role != "assistant":
         return False
@@ -1113,7 +1111,8 @@ def _project_for_cli(messages: list[Message]) -> list[Message]:
     immediately after it (extras dropped, gaps filled with an error stub), and
     the closing merge undoes the split regrouping causes — consecutive same-role
     turns are the 400 `_stream_history` documents. A tool_result whose tool_use
-    is absent is paired across the resume_base split; it is kept, never dropped.
+    is absent from `messages` is kept in place, never dropped; native resume never
+    streams one, since `_enter` splits the body only before trailing user-text turns.
     """
     merged = _merge_assistant_fragments(messages)
     results: dict[str, ToolResultBlock] = {}
