@@ -124,6 +124,8 @@ class StepNode:
     label: str | None = None           # step display label, most-recent-wins:
                                        # the step_started seed, then overwritten by
                                        # each update_step_label push
+    header_label: str | None = field(init=False, default=None)  # own header: the
+                                       # creation seed, re-seeded only by a reopen restart
     lane_wait_label: str | None = None # transient footer override while parked in a
                                        # resource (test/merge) lane wait; None when
                                        # unset; highest precedence over `label` in
@@ -142,6 +144,9 @@ class StepNode:
                                        # seconds (timer honesty)
     interrupted: bool = False
     collapsible = False
+
+    def __post_init__(self) -> None:
+        self.header_label = self.label
 
 
 @dataclass
@@ -1550,6 +1555,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.position_label = bool(p.get("position_label", False))
                 existing.rotated_phrase = (
                     _draw_status_phrase() if existing.rotate_phrase else None)
+                existing.header_label = existing.label
                 existing.resumed = genuine
             elif p.get("route_label"):
                 # A continuation that re-entered via a labeled edge shows that
@@ -2248,13 +2254,28 @@ def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
 NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 
+def _latest_header_label(step: StepNode) -> str:
+    for c in reversed(step.children):
+        if isinstance(c, StepHeaderNode):
+            return c.label
+    return step.header_label or step.name
+
+
 def _h_step_label_updated(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
     # Live status-bar label for the current step. Do NOT flush the open burst:
     # this fires between the update_step_label tool_call and its tool_result.
-    if self._step_stack:
-        self._step_stack[-1].label = p.get("label")
+    if not self._step_stack:
+        return
+    top = self._step_stack[-1]
+    top.label = p.get("label")
+    if top.position_label and top.show_label:
+        label = top.label or top.name
+        if label != _latest_header_label(top):
+            self._append(StepHeaderNode(label=label, resumed=False,
+                                        phase_label=top.phase_label, model=top.model,
+                                        route_label=None))
 
 
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated

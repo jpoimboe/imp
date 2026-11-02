@@ -13,7 +13,15 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import LOG_CATEGORIES, render_tree
 from imp.cli.signals import InterruptCoordinator
-from tests._event_fixtures import _TTY, _two_phase_events, agent_text, ev, task_lead_started
+from tests._event_fixtures import (
+    _TTY,
+    TASK_LEAD_AID,
+    _two_phase_events,
+    agent_text,
+    ev,
+    interrupted_task_lead_events,
+    task_lead_started,
+)
 
 
 class _Pipe(io.StringIO):
@@ -2192,6 +2200,54 @@ def test_attach_resume_prints_the_resume_header_first() -> None:
     drv.finish()
     assert [ln for ln in _body(out) if ln] == [
         "implementation phase · plan 1/1 · task 1/2 (resume) · m", "• after"]
+
+
+def test_live_headers_match_imp_log_across_a_resume_and_a_position_change() -> None:
+    events = interrupted_task_lead_events()
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert body == _render_body(events)
+    assert [ln for ln in body if "· task " in ln and not ln.endswith("complete")] == [
+        "implementation phase · plan 1/1 · task 1/2 · m",
+        "implementation phase · plan 1/1 · task 1/2 (resume) · m",
+        "implementation phase · plan 1/1 · task 2/2 · m"]
+
+
+def test_mid_burst_position_push_heads_the_next_prose_live_and_in_imp_log() -> None:
+    events = [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "first"),
+        ev("4", "tool_call", agent_id=TASK_LEAD_AID, id="t1", name="update_step_label",
+           input={"label": "task 2/2"}),
+        ev("5", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 2/2"),
+        ev("6", "tool_result", agent_id=TASK_LEAD_AID, id="t1", content="ok"),
+        ev("7", "tool_call", agent_id=TASK_LEAD_AID, id="t2", name="read_file",
+           input={"path": "x"}),
+        ev("8", "tool_result", agent_id=TASK_LEAD_AID, id="t2", content="ok"),
+        agent_text("9", "second"),
+        ev("10", "step_completed", step="task-lead", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert body == _render_body(events)
+    header = "implementation phase · plan 1/1 · task 2/2 · m"
+    assert body.count(header) == 1
+    recap = body.index("  1 call · read_file")
+    assert body.index("• first") < recap < body.index(header) < body.index("• second")
+
+
+def test_live_driver_has_no_header_reemit_machinery() -> None:
+    drv, _ = _driver()
+    assert not hasattr(drv, "_maybe_reemit_header")
+    assert not hasattr(drv, "_last_header_position")
 
 
 def test_reemitted_header_does_not_mark_a_routed_reentry() -> None:

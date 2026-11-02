@@ -7,7 +7,7 @@ import json
 import pytest
 
 from imp.cli import narrative as nv
-from tests._event_fixtures import agent_text, ev, task_lead_started
+from tests._event_fixtures import TASK_LEAD_AID, agent_text, ev, task_lead_started
 
 
 def test_node_dataclasses_construct_and_default_collapsible() -> None:
@@ -3863,3 +3863,76 @@ def test_warning_detail_is_text_never_dict_repr(
     assert not any("{" in line for line in lines)
     if expected == "":
         assert lines[-1] == "warning: heads up"
+
+
+def test_position_push_appends_a_header_node_only_on_change() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="t"))
+    b.add(task_lead_started("2"))
+    b.add(ev("3", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 1/2"))
+    assert _headers(_only_step(b.tree)) == []
+    b.add(ev("4", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 2/2"))
+    b.add(ev("5", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 2/2"))
+    assert _headers(_only_step(b.tree)) == [nv.StepHeaderNode(
+        label="task 2/2", resumed=False, phase_label=_PHASE, model="m", route_label=None)]
+
+
+def test_position_push_on_a_hidden_step_adds_no_header() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2", show_label=False),
+        ev("3", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 2/2"),
+    ])
+    step = _only_step(tree)
+    assert _headers(step) == []
+    assert step.label == "task 2/2"
+
+
+def test_verb_push_adds_no_header() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="writing plan"),
+        ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
+           label="addressing plan review feedback"),
+    ])
+    assert _headers(_only_step(tree)) == []
+
+
+def test_position_push_lands_its_header_after_the_open_burst() -> None:
+    # The push fires mid-burst (between update_step_label's call and result) and
+    # must not split it: later calls still join the burst above the header.
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        ev("3", "tool_call", agent_id=TASK_LEAD_AID, id="t1", name="update_step_label",
+           input={"label": "task 2/2"}),
+        ev("4", "step_label_updated", agent_id=TASK_LEAD_AID, label="task 2/2"),
+        ev("5", "tool_result", agent_id=TASK_LEAD_AID, id="t1", content="ok"),
+        ev("6", "tool_call", agent_id=TASK_LEAD_AID, id="t2", name="read_file",
+           input={"path": "x"}),
+        ev("7", "tool_result", agent_id=TASK_LEAD_AID, id="t2", content="ok"),
+    ])
+    step = _only_step(tree)
+    assert [type(c) for c in step.children] == [nv.ToolBurstFold, nv.StepHeaderNode]
+    assert [c.name for c in step.children[0].calls] == ["update_step_label", "read_file"]
+
+
+def test_own_header_keeps_its_entry_label_across_on_stack_reentries() -> None:
+    from imp.cli import render_text as rt
+    restart = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        agent_text("3", "before"),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
+        task_lead_started("5", label="task 2/2", resumed=True, restarted=True),
+    ])
+    retry = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="t"),
+        task_lead_started("2"),
+        task_lead_started("3", label="task 2/2", resumed=True, restarted=True),
+    ])
+    for tree in (restart, retry):
+        step = _only_step(tree)
+        assert step.label == "task 2/2"
+        assert rt.header_line(step, depth=0, color=False) == f"{_PHASE} · task 1/2 · m"
