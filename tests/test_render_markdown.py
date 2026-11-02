@@ -6,8 +6,10 @@ from imp.cli.accounting import RowUsage
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
 from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
 from imp.cli.render_markdown import (
+    _details,
+    _escape_all,
     _md_escape,
-    _subagent_status_md,
+    _subagent_status_label,
     render_markdown,
     render_summary_markdown,
 )
@@ -288,17 +290,34 @@ def _make_subagent(**kw):
 
 
 def test_subagent_status_tags_and_elapsed() -> None:
-    assert "(running)" in _subagent_status_md(_make_subagent(running=True))
-    assert "(stalled)" in _subagent_status_md(
+    assert "(running)" in _subagent_status_label(_make_subagent(running=True))
+    assert "(stalled)" in _subagent_status_label(
         _make_subagent(terminal_state="stalled"))
-    assert "(interrupted)" in _subagent_status_md(
+    assert "(interrupted)" in _subagent_status_label(
         _make_subagent(terminal_state="interrupted"))
-    assert "(context exhausted)" in _subagent_status_md(
+    assert "(context exhausted)" in _subagent_status_label(
         _make_subagent(terminal_state="context_exhausted"))
-    assert "(failed)" in _subagent_status_md(_make_subagent(is_error=True))
-    row = _subagent_status_md(_make_subagent(start_ts="2024-01-01T00:00:00Z",
-                                             end_ts="2024-01-01T00:00:05Z"))
+    assert "(failed)" in _subagent_status_label(_make_subagent(is_error=True))
+    row = _subagent_status_label(_make_subagent(start_ts="2024-01-01T00:00:00Z",
+                                                end_ts="2024-01-01T00:00:05Z"))
     assert "reviewer" in row and "5" in row   # elapsed suffix present
+
+
+def test_subagent_status_label_is_raw_and_unprefixed() -> None:
+    assert _subagent_status_label(_make_subagent(subagent_name="<x>")) == "<x>"
+
+
+def test_escape_all_strips_sgr_caret_escapes_and_html_escapes() -> None:
+    assert _escape_all("\x1b[1;33m<b>&\x00") == "&lt;b&gt;&amp;^@"
+
+
+def test_details_escapes_its_raw_summary_per_context() -> None:
+    def tag(s: str) -> str:
+        return f"[{s}]"
+    assert _details("`<x>` & y", "body", full=False, esc=tag) == (
+        "<details>\n<summary>`&lt;x&gt;` &amp; y</summary>\n\nbody\n\n</details>")
+    assert _details("`<x>`", "body", full=True, esc=tag) == "**[`<x>`]**\n\nbody"
+    assert _details("`<x>`", "", full=True, esc=tag) == "**[`<x>`]**"
 
 
 def test_completion_breadcrumb_and_end_to_end_structure() -> None:

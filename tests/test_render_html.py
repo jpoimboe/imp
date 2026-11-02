@@ -508,3 +508,23 @@ def test_summary_html_puts_a_providers_share_in_the_quota_column() -> None:
             "<td></td>\n<td></td>\n<td>2.00%</td>\n</tr>") in out
     assert ("<tr>\n<td>↳ codex</td>\n<td></td>\n<td></td>\n<td></td>\n"
             "<td></td>\n<td></td>\n<td>—</td>\n</tr>") in out
+
+
+def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "`<x>`", "task_description": "go"}),
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ]
+    md = render_markdown(nv.build_tree(events), full=False,
+                         show=frozenset({"subagents"}))
+    out = render_html(md)
+    for doc in (md, out):
+        assert "<summary>· `&lt;x&gt;` · m</summary>" in doc
+        assert "&amp;" not in doc
