@@ -829,7 +829,7 @@ async def _run_cleared_session(
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import make_interactive_solicit, run_session_client
-    from imp.cli.signals import InterruptCoordinator
+    from imp.cli.signals import InterruptCoordinator, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.abandon import discard_conversation
@@ -855,10 +855,11 @@ async def _run_cleared_session(
         # A `/sandbox off|on` typed at this reopened prompt lands here; empty when none.
         cleared_sandbox_sink: dict[str, bool] = {}
         try:
-            reply = await _read_intent_line(
-                prompt, quest, color=color, width=_term_width(),
-                model_sink=cleared_model_sink,
-                sandbox_sink=cleared_sandbox_sink)
+            async with prompt_signal_guard():
+                reply = await _read_intent_line(
+                    prompt, quest, color=color, width=_term_width(),
+                    model_sink=cleared_model_sink,
+                    sandbox_sink=cleared_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -1138,7 +1139,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         make_interactive_solicit,
         run_session_client,
     )
-    from imp.cli.signals import install_process_group, prompt_sigint_guard
+    from imp.cli.signals import install_process_group, prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1275,7 +1276,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_sandbox_sink: dict[str, bool] = {}
     if show_opening_prompt:
         try:
-            async with prompt_sigint_guard():
+            async with prompt_signal_guard():
                 reply = await _read_opening_message(
                     quest, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
@@ -1569,8 +1570,10 @@ def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
 
 async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | None:
     """Read one line at inert resume through the shared slash-aware reader
-    (session-verb rejection, /help, /skills, empty-submit guard); EOF / Ctrl-C
-    retains the `> ` caret and maps to None — the quest stays parked."""
+    (session-verb rejection, /help, /skills, empty-submit guard). EOF / Ctrl-C
+    retains the `> ` caret; a leave signal prints its pause block. Both map to
+    None — the quest stays parked."""
+    from imp.cli.signals import PromptLeave, prompt_signal_guard
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
@@ -1580,12 +1583,17 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
     prompt.seed_history(
         _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
     try:
-        return await _read_intent_line(
-            prompt, quest, color=color, width=width, toolbar=toolbar)
+        async with prompt_signal_guard():
+            line = await _read_intent_line(
+                prompt, quest, color=color, width=width, toolbar=toolbar)
+    except PromptLeave as leave:
+        _emit_leave_pause(quest, leave.trigger)
+        return None
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
         print()
         return None
+    return line
 
 
 async def _resume_inert(

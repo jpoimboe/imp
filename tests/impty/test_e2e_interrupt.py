@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
 
+from imp.cli.prompt import DEFAULT_HINT
 from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests._live import _await_change_dir
@@ -160,3 +163,43 @@ def test_sigint_during_subagent_hands_back_and_resumes(tmp_path: Path) -> None:
     ) as r:
         rc2 = r.run_to_completion(hard=E2E_POLL_TIMEOUT)
         assert rc2 == 0, "\n".join(r.lines())
+
+
+_RUN_HEADER_RE = re.compile(r"^([a-z0-9]{6}) · new$", re.M)
+
+
+def _wait_for_opening_prompt(s: TerminalSession) -> str:
+    """Block until the bare opening prompt is drawn; return the quest id from its header."""
+    deadline = time.monotonic() + E2E_POLL_TIMEOUT
+    while True:
+        rows = s.lines()
+        header = _RUN_HEADER_RE.search("\n".join(rows))
+        if header and any(r.startswith("> ") and DEFAULT_HINT in r for r in rows):
+            return header.group(1)
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, "opening prompt never drawn:\n" + "\n".join(rows)
+        s.wait_idle(idle=0.1, hard=min(0.5, remaining))
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
+def test_leave_signal_at_opening_prompt_discards_the_draft(tmp_path: Path, sig: int) -> None:
+    script = {"default": [{"text": "unused", "tools": [
+        {"name": "complete_step", "input": {"status": "Success"}}]}]}
+    script_path = seed_minimal_repo(tmp_path, script=script)
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        qid = _wait_for_opening_prompt(s)
+        s.send_signal(sig)
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+        assert rc == 130, "\n".join(s.lines())        # a clean leave, not death by signal
+        assert_screen(s, contains=(f"{qid} · (unnamed) · discarded",),
+                      excludes=("Traceback",))
+
+    listed = subprocess.run(
+        [sys.executable, "-m", "imp", "list", "--all", "--json"],
+        cwd=str(tmp_path), env=env, capture_output=True, text=True, check=True)
+    assert qid not in [q["id"] for q in json.loads(listed.stdout)]

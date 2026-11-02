@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import functools
 import io
+import os
+import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +19,7 @@ import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
@@ -130,6 +135,83 @@ async def test_run_cleared_session_cancel_emits_discarded_spine(
     assert not out.endswith("discarded\n\n\n")           # exactly one trailing blank
     assert not out.endswith("> \n\n")                    # no bare caret line
     assert "cancelled" not in out
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "leave_sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
+async def test_run_cleared_session_leave_signal_discards_like_ctrl_d(
+    leave_sig: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], signal_sentinels: Callable[[int, object], None],
+) -> None:
+    # A leave signal at the reopened prompt == Ctrl-D there: the discarded spine,
+    # one trailing blank, the draft gone, exit 130 — no pause block, no trigger.
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+
+    class _SignalledPrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            os.kill(os.getpid(), leave_sig)
+            await asyncio.Event().wait()
+            raise AssertionError("the leave signal must cancel the blocked prompt")
+
+    monkeypatch.setattr(m, "Prompt", _SignalledPrompt)
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+
+    assert rc == 130
+    out = capsys.readouterr().out
+    assert out.endswith("· (unnamed) · discarded\n\n")
+    assert not out.endswith("discarded\n\n\n")
+    assert "paused" not in out
+    assert "SIGTERM" not in out and "SIGHUP" not in out
+    changes_dir = project_state_dir(tmp_path) / "quests"
+    assert (list(changes_dir.iterdir()) if changes_dir.exists() else []) == []
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_out_of_band_sigint_feeds_ctrl_c_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    signal_sentinels: Callable[[int, object], None],
+) -> None:
+    # An OS-level SIGINT at the reopened prompt goes to the prompt's Ctrl-C
+    # binding. It never exits: the line typed afterwards still starts the session.
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+    fed: list[bool] = []
+    monkeypatch.setattr(sig, "_feed_prompt_ctrl_c", lambda: fed.append(True))
+
+    class _SigintThenLinePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            os.kill(os.getpid(), signal.SIGINT)
+            await wait_until(lambda: bool(fed))
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _SigintThenLinePrompt)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+    launched: list[object] = []
+
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        launched.append(quest)
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+
+    assert rc == 0
+    assert fed == [True]
+    assert len(launched) == 1
 
 
 @pytest.mark.anyio

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import os
+import signal
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +19,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests._event_fixtures import ev
+from tests.async_wait import HANG_BACKSTOP
 from tests.conftest import _branch_with_commit, _seed_control
 
 
@@ -395,6 +400,78 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
     assert "Which DB should I use?" in out       # pending question replayed
     assert out.endswith("> \n\n")                # retained caret + one trailing blank
     assert "cancelled" not in out                # no `imp: cancelled` message
+
+
+class _SignalledInertPrompt:
+    """Sends `leave_sig` to this process while blocked at the prompt."""
+
+    def __init__(self, leave_sig: int, **kwargs: object) -> None:
+        self._sig = leave_sig
+
+    def seed_history(self, lines: list[str]) -> None:
+        pass
+
+    async def ask_async(self, *args: object, **kwargs: object) -> str:
+        os.kill(os.getpid(), self._sig)
+        await asyncio.Event().wait()
+        raise AssertionError("the leave signal must cancel the blocked prompt")
+
+
+_LEAVE_SIGNALS = pytest.mark.parametrize(
+    "leave_sig,display", [(signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP")],
+    ids=["sigterm", "sighup"])
+
+
+@pytest.mark.anyio
+@_LEAVE_SIGNALS
+async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
+    leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    signal_sentinels: Callable[[int, object], None],
+) -> None:
+    # A signal leave at the inert prompt prints the standard signal-leave block
+    # (no caret: nothing was typed) and maps to None like Ctrl-D.
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _SignalledInertPrompt(leave_sig, **kw))
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        line = await m._inert_ask_line(ch)
+
+    assert line is None
+    assert capsys.readouterr().out == (
+        f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+
+
+@pytest.mark.anyio
+@_LEAVE_SIGNALS
+async def test_resume_inert_leave_signal_parks_and_returns_zero(
+    leave_sig: int, display: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    signal_sentinels: Callable[[int, object], None],
+) -> None:
+    # Through the whole inert-resume flow: rc 0, nothing launched or journaled,
+    # the quest still parked, and the pause block is the last thing printed.
+    ch = _seed(tmp_path)
+    before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _SignalledInertPrompt(leave_sig, **kw))
+
+    async with asyncio.timeout(HANG_BACKSTOP):
+        rc = await m._resume_inert(
+            ch, "Which DB should I use?", marker="resuming", notice=None)
+
+    assert rc == 0
+    after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    assert after == before
+    assert State.load(ch.state_dir).status == "paused"
+    out = capsys.readouterr().out
+    assert out.endswith(f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+    assert not any(ln.startswith(">") for ln in out.splitlines())   # no caret line
 
 
 @pytest.mark.anyio

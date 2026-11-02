@@ -9,13 +9,14 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -745,3 +746,16 @@ def held_lock(lock_path: Path) -> Generator[None, None, None]:
         release_flag.touch()
         proc.join(timeout=5)
         assert not proc.is_alive()  # surface a wedged holder instead of leaking a spawn
+
+
+@pytest.fixture
+def signal_sentinels() -> Generator[Callable[[int, object], None], None, None]:
+    """A signal escaping a prompt guard hits a raising handler, failing the test not pytest."""
+    def _sentinel(signum: int, _frame: object) -> None:
+        raise AssertionError(f"signal {signum} escaped the prompt guard")
+
+    sigs = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    prev = {s: signal.signal(s, _sentinel) for s in sigs}
+    yield _sentinel
+    for s, handler in prev.items():
+        signal.signal(s, handler)

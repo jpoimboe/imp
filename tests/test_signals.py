@@ -22,8 +22,9 @@ import pytest
 
 from imp.cli.signals import (
     InterruptCoordinator,
+    PromptLeave,
     install_process_group,
-    prompt_sigint_guard,
+    prompt_signal_guard,
 )
 from tests.async_wait import wait_until
 
@@ -403,48 +404,115 @@ async def test_tty_quiesced_parks_reader_then_rearms(monkeypatch) -> None:
             os.close(slave)
 
 
-@pytest.mark.anyio
-async def test_prompt_sigint_guard_sigint_does_not_raise_or_exit() -> None:
-    """An out-of-band SIGINT at the opening prompt is routed through the prompt's
-    own Ctrl-C binding (a no-op here — no prompt_toolkit app is running), NOT
-    re-raised as KeyboardInterrupt and NEVER exits. The guarded body runs to
-    completion, and the guard restores the exact prior SIGINT disposition."""
-    def _sentinel(_signum, _frame):
-        raise AssertionError("prior handler must not actually fire")
+_GUARDED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
-    prev = signal.signal(signal.SIGINT, _sentinel)
-    try:
-        raised = False
-        completed = False
-        async with asyncio.timeout(10):
-            try:
-                async with prompt_sigint_guard():
-                    os.kill(os.getpid(), signal.SIGINT)
-                    await asyncio.sleep(0.1)   # let the loop deliver the signal
-                    completed = True
-            except KeyboardInterrupt:
-                raised = True
-        assert raised is False        # SIGINT no longer exits the opening prompt
-        assert completed is True      # the body ran to completion
-        assert signal.getsignal(signal.SIGINT) is _sentinel   # disposition restored
-    finally:
-        signal.signal(signal.SIGINT, prev)
+
+def _assert_restored(sentinel) -> None:
+    for sig in _GUARDED_SIGNALS:
+        assert signal.getsignal(sig) is sentinel, f"signal {sig} disposition not restored"
 
 
 @pytest.mark.anyio
-async def test_sigint_guard_clean_body_does_not_raise() -> None:
-    """A body that completes with no SIGINT runs to completion and the guard
-    raises nothing."""
+@pytest.mark.parametrize(
+    "sig,trigger", [(signal.SIGTERM, "sigterm"), (signal.SIGHUP, "sighup")],
+    ids=["sigterm", "sighup"])
+async def test_prompt_signal_guard_leave_signal_cancels_blocked_body(
+    signal_sentinels, sig, trigger,
+) -> None:
+    """A leave signal cancels the blocked body; the guard raises PromptLeave naming the trigger."""
+    reached = False
+    async with asyncio.timeout(10):
+        with pytest.raises(PromptLeave) as excinfo:
+            async with prompt_signal_guard():
+                asyncio.get_running_loop().call_soon(os.kill, os.getpid(), sig)
+                await asyncio.Event().wait()
+                reached = True
+    assert excinfo.value.trigger == trigger
+    assert isinstance(excinfo.value, EOFError)
+    assert reached is False
+    _assert_restored(signal_sentinels)
+
+
+@pytest.mark.anyio
+async def test_prompt_signal_guard_leave_between_awaits_lands_at_next_wait(
+    signal_sentinels,
+) -> None:
+    """A leave signal sent with no prompt app running cancels the body's next wait."""
+    steps: list[str] = []
+    async with asyncio.timeout(10):
+        with pytest.raises(PromptLeave) as excinfo:
+            async with prompt_signal_guard():
+                os.kill(os.getpid(), signal.SIGTERM)
+                steps.append("after-signal")
+                await asyncio.Event().wait()
+                steps.append("unreachable")
+    assert excinfo.value.trigger == "sigterm"
+    assert steps == ["after-signal"]
+    _assert_restored(signal_sentinels)
+
+
+@pytest.mark.anyio
+async def test_prompt_signal_guard_raises_for_leave_whose_cancel_never_landed(
+    signal_sentinels, monkeypatch,
+) -> None:
+    """A recorded leave whose cancel never reaches the (shielded) body still leaves on exit."""
+    import anyio
+
+    import imp.cli.signals as signals_mod
+
+    recorded: list[int] = []
+    real = signals_mod._leave_reason_for_signal
+
+    def _recording(sig: int) -> str:
+        recorded.append(sig)
+        return real(sig)
+
+    monkeypatch.setattr(signals_mod, "_leave_reason_for_signal", _recording)
+    completed = False
+    with pytest.raises(PromptLeave) as excinfo:
+        async with prompt_signal_guard():
+            with anyio.CancelScope(shield=True):
+                os.kill(os.getpid(), signal.SIGHUP)
+                await wait_until(lambda: bool(recorded))
+            completed = True
+    assert completed is True
+    assert excinfo.value.trigger == "sighup"
+    _assert_restored(signal_sentinels)
+
+
+@pytest.mark.anyio
+async def test_prompt_signal_guard_sigint_feeds_ctrl_c_and_never_exits(
+    signal_sentinels, monkeypatch,
+) -> None:
+    """An out-of-band SIGINT feeds the prompt's Ctrl-C; it never cancels or raises."""
+    import imp.cli.signals as signals_mod
+
+    fed: list[bool] = []
+    monkeypatch.setattr(signals_mod, "_feed_prompt_ctrl_c", lambda: fed.append(True))
+    completed = False
+    async with prompt_signal_guard():
+        os.kill(os.getpid(), signal.SIGINT)
+        await wait_until(lambda: bool(fed))
+        completed = True
+    assert fed == [True]
+    assert completed is True
+    _assert_restored(signal_sentinels)
+
+
+@pytest.mark.anyio
+async def test_prompt_signal_guard_clean_body_does_not_raise(signal_sentinels) -> None:
     ran = False
-    async with prompt_sigint_guard():
+    async with prompt_signal_guard():
         ran = True
     assert ran is True
+    _assert_restored(signal_sentinels)
 
 
 @pytest.mark.anyio
-async def test_sigint_guard_degrades_to_noop_when_unsupported(monkeypatch) -> None:
-    """Where loop.add_signal_handler is unsupported (Windows), the guard degrades
-    to a no-op: the body still runs and no error propagates."""
+async def test_prompt_signal_guard_degrades_to_noop_when_unsupported(
+    signal_sentinels, monkeypatch,
+) -> None:
+    """Without loop.add_signal_handler support (Windows) the guard is a no-op."""
     loop = asyncio.get_running_loop()
 
     def _unsupported(*_a, **_k):
@@ -452,28 +520,44 @@ async def test_sigint_guard_degrades_to_noop_when_unsupported(monkeypatch) -> No
 
     monkeypatch.setattr(loop, "add_signal_handler", _unsupported)
     ran = False
-    async with prompt_sigint_guard():
+    async with prompt_signal_guard():
         ran = True
     assert ran is True
+    _assert_restored(signal_sentinels)
 
 
 @pytest.mark.anyio
-async def test_sigint_guard_passes_body_exception_through_and_restores() -> None:
-    """A non-cancellation exception raised in the body (e.g. the EOFError the
-    opening prompt legitimately raises) propagates unchanged — never swallowed
-    nor replaced by KeyboardInterrupt — and the guard still restores the prior
-    SIGINT disposition on the way out."""
-    def _sentinel(_signum, _frame):
-        raise AssertionError("prior handler must not actually fire")
+async def test_prompt_signal_guard_partial_install_rolls_back(
+    signal_sentinels, monkeypatch,
+) -> None:
+    """A later install failure removes earlier handlers and restores all dispositions."""
+    loop = asyncio.get_running_loop()
+    real_add = loop.add_signal_handler
 
-    prev = signal.signal(signal.SIGINT, _sentinel)
-    try:
-        with pytest.raises(EOFError):
-            async with prompt_sigint_guard():
-                raise EOFError
-        assert signal.getsignal(signal.SIGINT) is _sentinel
-    finally:
-        signal.signal(signal.SIGINT, prev)
+    def _partial(sig, *args):
+        if sig == signal.SIGTERM:
+            raise NotImplementedError
+        return real_add(sig, *args)
+
+    monkeypatch.setattr(loop, "add_signal_handler", _partial)
+    ran = False
+    async with prompt_signal_guard():
+        ran = True
+    assert ran is True
+    assert loop.remove_signal_handler(signal.SIGINT) is False
+    _assert_restored(signal_sentinels)
+
+
+@pytest.mark.anyio
+async def test_prompt_signal_guard_passes_body_exception_through_and_restores(
+    signal_sentinels,
+) -> None:
+    """A plain EOFError from the body (Ctrl-D) propagates unchanged, not as PromptLeave."""
+    with pytest.raises(EOFError) as excinfo:
+        async with prompt_signal_guard():
+            raise EOFError
+    assert not isinstance(excinfo.value, PromptLeave)
+    _assert_restored(signal_sentinels)
 
 
 def test_feed_prompt_ctrl_c_is_a_noop_with_no_running_app() -> None:
