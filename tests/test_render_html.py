@@ -449,7 +449,7 @@ def test_summary_html_export_keeps_the_notional_sigil_out_of_a_list() -> None:
                 usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
                                priced=1, notional=1)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_html(render_summary_markdown(rows, header=hdr))
     assert "<td>$6.00*</td>" in out                     # the total's starred cell
@@ -469,7 +469,7 @@ def test_summary_html_export_carries_the_weekly_column_and_its_footnote() -> Non
                                dollars=3.00, priced=1, notional=1),
                 units=Units.of("claude", 2.0)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     column = QuotaColumn((QuotaFigure("claude", 9.0, 2.0, 10.0),))
     out = render_html(render_summary_markdown(rows, header=hdr, quota=column))
@@ -499,7 +499,7 @@ def test_summary_html_puts_a_providers_share_in_the_quota_column() -> None:
                                priced=1, notional=1),
                 units=Units.of("codex", 1.0)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
                           QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))

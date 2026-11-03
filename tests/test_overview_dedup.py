@@ -192,10 +192,10 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     _seed_control(tmp_path)
     monkeypatch.setattr(
         "imp.engine.archive.read.completed_rows",
-        lambda control: [("cid", "merged", "-", "iso", "Title", "created", None)])
+        lambda control: [("cid", "completed", "-", "iso", "Title", "created", None)])
     monkeypatch.setattr(s, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)
-    assert rows == [("cid", "merged", "-", "iso", "Title", "created", None, None, None)]
+    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None, None)]
 
 
 

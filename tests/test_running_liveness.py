@@ -45,8 +45,9 @@ def test_resolver_absent_lock_keeps_at_rest_status() -> None:
     assert s.resolve_display_status("new", lock_live=False, halt_condition=None) == "new"
 
 
-def test_resolver_merged_passes_through() -> None:
-    assert s.resolve_display_status("merged", lock_live=False, halt_condition=None) == "merged"
+def test_resolver_completed_passes_through() -> None:
+    status = s.resolve_display_status("completed", lock_live=False, halt_condition=None)
+    assert status == "completed"
 
 
 def test_membership_gates_reflect_derived_words() -> None:

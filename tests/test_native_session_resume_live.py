@@ -202,8 +202,8 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
     from imp.engine.archive import read as archive_read
-    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
-    assert final_status == "done", final_status
+    final_status = wait_for_archived_status(tmp_path, slug, "completed", 30.0)
+    assert final_status == "completed", final_status
     # The done completion reaped the live home; rehydrate so the archived events
     # (read by the assertions below) are readable again.
     deadline = time.time() + 30.0

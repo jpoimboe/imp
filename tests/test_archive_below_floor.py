@@ -22,7 +22,7 @@ def _triad(control: Path, quest_id: str) -> tuple[Path, Path, Path]:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{quest_id}-state.json"
     state_json.write_text(json.dumps({
-        "id": quest_id, "status": "merged", "step": "finalize"}))
+        "id": quest_id, "status": "completed", "step": "finalize"}))
     return events, quest_json, state_json
 
 

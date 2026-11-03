@@ -813,7 +813,7 @@ def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
         **_FALLBACK_USAGE,
         "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}}))
     assert cost_cell(rows[0].totals) == "≥$0.20*"
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[-1] == \
@@ -859,7 +859,7 @@ def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
                               "cacheCreationInputTokens": 0,
                               "webSearchRequests": 0}}))
     assert cost_cell(rows[0].totals) == "—"
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[3].split() == ["reviewer", "1m", "0s", "—", "—", "—"]
@@ -1106,13 +1106,13 @@ def test_header_carries_identity_only_and_the_total_row_carries_the_numbers():
                     end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0,
                     usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
                                    priced=1))]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=120.0,
                         exclusions=Exclusions(
                             (("2026-01-01T00:00:15+00:00",
                               "2026-01-01T00:01:45+00:00"),)))
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert out[0] == "f  ·  c  ·  merged"     # AC 19: identity only
+    assert out[0] == "f  ·  c  ·  completed"     # AC 19: identity only
     assert "$" not in out[0]
     assert "1.0k" not in out[0]
     total = next(ln for ln in out if ln.startswith("  total"))
@@ -1138,7 +1138,7 @@ def test_total_row_is_the_sum_of_the_step_rows_including_subagents():
                     usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
                                    priced=1))]),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     # AC 19/20: 1000 + (1000 + 500) in, 40 + (10 + 10) out, 0.20 + 0.30 cost.
@@ -1703,9 +1703,9 @@ def test_the_reference_after_state_renders_verbatim():
         _step("integration", "integrate", 120, RowUsage()),
     ]
     hdr = SummaryHeader(workflow="default", quest_id="zita45",
-                        status="merged", total_seconds=3120.0)
+                        status="completed", total_seconds=3120.0)
     assert render_summary(rows, header=hdr, color=False, width=80) == [
-        "default  ·  zita45  ·  merged",
+        "default  ·  zita45  ·  completed",
         "                                       time      in    out    cost",
         "scoping",
         "  threshold                          12m 0s  163.0k   3.0k  $0.27*",
@@ -1734,7 +1734,7 @@ def test_a_mixed_auth_run_shows_both_legend_lines_tilde_first():
                 usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
                                priced=1, notional=1)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[3].endswith("~$2.00")
@@ -1757,7 +1757,7 @@ def test_an_unpriced_step_floors_the_total_and_adds_the_third_legend_line():
                 end_ts="2026-01-01T00:01:00+00:00",
                 usage=RowUsage(fresh_input=900, output=90, unpriced=1)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[4].endswith("n/a")
@@ -1810,6 +1810,6 @@ def test_suppressing_the_header_line_drops_exactly_that_line(color: bool) -> Non
                           header_line=False)
     assert bare == full[1:]
     assert len(bare) == len(full) - 1
-    assert not any("feature" in ln or "merged" in ln for ln in bare)
+    assert not any("feature" in ln or "completed" in ln for ln in bare)
     assert "cost" in bare[0]          # the dim title row is now first
     assert bare[-1].startswith("  total")

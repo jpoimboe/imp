@@ -45,7 +45,7 @@ def _archive_one(control: Path, cid: str, dep: str, etype: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [dep]}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "merged", "step": "finalize"}))
+        "id": cid, "status": "completed", "step": "finalize"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

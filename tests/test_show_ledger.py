@@ -19,7 +19,7 @@ from imp.cli.render_summary import (
 from imp.engine.quest import LAYOUT_VERSION
 from imp.paths import project_state_dir
 
-_HDR = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
+_HDR = SummaryHeader(workflow="feature", quest_id="abc", status="completed",
                      total_seconds=2342.0)
 
 _NO_READINGS = "quota unavailable; this run recorded no quota readings"

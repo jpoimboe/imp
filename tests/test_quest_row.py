@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -111,7 +112,7 @@ def test_merge_blocked_renders_two_words_bold():
 
 
 def test_format_dim_wraps_whole_row():
-    line = format_quest_line(**_row(status="merged"), color=True, dim=True)
+    line = format_quest_line(**_row(status="completed"), color=True, dim=True)
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
     assert "\x1b[32m" not in line
@@ -119,14 +120,14 @@ def test_format_dim_wraps_whole_row():
 
 def test_dim_row_column_order():
     # history (dim) path preserves the same column order: NAME then STATUS then UPDATED.
-    line = format_quest_line(**_row(status="merged"), color=False, dim=True)
-    assert line.index("Add version flag") < line.index("merged") < line.index("15m")
+    line = format_quest_line(**_row(status="completed"), color=False, dim=True)
+    assert line.index("Add version flag") < line.index("completed") < line.index("15m")
 
 
-def test_merged_status_renders_plain():
-    line = format_quest_line(**_row(status="merged"), color=True)
-    assert "merged" in line
-    assert "\x1b[3" not in line
+def test_completed_status_renders_plain():
+    line = format_quest_line(**_row(status="completed"), color=True)
+    assert "completed" in line
+    assert not re.search(r"\x1b\[[\d;]*m\s*completed", line)
 
 
 def test_name_budget_fills_remaining_width(monkeypatch):
@@ -184,9 +185,9 @@ def test_status_cell_falls_back_to_step_name_without_label():
 def test_status_cell_bare_when_step_empty():
     # The default _row title ("Add version flag") has no paren, so a clean line
     # has none at all when the STATUS cell carries no ` (label)` suffix.
-    line = format_quest_line(**_row(status="merged", step="-"),
+    line = format_quest_line(**_row(status="completed", step="-"),
                               step_label=None, color=False)
-    assert "merged" in line
+    assert "completed" in line
     assert "(" not in line                     # no suffix in the STATUS cell
 
 
@@ -325,7 +326,7 @@ def test_status_colors_are_meaning_based() -> None:
     assert STATUS_COLORS["merge_blocked"] == ("bold",)
     assert "new" not in STATUS_COLORS       # plain, at rest
     assert "paused" not in STATUS_COLORS
-    assert "merged" not in STATUS_COLORS
+    assert "completed" not in STATUS_COLORS
     assert "backlog" not in STATUS_COLORS
     assert "draft" not in STATUS_COLORS
 

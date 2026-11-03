@@ -148,7 +148,7 @@ def test_a_non_resumable_status_leaves_no_mutated_quest_json(
     # Validate the name early, write it late: a rejected resume must not pin.
     quest = _seed(tmp_path)
     state = State.load(quest.state_dir)
-    state.status = "done"
+    state.status = "completed"
     state.save(quest.state_dir)
     monkeypatch.chdir(tmp_path)
     _stub_headless(monkeypatch)

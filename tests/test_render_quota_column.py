@@ -14,7 +14,7 @@ from imp.cli.render_summary import (
     total_cell,
 )
 
-_HDR = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
+_HDR = SummaryHeader(workflow="feature", quest_id="abc", status="completed",
                      total_seconds=2342.0)
 
 

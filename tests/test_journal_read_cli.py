@@ -758,10 +758,10 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     assert "Archived One" in out
 
 
-def test_resolve_dependencies_marks_archived_done_dep_satisfied(tmp_path: Path) -> None:
+def test_resolve_dependencies_marks_archived_completed_dep_satisfied(tmp_path: Path) -> None:
     from imp.engine.quest_refs import resolve_dependencies
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Dep", quest_id="depid", base_branch="main")
-    _complete_and_archive(tmp_path, "depid", status="done")
+    _complete_and_archive(tmp_path, "depid")
     deps = resolve_dependencies(tmp_path, ["depid"])
     assert deps == [{"id": "depid", "title": "Dep", "merged": True}]

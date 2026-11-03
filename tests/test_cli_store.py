@@ -18,7 +18,7 @@ def _append_event(quest: Quest, event: dict) -> None:
         fh.write(json.dumps(event) + "\n")
 
 
-def _archive(control: Path, quest_id: str, status: str = "merged") -> None:
+def _archive(control: Path, quest_id: str, status: str = "completed") -> None:
     ch = Quest.load(control, quest_id)
     st = State.load(ch.state_dir)
     st.status = status
@@ -77,7 +77,7 @@ def test_completed_rows_from_archive(tmp_path: Path) -> None:
     rows = make_store(tmp_path).completed_rows()
     match = [r for r in rows if r.quest_id == "doneq"]
     assert len(match) == 1
-    assert match[0].status == "merged"
+    assert match[0].status == "completed"
     assert match[0].title == "Done Thing"
 
 

@@ -59,7 +59,7 @@ def _archive_merged(control: Path, quest_id: str) -> None:
         "materialized": True}))
     state_json = control / f"{quest_id}.state.json"
     state_json.write_text(json.dumps({
-        "id": quest_id, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
+        "id": quest_id, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(
         control, quest_id, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

@@ -26,7 +26,7 @@ def _setup_change(control: Path) -> tuple[Path, Path, Path]:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["beta"]}))
     state_json = control / "state.json"
     state_json.write_text(json.dumps({
-        "id": "alpha", "status": "merged", "step": "finalize",
+        "id": "alpha", "status": "completed", "step": "finalize",
         "merge_commit": "abc123"}))
     return events, quest_json, state_json
 
@@ -48,14 +48,14 @@ def test_archive_quest_writes_blob_record_and_index(tmp_path: Path) -> None:
     assert rec is not None
     assert rec["events_hash"] == expected_hash
     assert rec["base"] == "main"
-    assert rec["final_state"]["status"] == "merged"
+    assert rec["final_state"]["status"] == "completed"
 
     # Index has the change row + one row per event line.
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
             "SELECT status, events_hash FROM quests WHERE id='alpha'"
-        ).fetchone() == ("merged", expected_hash)
+        ).fetchone() == ("completed", expected_hash)
     finally:
         conn.close()
 
@@ -142,7 +142,7 @@ def test_ensure_current_rebuilds_physically_corrupt_index(tmp_path: Path) -> Non
         conn.close()
     assert rebuilt == (
         index._SCHEMA_VERSION,
-        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "merged",
+        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "completed",
          "finalize", "2026-06-01T00:00:02+00:00"),
         [("alpha", "beta")],
     )
@@ -188,9 +188,9 @@ def test_ensure_current_rebuilds_current_but_malformed_index(
     finally:
         conn.close()
     assert (completed, quest, deps) == (
-        [("alpha", "merged", "finalize", "2026-06-01T00:00:02+00:00",
+        [("alpha", "completed", "finalize", "2026-06-01T00:00:02+00:00",
           "Alpha", "2026-06-01T00:00:00+00:00", None)],
-        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "merged",
+        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "completed",
          "finalize", "2026-06-01T00:00:02+00:00"),
         [("alpha", "beta")],
     )

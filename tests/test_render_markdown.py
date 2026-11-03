@@ -509,16 +509,16 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
              step="spec", kind="agent", action={"verb": "continue"}, var_mutations={}),
     ]
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
-                           status="merged", total_seconds=summary_total(events))
+                           status="completed", total_seconds=summary_total(events))
     out = render_summary_markdown(build_summary(events), header=header)
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
-    assert "merged" in out                        # status carried
+    assert "completed" in out                        # status carried
     assert "## design" in out                     # phase grouping heading
     assert ("| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
             in out)
     assert "Wait" not in out                      # Wait column dropped
     assert "| spec | 1m 0s | — | — | — | — | — |" in out
-    assert "**Status:** merged" in out            # AC 22(d): identity only
+    assert "**Status:** completed" in out            # AC 22(d): identity only
     assert "**Total:**" not in out
     assert "**Tokens:**" not in out
     assert "**Cost:**" not in out
@@ -546,7 +546,7 @@ def test_summary_markdown_total_subtracts_the_exclusion_union() -> None:
                     start_ts="2024-01-01T00:00:00Z",
                     end_ts="2024-01-01T00:01:00Z")]
     header = SummaryHeader(
-        workflow="imp", quest_id="c", status="merged", total_seconds=480.0,
+        workflow="imp", quest_id="c", status="completed", total_seconds=480.0,
         exclusions=nv.Exclusions((("2024-01-01T00:01:30Z",
                                    "2024-01-01T00:06:30Z"),)))
     out = render_summary_markdown(rows, header=header)
@@ -563,7 +563,7 @@ def test_summary_multiple_phases_grouped_in_order() -> None:
                 end_ts="2024-01-01T00:00:20Z"),
     ]
     header = SummaryHeader(workflow="imp", quest_id="c",
-                           status="merged", total_seconds=30.0)
+                           status="completed", total_seconds=30.0)
     out = render_summary_markdown(rows, header=header)
     assert out.index("## design") < out.index("## build")
     assert "| spec |" in out and "| impl |" in out
@@ -585,7 +585,7 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
                                    priced=1))]),
     ]
     header = SummaryHeader(workflow="imp", quest_id="c",
-                           status="merged", total_seconds=60.0)
+                           status="completed", total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     # AC 22(a): the four buckets are broken out, not collapsed into one figure.
     assert ("| task-lead | 1m 0s | 12.2k | 200 | 100 | 365 | ~$0.39 |"
@@ -705,7 +705,7 @@ def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
                                            start_ts="2026-01-01T00:00:10+00:00",
                                            end_ts="2026-01-01T00:02:24+00:00",
                                            end_inferred=True)])]
-    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="imp", quest_id="c", status="completed",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | ~5m 0s | — | — | — | — | — |" in out
@@ -780,7 +780,7 @@ def test_summary_markdown_carries_a_totals_row() -> None:
                     usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
                                    priced=1))]),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     assert "| total | 1m 0s | 2.5k | 200 | 100 | 60 | ~$0.50 |" in out
@@ -799,7 +799,7 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
                 usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
                                priced=1, notional=1)),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     tilde = "~ estimated at API list price"
@@ -837,7 +837,7 @@ def test_summary_markdown_prices_a_vendor_less_claude_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
     rows = build_summary(_cc_fallback_events())
-    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     lines = out.split("\n")
@@ -984,7 +984,7 @@ def _quota_rows() -> list[StepRow]:
 def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
     # AC 19(a): 9 points of movement over a 10-unit window, so a row's share is
     # 0.9x its own units — the step's subtree drew 3 of them, its subagent 1.
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     column = QuotaColumn((QuotaFigure("claude", 9.0, 3.0, 10.0),))
     out = render_summary_markdown(_quota_rows(), header=header, quota=column)
@@ -1002,7 +1002,7 @@ def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
 def test_summary_markdown_falls_back_to_cost_with_the_withheld_legend() -> None:
     # AC 19(a) over AC 6(b): no gauge resolved, so today's Cost column stays and
     # one extra line names why — under, not instead of, the dollar legend.
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     still = ("quota below measurement resolution; the weekly gauge did not move"
              " during this run")
@@ -1035,7 +1035,7 @@ def _quota_events() -> list[dict]:
 
 def test_summary_markdown_without_a_quota_argument_is_unchanged() -> None:
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
-                           status="merged", total_seconds=60.0)
+                           status="completed", total_seconds=60.0)
     rows = build_summary(_quota_events())
     out = render_summary_markdown(rows, header=header)
     assert out == render_summary_markdown(rows, header=header, quota=None)
@@ -1064,7 +1064,7 @@ def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
                                priced=1, notional=1),
                 units=Units.of("codex", 1.0)),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
                           QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
@@ -1283,7 +1283,7 @@ def test_hostile_document_falls_back_to_full_escape(
 
 
 def test_summary_step_code_span_is_safe_and_verbatim() -> None:
-    header = SummaryHeader(workflow="imp", quest_id="q", status="merged",
+    header = SummaryHeader(workflow="imp", quest_id="q", status="completed",
                            total_seconds=1.0)
 
     def rows(step: str) -> list[StepRow]:

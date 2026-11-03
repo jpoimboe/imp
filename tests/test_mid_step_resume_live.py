@@ -155,8 +155,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         f"resume failed rc={resume.returncode} stdout={resume.stdout} stderr={resume.stderr}"
     )
 
-    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
-    assert final_status == "done", final_status
+    final_status = wait_for_archived_status(tmp_path, slug, "completed", 30.0)
+    assert final_status == "completed", final_status
 
 
 @pytest.mark.live("openai")
@@ -315,5 +315,5 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude(
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
 
-    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
-    assert final_status == "done", final_status
+    final_status = wait_for_archived_status(tmp_path, slug, "completed", 30.0)
+    assert final_status == "completed", final_status

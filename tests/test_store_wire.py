@@ -81,7 +81,7 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
 
 def test_completed_row_survives_round_trip() -> None:
     row = CompletedRow(
-        quest_id="q1", status="merged", step="done", last="2026-06-01",
+        quest_id="q1", status="completed", step="done", last="2026-06-01",
         title="Q", created="2026-05-01")
     assert _row_from_wire(_json_round_trip(_row_to_wire(row))) == row
 
@@ -102,7 +102,7 @@ def test_search_hit_survives_round_trip() -> None:
 
 def test_search_zones_survives_round_trip_including_frozenset() -> None:
     z = SearchZones(
-        active=True, backlog=False, statuses=frozenset({"merged", "abandoned"}),
+        active=True, backlog=False, statuses=frozenset({"completed", "abandoned"}),
         merged_after="2026-01-01")
     got = _zones_from_wire(_json_round_trip(_zones_to_wire(z)))
     assert got == z

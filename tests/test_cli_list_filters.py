@@ -70,7 +70,7 @@ def _ids(lines: list[str]) -> set[str]:
 
 def test_filtered_selects_only_the_requested_disposition(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     _archive_status(tmp_path, "abnd", "abandoned")
     _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
@@ -94,7 +94,7 @@ def test_filtered_unions_dispositions(tmp_path: Path) -> None:
 def test_filtered_archived_selects_archived_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "shlv", "archived")
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     lines = m._filtered_overview_lines(
         tmp_path, dispositions={"archived"}, cutoff=None, now=_NOW, color=False)
     out = "\n".join(lines)
@@ -114,7 +114,7 @@ def test_filtered_cutoff_drops_stale_rows(tmp_path: Path) -> None:
 
 def test_filtered_empty_returns_no_match_notice(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     lines = m._filtered_overview_lines(
         tmp_path, dispositions={"abandoned"}, cutoff=None, now=_NOW, color=False)
     assert lines == ["No quests match that filter."]
@@ -168,7 +168,7 @@ def _run_list(tmp_path, monkeypatch, argv) -> str:
 
 def test_list_abandoned_shows_only_abandoned(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     _archive_status(tmp_path, "abnd", "abandoned")
     out = _run_list(tmp_path, monkeypatch, ["list", "--abandoned"])
     assert "abnd" in out and "mrgd" not in out
@@ -176,7 +176,7 @@ def test_list_abandoned_shows_only_abandoned(tmp_path, monkeypatch) -> None:
 
 def test_list_archived_shows_only_archived(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     _archive_status(tmp_path, "abnd", "abandoned")
     _archive_status(tmp_path, "shlv", "archived")
     out = _run_list(tmp_path, monkeypatch, ["list", "--archived"])
@@ -185,7 +185,7 @@ def test_list_archived_shows_only_archived(tmp_path, monkeypatch) -> None:
 
 def test_list_no_flag_matches_prints_no_match_notice(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     out = _run_list(tmp_path, monkeypatch, ["list", "--archived"])
     assert out.strip() == "No quests match that filter."
 
@@ -241,7 +241,7 @@ def test_list_since_bad_value_exits_two_with_pinned_message(
 
 def test_list_since_filters_stale_history(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "stale", "merged", last_ts="2020-01-01T00:00:00+00:00")
+    _archive_status(tmp_path, "stale", "completed", last_ts="2020-01-01T00:00:00+00:00")
     out = _run_list(tmp_path, monkeypatch, ["list", "--since", "1d"])
     assert out.strip() == "No quests match that filter."
 
@@ -314,7 +314,7 @@ def test_all_history_lists_archived_once(tmp_path: Path) -> None:
 
 def test_past_quest_count_excludes_archived(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged")
+    _archive_status(tmp_path, "mrgd", "completed")
     _archive_status(tmp_path, "abnd", "abandoned")
     _archive_status(tmp_path, "shlv", "archived")
     assert m._past_quest_count(tmp_path) == 2   # merged + abandoned; archived is not a past quest

@@ -115,10 +115,10 @@ def test_search_backlog_excludes_nonmatching(tmp_path: Path) -> None:
 
 
 def test_search_archived_filters_by_disposition_and_labels_zone(tmp_path: Path) -> None:
-    _archive(tmp_path, "arccomp", "Dark archived merged", status="merged")
+    _archive(tmp_path, "arccomp", "Dark archived merged", status="completed")
     _archive(tmp_path, "arcaband", "Dark archived abandoned", status="abandoned")
     hits = _search_archived(tmp_path, "dark", {"abandoned"}, None)
-    assert [h.quest_id for h in hits] == ["arcaband"]   # merged excluded by status
+    assert [h.quest_id for h in hits] == ["arcaband"]   # completed excluded by status
     assert hits[0].zone == "history"
 
 
@@ -160,7 +160,7 @@ def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
     assert _search_active(tmp_path, "cover-check") == []
 
 
-def test_search_archived_merged_disposition_excludes_abandoned(tmp_path: Path) -> None:
+def test_search_archived_completed_disposition_excludes_abandoned(tmp_path: Path) -> None:
     _archive(tmp_path, "alpha", "Dark mode", status="completed")
     _archive(tmp_path, "beta", "Dark login", status="abandoned")
     hits = _search_archived(tmp_path, "dark", {"completed"}, None)
@@ -170,7 +170,7 @@ def test_search_archived_merged_disposition_excludes_abandoned(tmp_path: Path) -
 
 def test_merged_after_keeps_only_fixes_that_landed_after(tmp_path: Path) -> None:
     sha_a, sha_b = _init_git_commits(tmp_path)          # b is a child of a
-    _archive(tmp_path, "alpha", "Dark", status="merged", merge_commit=sha_b)
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_b)
     # b is NOT an ancestor of a -> landed after -> kept (git exit 1).
     assert _merged_after(tmp_path, "alpha", sha_a) is True
     # b IS an ancestor of b (itself) -> landed at/before -> excluded (git exit 0).
@@ -179,9 +179,9 @@ def test_merged_after_keeps_only_fixes_that_landed_after(tmp_path: Path) -> None
 
 def test_merged_after_excludes_missing_and_unverifiable(tmp_path: Path) -> None:
     sha_a, _sha_b = _init_git_commits(tmp_path)
-    _archive(tmp_path, "nomerge", "Dark", status="merged", merge_commit=None)
+    _archive(tmp_path, "nomerge", "Dark", status="completed", merge_commit=None)
     assert _merged_after(tmp_path, "nomerge", sha_a) is False   # no recorded merge SHA
-    _archive(tmp_path, "alpha", "Dark", status="merged", merge_commit=sha_a)
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_a)
     # Unknown ref -> git exits 128 (not 1) -> unverifiable -> excluded.
     assert _merged_after(tmp_path, "alpha", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") is False
 

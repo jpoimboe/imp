@@ -2715,7 +2715,7 @@ def _reap_home(quest: Quest) -> None:
     session_socket_path(quest.id).unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("status", ["merged", "done"])
+@pytest.mark.parametrize("status", ["completed"])
 @pytest.mark.anyio
 async def test_completed_run_on_reaped_home_returns_cleanly(
     tmp_path: Path, status: str,
@@ -2744,7 +2744,7 @@ async def test_completed_run_on_reaped_home_returns_cleanly(
     assert not quest.quest_dir.exists()   # the reap really happened
 
 
-@pytest.mark.parametrize("status", ["merged", "done"])
+@pytest.mark.parametrize("status", ["completed"])
 @pytest.mark.anyio
 async def test_hold_loop_completion_on_reaped_home_returns_cleanly(
     tmp_path: Path, status: str,
@@ -2823,7 +2823,7 @@ def test_main_exits_zero_on_reaped_home(
     ) -> RunResult:
         st = State.load(quest.state_dir)
         st.step = None
-        st.status = "merged"
+        st.status = "completed"
         st.save(quest.state_dir)
         _reap_home(quest)
         return RunResult.COMPLETED

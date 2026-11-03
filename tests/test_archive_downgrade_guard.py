@@ -38,7 +38,7 @@ def _seed_archived_quest(control: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / "state.json"
     state_json.write_text(json.dumps({
-        "id": ARCH, "status": "merged", "step": "finalize"}))
+        "id": ARCH, "status": "completed", "step": "finalize"}))
     archive.archive_quest(
         control, ARCH, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

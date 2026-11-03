@@ -239,7 +239,7 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
 
 def test_cmd_search_archived_filters_to_archived(tmp_path: Path, capsys) -> None:
     _archive(tmp_path, "shlv", "Dark shelved chat", status="archived")
-    _archive(tmp_path, "done", "Dark merged work", status="merged")
+    _archive(tmp_path, "done", "Dark merged work", status="completed")
     rc = _cmd_search(_ns("dark", archived=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
