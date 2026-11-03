@@ -101,7 +101,7 @@ def handle_slash_line(
 
     if cmd in ("", "help"):
         _echo_command(text, output_fn, color=color)
-        _help(output_fn, materialized=_is_materialized(quest), pre_session=pre_session)
+        _help(output_fn, materialized=_is_materialized(quest))
         return REPROMPT
     if cmd == "skills":
         _echo_command(text, output_fn, color=color)
@@ -218,20 +218,18 @@ def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
         out(f"  /{name}    {description}" if description else f"  /{name}")
 
 
-def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool = False) -> None:
+def _help(out: Callable[[str], None], *, materialized: bool) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    if not pre_session:
-        out("  /pause             Pause and exit; resume with imp resume <id>")
-        if not materialized:
-            out("  /archive           Archive this conversation (find it later with imp search)")
-            out("  /clear             Archive this conversation and start a fresh one")
+    out("  /pause             Pause and exit; resume with imp resume <id>")
+    if not materialized:
+        out("  /archive           Archive this conversation (find it later with imp search)")
+        out("  /clear             Archive this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /provider [name]   Show or switch the provider for this quest")
-    if not pre_session:
-        out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
+    out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
     out("  /abandon           Abandon the current quest")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
@@ -241,6 +239,7 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
     else:
         out("  Ctrl+D             Leave this conversation; resume with imp resume <id>")
     out("  Ctrl+C             Clear the typed line, or interrupt a running step")
+    out("  Alt+Enter          Insert a newline (Enter sends)")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
 

@@ -185,9 +185,9 @@ to score).
   any pre-materialized conversation). On a built quest they print a redirect naming
   `/pause`, and `/pause` pauses it like Ctrl-D (`paused · /pause`). The retired `save` and
   `shelve` leave names are unknown commands now (`Unknown command: …`). At a pre-session
-  prompt (opening intent, post-`/clear`, inert-resume reply) each of `/compact`, `/pause`,
-  `/archive`, and `/clear` prints a redirect and re-prompts, and `/help` there
-  omits them. **There is no `/list`, `/search`, or `/resume`** client-side. Each is handled
+  prompt (opening intent, post-`/clear`, inert-resume reply) `/help` still lists
+  `/compact`, `/pause`, `/archive`, and `/clear`, but each prints a redirect and re-prompts
+  when typed. **There is no `/list`, `/search`, or `/resume`** client-side. Each is handled
   without spending a model turn; Tab completion covers them (`send("/sk\t")` → `/skills`), an
   unambiguous prefix fills and an ambiguous one lists candidates; Up-arrow recalls previous
   input; Alt+Enter (`send("\x1b\r")`) inserts a newline; Ctrl-C clears the buffer (and hints
