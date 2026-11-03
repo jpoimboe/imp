@@ -179,3 +179,33 @@ async def test_leave_reason_without_interrupt_does_not_relabel(tmp_path: Path) -
     assert len(paused) == 1
     assert paused[0]["reason"] == "awaiting_user"
     assert "interrupt_reason" not in paused[0]
+
+
+@pytest.mark.anyio
+async def test_cleared_pause_drops_stale_leave_reason(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, ["s1", "s2"])
+    coord = InterruptCoordinator()
+    ran: list[str] = []
+
+    async def _run(inv: AgentInvocation) -> AsyncIterator[Event]:
+        ran.append(inv.agent_id)
+        await coord.signal_pause(reason="ctrl-c")
+        coord.leave_reason = "ctrl-d"
+        coord.clear_pause()   # the steer resolved inline; the step carries on
+        yield _SUCCESS
+
+    _register(_run)
+    completed: list[str] = []
+
+    def _on_event(e: dict[str, Any]) -> None:
+        if e.get("type") == "step_completed":
+            completed.append((e.get("payload") or {}).get("step"))
+            # A fresh ctrl-c, with no leave gesture this round.
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_quest(quest, on_event=_on_event, coordinator=coord)
+    assert result is RunResult.PAUSED
+    assert completed == ["s1"]
+    assert len(ran) == 1
+    assert _paused(quest) == [{"reason": "interrupt", "interrupt_reason": "ctrl-c"}]
