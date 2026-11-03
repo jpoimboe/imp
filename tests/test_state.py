@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
@@ -422,6 +423,39 @@ def test_state_resume_target_defaults_to_none_and_round_trips(tmp_path: Path) ->
     assert State.load(tmp_path).resume_target == "prompt-interrupted"
     raw = json.loads((tmp_path / "state.json").read_text())
     assert raw["resume_target"] == "prompt-interrupted"
+
+
+def test_arm_step_resume_sets_the_landing_and_round_trips(tmp_path: Path) -> None:
+    s = State(id="c1", step="code", step_attempt=0, status="paused")
+    s.arm_step_resume(should_continue=True, target="prompt-interrupted")
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert (loaded.resume_pending, loaded.resume_target, loaded.resume_should_continue) == (
+        "code", "prompt-interrupted", True,
+    )
+
+
+def test_arm_and_clear_step_resume_reset_a_prior_landing() -> None:
+    s = State(id="c1", step="code", step_attempt=0, status="paused")
+    s.arm_step_resume(should_continue=False, target="prompt-paused")
+    s.arm_step_resume(should_continue=True)
+    assert s.resume_target is None
+
+    s.arm_step_resume(should_continue=False, target="prompt-paused")
+    s.clear_step_resume()
+    assert (s.resume_pending, s.resume_should_continue, s.resume_cause, s.resume_target) == (
+        None, False, "human", None,
+    )
+
+
+def test_resume_target_is_assigned_only_by_state_writers() -> None:
+    src = Path(__file__).resolve().parents[1] / "src"
+    assign = re.compile(r"\.resume_target\s*=[^=]")
+    hits = sorted(
+        p.relative_to(src.parent).as_posix()
+        for p in src.rglob("*.py") if assign.search(p.read_text())
+    )
+    assert hits == ["src/imp/engine/state.py"]
 
 
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:

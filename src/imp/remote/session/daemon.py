@@ -39,6 +39,7 @@ from imp.engine.state import (
     State,
     lock_is_live,
 )
+from imp.engine.types import ResumeTarget
 from imp.paths import project_state_dir
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
@@ -120,6 +121,25 @@ def _hold_prompt(
     return None
 
 
+def _record_landing(
+    state: State, prompt: dict[str, Any] | None, step_kind: str | None,
+) -> None:
+    """Arm resume to land where the user was at their first leave."""
+    if prompt is None:
+        if step_kind == "agent":
+            state.arm_step_resume(should_continue=True)
+        else:
+            state.clear_step_resume()   # the executor arms no resume for a non-agent step
+        return
+    payload = prompt["payload"]
+    if not payload.get("interrupt"):
+        state.arm_step_resume(should_continue=False)   # a question: re-solicit it
+    elif payload.get("steer_hint") in (_RESUME_PROMPT, _SCRIPT_HOLD_PROMPT):
+        state.arm_step_resume(should_continue=False, target="prompt-paused")
+    else:
+        state.arm_step_resume(should_continue=True, target="prompt-interrupted")
+
+
 def _resolve_step_kind(quest: Quest) -> str | None:
     """The kind ('agent'/'script'/…) of the quest's current step, or None."""
     state = State.load(quest.state_dir)
@@ -172,6 +192,7 @@ async def serve_quest_session(
             quest.workflow_dir / "skills", name),
         on_query=build_session_handler(quest.control_root, parent_id=quest.id),
         set_provider=_set_provider,
+        current_step=lambda: State.load(quest.state_dir).step,
     )
     # Raw broadcast, not the liveness fan-out: interrupt records must not pulse
     # note_activity().
@@ -184,7 +205,7 @@ async def serve_quest_session(
         def _paused_is_script() -> bool:
             return _resolve_step_kind(quest) == "script"
 
-        resume_target: str | None = None
+        resume_target: ResumeTarget | None = None
         if resume:
             log = quest.event_log()
             state = State.load(quest.state_dir)
@@ -201,9 +222,7 @@ async def serve_quest_session(
                     should_continue=unanswered_bare_gate(quest) is None)
             state.save(quest.state_dir)
             coordinator.set_unsandboxed(state.unsandboxed)
-            # A crash replays the interrupted agent step, so it always lands in
-            # the agent regardless of the last-stamped target.
-            resume_target = None if crashed else state.resume_target
+            resume_target = state.resume_target
         run_kwargs: dict[str, Any] = {}
         if non_interactive:
             run_kwargs["headless"] = True
@@ -217,7 +236,7 @@ async def serve_quest_session(
                 and not (non_interactive or autonomous)):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
-            # a detach re-leaves it paused, re-stamping the same tell.
+            # a leave here re-records the landing by position.
             # Only an interactive resume can answer the prompt; a headless or
             # autonomous resume has no channel to type a redirect, so honoring it
             # would re-pause without progress. Fall through to run the agent — it
@@ -263,29 +282,8 @@ async def serve_quest_session(
                 try:
                     reply = await user_chat_input_fn("")
                 except AwaitingUserInput:
-                    # Left at the hold loop. A ctrl-d or /pause leave detaches here
-                    # with the agent mid-step, so arm resume here exactly as the
-                    # executor's Pause handler would — native-resume the interrupted
-                    # step (not re-seed) and take the continuation nudge on a
-                    # no-message resume. Any other detach left the user at the
-                    # resteer prompt: its markers were already armed by the executor
-                    # Pause handler, so record the target only.
-                    state = State.load(quest.state_dir)
-                    if coordinator.pause_reason in ("ctrl-d", "pause"):
-                        state.resume_target = "agent"
-                        state.arm_step_resume(should_continue=True)
-                    elif state.resume_should_continue:
-                        # The executor armed the interrupt disposition (mid-turn
-                        # Ctrl-C steer, Pause(interrupt=True)): preserve its
-                        # continue-resume arming (resume_should_continue=True) and
-                        # reproduce `interrupted ·` on resume. Re-arming a
-                        # no-continue resume here would drop both.
-                        state.resume_target = "prompt-interrupted"
-                    else:
-                        state.resume_target = "prompt-paused"
-                        state.arm_step_resume(should_continue=False)
-                    state.save(quest.state_dir)
-                    return result
+                    # Resume lands where the user was at their first leave, never by gesture.
+                    break
                 coordinator.reset()
                 if reply.strip():
                     if _paused_is_script():
@@ -306,6 +304,12 @@ async def serve_quest_session(
             prompt = _hold_prompt(
                 result, coordinator, is_script_fn=_paused_is_script,
                 log=quest.event_log())
+        if result is RunResult.PAUSED and server.left_at is not None:
+            state = State.load(quest.state_dir)
+            # The run moved on since the leave: the executor's own resume arming stands.
+            if state.step == server.left_at.step:
+                _record_landing(state, server.left_at.prompt, _resolve_step_kind(quest))
+                state.save(quest.state_dir)
         return result
 
     # Snapshot crash liveness BEFORE acquire(): ProjectLock.acquire() overwrites

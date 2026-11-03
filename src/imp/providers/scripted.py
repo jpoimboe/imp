@@ -4,13 +4,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
 import os
-from collections.abc import AsyncGenerator
+import signal
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+import anyio
 
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.runner import (
@@ -23,13 +27,21 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext
-from imp.agents.transcript import Transcript, deliver_continuation_reply
+from imp.agents.tools.context import ToolContext, kill_process_group
+from imp.agents.transcript import (
+    RESUME_CONTINUE_NUDGE,
+    Transcript,
+    deliver_continuation_reply,
+    deliver_engine_continuation,
+)
 from imp.engine.agent_run import last_assistant_text
+from imp.engine.completion import INTERRUPT_STEER_HINT, build_inline_solicit
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
 
 ENV_VAR = "IMP_SCRIPTED_SCRIPT"
+
+InterruptMode = Literal["default", "cooperative", "hard_kill"]
 
 
 def _env_check() -> bool:
@@ -43,6 +55,13 @@ def _load_script() -> dict[str, Any]:
 def _select_turns(script: dict[str, Any], agent_name: str) -> list[dict[str, Any]]:
     steps = script.get("steps") or {}
     return steps.get(agent_name) or script.get("default") or []
+
+
+def _interrupt_mode(script: dict[str, Any]) -> InterruptMode:
+    mode = script.get("interrupt", "default")
+    if mode not in ("default", "cooperative", "hard_kill"):
+        raise ValueError(f"scripted: unknown interrupt mode {mode!r}")
+    return cast(InterruptMode, mode)
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -63,9 +82,18 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
 
 
 class ScriptedAgentRunner:
-    def __init__(self, model_name: str) -> None:
+    def __init__(
+        self, model_name: str, interrupt_mode: InterruptMode = "default",
+    ) -> None:
         self.model = model_name
         self._ctx: ToolContext | None = None
+        self.interrupt_mode = interrupt_mode
+        self._steer_requested = False
+        self._stop_requested = False
+        self._killed = asyncio.Event()
+        # A present force_kill opts the runner into the coordinator's hard tier.
+        self.force_kill: Callable[[], Awaitable[None]] | None = (
+            self._force_kill if interrupt_mode == "hard_kill" else None)
 
     async def run(
         self, invocation: AgentInvocation,
@@ -175,6 +203,33 @@ class ScriptedAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
 
+                if self._stop_requested:
+                    await self._killed.wait()
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "scripted runner force-killed"}}
+                    return
+                if self._steer_requested:
+                    self._steer_requested = False
+                    steer = build_inline_solicit(
+                        user_input_fn=invocation.user_input_fn,
+                        coordinator=invocation.coordinator,
+                        event_log=elog, agent_id=aid,
+                        steer_prompt=INTERRUPT_STEER_HINT,
+                        interrupt=True,
+                        halt_writer=invocation.halt_writer,
+                        halt_clearer=invocation.halt_clearer)
+                    reply = await steer(text)
+                    if invocation.coordinator is not None:
+                        invocation.coordinator.clear_pause()
+                    if isinstance(reply, str) and not reply.strip():
+                        deliver_engine_continuation(
+                            messages, transcript, elog, aid, RESUME_CONTINUE_NUDGE)
+                    else:
+                        deliver_continuation_reply(
+                            messages, transcript, elog, aid, reply, human=True)
+                    continue
+
                 if not tool_uses and invocation.subagent_depth > 0:
                     # Subagent bare turn-end is terminal SUCCESS: its final text
                     # is the deliverable. Empty text walks back; none -> emit
@@ -192,6 +247,8 @@ class ScriptedAgentRunner:
                     nxt, human = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
+                    # An interrupt while parked at the solicit has no turn to stop.
+                    self._steer_requested = False
                     deliver_continuation_reply(
                         messages, transcript, elog, aid, nxt, human=human)
 
@@ -207,10 +264,23 @@ class ScriptedAgentRunner:
 
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_tool_processes
+        if self.interrupt_mode == "hard_kill":
+            # Never acknowledges: models a runner wedged past the cooperative deadline.
+            self._stop_requested = True
+            await anyio.sleep_forever()
+        if self.interrupt_mode == "cooperative":
+            self._steer_requested = True
         ctx = self._ctx
         if ctx is not None:
             with contextlib.suppress(Exception):
                 await terminate_tool_processes(ctx)
+
+    async def _force_kill(self) -> None:
+        self._killed.set()
+        ctx = self._ctx
+        if ctx is not None:
+            for proc in list(ctx.running_processes):
+                await kill_process_group(proc, signal.SIGKILL)
 
 
 class ScriptedProvider:
@@ -220,7 +290,8 @@ class ScriptedProvider:
         self.model = model_name
 
     def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
-        return ScriptedAgentRunner(model_name=self.model)
+        return ScriptedAgentRunner(
+            model_name=self.model, interrupt_mode=_interrupt_mode(_load_script()))
 
 
 def _factory(model: str) -> Provider:

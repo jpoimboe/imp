@@ -2931,6 +2931,44 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
 
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
+async def test_forward_advance_clears_the_resume_landing(tmp_path: Path) -> None:
+    from imp.providers import resolve
+
+    quest = _seed_two_step_workflow(tmp_path)
+    state = State.load(quest.state_dir)
+    state.has_started = True
+    state.step = "s1"
+    state.arm_step_resume(should_continue=True, target="prompt-interrupted")
+    state.save(quest.state_dir)
+    seen: dict[str, tuple[str | None, str | None]] = {}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+            st = State.load(quest.state_dir)
+            seen[st.step or ""] = (st.resume_pending, st.resume_target)
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda model: _Provider())
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    assert seen["s1"] == ("s1", "prompt-interrupted")
+    assert seen["s2"] == (None, None)   # s1's Continue dropped its landing with the triple
+
+
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
     """A forward Continue persists the NEXT step's label-or-name into
     state.step_label, derived from the labeled step the cursor lands on."""
