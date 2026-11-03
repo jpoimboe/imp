@@ -202,21 +202,15 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 # segment, and a dot-joined outcome tail whose color carries meaning (green =
 # success, red = error, gold = everything-else). The middle segment is always
 # present via the shared resolver (quest_row.resolve_display_name): a real title
-# is plain, else the opening prompt renders dim with a plain-ASCII `> ` prefix,
-# else the dim `(unnamed)` placeholder. Exception to the old "no dim, no glyphs"
-# rule — but dim is color-only and `> ` is plain ASCII, so NO_COLOR / non-TTY
-# output stays plain and script-parseable. Shared by `new`/`resume`, leaves, and the
-# completed block.
+# is plain, else the opening message renders dim, else the dim `(unnamed)`
+# placeholder. Dim is color-only, so NO_COLOR / non-TTY output stays plain and
+# script-parseable. Shared by `new`/`resume`, leaves, and the completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
     """The styled middle name segment and its kind, resolved title→intent→(unnamed)."""
     resolved = quest_row.resolve_display_name(title, intent)
-    if resolved.kind is quest_row.NameKind.PROMPT:
-        name = quest_row.PROMPT_PREFIX + quest_row._truncate(
-            resolved.text, quest_row.NAME_CAP - len(quest_row.PROMPT_PREFIX))
-    else:
-        name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
+    name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
     if resolved.kind is not quest_row.NameKind.TITLE:
         name = pal.ansi(name, "dim", enabled=color)
     return name, resolved.kind
@@ -243,6 +237,7 @@ def _emit_completed(quest: Quest, *, merged_base: str | None,
     oldest-first when any were recorded; one trailing blank. `merged_base` is the branch
     the merge landed on, None when the run completed without merging."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     tail = (f"merged into {merged_base}" if merged_base is not None
             else f"done · commits on imp/{quest.id}")
     print(_status_spine(quest.id, quest.title, tail, "wordmark", color=color,
@@ -410,6 +405,7 @@ def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
     """The trailing run-status line on a non-interactive pause; `info` None renders the
     bare `paused` block."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     for ln in _pause_lines(quest.id, quest.id, info=info, title=quest.title,
                            color=color, intent=intent):
         print(ln)
@@ -449,6 +445,7 @@ def _emit_merge_blocked(
     `note` (e.g. the recovery-exhaustion note) renders before git's detail.
     `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         summary = "uncommitted work in the worktree"
@@ -495,7 +492,8 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
         head = "startup failed: session daemon did not come up"
         body = [f"It may have crashed; see "
                 f"{project_state_dir(quest.control_root) / 'remote-control.log'}"]
-    intent = _resolve_intent(list(quest.event_log().read()))
+    intent = quest_row.fallback_intent(
+        _resolve_intent(list(quest.event_log().read())), quest.seed_opening)
     for ln in _error_block(head, body, quest.id, quest.title,
                            color=color, intent=intent):
         print(ln)
@@ -505,6 +503,7 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
 def _emit_lost_connection(quest: Quest, *, intent: str | None = None) -> None:
     """The client's event stream faulted: report the ending it saw, never a state it didn't."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     body = [f"It may still be running — `imp resume {quest.id}` to reattach."]
     for ln in _error_block("lost the connection to the run", body, quest.id,
                            quest.title, color=color, intent=intent):
@@ -531,6 +530,7 @@ def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
     the crash, otherwise the run simply stopped reporting. No resume line — the inline
     hint is the remediation."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     stderr_path = quest.quest_dir / "daemon.stderr"
     body: list[str] = []
     if _daemon_stderr_has_crash(stderr_path):
@@ -557,6 +557,7 @@ def _emit_leave_block(
 ) -> None:
     """The closing block for a leave the daemon applies, whichever client sent it."""
     color = should_use_color(sys.stdout)
+    intent = quest_row.fallback_intent(intent, quest.seed_opening)
     print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
                         color=color, intent=intent))
     if disposition == CONTROL_SAVE:
@@ -587,6 +588,7 @@ def _print_leave_disposition(
         return ExitCode.USER_ENDED
     if leave_state.get("send_failed"):
         color = should_use_color(sys.stdout)
+        intent = quest_row.fallback_intent(intent, quest.seed_opening)
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color, intent=intent))
         print(_resume_line(quest.id))
@@ -745,12 +747,16 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _run_header_line(quest_id: str, title: str, marker: str | None = None,
-                     *, color: bool) -> str:
-    stripped = title.strip()
-    if marker is None:
-        tail = f" · {stripped}" if stripped else ""
-    else:
-        tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
+                     *, color: bool, intent: str | None = None) -> str:
+    resolved = quest_row.resolve_display_name(title, intent)
+    segments: list[str] = []
+    if resolved.kind is quest_row.NameKind.TITLE:
+        segments.append(resolved.text)
+    elif resolved.kind is quest_row.NameKind.PROMPT:
+        segments.append(quest_row._truncate(resolved.text, quest_row.NAME_CAP))
+    if marker is not None:
+        segments.append(marker)
+    tail = "".join(f" · {s}" for s in segments)
     head = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
     return head + ansi(tail, "dim", enabled=color) if tail else head
 
@@ -1456,7 +1462,10 @@ def _resume_live_framing(
 def _print_resume_opening(
     quest: Quest, marker: str, notice: str | None, *, color: bool,
 ) -> None:
-    print(_run_header_line(quest.id, quest.title, marker, color=color))
+    from imp.cli.store import _resolve_intent
+    intent = None if quest.title.strip() else quest_row.fallback_intent(
+        _resolve_intent(list(quest.event_log().read())), quest.seed_opening)
+    print(_run_header_line(quest.id, quest.title, marker, color=color, intent=intent))
     if notice is not None:
         print(ansi(notice, "dim", enabled=color))
 
@@ -1604,20 +1613,21 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
     retains the `> ` caret; a leave signal prints its pause block. Both map to
     None — the quest stays parked."""
     from imp.cli.signals import PromptLeave, prompt_signal_guard
+    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
-    prompt.seed_history(
-        _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
+    events = list(quest.event_log().read())
+    prompt.seed_history(_prompt_history_lines(quest.seed_opening, events))
     try:
         async with prompt_signal_guard():
             line = await _read_intent_line(
                 prompt, quest, color=color, width=width, toolbar=toolbar)
     except PromptLeave as leave:
-        _emit_leave_pause(quest, leave.trigger)
+        _emit_leave_pause(quest, leave.trigger, intent=_resolve_intent(events))
         return None
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
@@ -1816,7 +1826,9 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
         print(quest_row.format_quest_line(
             quest_id=card.quest_id, title=card.title, status=card.status,
             step=card.step, step_label=card.step_label, last_iso=card.last,
-            now=now, color=color, name_width=name_w), file=sys.stderr)
+            now=now, color=color, name_width=name_w,
+            intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
+            file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1876,6 +1888,16 @@ def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
     return pal.ansi(label, "dim", enabled=color) + " " * (width - len(label)) + value
 
 
+def _card_title_row(title: str, intent: str | None, width: int, *, color: bool) -> str:
+    """The `title:` row: a real title plain, else the dim fallback clipped to one line."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.TITLE:
+        return _card_field("title:", resolved.text, width, color=color)
+    value = pal.ansi(resolved.text, "dim", enabled=color)
+    return pal.clip_display(_card_field("title:", value, width, color=color),
+                            _display_width())
+
+
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
                   color: bool) -> list[str]:
     from imp.cli.store import make_store
@@ -1885,7 +1907,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     created = meta.get("created_at")
     lines = [
         _card_field("id:", meta["id"], 12, color=color),
-        _card_field("title:", meta.get("title") or "(unnamed)", 12, color=color),
+        _card_title_row(meta.get("title") or "", meta.get("seed_opening"), 12,
+                        color=color),
         _card_field("status:", "backlog", 12, color=color),
         _card_field("provenance:", meta.get("origin", "draft"), 12, color=color),
         _card_field("readiness:", readiness, 12, color=color),
@@ -2013,7 +2036,9 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
     from imp.cli.store import _INFLIGHT
     lines = [
         _card_field("id:", card.quest_id, 15, color=color),
-        _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
+        _card_title_row(card.title,
+                        quest_row.fallback_intent(card.intent, card.seed_opening),
+                        15, color=color),
         _card_field(
             "status:",
             quest_row.display_word(card.status),
@@ -2249,6 +2274,14 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     if r[4].strip():
         return None
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
+
+
+def _row_display_intent(control: Path, r: _Row) -> str | None:
+    """A title-less row's human name source: its opening prompt, else its seed_opening."""
+    from imp.cli.store import _display_intent_for_id
+    if r[4].strip():
+        return None
+    return _display_intent_for_id(control, r[0])
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
@@ -2685,7 +2718,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
     tree = narrative.build_tree(events)
     card = store.quest_card(quest_id)
     title = card.title if card is not None else ""
-    run_header = _run_header_line(quest_id, title, color=color)
+    intent = (quest_row.fallback_intent(card.intent, card.seed_opening)
+              if card is not None else None)
+    run_header = _run_header_line(quest_id, title, color=color, intent=intent)
     lines = [run_header, "", *render_tree(tree, show=show, color=color, width=width,
                                           display_width=_display_width())]
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -2979,7 +3014,7 @@ def _picker_cancelled(verb: str) -> ExitCode:
     return ExitCode.USER_ENDED
 
 
-def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
+def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
@@ -2991,7 +3026,8 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
+            name_width=name_w, intent=_row_display_intent(control, r)),
+            file=sys.stderr)
     return 2
 
 
@@ -3013,7 +3049,7 @@ async def _pick_quest_target(
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
         step_label=r[6], phase_label=r[7],
-        intent=_resolve_row_intent(control, r))
+        intent=_row_display_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -3055,7 +3091,7 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
         header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
         on_cancel=lambda: _picker_cancelled("resume"),
-        on_non_tty=_resume_picker_non_tty,
+        on_non_tty=lambda rows: _resume_picker_non_tty(control, rows),
         non_interactive=non_interactive,
     )
 
@@ -3075,7 +3111,7 @@ async def _resolve_resume_target(
             header=_RESUME_PICKER_HEADER,
             on_empty=lambda: _resume_picker_empty(control),
             on_cancel=lambda: _picker_cancelled("resume"),
-            on_non_tty=_resume_picker_non_tty,
+            on_non_tty=lambda rows: _resume_picker_non_tty(control, rows),
             non_interactive=non_interactive,
         )
     if len(matches) == 1:
@@ -3488,11 +3524,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     """Render the sectioned overview for already-gathered rows."""
 
     def _name_text(r: _Row) -> str:
-        raw = r[4].strip()
-        if raw:
-            return raw
-        intent = intents.get(r[0])
-        return " ".join(intent.split()) if intent else "(unnamed)"
+        return quest_row.resolve_display_name(r[4], intents.get(r[0])).text
 
     specs: list[tuple[str, str | None, str]] = []
     for r in inflight:
@@ -3543,7 +3575,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.intents, history_label=label, now=now,
+                          intents=rows.display_intents, history_label=label, now=now,
                           color=color, name_cap=name_cap)
 
 
@@ -3567,13 +3599,14 @@ class _OverviewRows(NamedTuple):
     backlog: list[_Row]
     history: list[_Row]
     intents: dict[str, str | None]
+    display_intents: dict[str, str | None]
 
 
 def _overview_rows(control: Path, *, dispositions: set[str],
                    cutoff: datetime | None) -> _OverviewRows:
     """Board rows for the requested dispositions, zone-sorted and cutoff-filtered,
     with the display intents title-less rows fall back to."""
-    from imp.cli.store import _backlog_rows, _status_rows, make_store
+    from imp.cli.store import _backlog_rows, _meta_seed_opening, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
@@ -3587,10 +3620,15 @@ def _overview_rows(control: Path, *, dispositions: set[str],
     backlog = [r for r in backlog if _row_since(r, cutoff)]
     history = [r for r in history if _row_since(r, cutoff)]
     intents: dict[str, str | None] = {d.quest_id: d.intent_title for d in scanned}
+    display_intents: dict[str, str | None] = {
+        d.quest_id: quest_row.fallback_intent(d.intent_title, d.meta.get("seed_opening"))
+        for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
-    return _OverviewRows(inflight, backlog, history, intents)
+            display_intents[r[0]] = quest_row.fallback_intent(
+                intents[r[0]], _meta_seed_opening(control, r[0]))
+    return _OverviewRows(inflight, backlog, history, intents, display_intents)
 
 
 def _filtered_overview_lines(control: Path, *, dispositions: set[str],
@@ -3601,7 +3639,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.intents, history_label="history:", now=now,
+                          intents=rows.display_intents, history_label="history:", now=now,
                           color=color, name_cap=quest_row.NAME_CAP)
 
 
@@ -3713,22 +3751,27 @@ class EventSearchHit(NamedTuple):
     handle_map: dict[str, str]
     match_count: int
     overlays: dict[int, dict[str, Any]]
+    intent: str | None   # titleless name source (opening, else seed_opening); None when titled
 
 
 def _events_search_active(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
     """In-flight quests with >=1 event matching query (after type/agent filters)."""
-    from imp.cli.store import _status_rows, make_store
+    from imp.cli.store import _resolve_intent, _status_rows, make_store
     store = make_store(control)
     scanned = store.scan_homes()
+    seed_by_id = {d.quest_id: d.meta.get("seed_opening") for d in scanned}
     hits: list[EventSearchHit] = []
     for r in _status_rows(control, scanned):
         events = store.get_events(r[0]) or []
         matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
+            intent = None if r[4].strip() else quest_row.fallback_intent(
+                _resolve_intent(events), seed_by_id.get(r[0]))
             hits.append(EventSearchHit(
-                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays))
+                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays,
+                intent))
     return hits
 
 
@@ -3739,8 +3782,19 @@ def _events_search_backlog(
     if types is not None or agents is not None:
         return []
     from imp.cli.store import _backlog_matches
-    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1, {})
+    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1, {},
+                           None if m.title.strip() else quest_row.fallback_intent(None, m.seed))
             for m in _backlog_matches(control, query)]
+
+
+def _archived_hit_intent(store: Store, quest_id: str,
+                         events: list[dict[str, Any]]) -> str | None:
+    """A titleless archived hit's name source; its card loads only when the events carry none."""
+    from imp.cli.store import _resolve_intent
+    if (intent := _resolve_intent(events)) is not None:
+        return intent
+    card = store.quest_card(quest_id)
+    return quest_row.fallback_intent(None, card.seed_opening if card is not None else None)
 
 
 def _events_search_archived(
@@ -3754,8 +3808,10 @@ def _events_search_archived(
         events = store.get_events(cid) or []
         matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
+            intent = None if title.strip() else _archived_hit_intent(store, cid, events)
             hits.append(EventSearchHit(
-                cid, title, "archive", last, matched, handle_map, len(matched), overlays))
+                cid, title, "archive", last, matched, handle_map, len(matched), overlays,
+                intent))
     return hits
 
 
@@ -3790,6 +3846,18 @@ def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
     if last < len(text):
         out.append(pal.ansi(text[last:], *base_codes, enabled=True))
     return "".join(out)
+
+
+def _search_name_segment(title: str, intent: str | None, query: str, *,
+                         color: bool) -> str | None:
+    """A search heading's name: a real title plain, else the dim NAME_CAP-clipped fallback."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.UNNAMED:
+        return None
+    if resolved.kind is quest_row.NameKind.TITLE:
+        return _spine_segment(resolved.text, query, color=color)
+    return _spine_segment(quest_row._truncate(resolved.text, quest_row.NAME_CAP),
+                          query, "dim", color=color)
 
 
 def _highlight(text: str, query: str, *, color: bool) -> str:
@@ -3842,16 +3910,15 @@ def _render_search_hit(
 def _search_list_line(
     hit: SearchHit, *, query: str, now: datetime, color: bool,
 ) -> str:
-    """Spine heading id · title · zone · age; query highlighted; title dropped when empty."""
+    """Spine heading id · name · zone · age; query highlighted; name dropped when absent."""
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
     age = quest_row.relative_age(hit.last_activity, now=now)
     tail = pal.ansi(f"{hit.zone} · {age}", "dim", enabled=color)
-    title = hit.title.strip()
-    if not title:
+    name = _search_name_segment(hit.title, hit.intent, query, color=color)
+    if name is None:
         return f"{id_seg} · {tail}"
-    title_seg = _spine_segment(title, query, color=color)
-    return f"{id_seg} · {title_seg} · {tail}"
+    return f"{id_seg} · {name} · {tail}"
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -3889,11 +3956,10 @@ def _events_search_list_line(
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
     tail = pal.ansi(hit.zone, "dim", enabled=color)
-    title = hit.title.strip()
-    if not title:
+    name = _search_name_segment(hit.title, hit.intent, query, color=color)
+    if name is None:
         return f"{id_seg} · {tail}"
-    title_seg = _spine_segment(title, query, color=color)
-    return f"{id_seg} · {title_seg} · {tail}"
+    return f"{id_seg} · {name} · {tail}"
 
 
 def _render_events_search_hit(
@@ -3903,7 +3969,7 @@ def _render_events_search_hit(
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
-        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
+        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity, hit.intent),
         query=query, now=now, color=color)
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]

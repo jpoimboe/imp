@@ -8,6 +8,8 @@ import pytest
 import imp.cli.main as m
 import imp.cli.store as s
 from imp.engine import archive
+from imp.engine.quest import Quest
+from tests.conftest import _seed_control
 
 
 def test_row_for_id_from_archive(tmp_path: Path) -> None:
@@ -42,7 +44,7 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
             last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
             created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
             workflow="default", base_branch=None, merge_commit=None, parent=None,
-            depends_on=[], intent=None, summary=None, vars={})
+            depends_on=[], intent=None, seed_opening=None, summary=None, vars={})
 
     class FakeStore:
         def quest_card(self, cid: str) -> QuestCard:
@@ -59,3 +61,24 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
     assert "NAME" in err                          # shared header row
     assert "paused" in err                        # STATUS via card.status
     assert "aaa111" in err and "bbb222" in err    # resume tokens, one row each
+
+
+def test_exit_ambiguous_names_titleless_candidates_by_their_opening(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="", quest_id="amb001", base_branch="main",
+                       seed_opening="summarize\n  foo.py")
+    q2 = Quest.create(tmp_path, title="", quest_id="amb002", base_branch="main")
+    q2.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent",
+                 "content": [{"type": "text", "text": "fix the login crash"}]})
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    with pytest.raises(SystemExit):
+        m._exit_ambiguous("amb", ["amb001", "amb002"], tmp_path)
+    err = capsys.readouterr().err
+    lines = err.splitlines()
+    assert "summarize foo.py" in next(ln for ln in lines if ln.startswith("amb001"))
+    assert "fix the login crash" in next(ln for ln in lines if ln.startswith("amb002"))
+    assert "(unnamed)" not in err

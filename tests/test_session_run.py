@@ -1909,7 +1909,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
     assert rc == 0
     # The witnessed payload names the base (the quest's own attribute is `main`),
     # and the identity line carries the witnessed opening prompt.
-    assert out == f"{quest.id} · > fold the corrections · merged into master\n\n"
+    assert out == f"{quest.id} · fold the corrections · merged into master\n\n"
     assert "paused" not in out
     assert "resume: imp resume" not in out
 

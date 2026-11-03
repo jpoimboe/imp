@@ -216,7 +216,7 @@ def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
         ch, {"disposition": "archive"}, intent="when I hit save it crashed")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl1 · > when I hit save it crashed · shelved" in out
+    assert "tl1 · when I hit save it crashed · shelved" in out
     assert "(unnamed)" not in out
 
 
@@ -228,7 +228,7 @@ def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
     rc = m._print_leave_disposition(ch, {"intent": "abandon"}, intent="make dark mode work")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl3 · > make dark mode work · abandoned" in out
+    assert "tl3 · make dark mode work · abandoned" in out
     assert "(unnamed)" not in out
 
 
@@ -240,7 +240,7 @@ def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
     rc = m._print_leave_disposition(ch, {"send_failed": "1"}, intent="fix the login crash")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl4 · > fix the login crash · left running" in out
+    assert "tl4 · fix the login crash · left running" in out
     assert "(unnamed)" not in out
 
 
@@ -265,5 +265,5 @@ def test_leave_disposition_renders_the_intent_it_is_handed(
         ch, {"disposition": "save"}, intent="what the client witnessed")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl5 · > what the client witnessed · saved as draft" in out
+    assert "tl5 · what the client witnessed · saved as draft" in out
     assert "the log's own intent" not in out     # the spine no longer re-reads the log

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
+from imp.cli.quest_row import fallback_intent
 from imp.paths import project_state_dir
 
 
@@ -59,6 +60,7 @@ class QuestCard:
     parent: dict[str, str] | None
     depends_on: list[dict[str, Any]]
     intent: str | None
+    seed_opening: str | None
     summary: bytes | None
     vars: dict[str, object]
 
@@ -77,6 +79,7 @@ class SearchHit:
     zone: str
     content: str
     last_activity: str | None
+    intent: str | None   # titleless name source (opening, else seed_opening); None when titled
 
 
 @dataclass(frozen=True)
@@ -194,6 +197,7 @@ class LocalStore:
             depends_on=quest_refs.resolve_dependencies(
                 self.control_root, list(meta.get("depends_on", []))),
             intent=_resolve_intent(events),
+            seed_opening=meta.get("seed_opening"),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
             vars=dict(state.get("vars") or {}),
         )
@@ -386,6 +390,16 @@ def _is_backlog_home(
         and not conversed
         and not lock_live
     )
+
+
+def _meta_seed_opening(control: Path, quest_id: str) -> str | None:
+    return (_quest_meta(control, quest_id) or {}).get("seed_opening")
+
+
+def _display_intent_for_id(control: Path, quest_id: str) -> str | None:
+    """A titleless quest's human name source: its opening message, else its seed_opening."""
+    return fallback_intent(_resolve_intent(_load_events_for_id(control, quest_id) or []),
+                           _meta_seed_opening(control, quest_id))
 
 
 def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | None:
@@ -628,11 +642,14 @@ def _search_active(control: Path, query: str) -> list[SearchHit]:
     q = query.lower()
     scanned = make_store(control).scan_homes()
     prose_by_id = {d.quest_id: d.prose for d in scanned}
+    intent_by_id = {d.quest_id: fallback_intent(d.intent_title, d.meta.get("seed_opening"))
+                    for d in scanned}
     hits: list[SearchHit] = []
     for r in _status_rows(control, scanned):
         prose = prose_by_id.get(r[0], "")
         if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
-            hits.append(SearchHit(r[0], r[4], "active", prose, r[3]))
+            intent = None if r[4].strip() else intent_by_id.get(r[0])
+            hits.append(SearchHit(r[0], r[4], "active", prose, r[3], intent))
     return hits
 
 
@@ -654,7 +671,8 @@ def _backlog_matches(control: Path, query: str) -> list[_BacklogMatch]:
 def _search_backlog(control: Path, query: str) -> list[SearchHit]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
-    return [SearchHit(m.quest_id, m.title, "backlog", m.seed, m.last_activity)
+    return [SearchHit(m.quest_id, m.title, "backlog", m.seed, m.last_activity,
+                      None if m.title.strip() else fallback_intent(None, m.seed))
             for m in _backlog_matches(control, query)]
 
 
@@ -670,7 +688,8 @@ def _search_archived(control: Path, query: str, statuses: set[str],
         if (status == "merged" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
-        hits.append(SearchHit(cid, title, "archive", content, last))
+        hits.append(SearchHit(cid, title, "archive", content, last,
+                              None if title.strip() else _display_intent_for_id(control, cid)))
     return hits
 
 

@@ -62,18 +62,20 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
         workflow="memory", base_branch="main",
         merge_commit=None, parent={"id": "par1", "title": "Parent"},
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
-        intent="why", summary=b"done\n", vars={"retries": 5, "strict": True})
+        intent="why", seed_opening="summarize foo.py", summary=b"done\n",
+        vars={"retries": 5, "strict": True})
     got = _card_from_wire(_json_round_trip(_card_to_wire(card)))
     assert got == card
     assert got is not None and got.pause_reason == "detached"
     assert got.workflow == "memory"
+    assert got.seed_opening == "summarize foo.py"
     card2 = QuestCard(
         quest_id="q1", status="active", pause_reason=None, step="plan",
         last="", title="Q", created="", step_label=None, phase_label=None,
         workflow="default", base_branch="main",
         merge_commit=None, parent=None,
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
-        intent="why", summary=b"done\n", vars={})
+        intent="why", seed_opening=None, summary=b"done\n", vars={})
     assert _card_from_wire(_json_round_trip(_card_to_wire(card2))) == card2
 
 
@@ -93,8 +95,8 @@ def test_readiness_survives_round_trip_including_blocked_on_tuple() -> None:
 
 def test_search_hit_survives_round_trip() -> None:
     hit = SearchHit(
-        quest_id="q1", title="Q", zone="active", content="darkmode",
-        last_activity=None)
+        quest_id="q1", title="", zone="active", content="darkmode",
+        last_activity=None, intent="summarize foo.py")
     assert _hit_from_wire(_json_round_trip(_hit_to_wire(hit))) == hit
 
 
@@ -256,3 +258,29 @@ def test_run_query_rejects_unknown_op(tmp_path: Path) -> None:
         assert "nope" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_run_query_quest_card_carries_seed_opening(tmp_path: Path) -> None:
+    # An unstarted draft has no intent event; its seed_opening must cross the proxy.
+    from imp.cli.store import LocalStore
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="", quest_id="drft01", base_branch="main",
+                       seed_opening="summarize foo.py")
+    wire = run_query(LocalStore(tmp_path), "quest_card", {"quest_id": "drft01"})
+    card = _card_from_wire(_json_round_trip(wire))
+    assert card is not None
+    assert card.seed_opening == "summarize foo.py"
+    assert card.intent is None
+
+
+def test_run_query_search_carries_hit_intent(tmp_path: Path) -> None:
+    # An unstarted draft has no intent event; its seed_opening name must cross the proxy.
+    from imp.cli.store import LocalStore
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="", quest_id="drft01", base_branch="main",
+                       seed_opening="summarize foo.py")
+    zones = SearchZones(active=True, backlog=True, statuses=frozenset(), merged_after=None)
+    wire = run_query(LocalStore(tmp_path), "search",
+                     {"query": "drft01", "zones": _zones_to_wire(zones)})
+    hits = [_hit_from_wire(d) for d in _json_round_trip(wire)]
+    assert [(h.quest_id, h.intent) for h in hits] == [("drft01", "summarize foo.py")]

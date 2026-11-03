@@ -101,7 +101,7 @@ def test_merge_blocked_renders_the_intent_it_is_handed(
                  "content": [{"type": "text", "text": "the log's own intent"}]})
     cli_main._emit_merge_blocked(ch, "worktree_dirty", intent="witnessed intent")
     out = capsys.readouterr().out
-    assert "mb9 · > witnessed intent" in out
+    assert "mb9 · witnessed intent" in out
     assert "the log's own intent" not in out
 
 

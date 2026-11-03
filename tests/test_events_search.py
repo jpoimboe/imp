@@ -150,6 +150,7 @@ def test_events_search_active_includes_only_quests_with_matching_events(
     assert hits[0].zone == "active"
     assert hits[0].match_count == 1
     assert [o for o, _ in hits[0].events] == [1]
+    assert hits[0].intent is None   # titled
 
 
 def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: Path) -> None:
@@ -163,6 +164,7 @@ def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: P
     assert hits[0].zone == "backlog"
     assert hits[0].events == []
     assert hits[0].match_count == 1
+    assert hits[0].intent is None   # titled: the seed is not a name source
 
 
 def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> None:
@@ -199,12 +201,16 @@ def test_events_search_backlog_skipped_when_type_filter_present(
 
 
 def _archive_events(tmp_path: Path, quest_id: str, title: str,
-                    events_text: str, status: str = "merged") -> None:
+                    events_text: str, status: str = "merged",
+                    seed_opening: str | None = None) -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text(events_text)
-    (tmp_path / f"{quest_id}.quest.json").write_text(_json.dumps({
+    meta: dict[str, Any] = {
         "id": quest_id, "title": title, "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}
+    if seed_opening is not None:
+        meta["seed_opening"] = seed_opening
+    (tmp_path / f"{quest_id}.quest.json").write_text(_json.dumps(meta))
     (tmp_path / f"{quest_id}.state.json").write_text(_json.dumps({
         "id": quest_id, "status": status, "step": "finalize"}))
     archive.archive_quest(
@@ -248,11 +254,12 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
     assert [h.quest_id for h in hits] == ["arch01"]
     assert hits[0].zone == "archive"
     assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
+    assert hits[0].intent is None   # titled: no quest_card load (the fake has none)
 
 
 def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]]],
          match_count: int, last: str = "2026-06-11T00:00:00+00:00") -> m.EventSearchHit:
-    return m.EventSearchHit(cid, title, zone, last, events, {}, match_count, {})
+    return m.EventSearchHit(cid, title, zone, last, events, {}, match_count, {}, None)
 
 
 def _bounded_hits() -> list[m.EventSearchHit]:
@@ -622,9 +629,116 @@ def test_search_hit_digest_applies_codex_usage_patch_overlay(
         events, "greptarget", types=None, agents=None)
     assert overlays, "patch must produce an overlay for the preceding agent_message"
     hit = m.EventSearchHit("q1", "T1", "active", "2026-06-11T00:00:00+00:00",
-                           matched, handle_map, len(matched), overlays)
+                           matched, handle_map, len(matched), overlays, None)
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
 
     assert m._cmd_events_search(_search_ns("greptarget"), tmp_path) == 0
     out = capsys.readouterr().out
     assert "ctx=8000/160000 (5.0%)" in out
+
+
+_OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
+_BRIEF = "Brief foo.py one\n\nmore body"
+
+
+def _intent_line(text: str) -> str:
+    return _json.dumps({
+        "id": "open", "agent_id": None, "timestamp": "2026-06-10T00:00:00+00:00",
+        "type": "user_message",
+        "payload": {"subtype": "intent", "content": [{"type": "text", "text": text}]},
+    }) + "\n"
+
+
+def _titleless_in_every_zone(tmp_path: Path) -> None:
+    """Titleless act001 (intent event), bk0001 (backlog brief), arc001 (shelved, intent event)."""
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    _archive_events(tmp_path, "arc001", "", _intent_line(_OPENING), status="shelved")
+    _seed_control(tmp_path)
+    q = Quest.create(tmp_path, title="", quest_id="act001", base_branch="main")
+    q.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent", "content": [{"type": "text", "text": _OPENING}]})
+    Quest.create_draft(tmp_path, title="", quest_id="bk0001", base_branch="main",
+                       origin="idea", seed_opening=_BRIEF)
+
+
+def test_events_search_hits_carry_the_titleless_name_source_in_every_zone(
+        tmp_path: Path) -> None:
+    _titleless_in_every_zone(tmp_path)
+    hits = {h.quest_id: h for h in m._events_search(
+        tmp_path, "foo.py", (True, True, True), types=None, agents=None)}
+    assert hits["act001"].intent == _OPENING
+    assert hits["bk0001"].intent == _BRIEF
+    assert hits["arc001"].intent == _OPENING
+
+
+def test_events_search_active_titleless_hit_falls_back_to_seed_opening(
+        tmp_path: Path) -> None:
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    d = Quest.create_draft(tmp_path, title="", quest_id="drf001", base_branch="main",
+                           seed_opening="seeded brief")
+    d.event_log().append(agent_id="step:impl/coder", type="tool_call",
+                         payload={"name": "bash", "input": {"cmd": "GREPTARGET"}})
+    hits = m._events_search_active(tmp_path, "greptarget", types=None, agents=None)
+    assert [(h.quest_id, h.intent) for h in hits] == [("drf001", "seeded brief")]
+
+
+def test_events_search_archived_titleless_hit_falls_back_to_card_seed_opening(
+        tmp_path: Path) -> None:
+    # No intent event and no human turn: the name comes from the quest card's seed_opening.
+    line = _json.dumps({
+        "id": "e0", "type": "tool_call", "timestamp": "2026-06-10T00:00:00+00:00",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    _archive_events(tmp_path, "arc003", "", line, status="shelved",
+                    seed_opening="seeded never-run brief")
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
+    assert [(h.quest_id, h.intent) for h in hits] == [("arc003", "seeded never-run brief")]
+
+
+def test_events_search_list_line_names_a_titleless_hit_dim() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == (
+        f"bedo08 · {_OPENING} · archive")
+    assert m._events_search_list_line(hit, query="zzz", color=True) == (
+        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2marchive\x1b[0m")
+
+
+def test_events_search_list_line_clips_a_long_fallback_at_name_cap() -> None:
+    opening = "summarize " + "y" * 100
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, opening)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == (
+        "bedo08 · summarize " + "y" * 59 + "… · archive")
+
+
+def test_events_search_list_line_omits_the_name_with_neither_title_nor_intent() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, None)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · archive"
+
+
+def _headings(out: str) -> dict[str, str]:
+    return {ln.split(" · ")[0]: ln for ln in out.splitlines()
+            if " · " in ln and not ln.startswith(" ")}
+
+
+def test_cmd_events_search_names_titleless_quests_in_every_zone(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _titleless_in_every_zone(tmp_path)
+    for listed in (True, False):
+        assert m._cmd_events_search(_search_ns("foo.py", list=listed), tmp_path) == 0
+        heads = _headings(capsys.readouterr().out)
+        assert heads["act001"].startswith(f"act001 · {_OPENING} · active")
+        assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archive")
+
+
+def test_events_search_list_line_highlights_the_query_over_the_dim_fallback() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    assert m._events_search_list_line(hit, query="foo.py", color=True) == (
+        "\x1b[33mbedo08\x1b[0m · "
+        "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
+        "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
+        " · \x1b[2marchive\x1b[0m")

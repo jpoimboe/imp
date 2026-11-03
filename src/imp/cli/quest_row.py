@@ -9,14 +9,11 @@ from typing import NamedTuple
 
 from imp.cli import palette as pal
 
-# Quoted-prompt prefix, shared so surfaces can't drift; callers apply dim.
-PROMPT_PREFIX = "> "
-
 
 class NameKind(Enum):
     """Which of the three display-name cases a resolved name is."""
     TITLE = "title"        # a real title: plain default foreground
-    PROMPT = "prompt"      # titleless, falls back to the opening prompt: dim, `> `-prefixed
+    PROMPT = "prompt"      # titleless, falls back to the opening message: dim
     UNNAMED = "unnamed"    # titleless with no prompt: the dim `(unnamed)` placeholder
 
 
@@ -34,6 +31,15 @@ def resolve_display_name(title: str | None, intent: str | None) -> ResolvedName:
     if flat:
         return ResolvedName(flat, NameKind.PROMPT)
     return ResolvedName("(unnamed)", NameKind.UNNAMED)
+
+
+def fallback_intent(intent: str | None, seed_opening: str | None) -> str | None:
+    """The titleless-name source: the events-derived intent, else seed_opening; blank is absent."""
+    if intent and intent.strip():
+        return intent
+    if seed_opening and seed_opening.strip():
+        return seed_opening
+    return None
 
 
 def relative_age(then_iso: str | None, *, now: datetime) -> str:
@@ -188,13 +194,8 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"
     age_text = relative_age(last_iso, now=now)   # final column, emitted bare
-    # PROMPT fallback gets the `> ` prefix and dim, clipped to name_width.
     resolved = resolve_display_name(title, intent)
-    if resolved.kind is NameKind.PROMPT:
-        name_text = PROMPT_PREFIX + _truncate(resolved.text,
-                                              name_width - len(PROMPT_PREFIX))
-    else:
-        name_text = _truncate(resolved.text, name_width)
+    name_text = _truncate(resolved.text, name_width)
     name_pad = " " * (name_width - len(name_text))   # right-pad NAME so STATUS aligns
     is_fallback = resolved.kind is not NameKind.TITLE
     if dim:
