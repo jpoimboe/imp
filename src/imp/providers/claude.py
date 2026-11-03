@@ -457,9 +457,6 @@ class _RunState:
     # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
     # loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
-    # Per-tool wall-time (ms) keyed by SDK tool_use_id, written by the MCP
-    # wrapper and read once by the receive loop when it appends the tool_result.
-    tool_durations: dict[str, float] = field(default_factory=dict)
     # The session's _flush_llm_group, assigned once by ClaudeSession._enter so
     # the out-of-band _impl sub_agent path can commit accumulated parent prose
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
@@ -557,7 +554,7 @@ def _tool_use_block(
 
 
 def _journal_withheld(
-    elog: EventLog, aid: str, state: _RunState, w: _WithheldResult,
+    elog: EventLog, aid: str, w: _WithheldResult,
     content: _ToolResultContent, *, is_error: bool,
 ) -> None:
     """Emit the pair a withheld call is owed: its tool_call when the streaming site
@@ -566,8 +563,7 @@ def _journal_withheld(
         elog.append_tool_call(agent_id=aid, block=w.call)
     elog.append_tool_result(
         agent_id=aid,
-        block=ToolResultBlock(w.tool_use_id, content, is_error=is_error),
-        duration_ms=state.tool_durations.pop(w.tool_use_id, None))
+        block=ToolResultBlock(w.tool_use_id, content, is_error=is_error))
 
 
 def _correct_withheld_results(
@@ -582,7 +578,7 @@ def _correct_withheld_results(
         w = state.withheld.pop(0)
         content, is_error = captured.get(
             w.key, (unresolved_tool_result_content(w.name), True))
-        _journal_withheld(elog, aid, state, w, content, is_error=is_error)
+        _journal_withheld(elog, aid, w, content, is_error=is_error)
 
 
 def _restore_withheld_results(
@@ -596,7 +592,7 @@ def _restore_withheld_results(
     """
     while state.withheld:
         w = state.withheld.pop(0)
-        _journal_withheld(elog, aid, state, w, w.filler, is_error=True)
+        _journal_withheld(elog, aid, w, w.filler, is_error=True)
 
 
 _CORRECTION_HEADER = (
@@ -925,17 +921,12 @@ def _wrap_one(
                 # sub_agent flush above). No-ops when no llm group is open; None
                 # until _enter assigns the closure (pre-loop).
                 state.flush_llm_group()
-            tuid = args.get("__tool_use_id__", "")
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
             inflight_key = captured_result_key(name, clean_args)
             state.register_inflight(inflight_key, name)
-            start = time.perf_counter()
             with suspend_inactivity_watchdog(ctx):
                 raw = await t.async_invoke(ctx, clean_args)
-            dur_ms = (time.perf_counter() - start) * 1000.0
-            if tuid:
-                state.tool_durations[tuid] = dur_ms
             if (isinstance(raw, list) and raw
                     and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
                 caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
@@ -1979,9 +1970,7 @@ class ClaudeSession(ObserveSession):
                             cites = _parse_cc_web_citations(
                                 norm, call_input, b.content)
                             elog.append_tool_result(
-                                agent_id=aid, block=b, citations=cites,
-                                duration_ms=state.tool_durations.pop(
-                                    b.tool_use_id, None))
+                                agent_id=aid, block=b, citations=cites)
                             continue
                         pend = self._pending_tools.get(b.tool_use_id)
                         is_task = pend is not None and pend.name == "sub_agent"
@@ -1998,10 +1987,7 @@ class ClaudeSession(ObserveSession):
                                 b.content,
                                 journaled=pend is not None))
                         if not is_task and not withheld:
-                            elog.append_tool_result(
-                                agent_id=aid, block=b,
-                                duration_ms=state.tool_durations.pop(
-                                    b.tool_use_id, None))
+                            elog.append_tool_result(agent_id=aid, block=b)
                             if (pend is not None and pend.name == "save_and_exit"
                                     and not b.is_error):
                                 state.save_and_exit_logged = True
