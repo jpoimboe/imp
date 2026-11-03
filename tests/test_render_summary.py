@@ -3,9 +3,8 @@ from __future__ import annotations
 import pytest
 
 from imp.cli.accounting import RowUsage
-from imp.cli.narrative import elapsed_seconds
+from imp.cli.narrative import Exclusions, elapsed_seconds
 from imp.cli.render_summary import (
-    Exclusions,
     StepRow,
     SubagentRow,
     SummaryHeader,

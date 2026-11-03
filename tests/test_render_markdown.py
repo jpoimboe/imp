@@ -25,7 +25,6 @@ from imp.cli.render_markdown import (
     render_summary_markdown,
 )
 from imp.cli.render_summary import (
-    Exclusions,
     StepRow,
     SubagentRow,
     SummaryHeader,
@@ -548,8 +547,8 @@ def test_summary_markdown_total_subtracts_the_exclusion_union() -> None:
                     end_ts="2024-01-01T00:01:00Z")]
     header = SummaryHeader(
         workflow="imp", quest_id="c", status="merged", total_seconds=480.0,
-        exclusions=Exclusions((("2024-01-01T00:01:30Z",
-                                "2024-01-01T00:06:30Z"),)))
+        exclusions=nv.Exclusions((("2024-01-01T00:01:30Z",
+                                   "2024-01-01T00:06:30Z"),)))
     out = render_summary_markdown(rows, header=header)
     assert "| total | 3m 0s | — | — | — | — | — |" in out   # 8m wall - 5m parked
 

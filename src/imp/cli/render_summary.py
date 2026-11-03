@@ -17,7 +17,7 @@ from imp.cli.accounting import (
     kept_query_results,
     vendor_contribution,
 )
-from imp.cli.narrative import elapsed_seconds
+from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
@@ -39,91 +39,15 @@ def _dur_text(seconds: float | None, open_label: str = "running", *,
     return f"~{fmt_seconds(seconds)}" if inferred else fmt_seconds(seconds)
 
 
-def _union_seconds(segments: list[tuple[float, float]]) -> float:
-    """Total length of the union of half-open segments: overlaps counted once."""
-    total = 0.0
-    mark = float("-inf")
-    for lo, hi in sorted(segments):
-        lo = max(lo, mark)
-        if hi > lo:
-            total += hi - lo
-        mark = max(mark, hi)
-    return total
-
-
-@dataclass(frozen=True)
-class Exclusions:
-    """Wall-clock intervals of a run that are not work: human waits and pauses."""
-
-    spans: tuple[tuple[str, str], ...] = ()
-
-    def overlap(self, start_ts: str | None, end_ts: str | None) -> float:
-        """Union seconds falling inside [start_ts, end_ts]; 0.0 for an open span."""
-        width = elapsed_seconds(start_ts, end_ts)
-        if width is None or width <= 0:
-            return 0.0
-        clipped: list[tuple[float, float]] = []
-        for open_ts, close_ts in self.spans:
-            lo = elapsed_seconds(start_ts, open_ts)
-            hi = elapsed_seconds(start_ts, close_ts)
-            if lo is None or hi is None:
-                continue
-            lo, hi = max(0.0, lo), min(width, hi)
-            if hi > lo:
-                clipped.append((lo, hi))
-        return _union_seconds(clipped)
-
-    @property
-    def total(self) -> float:
-        """Union seconds over the whole run."""
-        if not self.spans:
-            return 0.0
-        ref = self.spans[0][0]  # spans aren't in start order, so offsets are deliberately signed
-        segments: list[tuple[float, float]] = []
-        for open_ts, close_ts in self.spans:
-            lo = elapsed_seconds(ref, open_ts)
-            hi = elapsed_seconds(ref, close_ts)
-            if lo is not None and hi is not None and hi > lo:
-                segments.append((lo, hi))
-        return _union_seconds(segments)
-
-
 NO_EXCLUSIONS = Exclusions()
 
 
 def exclusion_spans(events: Iterable[dict[str, Any]]) -> Exclusions:
-    """Human waits (`awaiting_user_input` → the reply) and pauses (`workflow_paused`
-    → `workflow_resumed`), each also closed by the step boundary that ends it."""
-    spans: list[tuple[str, str]] = []
-    wait_start: str | None = None
-    pause_start: str | None = None
+    """Closed exclusion spans over a whole log; the rule lives in narrative.ExclusionTracker."""
+    tracker = ExclusionTracker()
     for e in events:
-        etype = e.get("type")
-        ts = e.get("timestamp")
-        if not isinstance(ts, str):
-            continue
-        if etype == "awaiting_user_input":
-            if wait_start is None:  # a re-armed gate keeps the first ask
-                wait_start = ts
-        elif etype == "workflow_paused":
-            if pause_start is None:
-                pause_start = ts
-        elif etype == "user_message":
-            if wait_start is not None:
-                spans.append((wait_start, ts))
-                wait_start = None
-        elif etype == "workflow_resumed":
-            if pause_start is not None:
-                spans.append((pause_start, ts))
-                pause_start = None
-        elif etype in ("step_started", "step_completed"):
-            if wait_start is not None:
-                spans.append((wait_start, ts))
-                wait_start = None
-            if pause_start is not None:
-                spans.append((pause_start, ts))
-                pause_start = None
-    return Exclusions(tuple(spans))
+        tracker.feed(e)
+    return tracker.exclusions
 
 
 @dataclass
