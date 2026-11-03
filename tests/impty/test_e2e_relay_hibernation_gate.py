@@ -88,7 +88,8 @@ pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 
 def _seed_scripted_gate_project(
-    root: Path, *, turns: list[dict[str, Any]] | None = None
+    root: Path, *, turns: list[dict[str, Any]] | None = None,
+    interrupt: str = "default",
 ) -> Path:
     """Seed the interactive one-step gate workflow whose scripted agent plays
     `turns`, defaulting to the cli_attached poll then a bare turn-end.
@@ -123,7 +124,7 @@ def _seed_scripted_gate_project(
              ]},
             {"text": "waiting for you"},
         ]
-    script_path.write_text(json.dumps({"default": turns}))
+    script_path.write_text(json.dumps({"interrupt": interrupt, "default": turns}))
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
     return script_path

@@ -18,6 +18,7 @@ from tests.impty.e2e_support import (
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
     _event_types,
+    _flock_free,
     _poll,
     can_pty,
     clean_env,
@@ -163,20 +164,23 @@ def test_leave_command_in_chat_after_an_exchange_exits_130(
             f" · {tail}", f"resume: imp resume {quest_dir.name}{resume_suffix}"))
 
 
-def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
-    script = _seed_scripted_gate_project(tmp_path, turns=[
+@pytest.mark.parametrize("interrupt", ["cooperative", "hard_kill"])
+def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: str) -> None:
+    script = _seed_scripted_gate_project(tmp_path, interrupt=interrupt, turns=[
         {"text": "working", "tools": [
             {"name": "create_and_enter_worktree", "input": {}},
-            # Attached, then busy: the marker proves the step is mid-run.
+            # Attached, then busy once: the marker proves the step is mid-run.
             {"name": "bash", "input": {
-                "command": f'{_ATTACH_POLL}; : > "$IMP_QUEST_DIR/busy"; sleep 30'}},
+                "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
+                           ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
         ]},
-        {"text": "done"},
+        {"text": "the next turn ran"},
     ])
+    env = _env(script)
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "sigterm-mid-run",
          "--title", "sigterm mid run"],
-        cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as s:
         quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
         assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), (
@@ -187,6 +191,27 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
 
         assert rc == 130, "\n".join(s.lines())
         assert_screen(s, contains=("paused · SIGTERM",))
+
+    # Left mid-run: resume runs the agent on, not the interrupted-steer prompt.
+    assert _poll(lambda: _flock_free(quest_dir / "lock"), timeout=E2E_POLL_TIMEOUT)
+
+    def _after_resume() -> list[dict]:
+        events = _events(quest_dir)
+        last = max((i for i, e in enumerate(events) if e["type"] == "workflow_resumed"),
+                   default=None)
+        return [] if last is None else events[last + 1:]
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "resume", quest_dir.name],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as r:
+        assert _poll(lambda: any(
+            e["type"] == "awaiting_user_input"
+            and e["payload"].get("last_agent_message") == "the next turn ran"
+            for e in _after_resume()), timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
+        assert not any(e["type"] == "awaiting_user_input" and e["payload"].get("interrupt")
+                       for e in _after_resume())
+        assert not any("interrupted ·" in ln for ln in r.lines())
 
 
 def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> None:
