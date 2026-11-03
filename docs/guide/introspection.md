@@ -42,30 +42,32 @@ names rather than guessing them.
 
 ## What work exists
 
-- `imp list` — the board: active in-flight and draft quests, plus the backlog
-  (parked items for later).
-- `imp list --all` — also includes merged and abandoned past quests.
+- `imp list` — the board: active in-flight and draft quests, the backlog
+  (parked items for later), and completed quests (merged or done).
+- `imp list --all` — also includes abandoned and archived quests; `--archived`
+  alone shows only archived conversations.
 - `imp list --json` — the same board as a structured JSON array, one
   object per quest tagged with its zone; composes with every filter.
-- `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
-  drafts), **backlog**, and **archive** quests for `<query>` as a case-insensitive
-  substring of a quest's id, title, or conversation content (a required substring;
-  bare `imp search` errors). Composable `--active` / `--backlog` / `--archived` flags
-  scope it to those zones; with none given, all three are searched. `--merged`
-  narrows the archive to just the merged subset; add `--merged-after <commit>` to keep
-  only merged quests whose merge landed after `<commit>` (implies `--merged`). Default
-  output is grep-style matched excerpts per quest; `-l` / `--list`
-  prints one terse line per quest (`id  title  [zone]`).
+- `imp search <query>` — a live-and-history scout: search **active** (in-flight +
+  drafts), **backlog**, and **history** (merged, abandoned, archived) quests for
+  `<query>` as a case-insensitive substring of a quest's id, title, or conversation
+  content (a required substring; bare `imp search` errors). Composable `--active` /
+  `--backlog` / `--merged` / `--abandoned` / `--archived` flags scope it, with
+  `--archived` meaning archived conversations only; with none given, all three zones
+  are searched. Add `--merged-after <commit>` to keep only merged quests whose merge
+  landed after `<commit>` (implies `--merged`). Default output is grep-style matched
+  excerpts per quest; `-l` / `--list` prints one terse line per quest
+  (`id  title  [zone]`).
 - `imp events search <query>` — the structured-event sibling of `imp search`: the
   same case-insensitive substring search, but over quests' **event content** (tool
   calls, tool results, agent reasoning, skill loads) rather than only their
   conversation prose — so it answers questions like which agents loaded a given
   skill, which `imp search` cannot. Searches **active**, **backlog** (matched on
-  title + intent, since drafts have no events), and **archive** quests; the same
-  `--active` / `--backlog` / `--archived` flags scope it, and `imp events`'
+  title + intent, since drafts have no events), and **history** quests;
+  `--active` / `--backlog` / `--history` flags scope it, and `imp events`'
   `--type` / `--agent` filters narrow which events match (`--type tool_call` for
   "where invoked", the default for anywhere). Results stay zone-major — active →
-  backlog → archive — and newest-first within each zone. Default rich and `--json`
+  backlog → history — and newest-first within each zone. Default rich and `--json`
   output show the first three matched quests and the first three matching events per
   quest; `--limit N` changes only the matched-quest bound. `--list` scans every
   matched quest unless capped with `--limit N`; `--all` lifts both search-result
@@ -166,7 +168,7 @@ Two reaches the figure does not cover:
 
 ## Reading another quest
 
-To understand a *different* quest — live or archived — reach for the `imp` CLI
+To understand a *different* quest — live or in history — reach for the `imp` CLI
 readers rather than cat-ing its files (a raw `read_file` silently fails for an
 archived quest, whose artifacts live in a git ref, not on disk). This project's
 sibling quest homes are masked inside the bash sandbox and are not readable
@@ -183,7 +185,7 @@ answers them — not the sandbox floor:
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`
   / `agent_message` churn), or scope to an author with `--agent`. Resolves live and
-  archived quests alike.
+  history quests alike.
 
 Other projects' state directories *are* readable read-only inside the sandbox,
 so their `quests/<id>/events.jsonl` and artifacts can be read directly — a

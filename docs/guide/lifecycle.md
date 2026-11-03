@@ -36,7 +36,7 @@ There is no `draft` status word: an
 un-materialized quest shows its real derived status (`new`/`paused`), with its
 `(threshold)` step marking that it is still being scoped.
 
-## Zones: active list, backlog, archive
+## Zones: active list, backlog, history
 
 Where a quest appears is **derived** — never a separate status string. Two facts
 decide it: whether it has been **materialized**, and its **origin**.
@@ -46,7 +46,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
-- **archive** — finished (`merged`/`abandoned`) and archived conversations,
+- **history** — finished (`merged`/`done`/`abandoned`) and archived conversations,
   reachable by search.
 
 ## Materialize / go-live

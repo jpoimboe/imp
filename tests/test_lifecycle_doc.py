@@ -28,11 +28,13 @@ def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
 
 
 def test_lifecycle_covers_zones_and_materialize() -> None:
-    low = DOC.read_text().lower()
-    for zone in ("active", "backlog", "archive"):
-        assert zone in low, zone
-    assert "materialize" in low
-    assert "create_and_enter_worktree" in DOC.read_text()
+    body = DOC.read_text()
+    assert "\n## Zones: active list, backlog, history\n" in body
+    for zone in ("- **active list** —", "- **backlog** —", "- **history** —"):
+        assert zone in body, zone
+    assert "- **archive** —" not in body
+    assert "materialize" in body.lower()
+    assert "create_and_enter_worktree" in body
 
 
 def test_lifecycle_names_the_three_left_draft_dispositions() -> None:

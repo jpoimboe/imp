@@ -76,7 +76,7 @@ bookkeeping. Ask the CLI instead:
   for the raw spec, `show <id> verify` for the last failing gate run, `--json` for
   a structured card, no ledger).
 - `imp search <query>` — case-insensitive substring search across in-flight,
-  backlog, and archived quests' conversation content.
+  backlog, and history quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;
   `--step <name>` scopes it to one step, `-s` swaps the story for the per-step
   ledger `imp show` also carries, and owns its windowing and `--md`/`--html`

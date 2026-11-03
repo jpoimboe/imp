@@ -495,7 +495,7 @@ imp list                         # active work, drafts, and backlog
 imp show <id>                    # intent, status, timing, result, and run ledger
 imp log <id>                     # readable story of the run
 imp log --summary <id>           # per-step ledger of time, tokens, and quota
-imp search "rate limit"          # live and archived conversations
+imp search "rate limit"          # active, backlog, and history quests
 ```
 
 Every commit log produced by the default workflow carries a `Quest: <id>`
@@ -508,7 +508,7 @@ git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
 imp log <quest-id>
 ```
 
-You can also see all in-progress, backlog, and completed/archived quests:
+You can also see all in-progress, backlog, and completed quests:
 
 ```console
 $ imp list
@@ -535,17 +535,17 @@ And full fast search is supported:
 $ imp search "merge queue"
 433 matches for "merge queue"
 
-vuka12 · Cut redundant review ceremony · archive · 10h
+vuka12 · Cut redundant review ceremony · history · 10h
   … "wait-for-head": "waiting in merge queue", "reconciler": "resol …
   … body). _IR_SIG = "HEAD of the merge queue" def _prompt_carries_ir(**kw …
 
-fesa14 · Wait for dependencies outside the provider call · archive · 6d
+fesa14 · Wait for dependencies outside the provider call · history · 6d
   … ** for the next quest in the **merge queue**, i.e. the next quest waiting …
   … acquire step, not yet head in merge queue → `raise AwaitingUserInput()` …
   … thing that happens when in the merge queue (and what happens today for cr …
   … +3 more
 
-gevu23 · Resume without replaying the integrate phase · archive · 10d
+gevu23 · Resume without replaying the integrate phase · history · 10d
   … aml # ── integrate: the FIFO merge queue (base lock from wait-for-head) …
   … lane label: waiting in merge queue rules: - {el …
   … y:1290–1293`), enqueues in the merge queue, waits until head, then **mark …
