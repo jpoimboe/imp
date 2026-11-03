@@ -804,6 +804,52 @@ def test_wait_for_bash_tool_call_none_when_events_missing(tmp_path):
     assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is None
 
 
+# Expected skip reason; `{}` is the json.dumps of the call's input.
+_NONCOMPLIANT_REASON = (
+    "the model's first bash call was not a foreground `sleep 30` (input: {}); "
+    "the mid-bash interrupt precondition is unmet. This is model non-compliance, "
+    "not an interrupt-resume regression."
+)
+
+_FOREGROUND_SLEEP_INPUTS = [
+    {"command": "sleep 30"},
+    {"command": " sleep 30 ", "timeout": 60},
+]
+
+_NON_FOREGROUND_SLEEP_INPUTS = [
+    {"command": "sleep 30", "run_in_background": True},
+    {"command": "sleep 30", "timeout": 30},
+    {"command": "sleep 30", "timeout": 5},
+    {"command": "sleep 30 &"},
+    {"command": "sleep 30", "timeout": "60"},
+]
+
+
+def _bash_payload(inp, *, as_str):
+    # as_str: some providers log `input` as a JSON string rather than a dict.
+    return {"id": "b1", "name": "bash", "input": _json.dumps(inp) if as_str else inp}
+
+
+@pytest.mark.parametrize("as_str", [False, True])
+@pytest.mark.parametrize("inp", _FOREGROUND_SLEEP_INPUTS)
+def test_foreground_sleep_bash_call_does_not_skip(inp, as_str):
+    from tests._live import skip_unless_foreground_sleep
+    # A wrongful skip would surface as SKIPPED, not FAIL; convert it.
+    try:
+        skip_unless_foreground_sleep(_bash_payload(inp, as_str=as_str))
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"compliant bash call was skipped: {exc.msg}")
+
+
+@pytest.mark.parametrize("as_str", [False, True])
+@pytest.mark.parametrize("inp", _NON_FOREGROUND_SLEEP_INPUTS)
+def test_non_foreground_sleep_bash_call_skips_with_reason(inp, as_str):
+    from tests._live import skip_unless_foreground_sleep
+    with pytest.raises(pytest.skip.Exception) as exc:
+        skip_unless_foreground_sleep(_bash_payload(inp, as_str=as_str))
+    assert exc.value.msg == _NONCOMPLIANT_REASON.format(_json.dumps(inp))
+
+
 def test_bash_tool_call_poller_defined_once_in_live_helpers():
     import tests._live as live
     import tests.test_mid_step_resume_live as mid

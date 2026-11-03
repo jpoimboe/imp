@@ -540,6 +540,23 @@ def wait_for_bash_tool_call(events_path: Path, timeout: float) -> dict[str, Any]
     return None
 
 
+def skip_unless_foreground_sleep(payload: dict[str, Any]) -> None:
+    """Skip unless the bash call can still be running when the SIGINT lands."""
+    args = call_args(payload)
+    command = args.get("command")
+    timeout = args.get("timeout")
+    if (isinstance(command, str) and command.strip() == "sleep 30"
+            and not args.get("run_in_background")
+            and (timeout is None
+                 or (isinstance(timeout, int | float) and timeout > 30))):
+        return
+    pytest.skip(
+        "the model's first bash call was not a foreground `sleep 30` (input: "
+        f"{json.dumps(args)}); the mid-bash interrupt precondition is unmet. "
+        "This is model non-compliance, not an interrupt-resume regression."
+    )
+
+
 def wait_for_status(state_path: Path, want: str, timeout: float) -> str:
     """Poll state.json until status == want (or timeout); return the last status.
 
