@@ -63,6 +63,23 @@ def test_real_mcp_tool_call_records_tool_name_and_result() -> None:
     assert results[0]["payload"]["error"] is False
 
 
+def test_real_mcp_result_for_a_killed_bash_appends_tool_killed() -> None:
+    item = McpToolCallItem(
+        id="b1", type="mcp_tool_call", server="imp", tool="bash",
+        arguments={"command": "sleep 60"},
+        result=McpToolCallResult(
+            content=[{"type": "text",
+                      "text": '{"returncode": -15, "stdout": "", "stderr": ""}'}],
+            structured_content=None,
+        ),
+        status="completed",
+    )
+    elog, _ = _feed(item)
+    events = list(elog.read())
+    assert [e["type"] for e in events] == ["tool_call", "tool_result", "tool_killed"]
+    assert events[2]["payload"] == {"id": "b1", "name": "bash", "signal": 15}
+
+
 def test_real_mcp_tool_call_complete_step_capture_fires() -> None:
     # Previously dead: the `if name == "complete_step"` branch never matched
     # because name was "". With `tool` read correctly it must capture.

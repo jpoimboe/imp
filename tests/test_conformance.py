@@ -267,23 +267,11 @@ async def test_classify_before_nudge(pair: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_tool_killed_event_codex(tmp_path: Path, monkeypatch) -> None:
-    import imp.providers.codex_runner as cr
-
-    orig = cr.process_event
-
-    def _patched(*a, **k):
-        rs = k.get("run_state")
-        ev = a[0]
-        if (rs is not None and getattr(ev, "type", None) == "item.completed"
-                and getattr(getattr(ev, "item", None), "tool", None) == "bash"):
-            rs.killed_tool_uses.append({"id": "kill-1", "name": "bash", "signal": 9})
-        return orig(*a, **k)
-
-    monkeypatch.setattr(cr, "process_event", _patched)
-
+async def test_tool_killed_event_codex(tmp_path: Path) -> None:
     scripted = [[cx_start("thr-1"),
-                 cx_call(name="bash", args={"command": "sleep 1"}, result="", item_id="b1"),
+                 cx_call(name="bash", args={"command": "sleep 1"},
+                         result='{"returncode": -9, "stdout": "", "stderr": ""}',
+                         item_id="b1"),
                  cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
                  cx_done()]]
     runner, inv = build("codex", tmp_path, scripted,
@@ -291,9 +279,8 @@ async def test_tool_killed_event_codex(tmp_path: Path, monkeypatch) -> None:
     driven = await drive(runner, inv)
 
     log = list(driven.log.read())
-    killed = [e for e in log if e["type"] == "tool_killed"]
-    assert killed and killed[0]["payload"]["name"] == "bash"
-    assert killed[0]["payload"]["signal"] == 9
+    [killed] = [e for e in log if e["type"] == "tool_killed"]
+    assert killed["payload"] == {"id": "b1", "name": "bash", "signal": 9}
     # tool_killed is an audit-log event, never a yielded control signal.
     assert "tool_killed" not in [e["type"] for e in driven.control]
     assert driven.control[-1]["type"] == "agent_result"

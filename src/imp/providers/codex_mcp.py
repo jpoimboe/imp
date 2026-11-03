@@ -164,7 +164,6 @@ class RunState:
     abort_requested: bool = False
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
-    killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
     task_starts: TaskStartCoordinator = field(default_factory=TaskStartCoordinator)
     # Runner's event loop, recorded at runner entry. start_server raises on a
     # foreign loop (same-loop topology pin). None disables the check.
@@ -281,15 +280,6 @@ async def dispatch_tool(
         # FastMCP rewraps this as an isError result; the prefix keeps the
         # original exception type in the text the model reads.
         raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
-    if tool.name == "bash" and isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            rc = parsed.get("returncode") if isinstance(parsed, dict) else None
-            if isinstance(rc, int) and rc < 0:
-                state.killed_tool_uses.append(
-                    {"id": "", "name": "bash", "signal": -rc})
-        except (ValueError, TypeError):
-            pass
     if (isinstance(raw, list) and raw
             and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
         return _parts_to_mcp_content(raw)

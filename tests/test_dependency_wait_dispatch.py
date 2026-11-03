@@ -107,9 +107,6 @@ class _FakeObserve(ObserveSession):
         return
         yield  # pragma: no cover — makes this an async generator
 
-    def _drain_kills(self) -> list[dict[str, Any]]:
-        return []
-
     def _fatal_error(self) -> dict[str, Any] | None:
         return None
 
