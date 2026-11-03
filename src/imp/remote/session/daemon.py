@@ -39,6 +39,7 @@ from imp.engine.state import (
     State,
     lock_is_live,
 )
+from imp.engine.types import ResumeTarget
 from imp.paths import project_state_dir
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
@@ -184,7 +185,7 @@ async def serve_quest_session(
         def _paused_is_script() -> bool:
             return _resolve_step_kind(quest) == "script"
 
-        resume_target: str | None = None
+        resume_target: ResumeTarget | None = None
         if resume:
             log = quest.event_log()
             state = State.load(quest.state_dir)
@@ -201,9 +202,7 @@ async def serve_quest_session(
                     should_continue=unanswered_bare_gate(quest) is None)
             state.save(quest.state_dir)
             coordinator.set_unsandboxed(state.unsandboxed)
-            # A crash replays the interrupted agent step, so it always lands in
-            # the agent regardless of the last-stamped target.
-            resume_target = None if crashed else state.resume_target
+            resume_target = state.resume_target
         run_kwargs: dict[str, Any] = {}
         if non_interactive:
             run_kwargs["headless"] = True
@@ -272,18 +271,16 @@ async def serve_quest_session(
                     # Pause handler, so record the target only.
                     state = State.load(quest.state_dir)
                     if coordinator.pause_reason in ("ctrl-d", "pause"):
-                        state.resume_target = "agent"
-                        state.arm_step_resume(should_continue=True)
+                        state.arm_step_resume(should_continue=True, target="agent")
                     elif state.resume_should_continue:
                         # The executor armed the interrupt disposition (mid-turn
                         # Ctrl-C steer, Pause(interrupt=True)): preserve its
                         # continue-resume arming (resume_should_continue=True) and
                         # reproduce `interrupted ·` on resume. Re-arming a
                         # no-continue resume here would drop both.
-                        state.resume_target = "prompt-interrupted"
+                        state.arm_step_resume(should_continue=True, target="prompt-interrupted")
                     else:
-                        state.resume_target = "prompt-paused"
-                        state.arm_step_resume(should_continue=False)
+                        state.arm_step_resume(should_continue=False, target="prompt-paused")
                     state.save(quest.state_dir)
                     return result
                 coordinator.reset()

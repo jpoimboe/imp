@@ -33,7 +33,7 @@ import filelock
 from imp.engine import readfault
 from imp.engine.errors import StateDecodeError
 from imp.engine.pagecache import drop_page_cache
-from imp.engine.types import ResumeCause
+from imp.engine.types import ResumeCause, ResumeTarget
 
 Status = Literal[
     "new", "paused", "merge_blocked", "merged", "done", "archived", "abandoned", "error"
@@ -141,8 +141,8 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
-    # "agent" | "prompt-interrupted" | "prompt-paused"; absent/None ⇒ agent.
-    resume_target: str | None = None
+    # Armed and cleared with the resume triple by the two writers below.
+    resume_target: ResumeTarget | None = None
     # Resume-continue disposition for resume_pending: True ⇒ native resume + a
     # continuation nudge, False ⇒ resume without a nudge. Meaningful only while
     # resume_pending is set; armed and cleared with it via the two writers below,
@@ -291,17 +291,20 @@ class State:
 
     def arm_step_resume(
         self, *, should_continue: bool, cause: ResumeCause = "human",
+        target: ResumeTarget | None = None,
     ) -> None:
-        """Sole writer of the (pending, should_continue, cause) resume triple."""
+        """Sole writer of the (pending, should_continue, cause) resume triple and its landing."""
         self.resume_pending = self.step
         self.resume_should_continue = should_continue
         self.resume_cause = cause
+        self.resume_target = target
 
     def clear_step_resume(self) -> None:
-        """Sole clear writer: drop the triple together so it can never tear."""
+        """Sole clear writer: drop the triple and its landing together so they can never tear."""
         self.resume_pending = None
         self.resume_should_continue = False
         self.resume_cause = "human"
+        self.resume_target = None
 
     def reincarnation_count(self, key: str) -> int:
         return self.reincarnations.get(key, 0)

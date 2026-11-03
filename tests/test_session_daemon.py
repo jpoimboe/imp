@@ -15,6 +15,7 @@ from imp.engine.completion import INTERRUPT_STEER_HINT, build_inline_solicit
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.engine.types import ResumeTarget
 from imp.paths import project_state_dir
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_quest_session
@@ -1619,13 +1620,14 @@ async def test_detach_after_leave_midrun_stamps_resume_target_agent(
 ])
 @pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
-    tmp_path: Path, target: str, prompt_attr: str,
+    tmp_path: Path, target: ResumeTarget, prompt_attr: str,
 ) -> None:
     import imp.remote.session.daemon as daemon
 
     quest = _make_quest(tmp_path, "2026-06-15-rpt")
     st = State.load(quest.state_dir)
-    st.resume_target = target
+    st.step = "task-lead"
+    st.arm_step_resume(should_continue=target != "prompt-paused", target=target)
     st.save(quest.state_dir)
     sock = str(session_socket_path(quest.id))
 
@@ -1684,11 +1686,12 @@ async def test_resume_prompt_target_holds_before_running_agent(
 @pytest.mark.anyio
 @pytest.mark.parametrize("target", [None, "agent"])
 async def test_resume_agent_target_runs_straight_away(
-    tmp_path: Path, target: str | None,
+    tmp_path: Path, target: ResumeTarget | None,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-rat")
     st = State.load(quest.state_dir)
-    st.resume_target = target
+    st.step = "task-lead"
+    st.arm_step_resume(should_continue=target != "prompt-paused", target=target)
     st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}
@@ -1712,7 +1715,7 @@ async def test_resume_agent_target_runs_straight_away(
 @pytest.mark.parametrize("flag", ["non_interactive", "autonomous"])
 @pytest.mark.parametrize("target", ["prompt-interrupted", "prompt-paused"])
 async def test_resume_prompt_target_runs_agent_without_interactive_channel(
-    tmp_path: Path, flag: str, target: str,
+    tmp_path: Path, flag: str, target: ResumeTarget,
 ) -> None:
     """A prompt-* resteer hold only makes sense when a human can
     type. A headless or autonomous resume has no channel to answer the prompt, so
@@ -1720,7 +1723,8 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
     quest = _make_quest(tmp_path, "2026-06-15-rph")
     st = State.load(quest.state_dir)
-    st.resume_target = target
+    st.step = "task-lead"
+    st.arm_step_resume(should_continue=target != "prompt-paused", target=target)
     st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}
