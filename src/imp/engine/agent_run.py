@@ -800,6 +800,7 @@ async def drive_invocation(
                         # RetryNow (agent_output_missing today)
                         return AgentRunResult(None, True, False, False, None,
                                               ErrorInfo(category, kind, message))
+                    # Pause wins over a racing result by design, as the Claude CLI discards it too.
                     if coordinator is not None and coordinator.should_pause:
                         return AgentRunResult(None, False, True, False, None,
                                               interrupt=True)
