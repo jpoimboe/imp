@@ -18,7 +18,7 @@ from tests.conftest import _seed_control
 
 def _ns(**kw: bool) -> argparse.Namespace:
     base = {"active": False, "backlog": False, "merged": False,
-            "abandoned": False, "shelved": False, "archived": False}
+            "abandoned": False, "archived": False}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -29,7 +29,7 @@ def test_no_flag_selects_nothing() -> None:
 
 def test_single_flag_selects_that_disposition() -> None:
     assert _selected_list_dispositions(_ns(abandoned=True)) == {"abandoned"}
-    assert _selected_list_dispositions(_ns(shelved=True)) == {"shelved"}
+    assert _selected_list_dispositions(_ns(archived=True)) == {"archived"}
     assert _selected_list_dispositions(_ns(active=True)) == {"active"}
     assert _selected_list_dispositions(_ns(backlog=True)) == {"backlog"}
 
@@ -37,14 +37,6 @@ def test_single_flag_selects_that_disposition() -> None:
 def test_flags_union_additively() -> None:
     assert _selected_list_dispositions(
         _ns(merged=True, abandoned=True)) == {"merged", "abandoned"}
-
-
-def test_archived_expands_to_the_four_archive_dispositions() -> None:
-    assert _selected_list_dispositions(
-        _ns(archived=True)) == {"merged", "done", "abandoned", "shelved"}
-    # --archived unioned with a redundant flag stays the same set.
-    assert _selected_list_dispositions(
-        _ns(archived=True, merged=True)) == {"merged", "done", "abandoned", "shelved"}
 
 
 _NOW = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC)
@@ -79,7 +71,7 @@ def test_filtered_selects_only_the_requested_disposition(tmp_path: Path) -> None
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
         tmp_path, dispositions={"abandoned"}, cutoff=None, now=_NOW, color=False)
     out = "\n".join(lines)
@@ -91,19 +83,19 @@ def test_filtered_unions_dispositions(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"merged", "abandoned", "shelved"},
+        tmp_path, dispositions={"merged", "abandoned", "archived"},
         cutoff=None, now=_NOW, color=False)
     assert _ids(lines) >= {"mrgd", "abnd", "shlv"}
 
 
-def test_filtered_shelved_selects_shelved_status(tmp_path: Path) -> None:
+def test_filtered_archived_selects_archived_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     _archive_status(tmp_path, "mrgd", "merged")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"shelved"}, cutoff=None, now=_NOW, color=False)
+        tmp_path, dispositions={"archived"}, cutoff=None, now=_NOW, color=False)
     out = "\n".join(lines)
     assert "shlv" in out and "mrgd" not in out
 
@@ -146,20 +138,20 @@ def test_default_overview_lines_unchanged_for_empty(tmp_path: Path) -> None:
         tmp_path, show_all=False, now=_NOW, color=False) == expected
 
 
-def test_list_parses_the_six_flags_and_since() -> None:
+def test_list_parses_the_five_flags_and_since() -> None:
     args = _build_parser().parse_args(
         ["list", "--active", "--backlog", "--merged", "--abandoned",
-         "--shelved", "--archived", "--since", "2d"])
+         "--archived", "--since", "2d"])
     assert args.func is _cmd_list
     assert args.active and args.backlog and args.merged
-    assert args.abandoned and args.shelved and args.archived
+    assert args.abandoned and args.archived
     assert args.since == "2d"
 
 
 def test_list_defaults_flags_off_and_since_none() -> None:
     args = _build_parser().parse_args(["list"])
     assert not (args.active or args.backlog or args.merged
-                or args.abandoned or args.shelved or args.archived)
+                or args.abandoned or args.archived)
     assert args.since is None
 
 
@@ -181,19 +173,19 @@ def test_list_abandoned_shows_only_abandoned(tmp_path, monkeypatch) -> None:
     assert "abnd" in out and "mrgd" not in out
 
 
-def test_list_archived_unions_all_three(tmp_path, monkeypatch) -> None:
+def test_list_archived_shows_only_archived(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     out = _run_list(tmp_path, monkeypatch, ["list", "--archived"])
-    assert "mrgd" in out and "abnd" in out and "shlv" in out
+    assert "shlv" in out and "mrgd" not in out and "abnd" not in out
 
 
 def test_list_no_flag_matches_prints_no_match_notice(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
-    out = _run_list(tmp_path, monkeypatch, ["list", "--shelved"])
+    out = _run_list(tmp_path, monkeypatch, ["list", "--archived"])
     assert out.strip() == "No quests match that filter."
 
 
@@ -254,37 +246,37 @@ def test_list_default_routes_through_overview_lines(tmp_path, monkeypatch) -> No
     assert calls["overview"] == 1 and calls["filtered"] == 0
 
 
-def test_list_help_names_shelved_not_left(capsys) -> None:
+def test_list_help_names_archived_not_left(capsys) -> None:
     with pytest.raises(SystemExit):
         _build_parser().parse_args(["list", "--help"])
     out = capsys.readouterr().out
-    assert "abandoned/shelved quests" in out                # list description
-    assert "include abandoned and shelved quests" in out    # -a/--all help
+    assert "abandoned/archived quests" in out                # list description
+    assert "include abandoned and archived quests" in out    # -a/--all help
     assert "left" not in out
 
 
-def test_search_help_names_shelved_not_left(capsys) -> None:
+def test_search_help_names_history_not_left(capsys) -> None:
     with pytest.raises(SystemExit):
         _build_parser().parse_args(["search", "--help"])
     out = capsys.readouterr().out
-    assert "merged, abandoned, shelved) quests" in out      # --archived help
+    assert "history (merged, abandoned, archived) quests" in " ".join(out.split())
     assert "left" not in out
 
 
-def test_filtered_lists_shelved_once(tmp_path: Path) -> None:
+def test_filtered_lists_archived_once(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"merged", "abandoned", "shelved"},
+        tmp_path, dispositions={"merged", "abandoned", "archived"},
         cutoff=None, now=_NOW, color=False)
     body = [ln for ln in lines if ln and ln[0].isalnum()]
     assert [ln.split()[0] for ln in body].count("shlv") == 1
 
 
-def test_all_history_lists_shelved_once(tmp_path: Path) -> None:
+def test_all_history_lists_archived_once(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
     body = [ln for ln in lines if ln and ln[0].isalnum()]
     ids = [ln.split()[0] for ln in body]
@@ -292,9 +284,48 @@ def test_all_history_lists_shelved_once(tmp_path: Path) -> None:
     assert ids.count("mrgd") == 1
 
 
-def test_past_quest_count_excludes_shelved(tmp_path: Path) -> None:
+def test_past_quest_count_excludes_archived(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
-    assert m._past_quest_count(tmp_path) == 2   # merged + abandoned; shelved is not a past quest
+    _archive_status(tmp_path, "shlv", "archived")
+    assert m._past_quest_count(tmp_path) == 2   # merged + abandoned; archived is not a past quest
+
+
+def _subparser(name: str) -> argparse.ArgumentParser:
+    action = next(a for a in _build_parser()._actions
+                  if isinstance(a, argparse._SubParsersAction))
+    return action.choices[name]
+
+
+def _flag_help(p: argparse.ArgumentParser, flag: str) -> str | None:
+    return next(a.help for a in p._actions if flag in a.option_strings)
+
+
+def test_list_help_copy_is_verbatim() -> None:
+    p = _subparser("list")
+    assert p.description == (
+        "With no argument, an overview of your quests — in-flight, the backlog, "
+        "and every merged quest. -a/--all also includes abandoned/archived quests "
+        "(the block is then labelled `history`).")
+    assert _flag_help(p, "--all") == (
+        "Also include abandoned and archived quests "
+        "(the block is then labelled `history`).")
+    assert _flag_help(p, "--archived") == "Show only archived conversations."
+
+
+def test_search_help_copy_is_verbatim() -> None:
+    p = _subparser("search")
+    assert (p.description or "").startswith(
+        "Search active (in-flight + drafts), backlog, and history (merged, abandoned, "
+        "archived) quests for the query as a case-insensitive substring of a quest's "
+        "id, title, or conversation content.")
+    assert _flag_help(p, "--archived") == "Search archived conversations."
+
+
+@pytest.mark.parametrize("argv", [["list", "--shelved"], ["search", "q", "--shelved"]])
+def test_retired_shelved_flag_is_rejected(argv: list[str], capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _build_parser().parse_args(argv)
+    assert exc.value.code == 2
+    assert "--shelved" in capsys.readouterr().err

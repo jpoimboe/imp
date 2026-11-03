@@ -9,7 +9,7 @@ The client's signals map to two distinct intents (the keep-alive-lease design):
     yields inline and the client stays attached; with no inline channel the stop
     lands as a clean pause.
   - Intent B — "this client is leaving" (SIGTERM, SIGHUP, terminal close,
-    Ctrl-D, /save). Acts on the *attachment*: release the lease, detach, exit. The
+    Ctrl-D, /pause). Acts on the *attachment*: release the lease, detach, exit. The
     client does NOT decide whether the run pauses — the session daemon's lease
     rule does.
 
@@ -54,7 +54,7 @@ _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
-_PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "done", "shelved", "abandoned", "error")
+_PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "done", "archived", "abandoned", "error")
 
 
 async def _wait_interrupt_deadline() -> None:

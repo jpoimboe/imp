@@ -41,8 +41,8 @@ def leave_control_action(
     """
     if intent == "abandon":
         return None
-    explicit_save = intent == "save"
-    is_archive = intent in ("clear", "shelve")
+    explicit_save = intent == "pause"
+    is_archive = intent in ("clear", "archive")
     if quest.materialized:
         return None
     if not explicit_save and not _had_exchange(quest.event_log()):

@@ -427,11 +427,11 @@ def test_detail_card_reshapes_depends_on(tmp_path: Path) -> None:
     assert merge_idx == depends_idx + 1
 
 
-def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> None:
+def test_detail_card_shows_archived_for_archived_paused_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     # Materialized case: quest.json has no "materialized" key (defaults True).
-    # Row status would be "paused"; card must show "shelved".
+    # Row status would be "paused"; card must show "archived".
     events_m = tmp_path / "arc_m.jsonl"
     events_m.write_text("")
     quest_json_m = tmp_path / "arc_m.quest.json"
@@ -440,19 +440,19 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json_m = tmp_path / "arc_m.state.json"
     state_json_m.write_text(json.dumps({
-        "id": "2026-06-20-shv01", "status": "shelved", "step": None}))
+        "id": "2026-06-20-shv01", "status": "archived", "step": None}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv01", events_path=events_m,
         quest_json_path=quest_json_m, state_json_path=state_json_m)
 
     card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW, color=False))
     status_line_m = next(ln for ln in card_m.splitlines() if ln.startswith("status:"))
-    assert "shelved" in status_line_m
+    assert "archived" in status_line_m
     assert "paused" not in status_line_m
     assert "draft" not in status_line_m
 
     # Un-materialized case: quest.json has "materialized": false.
-    # The archived card must show "shelved" from the stored status "shelved"
+    # The archived card must show "archived" from the stored status "archived"
     # (stored == displayed for archived homes).
     events_u = tmp_path / "arc_u.jsonl"
     events_u.write_text("")
@@ -463,19 +463,19 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "materialized": False}))
     state_json_u = tmp_path / "arc_u.state.json"
     state_json_u.write_text(json.dumps({
-        "id": "2026-06-20-shv02", "status": "shelved", "step": None}))
+        "id": "2026-06-20-shv02", "status": "archived", "step": None}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv02", events_path=events_u,
         quest_json_path=quest_json_u, state_json_path=state_json_u)
 
     card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW, color=False))
     status_line_u = next(ln for ln in card_u.splitlines() if ln.startswith("status:"))
-    assert "shelved" in status_line_u
+    assert "archived" in status_line_u
     assert "paused" not in status_line_u
     assert "draft" not in status_line_u
 
     # Mid-step case: state.json has a non-null step (quest archived while a step was
-    # in flight). Card must still show "shelved" and must NOT show the step: line.
+    # in flight). Card must still show "archived" and must NOT show the step: line.
     events_s = tmp_path / "arc_s.jsonl"
     events_s.write_text("")
     quest_json_s = tmp_path / "arc_s.quest.json"
@@ -484,14 +484,14 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json_s = tmp_path / "arc_s.state.json"
     state_json_s.write_text(json.dumps({
-        "id": "2026-06-20-shv03", "status": "shelved", "step": "spec-writer"}))
+        "id": "2026-06-20-shv03", "status": "archived", "step": "spec-writer"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv03", events_path=events_s,
         quest_json_path=quest_json_s, state_json_path=state_json_s)
 
     card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW, color=False))
     status_line_s = next(ln for ln in card_s.splitlines() if ln.startswith("status:"))
-    assert "shelved" in status_line_s
+    assert "archived" in status_line_s
     assert not any(ln.startswith("step:") for ln in card_s.splitlines())
 
 

@@ -729,21 +729,6 @@ def test_overview_lists_done_quest_in_history(tmp_path: Path, monkeypatch) -> No
     assert "lightid" in out and "done" in out
 
 
-def test_list_archived_flag_includes_done_quest(tmp_path: Path, monkeypatch) -> None:
-    import imp.cli.main as m
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="Light change", quest_id="lightarc", base_branch="main")
-    _complete_and_archive(tmp_path, "lightarc", status="done")
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setenv("NO_COLOR", "1")
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        rc = main(["list", "--archived"])
-    out = buf.getvalue()
-    assert rc == 0
-    assert "lightarc" in out and "done" in out
-
-
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     import imp.cli.main as m
 

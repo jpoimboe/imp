@@ -18,19 +18,23 @@ def test_lifecycle_doc_exists_and_is_nonempty() -> None:
 def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
     body = DOC.read_text()
     for status in ("new", "paused", "merge_blocked", "merged",
-                   "shelved", "abandoned", "error"):
+                   "archived", "abandoned", "error"):
         assert status in body, status
+    assert "(stored `archived`)" in body
+    assert "shelved" not in body
     # running is derived, never stored
     assert "running" in body
     assert "derived" in body
 
 
 def test_lifecycle_covers_zones_and_materialize() -> None:
-    low = DOC.read_text().lower()
-    for zone in ("active", "backlog", "archive"):
-        assert zone in low, zone
-    assert "materialize" in low
-    assert "create_and_enter_worktree" in DOC.read_text()
+    body = DOC.read_text()
+    assert "\n## Zones: active list, backlog, history\n" in body
+    for zone in ("- **active list** —", "- **backlog** —", "- **history** —"):
+        assert zone in body, zone
+    assert "- **archive** —" not in body
+    assert "materialize" in body.lower()
+    assert "create_and_enter_worktree" in body
 
 
 def test_lifecycle_names_the_three_left_draft_dispositions() -> None:
@@ -38,6 +42,15 @@ def test_lifecycle_names_the_three_left_draft_dispositions() -> None:
     assert "discard_conversation" in body
     assert "save_as_draft" in body
     assert "archive_conversation" in body
+
+
+def test_lifecycle_left_draft_section_names_the_leave_commands() -> None:
+    body = DOC.read_text()
+    section = body.split("\n## What happens to a left draft\n", 1)[1].split("\n## ", 1)[0]
+    for command in ("`/pause`", "`/archive`", "`/clear`"):
+        assert command in section, command
+    assert "/save" not in section
+    assert "/shelve" not in section
 
 
 def test_lifecycle_carries_the_training_data_correction() -> None:
@@ -81,3 +94,5 @@ def test_lifecycle_exit_code_table_matches_the_exit_code_constants() -> None:
     codes = [int(c) for c in re.findall(r"^\| (\d+) \|", section, flags=re.M)]
     assert codes == sorted(int(code) for code in ExitCode)
     assert "| 130 | You ended it and nothing failed" in section
+    assert ("left, paused, archived, discarded, abandoned or cancelled. "
+            "A left quest is resumable") in section

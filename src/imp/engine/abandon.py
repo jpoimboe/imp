@@ -45,14 +45,14 @@ def tear_down_quest(quest: Quest) -> None:
 
 
 def archive_conversation(quest: Quest) -> None:
-    """Archive a shelved conversation as resumable (paused, not abandoned); drop the live home."""
+    """Archive a conversation resumably (status `archived`, not abandoned); drop the live home."""
     control = quest.control_root
     quest_id = quest.id
     base_branch = quest.base_branch
     materialized = quest.materialized
     with ProjectLock(quest.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(quest.state_dir)
-        state.status = "shelved"
+        state.status = "archived"
         state.arm_step_resume(should_continue=False)
         state.save(quest.state_dir)
         quest.event_log().append(

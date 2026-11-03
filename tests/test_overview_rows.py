@@ -40,9 +40,9 @@ def test_history_by_disposition_selects_only_the_wanted_dispositions(
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
-    _archive_status(tmp_path, "shlv", "shelved", last_ts="2026-06-08T00:00:00+00:00")
+    _archive_status(tmp_path, "shlv", "archived", last_ts="2026-06-08T00:00:00+00:00")
     rows = m._history_by_disposition(
-        tmp_path, dispositions={"abandoned", "shelved"}, live_ids=set())
+        tmp_path, dispositions={"abandoned", "archived"}, live_ids=set())
     assert [r[0] for r in rows] == ["abnd", "shlv"]   # newest-first; merged excluded
     # The live-zone tokens name no archive status, so they select nothing.
     assert m._history_by_disposition(
@@ -118,11 +118,11 @@ def test_overview_rows_history_selects_both_boards(
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
-    _archive_status(tmp_path, "shlv", "shelved", last_ts="2026-06-08T00:00:00+00:00")
+    _archive_status(tmp_path, "shlv", "archived", last_ts="2026-06-08T00:00:00+00:00")
     default = {"active", "backlog", "merged", "done"}
     plain = m._overview_rows(tmp_path, dispositions=default, cutoff=None)
     every = m._overview_rows(
-        tmp_path, dispositions=default | {"abandoned", "shelved"}, cutoff=None)
+        tmp_path, dispositions=default | {"abandoned", "archived"}, cutoff=None)
     assert [r[0] for r in plain.history] == ["mrgd"]
     assert [r[0] for r in every.history] == ["mrgd", "abnd", "shlv"]
 
@@ -143,7 +143,7 @@ def test_overview_lines_routes_through_the_shared_gatherer(
     monkeypatch.setattr(m, "_overview_rows", spy)
 
     all_lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
-    assert asked == [{"active", "backlog", "merged", "done", "abandoned", "shelved"}]
+    assert asked == [{"active", "backlog", "merged", "done", "abandoned", "archived"}]
     assert any(ln.startswith("abnd") for ln in all_lines)
 
     asked.clear()

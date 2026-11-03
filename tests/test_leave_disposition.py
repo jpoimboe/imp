@@ -101,14 +101,14 @@ def test_print_leave_disposition_archive_is_lock_free(
     assert (project_state_dir(tmp_path) / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
-    assert "· shelved" in out
+    assert "· archived" in out
     assert "resume: imp resume fast1 — or find it later with imp search" in out
     assert not out.startswith("\n")
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
 
-def test_print_leave_disposition_save_prints_saved_as_draft_spine(
+def test_print_leave_disposition_save_prints_paused_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -116,7 +116,7 @@ def test_print_leave_disposition_save_prints_saved_as_draft_spine(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 130
     out = capsys.readouterr().out
-    assert "· saved as draft" in out
+    assert "· paused" in out
     assert "kept as draft" not in out
     assert "saved to backlog" not in out
     assert "resume: imp resume bk1" in out
@@ -207,7 +207,7 @@ def _titleless_draft_with_intent(tmp_path: Path, quest_id: str, text: str) -> Qu
     return ch
 
 
-def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
+def test_leave_disposition_titleless_archived_shows_prompt_fallback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -216,7 +216,7 @@ def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
         ch, {"disposition": "archive"}, intent="when I hit save it crashed")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl1 · when I hit save it crashed · shelved" in out
+    assert "tl1 · when I hit save it crashed · archived" in out
     assert "(unnamed)" not in out
 
 
@@ -252,7 +252,7 @@ def test_leave_disposition_titleless_no_prompt_shows_unnamed(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl2 · (unnamed) · saved as draft" in out
+    assert "tl2 · (unnamed) · paused" in out
     assert "> (unnamed)" not in out
 
 
@@ -265,5 +265,5 @@ def test_leave_disposition_renders_the_intent_it_is_handed(
         ch, {"disposition": "save"}, intent="what the client witnessed")
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl5 · what the client witnessed · saved as draft" in out
+    assert "tl5 · what the client witnessed · paused" in out
     assert "the log's own intent" not in out     # the spine no longer re-reads the log

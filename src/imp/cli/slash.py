@@ -42,17 +42,16 @@ PROVIDER_ALREADY = "Already on {name} — nothing changed."
 PROVIDER_PINNED = "This quest will run on {name}."
 
 MATERIALIZED_LEAVE_REDIRECT = (
-    "/save, /shelve, and /clear apply only before a quest is built — this one "
-    "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
-    "/abandon to tear it down.")
+    "/archive and /clear apply only before a quest is built — this one is "
+    "live. Type /pause or press Ctrl-D to pause it (resume with imp resume "
+    "{qid}), or /abandon to tear it down.")
 
 PRE_SESSION_COMPACT_REDIRECT = (
     "/compact applies once the conversation is running — send a message first.")
 
 PRE_SESSION_LEAVE_REDIRECT = (
-    "/save, /shelve, and /clear apply to a conversation already under way — "
-    "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
-    "(resume with imp resume {qid}), or /abandon to tear it down.")
+    "/pause, /archive, and /clear apply once the conversation is running — "
+    "send a message first.")
 
 
 # A command-shaped first token: identifier-like, no `/` and no `.`. Anything
@@ -116,12 +115,12 @@ def handle_slash_line(
             output_fn(PRE_SESSION_COMPACT_REDIRECT)
             return REPROMPT
         return "/compact"
-    if cmd in ("save", "shelve", "clear"):
+    if cmd in ("pause", "archive", "clear"):
         if pre_session:
             _echo_command(text, output_fn, color=color)
-            output_fn(PRE_SESSION_LEAVE_REDIRECT.format(qid=quest.id))
+            output_fn(PRE_SESSION_LEAVE_REDIRECT)
             return REPROMPT
-        if _is_materialized(quest):
+        if cmd != "pause" and _is_materialized(quest):
             _echo_command(text, output_fn, color=color)
             output_fn(MATERIALIZED_LEAVE_REDIRECT.format(qid=quest.id))
             return REPROMPT
@@ -223,10 +222,11 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    if not materialized and not pre_session:
-        out("  /save              Keep this conversation as a draft in your active list")
-        out("  /shelve            Shelve this conversation to the archive (find via `imp search`)")
-        out("  /clear             Shelve this conversation and start a fresh one")
+    if not pre_session:
+        out("  /pause             Pause and exit; resume with imp resume <id>")
+        if not materialized:
+            out("  /archive           Archive this conversation (find it later with imp search)")
+            out("  /clear             Archive this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /provider [name]   Show or switch the provider for this quest")

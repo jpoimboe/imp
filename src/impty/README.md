@@ -163,7 +163,7 @@ it gets one record per tool call.
 imp passes the step transcript dir, `<quest_home>/steps/<phase>/<step>/`, so the
 journal sits beside that step's `stderr.log`: never committed (only `artifacts/` is
 harvested into the quest's artifact ref), reaped with the quest, archived only for a
-shelved quest you mean to resume, and masked from both the sandboxed program and any
+conversation you mean to resume, and masked from both the sandboxed program and any
 agent's `read_file` — the right containment for raw bytes that may carry a token.
 
 `snapshot()`'s default PNG goes to `<quest_home>/snapshots/`, created by the driver,

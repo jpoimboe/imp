@@ -100,7 +100,7 @@ def test_read_quest_json_prefers_stored_meta(tmp_path: Path) -> None:
         "project_root": str(tmp_path), "materialized": False,
         "orig_base_head": "deadbeef", "layout_version": 2}))
     state_json = tmp_path / "state.json"
-    state_json.write_text(json.dumps({"id": "conv", "status": "shelved", "step": "threshold"}))
+    state_json.write_text(json.dumps({"id": "conv", "status": "archived", "step": "threshold"}))
 
     archive.archive_quest(
         tmp_path, "conv", events_path=events,
@@ -146,7 +146,7 @@ def test_read_step_blobs_returns_relpath_to_bytes(tmp_path: Path) -> None:
     quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
-    state_json.write_text(json.dumps({"id": "conv", "status": "shelved"}))
+    state_json.write_text(json.dumps({"id": "conv", "status": "archived"}))
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
@@ -176,7 +176,7 @@ def test_read_step_blobs_skips_missing_blob(tmp_path: Path) -> None:
     quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
-    state_json.write_text(json.dumps({"id": "conv", "status": "shelved"}))
+    state_json.write_text(json.dumps({"id": "conv", "status": "archived"}))
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
@@ -203,7 +203,7 @@ def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
     quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
-    state_json.write_text(json.dumps({"id": "conv", "status": "shelved"}))
+    state_json.write_text(json.dumps({"id": "conv", "status": "archived"}))
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")

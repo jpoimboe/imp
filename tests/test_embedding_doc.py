@@ -22,7 +22,7 @@ RELIED_ON = (
 # Scope 6: every value `QuestSummary.status` can take, in-flight then finished.
 STATUSES = (
     "new", "running", "waiting", "paused", "error", "merge_blocked",
-    "merged", "done", "abandoned", "shelved",
+    "merged", "done", "abandoned", "archived",
 )
 
 _PY_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)

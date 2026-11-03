@@ -1417,7 +1417,7 @@ def test_dur_text_marks_an_inferred_end_with_a_tilde():
     ("paused", "paused"),
     ("new", "new"),
     ("error", "error"),
-    ("shelved", "shelved"),          # parked, not finished: keeps its status word
+    ("archived", "archived"),          # parked, not finished: keeps its status word
     ("merge_blocked", "merge blocked"),
 ])
 def test_open_span_label_word_per_status(status, expected):

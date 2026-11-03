@@ -133,6 +133,11 @@ def test_list_help_line_says_running_quests() -> None:
     assert "/list — show running quests (● = subscribed)" in HELP_TEXT
 
 
+def test_resume_help_line_says_paused_or_archived() -> None:
+    assert ("/resume <id or text> — rehydrate and continue a paused/archived "
+            "conversation\n") in HELP_TEXT
+
+
 def test_route_hint_points_at_list_not_show() -> None:
     assert "send /list." in ROUTE_HINT
     assert "/show" not in ROUTE_HINT

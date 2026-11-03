@@ -55,7 +55,7 @@ def test_membership_gates_reflect_derived_words() -> None:
     assert "error" in m.RESUMABLE          # a failed quest stays resumable
     assert "waiting" not in m.RESUMABLE    # live-only, never a resume target
     assert "draft" not in m.RESUMABLE
-    assert "shelved" in m.RESUMABLE        # a shelved conversation rehydrates and resumes
+    assert "archived" in m.RESUMABLE        # an archived conversation rehydrates and resumes
 
 
 def test_resumable_and_inflight_include_new_not_errored() -> None:

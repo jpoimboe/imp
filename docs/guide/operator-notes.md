@@ -130,7 +130,7 @@ all work for it by its full id while the archive is unreadable. A refusal is one
 line on stderr, exit 2, no output:
 
 ```
-imp: archive data is at v15, newer than this imp (knows v14). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+imp: archive data is at v16, newer than this imp (knows v15). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
@@ -143,7 +143,7 @@ line follows indented, and any readable match is offered as a hint:
 
 ```
 imp: 'lodo' matches an archived quest this imp cannot read: lodo77
-  archive data is at v15, newer than this imp (knows v14). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+  archive data is at v16, newer than this imp (knows v15). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
   hint: readable match lodo40 — pass its full id to resume it.
 ```
 
@@ -169,7 +169,7 @@ touched, so a refusal there is post-terminal bookkeeping: imp keeps the `merged`
 
 ```
 warning: this quest finished but was not filed into the archive; imp files it on its next run
-  archive data is at v14; this imp knows v13
+  archive data is at v16; this imp knows v15
 ```
 
 The stranded-home sweep on the next `imp list` or `imp show` files the record, and
@@ -182,26 +182,30 @@ an engine bug and still pauses the run.
 An older imp may still archive a quest into a newer archive; its trailing stamp
 lowers both floors (the blob `data_version` marker and the index's `PRAGMA
 user_version`). One blob migration ships in the tree, and it heals exactly one
-step: a marker reading 13 is upgraded to 14 in place — `check_data_floor` runs
-the upgrade on first touch, backfills the `commits` list onto each archived
-terminal event, rebuilds the index and stamps both markers current — so a v13
-archive is repaired rather than refused. The upgrade has to write, so a v13
-archive on a read-only archive root is refused rather than healed, where before
-this migration it read fine; make the archive root writable and the next command
-heals it. Every other below-floor version is a layout nothing in the tree can
-vouch for: a current imp refuses that archive rather than stamping it current.
-Record and blob reads raise, `ensure_current` leaves it exactly as it found it,
-nothing further is archived into it, and the daemon's startup reaper
-(`reap_archived_homes`) deletes no quest home — which can strand a quest on
-bookkeeping after its merge has already landed, but leaves the homes that are
-its last locally readable copy standing. Index-only queries
-(`imp list`, `imp search`) keep answering from the stale index, and that index is
-never rebuilt: no code path raises a lowered marker back to `_DATA_VERSION`, so
-for records written below any version but 13 the stranding is permanent. Recovery
-runs through the install that wrote a given record — its floors match what it
-stamped, so it can still read it: check out that commit to finish or extract the
-affected quest. Updating every imp that writes here prevents further below-floor
-writes; it repairs none of the writes already made.
+step: a marker reading 14 is upgraded to 15 in place. `check_data_floor` runs
+the upgrade on first blob-backed touch, and the heal at the top of
+`ensure_current` runs it for the index-only readers (`imp list`, `imp search`),
+so whichever comes first migrates the archive. The upgrade renames the retired
+stored status `shelved` to `archived` in each archived record and each live
+quest home, rebuilds the index and stamps both markers current — so a v14
+archive is repaired rather than refused. Status lives only in the record, so no
+blob is rewritten. The upgrade has to write, so a v14 archive on a read-only
+archive root is refused rather than healed, where before this migration it read
+fine; make the archive root writable and the next command heals it. Every other
+below-floor version is a layout nothing in the tree can vouch for: a current imp
+refuses that archive rather than stamping it current. Record and blob reads
+raise, `ensure_current` leaves it exactly as it found it, nothing further is
+archived into it, and the daemon's startup reaper (`reap_archived_homes`)
+deletes no quest home — which can strand a quest on bookkeeping after its merge
+has already landed, but leaves the homes that are its last locally readable copy
+standing. Index-only queries (`imp list`, `imp search`) keep answering from the
+stale index, and that index is never rebuilt: no code path raises a lowered
+marker back to `_DATA_VERSION`, so for records written below any version but 14
+the stranding is permanent. Recovery runs through the install that wrote a given
+record — its floors match what it stamped, so it can still read it: check out
+that commit to finish or extract the affected quest. Updating every imp that
+writes here prevents further below-floor writes; it repairs none of the writes
+already made.
 
 **Constraint on future schema work: a new index column must be nullable.** An older
 writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
@@ -210,29 +214,32 @@ writer's `index.ingest` never supplies it, and that row stands until a rebuild; 
 **Constraint on future migrations: a blob migration that changes an index-visible
 value must also bump the index schema version.** Each read checks only the floor it
 touches, so a blob rewrite that changed what an index query reports would otherwise
-slip past the index-only gate on an archive this imp cannot read. The 13 → 14
-migration is the worked example: the `commits` list it writes reaches the
-searchable `events_content` column through `_collect_strings`, so
-`index._SCHEMA_VERSION` went 6 → 7 alongside `_DATA_VERSION`, and the migration's
-own rebuild re-stamps it in the same locked pass.
+slip past the index-only gate on an archive this imp cannot read. The 14 → 15
+migration is the worked example: the status it rewrites is the index's `status`
+column, which the board and `imp search` filter on, so `index._SCHEMA_VERSION`
+went 7 → 8 alongside `_DATA_VERSION`, and the migration's own rebuild re-stamps
+it in the same locked pass.
 
-**Constraint on a further `_DATA_VERSION` bump: ship the migration and hang it off
-`check_data_floor`.** That one choke point gates every blob-backed read, write and
-delete, so it subsumes both sites a bump has to reach — `archive_quest` calls it
-directly, and every blob-backed path that reaches `ensure_current` clears it first
-(`require_current`, or directly as `archive_quest` does). Hooking `ensure_current`
-instead never runs at all: it returns early on any data-version mismatch, which is
-exactly the archive a migration exists to heal, and where a caller does gate it
-`check_data_floor` raises first. The index-only readers in `archive/read.py` call
-`ensure_current` under `check_index_floor` alone and the bare-floor readers never
-call it at all, so neither reaches a migration hung there. The 13 → 14 upgrade is
-the shape to copy: version-exact (any other stored version keeps raising), one-shot
-under the index filelock with a double-checked re-read, and a no-op on a read-only
-archive root, which keeps today's refusal. A bump that also adds an index column
-must ship that migration for the same reason: an archive below the blob floor is
-never reindexed, `index.connect` only issues `CREATE TABLE IF NOT EXISTS` and so
-leaves an older writer's column set alone, and a query naming the new column would
-then fail outright instead of answering from the stale index.
+**Constraint on a further `_DATA_VERSION` bump: ship the migration and hang it
+off both hooks — `check_data_floor` for blob-backed access, and the heal at the
+top of `ensure_current` for index-only readers.** `check_data_floor` gates every
+blob-backed read, write and delete: `archive_quest` calls it directly, and every
+blob-backed path that reaches `ensure_current` clears it first
+(`require_current`, or directly as `archive_quest` does). The index-only readers
+in `archive/read.py` call `ensure_current` under `check_index_floor` alone, so
+without the heal they would answer from the un-migrated index until some
+blob-backed access happened: the heal runs the upgrade on a marker reading
+exactly `_UPGRADABLE_FROM` before `ensure_current`'s data-version check, which
+otherwise returns early on any mismatch. The bare-floor readers (`archived_ids`,
+`is_archived`) call neither hook and read the index as it stands. The 14 → 15
+upgrade is the shape to copy: version-exact (any other stored version keeps
+raising), one-shot under the index filelock with a double-checked re-read, and a
+no-op on a read-only archive root, which keeps today's refusal. A bump that also
+adds an index column must ship that migration for the same reason: an archive
+below the blob floor is never reindexed, `index.connect` only issues `CREATE
+TABLE IF NOT EXISTS` and so leaves an older writer's column set alone, and a
+query naming the new column would then fail outright instead of answering from
+the stale index.
 
 ---
 

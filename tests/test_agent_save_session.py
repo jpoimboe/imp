@@ -80,7 +80,7 @@ async def _never(_prompt: str, _interrupt: bool = False) -> str:
 
 
 @pytest.mark.anyio
-async def test_agent_save_ends_with_saved_as_draft(
+async def test_agent_save_ends_with_paused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -122,7 +122,7 @@ async def test_agent_save_ends_with_saved_as_draft(
     out = capsys.readouterr().out
     assert rc["rc"] == 130
     assert "lost the connection" not in out
-    assert out.endswith(f"{QID} · x · saved as draft\nresume: imp resume {QID}\n\n")
+    assert out.endswith(f"{QID} · x · paused\nresume: imp resume {QID}\n\n")
 
     events = [json.loads(ln) for ln in quest.events_path.read_text().splitlines()]
     types = [e["type"] for e in events]
@@ -130,7 +130,7 @@ async def test_agent_save_ends_with_saved_as_draft(
     call, res = types.index("tool_call"), types.index("tool_result")
     assert events[call]["payload"]["name"] == "save_and_exit"
     assert events[res]["payload"]["content"] == (
-        "Saved. The session closes at the end of this turn.")
+        "Paused. The session closes at the end of this turn.")
     assert call < res < types.index("conversation_saved")
     assert types[-1] == "conversation_saved"
     assert State.load(quest.state_dir).status == "paused"

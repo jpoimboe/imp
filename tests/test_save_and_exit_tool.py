@@ -48,7 +48,7 @@ def test_save_and_exit_registered() -> None:
     assert "save_and_exit" in reg
     tool = reg["save_and_exit"]
     assert tool.description == (
-        "Cleanly save this conversation and drop to the shell: a graceful pause "
+        "Cleanly pause this conversation and drop to the shell: a graceful stop "
         "at the current step — nothing built, no worktree — resumable later with "
         "`imp resume <id>`. Use when the user chooses to set the quest aside "
         "instead of building now."
@@ -63,7 +63,7 @@ def test_returns_its_result_without_requesting_save(tmp_path: Path) -> None:
     # One send() runs the body to completion: it never awaits.
     with pytest.raises(StopIteration) as stop:
         save_and_exit(_ctx(q, coordinator=coord)).send(None)
-    assert stop.value.value == "Saved. The session closes at the end of this turn."
+    assert stop.value.value == "Paused. The session closes at the end of this turn."
     assert coord.calls == []
     assert q.materialized is False
 

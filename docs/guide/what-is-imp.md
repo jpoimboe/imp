@@ -22,8 +22,8 @@ A few things worth knowing:
   you can scope something out with zero commitment, then either build it now or
   save it for later.
 - imp keeps your work in **zones**: an active list of things in flight, a
-  **backlog** of parked ideas, and an **archive** of finished or abandoned work
-  you can search later.
+  **backlog** of parked ideas, and a searchable **history** of finished,
+  abandoned, or archived work.
 - Everything for a quest — its spec, plans, and history — lives together in one
   per-quest home on disk.
 

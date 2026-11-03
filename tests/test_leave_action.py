@@ -55,17 +55,17 @@ def test_new_leave_zero_exchange_discards(tmp_path: Path) -> None:
     assert leave_control_action(ch, "new", None) == "discard"
 
 
-def test_save_intent_saves_even_with_zero_exchange(tmp_path: Path) -> None:
+def test_pause_intent_saves_even_with_zero_exchange(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "s1", exchange=False)
-    assert leave_control_action(ch, "chat", "save") == "save"
+    assert leave_control_action(ch, "chat", "pause") == "save"
 
 
-def test_save_intent_overrides_chat_mode(tmp_path: Path) -> None:
-    # Explicit /save wins over the chat-mode archive default.
+def test_pause_intent_overrides_chat_mode(tmp_path: Path) -> None:
+    # Explicit /pause wins over the chat-mode archive default.
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sn1", exchange=True)
-    assert leave_control_action(ch, "chat", "save") == "save"
+    assert leave_control_action(ch, "chat", "pause") == "save"
 
 
 def test_clear_intent_with_exchange_archives_even_for_new_mode(tmp_path: Path) -> None:
@@ -192,17 +192,17 @@ def test_was_renamed_false_without_quest_renamed_event() -> None:
     assert _was_renamed(log) is False
 
 
-def test_shelve_intent_with_exchange_archives(tmp_path: Path) -> None:
-    # /shelve is chat-style: archive (not save), like /clear.
+def test_archive_intent_with_exchange_archives(tmp_path: Path) -> None:
+    # /archive is chat-style: archive (not save), like /clear.
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sh1", exchange=True)
-    assert leave_control_action(ch, "new", "shelve") == "archive"
+    assert leave_control_action(ch, "new", "archive") == "archive"
 
 
-def test_shelve_intent_zero_exchange_discards(tmp_path: Path) -> None:
+def test_archive_intent_zero_exchange_discards(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sh2", exchange=False)
-    assert leave_control_action(ch, "new", "shelve") == "discard"
+    assert leave_control_action(ch, "new", "archive") == "discard"
 
 
 def test_had_exchange_true_for_user_message_intent() -> None:

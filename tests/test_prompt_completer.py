@@ -37,12 +37,14 @@ def test_completes_skill_names_by_prefix(tmp_path: Path) -> None:
 def test_includes_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(_skills(tmp_path))
     assert set(_texts(c, "/")) >= {
-        "help", "skills", "save", "shelve", "clear", "abandon"}
+        "help", "skills", "pause", "archive", "clear", "abandon"}
     # An unambiguous prefix fills exactly one command (no skill shares these stems).
-    assert set(_texts(c, "/sav")) == {"save"}
-    assert set(_texts(c, "/shel")) == {"shelve"}
+    assert set(_texts(c, "/pau")) == {"pause"}
+    assert set(_texts(c, "/arc")) == {"archive"}
     assert set(_texts(c, "/san")) == {"sandbox"}
     assert set(_texts(c, "/ab")) == {"abandon"}
+    assert _texts(c, "/sav") == []
+    assert _texts(c, "/shel") == []
 
 
 def test_no_completion_for_non_slash(tmp_path: Path) -> None:
@@ -53,7 +55,7 @@ def test_no_completion_for_non_slash(tmp_path: Path) -> None:
 def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
     assert set(_texts(c, "/")) == {
-        "help", "skills", "save", "shelve", "clear", "model", "sandbox",
+        "help", "skills", "pause", "archive", "clear", "model", "sandbox",
         "provider", "abandon", "compact"}
 
 

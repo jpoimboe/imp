@@ -64,7 +64,7 @@ def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
     _archive_conv(tmp_path, "darkid", "Dark mode", "2026-06-10T00:00:00+00:00",
                   "a dark note")
     hits = _search_archived(tmp_path, "dark",
-                            {"merged", "abandoned", "shelved"}, None)
+                            {"merged", "abandoned", "archived"}, None)
     assert len(hits) == 1
     assert hits[0].last_activity == "2026-06-10T00:00:00+00:00"
 
@@ -98,11 +98,11 @@ def test_search_active_hit_carries_last_activity(tmp_path: Path) -> None:
 
 def _ns(query: str, *, active: bool = False, backlog: bool = False,
         archived: bool = False, merged: bool = False, abandoned: bool = False,
-        shelved: bool = False, merged_after: str | None = None,
+        merged_after: str | None = None,
         list: bool = False, no_pager: bool = True) -> argparse.Namespace:
     return argparse.Namespace(
         query=query, active=active, backlog=backlog, archived=archived,
-        merged=merged, abandoned=abandoned, shelved=shelved,
+        merged=merged, abandoned=abandoned,
         merged_after=merged_after, list=list, no_pager=no_pager)
 
 
@@ -136,7 +136,7 @@ def test_cmd_search_prints_matching_archived_change(tmp_path: Path, capsys) -> N
     assert rc == 0
     assert "darkid" in out and "Dark mode toggle" in out
     assert "loginid" not in out
-    assert "· archive ·" in out                       # zone label, not status
+    assert "· history ·" in out                       # zone label, not status
 
 
 def test_cmd_search_no_match_prints_notice(tmp_path: Path, capsys) -> None:
@@ -233,18 +233,18 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
     rc = _cmd_search(_ns("dark", merged=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "alpha" in out and "· archive ·" in out    # archive zone tag from _search_list_line
+    assert "alpha" in out and "· history ·" in out    # history zone tag from _search_list_line
     assert "beta" not in out                           # abandoned excluded
 
 
-def test_cmd_search_shelved_filters_to_paused(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "shlv", "Dark shelved chat", status="shelved")
+def test_cmd_search_archived_filters_to_archived(tmp_path: Path, capsys) -> None:
+    _archive(tmp_path, "shlv", "Dark shelved chat", status="archived")
     _archive(tmp_path, "done", "Dark merged work", status="merged")
-    rc = _cmd_search(_ns("dark", shelved=True, list=True), tmp_path)
+    rc = _cmd_search(_ns("dark", archived=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
     assert "shlv" in out and "done" not in out
-    assert "· archive ·" in out
+    assert "· history ·" in out
 
 
 def test_cmd_search_merged_after_alone_enables_merged(tmp_path: Path, capsys) -> None:
@@ -268,18 +268,18 @@ def test_cmd_search_merged_after_returns_completed_hit_when_resolvable(
     assert "alpha" in out            # merged-after self-enabled merged; hit kept
 
 
-def test_search_parser_accepts_merged_abandoned_shelved_and_merged_after() -> None:
+def test_search_parser_accepts_merged_abandoned_archived_and_merged_after() -> None:
     ns = _build_parser().parse_args(
-        ["search", "dark", "--merged", "--abandoned", "--shelved",
+        ["search", "dark", "--merged", "--abandoned", "--archived",
          "--merged-after", "abc123"])
-    assert ns.merged is True and ns.abandoned is True and ns.shelved is True
+    assert ns.merged is True and ns.abandoned is True and ns.archived is True
     assert ns.merged_after == "abc123"
     assert not hasattr(ns, "completed")
 
 
 def test_search_parser_defaults_flags_false_merged_after_none() -> None:
     ns = _build_parser().parse_args(["search", "dark"])
-    assert ns.merged is False and ns.abandoned is False and ns.shelved is False
+    assert ns.merged is False and ns.abandoned is False and ns.archived is False
     assert ns.merged_after is None
 
 
@@ -336,7 +336,7 @@ def test_cmd_search_archived_shows_last_activity_age(tmp_path: Path, capsys) -> 
     rc = _cmd_search(_ns("dark"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert re.search(r"· archive · \d", out)
+    assert re.search(r"· history · \d", out)
 
 
 def test_cmd_search_default_includes_done_quest(tmp_path: Path, capsys) -> None:
@@ -345,7 +345,7 @@ def test_cmd_search_default_includes_done_quest(tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert rc == 0
     assert "dn1" in out
-    assert "· archive ·" in out
+    assert "· history ·" in out
 
 
 def test_cmd_search_missing_timestamp_renders_dash_age(tmp_path: Path, capsys) -> None:
@@ -353,7 +353,7 @@ def test_cmd_search_missing_timestamp_renders_dash_age(tmp_path: Path, capsys) -
     rc = _cmd_search(_ns("dark"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "· archive · -" in out
+    assert "· history · -" in out
 
 
 def test_cmd_search_output_is_plain_when_color_off(tmp_path: Path, capsys) -> None:
@@ -362,7 +362,7 @@ def test_cmd_search_output_is_plain_when_color_off(tmp_path: Path, capsys) -> No
     out = capsys.readouterr().out
     assert rc == 0
     assert "\x1b[" not in out
-    assert "· archive ·" in out
+    assert "· history ·" in out
 
 
 def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
@@ -372,12 +372,12 @@ def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
     lines = capsys.readouterr().out.splitlines()
     assert rc == 0
     assert len(lines) == 2
-    assert all(" · archive · " in ln for ln in lines)
+    assert all(" · history · " in ln for ln in lines)
 
 
 _OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
 _BRIEF = "Brief foo.py one\n\nmore body"
-_ALL_ARCHIVED = {"merged", "done", "abandoned", "shelved"}
+_ALL_ARCHIVED = {"merged", "done", "abandoned", "archived"}
 
 
 def _intent_event(text: str) -> dict[str, object]:
@@ -397,7 +397,7 @@ def _archive_titleless(tmp_path: Path, quest_id: str, *, intent: str | None,
     quest_json = tmp_path / f"{quest_id}.quest.json"
     quest_json.write_text(json.dumps(meta))
     state_json = tmp_path / f"{quest_id}.state.json"
-    state_json.write_text(json.dumps({"id": quest_id, "status": "shelved", "step": "spec"}))
+    state_json.write_text(json.dumps({"id": quest_id, "status": "archived", "step": "spec"}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -449,4 +449,4 @@ def test_cmd_search_names_titleless_quests_in_every_zone(
                  if " · " in ln and not ln.startswith(" ")}
         assert heads["act001"].startswith(f"act001 · {_OPENING} · active · ")
         assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog · ")
-        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archive · ")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · history · ")

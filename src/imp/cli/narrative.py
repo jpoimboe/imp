@@ -45,7 +45,7 @@ _OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
 
 # Human interrupt/leave reasons: like the silent yield, they append no PauseNode.
 _HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
-    {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit"})
+    {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit", "pause"})
 
 
 def _agent_message_is_turn_end(payload: dict[str, Any]) -> bool:

@@ -239,8 +239,9 @@ def test_emit_leave_pause_keystroke_prints_the_caret_shadow_above_the_head(
 
 @pytest.mark.parametrize(
     ("trigger", "display"),
-    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT")])
-def test_emit_leave_pause_signal_prints_no_caret(
+    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT"),
+     ("pause", "/pause")])
+def test_emit_leave_pause_non_keystroke_prints_no_caret(
     trigger, display, monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
@@ -255,7 +256,7 @@ def test_emit_leave_pause_signal_prints_no_caret(
 
 def test_status_spine_prompt_fallback_dim_and_unprefixed_color() -> None:
     from imp.cli import palette as pal
-    line = main._status_spine("z1", "", "shelved", "wordmark", color=True,
+    line = main._status_spine("z1", "", "archived", "wordmark", color=True,
                               intent="add a dark mode toggle")
     # the opening-prompt fallback is the dim, unprefixed middle segment
     assert pal.ansi("add a dark mode toggle", "dim") in line
@@ -264,32 +265,32 @@ def test_status_spine_prompt_fallback_dim_and_unprefixed_color() -> None:
 
 
 def test_status_spine_prompt_fallback_flattens_and_caps_at_70() -> None:
-    line = main._status_spine("z1", "   ", "shelved", "wordmark", color=False,
+    line = main._status_spine("z1", "   ", "archived", "wordmark", color=False,
                               intent="add a\n   dark   mode\ttoggle " + "y" * 80)
     # flattened to single spaces, then 69 chars + "…" = 70 display cols (NAME_CAP)
     body = "add a dark mode toggle " + "y" * 80
-    assert "z1 · " + body[:69] + "… · shelved" == line
+    assert "z1 · " + body[:69] + "… · archived" == line
 
 
 def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
-    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+    line = main._status_spine("z1", "", "archived", "wordmark", color=False,
                               intent=None)
-    assert line == "z1 · (unnamed) · shelved"
+    assert line == "z1 · (unnamed) · archived"
     assert "> (unnamed)" not in line
 
 
 def test_status_spine_title_unchanged_when_intent_present() -> None:
     # A real title wins over the opening prompt: plain, no dim, no `> `.
-    line = main._status_spine("z1", "Real title", "shelved", "wordmark",
+    line = main._status_spine("z1", "Real title", "archived", "wordmark",
                               color=False, intent="ignored prompt")
-    assert line == "z1 · Real title · shelved"
+    assert line == "z1 · Real title · archived"
 
 
 def test_status_spine_prompt_fallback_no_color_is_plain_and_parseable() -> None:
-    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+    line = main._status_spine("z1", "", "archived", "wordmark", color=False,
                               intent="when I hit save it crashed")
     # NO_COLOR / piped: plain text, no ANSI, dot-delimited spine intact
-    assert line == "z1 · when I hit save it crashed · shelved"
+    assert line == "z1 · when I hit save it crashed · archived"
     assert "\x1b[" not in line
     assert line.count(" · ") == 2
 

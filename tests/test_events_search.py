@@ -24,7 +24,7 @@ def _ev(eid: str | None, etype: str, agent_id: str | None = None,
 
 def _search_ns(query: str, **over: object) -> argparse.Namespace:
     base: dict[str, object] = dict(
-        query=query, active=False, backlog=False, archived=False,
+        query=query, active=False, backlog=False, history=False,
         type=None, agent=None, limit=None, all=False, list=False, json=False, no_pager=True)
     base.update(over)
     return argparse.Namespace(**base)
@@ -35,7 +35,7 @@ def test_selected_events_search_defaults_to_all_three() -> None:
 
 
 def test_selected_events_search_honours_explicit_flags() -> None:
-    assert m._selected_events_search(_search_ns("q", archived=True)) == (False, False, True)
+    assert m._selected_events_search(_search_ns("q", history=True)) == (False, False, True)
     assert m._selected_events_search(
         _search_ns("q", active=True, backlog=True)) == (True, True, False)
 
@@ -231,7 +231,7 @@ def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
                                              "input": {"cmd": "other"}}}) + "\n")
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["arch01"]
-    assert hits[0].zone == "archive"
+    assert hits[0].zone == "history"
     assert [o for o, _ in hits[0].events] == [1]
 
 
@@ -252,7 +252,7 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
 
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["arch01"]
-    assert hits[0].zone == "archive"
+    assert hits[0].zone == "history"
     assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
     assert hits[0].intent is None   # titled: no quest_card load (the fake has none)
 
@@ -272,11 +272,11 @@ def _bounded_hits() -> list[m.EventSearchHit]:
         ]
 
     return [
-        _hit("arc_old", "Archive Old", "archive", events("arc_old"), 5,
+        _hit("arc_old", "Archive Old", "history", events("arc_old"), 5,
              "2026-06-10T00:00:00+00:00"),
         _hit("act_old", "Active Old", "active", events("act_old"), 5,
              "2026-06-11T00:00:00+00:00"),
-        _hit("arc_new", "Archive New", "archive", events("arc_new"), 5,
+        _hit("arc_new", "Archive New", "history", events("arc_new"), 5,
              "2026-06-15T00:00:00+00:00"),
         _hit("act_new", "Active New", "active", events("act_new"), 5,
              "2026-06-16T00:00:00+00:00"),
@@ -441,8 +441,8 @@ def test_cmd_events_search_human_presentation_and_spacing(
         ),
         "\x1b[33mact_old\x1b[0m · Active Old · \x1b[2mactive\x1b[0m",
         "\x1b[33mbkl001\x1b[0m · Backlog One · \x1b[2mbacklog\x1b[0m",
-        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2marchive\x1b[0m",
-        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2marchive\x1b[0m",
+        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2mhistory\x1b[0m",
+        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2mhistory\x1b[0m",
     ]
     assert listed.endswith("\n\n") and not listed.endswith("\n\n\n")
 
@@ -569,7 +569,7 @@ def test_cmd_events_search_filters_before_sorting_and_bounding(
         "keep_new", "keep_mid", "keep_old"]
 
 
-def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) -> None:
+def test_main_routes_events_search_against_history(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     import json as _json
     line = _json.dumps({
@@ -578,7 +578,7 @@ def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) 
     _archive_events(tmp_path, "arch01", "Archived one", line)
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = main(["events", "search", "GREPTARGET", "--archived", "--no-pager"])
+        rc = main(["events", "search", "GREPTARGET", "--history", "--no-pager"])
     out = buf.getvalue()
     assert rc == 0
     assert "arch01" in out
@@ -650,10 +650,10 @@ def _intent_line(text: str) -> str:
 
 
 def _titleless_in_every_zone(tmp_path: Path) -> None:
-    """Titleless act001 (intent event), bk0001 (backlog brief), arc001 (shelved, intent event)."""
+    """Titleless act001 (intent event), bk0001 (backlog brief), arc001 (archived, intent event)."""
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
-    _archive_events(tmp_path, "arc001", "", _intent_line(_OPENING), status="shelved")
+    _archive_events(tmp_path, "arc001", "", _intent_line(_OPENING), status="archived")
     _seed_control(tmp_path)
     q = Quest.create(tmp_path, title="", quest_id="act001", base_branch="main")
     q.event_log().append(
@@ -692,30 +692,30 @@ def test_events_search_archived_titleless_hit_falls_back_to_card_seed_opening(
     line = _json.dumps({
         "id": "e0", "type": "tool_call", "timestamp": "2026-06-10T00:00:00+00:00",
         "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
-    _archive_events(tmp_path, "arc003", "", line, status="shelved",
+    _archive_events(tmp_path, "arc003", "", line, status="archived",
                     seed_opening="seeded never-run brief")
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
     assert [(h.quest_id, h.intent) for h in hits] == [("arc003", "seeded never-run brief")]
 
 
 def test_events_search_list_line_names_a_titleless_hit_dim() -> None:
-    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, _OPENING)
     assert m._events_search_list_line(hit, query="zzz", color=False) == (
-        f"bedo08 · {_OPENING} · archive")
+        f"bedo08 · {_OPENING} · history")
     assert m._events_search_list_line(hit, query="zzz", color=True) == (
-        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2marchive\x1b[0m")
+        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2mhistory\x1b[0m")
 
 
 def test_events_search_list_line_clips_a_long_fallback_at_name_cap() -> None:
     opening = "summarize " + "y" * 100
-    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, opening)
+    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, opening)
     assert m._events_search_list_line(hit, query="zzz", color=False) == (
-        "bedo08 · summarize " + "y" * 59 + "… · archive")
+        "bedo08 · summarize " + "y" * 59 + "… · history")
 
 
 def test_events_search_list_line_omits_the_name_with_neither_title_nor_intent() -> None:
-    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, None)
-    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · archive"
+    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, None)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · history"
 
 
 def _headings(out: str) -> dict[str, str]:
@@ -732,13 +732,27 @@ def test_cmd_events_search_names_titleless_quests_in_every_zone(
         heads = _headings(capsys.readouterr().out)
         assert heads["act001"].startswith(f"act001 · {_OPENING} · active")
         assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog")
-        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archive")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · history")
 
 
 def test_events_search_list_line_highlights_the_query_over_the_dim_fallback() -> None:
-    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, _OPENING)
     assert m._events_search_list_line(hit, query="foo.py", color=True) == (
         "\x1b[33mbedo08\x1b[0m · "
         "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
         "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
-        " · \x1b[2marchive\x1b[0m")
+        " · \x1b[2mhistory\x1b[0m")
+
+
+def test_events_search_help_copy_names_history() -> None:
+    p = m._build_events_search_parser()
+    assert "Searches active, backlog, and history by default" in (p.description or "")
+    assert next(a.help for a in p._actions if "--history" in a.option_strings) == (
+        "Search history quests' events.")
+
+
+def test_events_search_rejects_the_retired_archived_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        m._build_events_search_parser().parse_args(["q", "--archived"])
+    assert exc.value.code == 2
+    assert "--archived" in capsys.readouterr().err

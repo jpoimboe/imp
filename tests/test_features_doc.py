@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 DOC = Path("docs/guide/features.md")
 
 
@@ -24,7 +26,7 @@ def test_features_names_every_catalogued_capability() -> None:
     # drafts & zones
     assert "draft" in low
     assert "backlog" in low
-    assert "archive" in low
+    assert "history" in low
     # project memory
     assert "project memory" in low
     # the review gates
@@ -44,3 +46,11 @@ def test_features_documents_the_context_handoff_and_its_cap() -> None:
     assert "## Context handoff" in body
     assert "at 200k tokens, or at 80% of" in body
     assert "`context.max_reincarnations` (default 2)" in body
+
+
+@pytest.mark.parametrize("path", ["docs/guide/features.md", "docs/guide/what-is-imp.md"])
+def test_zones_prose_names_the_history_zone(path: str) -> None:
+    flat = " ".join(Path(path).read_text().split())
+    assert "searchable **history** of finished, abandoned, or archived work" in flat
+    assert "searchable archive of" not in flat
+    assert "an **archive** of" not in flat

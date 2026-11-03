@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import sys
@@ -65,6 +66,10 @@ def _at_the_question(s: TerminalSession, control_root: Path) -> Path:
     return quest_dir
 
 
+def _events(quest_dir: Path) -> list[dict]:
+    return [json.loads(ln) for ln in (quest_dir / "events.jsonl").read_text().splitlines()]
+
+
 def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
     script = _seed_scripted_gate_project(tmp_path, turns=[
         {"text": "setting up", "tools": [
@@ -84,6 +89,78 @@ def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
 
         assert rc == 130, "\n".join(s.lines())
         assert_screen(s, contains=("paused · Ctrl-D",))
+
+
+def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=[
+        {"text": "setting up", "tools": [
+            {"name": "create_and_enter_worktree", "input": {}},
+            {"name": "bash", "input": {"command": _ATTACH_POLL}},
+        ]},
+        {"text": "waiting for you"},
+    ])
+    env = _env(script)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new", "pause-gate", "--title", "pause gate"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        assert Quest.load(tmp_path, quest_dir.name).materialized   # a built quest
+        s.send("/pause\r")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(s.lines())
+        assert_screen(s, contains=("paused · /pause",))
+        assert not any(ln.strip() == "> Ctrl-D" for ln in s.lines())
+
+    paused = [e["payload"] for e in _events(quest_dir) if e["type"] == "workflow_paused"]
+    assert paused[-1]["interrupt_reason"] == "pause"
+    state = json.loads((quest_dir / "state" / "state.json").read_text())
+    assert state["status"] == "paused"
+    # Ctrl-D's disposition at this prompt: native-resume the step and continue it.
+    assert (state["resume_target"], state["resume_pending"],
+            state["resume_should_continue"]) == ("agent", "gate", True)
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "resume", quest_dir.name],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as r:
+        assert _poll(lambda: any("waiting for you" in ln for ln in r.lines()),
+                     timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
+        r.wait_idle()
+        r.send("go on\r")
+        # The reply lands as Ctrl-D's would; a prompt-interrupted target swallows it.
+        assert _poll(lambda: any(
+            e["type"] == "user_message" and "go on" in json.dumps(e["payload"])
+            for e in _events(quest_dir)), timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
+        assert not any("interrupted ·" in ln for ln in r.lines())
+
+
+@pytest.mark.parametrize(("command", "tail", "resume_suffix"), [
+    ("/pause", "paused", ""),
+    ("/archive", "archived", " — or find it later with imp search"),
+])
+def test_leave_command_in_chat_after_an_exchange_exits_130(
+    tmp_path: Path, command: str, tail: str, resume_suffix: str,
+) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=[
+        {"text": "setting up", "tools": [
+            {"name": "bash", "input": {"command": _ATTACH_POLL}},
+        ]},
+        {"text": "waiting for you"},
+    ])
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "chat", "hello there"],
+        cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
+    ) as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        assert not Quest.load(tmp_path, quest_dir.name).materialized
+        s.send(f"{command}\r")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(s.lines())
+        assert_screen(s, contains=(
+            f" · {tail}", f"resume: imp resume {quest_dir.name}{resume_suffix}"))
 
 
 def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
@@ -112,8 +189,8 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
         assert_screen(s, contains=("paused · SIGTERM",))
 
 
-def test_ctrl_d_in_chat_after_an_exchange_exits_130_shelved(tmp_path: Path) -> None:
-    # No create_and_enter_worktree: the chat stays phase-0, so Ctrl-D shelves it.
+def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> None:
+    # No create_and_enter_worktree: the chat stays phase-0, so Ctrl-D archives it.
     script = _seed_scripted_gate_project(tmp_path, turns=[
         {"text": "setting up", "tools": [
             {"name": "bash", "input": {"command": _ATTACH_POLL}},
@@ -132,4 +209,4 @@ def test_ctrl_d_in_chat_after_an_exchange_exits_130_shelved(tmp_path: Path) -> N
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("shelved",))
+        assert_screen(s, contains=("archived",))

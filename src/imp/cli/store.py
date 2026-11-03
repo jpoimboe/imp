@@ -9,7 +9,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from imp.cli.quest_row import fallback_intent
 from imp.paths import project_state_dir
@@ -72,11 +72,14 @@ class _BacklogMatch(NamedTuple):
     last_activity: str
 
 
+Zone = Literal["active", "backlog", "history"]
+
+
 @dataclass(frozen=True)
 class SearchHit:
     quest_id: str
     title: str
-    zone: str
+    zone: Zone
     content: str
     last_activity: str | None
     intent: str | None   # titleless name source (opening, else seed_opening); None when titled
@@ -225,9 +228,10 @@ class LocalStore:
 
 
 # Terminal status -> resumable. Explicit, never the _INFLIGHT complement: archiving a
-# shelved home non-resumably would drop its step blobs, so an unknown status is skipped.
+# resumable `archived` home as non-resumable would drop its step blobs, so an unknown
+# status is skipped.
 _TERMINAL_ARCHIVE_RESUMABLE: dict[str, bool] = {
-    "merged": False, "done": False, "abandoned": False, "shelved": True,
+    "merged": False, "done": False, "abandoned": False, "archived": True,
 }
 
 
@@ -688,7 +692,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
         if (status == "merged" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
-        hits.append(SearchHit(cid, title, "archive", content, last,
+        hits.append(SearchHit(cid, title, "history", content, last,
                               None if title.strip() else _display_intent_for_id(control, cid)))
     return hits
 

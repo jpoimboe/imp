@@ -38,7 +38,7 @@ configuration choice.
 A fresh quest starts as a draft — a conversation and notes on disk, with no git
 branch or worktree — so you can scope something out with zero commitment. Work is
 organized into zones: an active list of things in flight, a backlog of parked
-ideas, and a searchable archive of finished or abandoned quests.
+ideas, and a searchable **history** of finished, abandoned, or archived work.
 
 ## Project memory
 

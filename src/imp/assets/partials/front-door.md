@@ -173,9 +173,9 @@ done; nothing to do.
 - **Standing `imp/memory/` preferences** you record by launching a background `memory`
   quest on the user's confirmation — see "Recording standing preferences to memory";
   never write the tree yourself, never `.imp/`.
-- **This conversation** (keep it, abandon it, clear it) you hand back to the user via
-  the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
-  own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on` / `--base`
+- **This conversation** (pause, archive, abandon, or clear it) you hand back to the
+  user via the `/pause`, `/archive`, `/abandon`, and `/clear` commands — do **not** run
+  `imp` against your own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on` / `--base`
   before going live**.
 - **Another quest** you may mutate with `imp …` only after the user explicitly confirms.
 

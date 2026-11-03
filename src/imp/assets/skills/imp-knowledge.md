@@ -35,9 +35,9 @@ lands stays maintainable.
 - **Deterministic engine.** The engine decides nothing about your code — it
   sequences steps, routes on their results, and records every byte to an
   append-only log that is the single source of truth.
-- **Pause, resume, interrupt.** Ctrl-D to set a quest aside for later; Ctrl-C to
-  interrupt a running agent and re-steer; a run interrupted mid-call resumes from
-  the log with nothing lost.
+- **Pause, resume, interrupt.** Ctrl-D or `/pause` to set a quest aside for later;
+  Ctrl-C to interrupt a running agent and re-steer; a run interrupted mid-call
+  resumes from the log with nothing lost.
 - **Full provenance.** Trace any line of code back through the run to the
   conversation that spawned it.
 - **Search & backlog.** Full search across every quest, and a tracked backlog
@@ -67,8 +67,8 @@ Don't dig through `.imp/` — the raw event log is masked and the rest is intern
 bookkeeping. Ask the CLI instead:
 
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
-  completed quests (merged or done); `--all` adds abandoned and shelved
-  conversations, `--json` emits the board as a structured array.
+  completed quests (merged or done); `--all` adds abandoned and archived
+  quests, `--json` emits the board as a structured array.
 - `imp show <id>` — a quest's card: status, why it halted, current step, intent,
   summary, and the run ledger — a `run:` line of time, tokens, and charge (the
   run's share of the weekly quota window, or its cost when that window is
@@ -76,7 +76,7 @@ bookkeeping. Ask the CLI instead:
   for the raw spec, `show <id> verify` for the last failing gate run, `--json` for
   a structured card, no ledger).
 - `imp search <query>` — case-insensitive substring search across in-flight,
-  backlog, and archived quests' conversation content.
+  backlog, and history quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;
   `--step <name>` scopes it to one step, `-s` swaps the story for the per-step
   ledger `imp show` also carries, and owns its windowing and `--md`/`--html`

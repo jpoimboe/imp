@@ -263,15 +263,15 @@ async def serve_quest_session(
                 try:
                     reply = await user_chat_input_fn("")
                 except AwaitingUserInput:
-                    # Left at the hold loop. A ctrl-d mid-run interrupt detaches here
-                    # with the agent mid-step: the cancellation unwound past the
-                    # executor's Pause handler, so arm resume here exactly as it would
-                    # have — native-resume the interrupted step (not re-seed) and take
-                    # the continuation nudge on a no-message resume. Any other detach
-                    # left the user at the resteer prompt: its markers were already
-                    # armed by the executor Pause handler, so record the target only.
+                    # Left at the hold loop. A ctrl-d or /pause leave detaches here
+                    # with the agent mid-step, so arm resume here exactly as the
+                    # executor's Pause handler would — native-resume the interrupted
+                    # step (not re-seed) and take the continuation nudge on a
+                    # no-message resume. Any other detach left the user at the
+                    # resteer prompt: its markers were already armed by the executor
+                    # Pause handler, so record the target only.
                     state = State.load(quest.state_dir)
-                    if coordinator.pause_reason == "ctrl-d":
+                    if coordinator.pause_reason in ("ctrl-d", "pause"):
                         state.resume_target = "agent"
                         state.arm_step_resume(should_continue=True)
                     elif state.resume_should_continue:

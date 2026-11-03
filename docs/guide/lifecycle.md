@@ -16,7 +16,7 @@ prompts, partials, scripts, and skills that drove it.
 ## Statuses
 
 A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, `merged`,
-`shelved`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
+`archived`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
 at-rest status plus two runtime facts — whether a live process holds the quest's
 lock, and a durable **halt-condition** recorded on `state.json`:
 
@@ -25,7 +25,7 @@ lock, and a durable **halt-condition** recorded on `state.json`:
   `waiting`).
 - `error` — a not-live failure halt (stored `error`).
 - `merged` — merged into its base branch (stored `merged`).
-- `shelved` — an archived, resumable conversation (stored `shelved`).
+- `archived` — an archived, resumable conversation (stored `archived`).
 - `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
 - `paused` — not live, a clean stop (a yield or interrupt).
 - `new` — created, never started.
@@ -36,7 +36,7 @@ There is no `draft` status word: an
 un-materialized quest shows its real derived status (`new`/`paused`), with its
 `(threshold)` step marking that it is still being scoped.
 
-## Zones: active list, backlog, archive
+## Zones: active list, backlog, history
 
 Where a quest appears is **derived** — never a separate status string. Two facts
 decide it: whether it has been **materialized**, and its **origin**.
@@ -46,7 +46,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
-- **archive** — finished (`merged`/`abandoned`) and shelved conversations,
+- **history** — finished (`merged`/`done`/`abandoned`) and archived conversations,
   reachable by search.
 
 ## Materialize / go-live
@@ -72,13 +72,18 @@ failure pauses the quest with the command's output.
 
 When a phase-0 conversation is left, its fate depends on what happened:
 
-- **Never answered / no real exchange** → `discard_conversation` (it goes away).
-- **`imp new`, an explicit `/save`, or the quest was renamed (a design formed)**
-  → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
-  resumable later. It does **not** move to the backlog.
-- **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:
-  it leaves the active list but stays resumable (shelved) via `imp resume` or
-  findable with `imp search`.
+- **Never answered / no real exchange** (and no `/pause`) → `discard_conversation`
+  (it goes away).
+- **`imp new`, an explicit `/pause`, or the quest was renamed (a design formed)**
+  → `save_as_draft`: the quest is `paused` and `origin` stays `draft`, so it
+  remains in the active list, resumable later. It does **not** move to the backlog.
+- **After a real exchange, an explicit `/archive` or `/clear`, or otherwise** (an
+  un-renamed `imp chat` conversation) → `archive_conversation`: it leaves the
+  active list but stays resumable (`archived`) via `imp resume` or findable with
+  `imp search`. `/clear` then opens a fresh conversation.
+
+On a built quest `/archive` and `/clear` are refused; `/pause` pauses it exactly
+like Ctrl-D at that prompt.
 
 This is the exact point **training data** gets wrong — it once claimed `imp new`
 "archives a draft as resumable"; it does not. `imp new` runs `save_as_draft`, so
@@ -98,7 +103,7 @@ A script can tell from imp's exit code alone how a run ended:
 | 2 | Usage error: bad arguments, no such quest |
 | 3 | The session failed to start |
 | 4 | Lost the connection to the run (it may still be running) |
-| 130 | You ended it and nothing failed: left, paused, saved, shelved, discarded, abandoned or cancelled. A left quest is resumable with `imp resume`. |
+| 130 | You ended it and nothing failed: left, paused, archived, discarded, abandoned or cancelled. A left quest is resumable with `imp resume`. |
 
 ---
 

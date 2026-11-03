@@ -745,7 +745,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
 
 
 @pytest.mark.anyio
-async def test_save_slash_command_at_gate_records_intent_and_detaches(
+async def test_pause_slash_command_at_gate_records_intent_and_detaches(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -757,7 +757,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        # /save detaches the client; the run pauses (survives) — no abandon.
+        # /pause detaches the client; the run pauses (survives) — no abandon.
         with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
@@ -772,7 +772,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
         return client
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/save"
+        return "/pause"
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -794,12 +794,13 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
             tg.start_soon(_client)
 
     assert survived == [True]
-    assert leave_state == {"intent": "save"}
+    assert leave_state == {"intent": "pause"}
+    assert coord.leave_reason == "pause"
     assert not server.abandoned
 
 
 @pytest.mark.anyio
-async def test_shelve_slash_command_records_shelve_intent(
+async def test_archive_slash_command_records_archive_intent(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -811,7 +812,7 @@ async def test_shelve_slash_command_records_shelve_intent(
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        # /shelve detaches the client; the run pauses (survives) — no abandon.
+        # /archive detaches the client; the run pauses (survives) — no abandon.
         with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
@@ -826,7 +827,7 @@ async def test_shelve_slash_command_records_shelve_intent(
         return client
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
-        return "/shelve"
+        return "/archive"
 
     class _Driver(_NullDriver):
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -848,7 +849,7 @@ async def test_shelve_slash_command_records_shelve_intent(
             tg.start_soon(_client)
 
     assert survived == [True]
-    assert leave_state == {"intent": "shelve"}
+    assert leave_state == {"intent": "archive"}
     assert not server.abandoned
 
 
@@ -2674,11 +2675,11 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("command,expected_intent",
-                         [("/save", "save"), ("/clear", "clear")])
+                         [("/pause", "pause"), ("/clear", "clear")])
 async def test_local_echo_not_invoked_on_leave_command(
     tmp_path: Path, command: str, expected_intent: str,
 ) -> None:
-    # A leave command (/save, /clear) detaches the client and returns BEFORE the
+    # A leave command (/pause, /clear) detaches the client and returns BEFORE the
     # local_echo / send_input line, so no optimistic echo fires. (/abandon shares
     # the same pre-send early-return placement and is covered by the next test.)
     sock = str(tmp_path / "s.sock")
@@ -3363,8 +3364,8 @@ async def test_interrupt_pause_sends_no_disposition_frame(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
-    # An explicit /save after an interrupt still resolves to CONTROL_SAVE — the
+async def test_interrupt_then_pause_intent_still_saves(tmp_path: Path) -> None:
+    # An explicit /pause after an interrupt still resolves to CONTROL_SAVE — the
     # explicit intent wins even though leave_reason is unset and the run is interrupted.
     _seed_control(tmp_path)
     quest = Quest.create_draft(
@@ -3407,7 +3408,7 @@ async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
             tg.start_soon(_client)
             await wait_until(lambda: server.attached_count == 1)
             coord.request_exit("ctrl-c")        # interrupted, no leave_reason
-            leave_state["intent"] = "save"      # explicit /save
+            leave_state["intent"] = "pause"      # explicit /pause
             coord.escalation_event.set()
             with anyio.fail_after(30):   # deadlock backstop only
                 await returned.wait()

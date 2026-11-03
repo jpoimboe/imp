@@ -170,17 +170,28 @@ def test_introspection_documents_bounded_output_techniques() -> None:
 
 def test_introspection_search_entry_spans_all_zones_and_content() -> None:
     body = _introspection_doc()
-    low = body.lower()
-    # imp search now spans active + backlog + archive, not archive-only.
-    for zone in ("active", "backlog", "archive"):
-        assert zone in low, zone
-    # It matches conversation content, not just id/title.
-    assert "conversation content" in low
-    # Composable zone flags and the terse -l list are documented.
-    for flag in ("--active", "--backlog", "--archived", "-l"):
+    flat = " ".join(body.split())
+    # imp search and imp events search span active + backlog + history.
+    for zone in ("**active**", "**backlog**", "**history**"):
+        assert zone in body, zone
+    assert "**archive**" not in body
+    assert "conversation content" in flat.lower()   # the bullet wraps mid-phrase
+    for flag in ("--active", "--backlog", "--archived", "--history", "-l"):
         assert flag in body, flag
-    # The stale archive-only framing is gone.
+    assert "`--archived` meaning archived conversations only" in flat
+    # the broad --archived zone flag is gone from both search entries
+    assert "`--active` / `--backlog` / `--archived` flags" not in flat
+    assert "`--active` / `--backlog` / `--history` flags scope it" in flat
+    assert "active → backlog → history" in flat
     assert "search the archive (completed, abandoned, and left" not in body
+
+
+def test_introspection_reader_section_says_history_for_filed_quests() -> None:
+    flat = " ".join(_introspection_doc().split())
+    assert "a *different* quest — live or in history —" in flat
+    assert "Resolves live and history quests alike." in flat
+    assert "live or archived" not in flat
+    assert "imp list --all` — also includes abandoned and archived quests" in flat
 
 
 def test_introspection_documents_merged_search_and_merge_commit() -> None:
@@ -320,7 +331,8 @@ def test_knowledge_cheatsheet_documents_bounded_events_search() -> None:
     assert "`--list` to scan every matched quest" in flat
     assert "`imp events <id> ... --json` for exact payloads" in flat
     assert "`--all` only for exhaustive search output" in flat
-    assert "backlog, and archived quests' conversation content." in body
+    assert "backlog, and history quests' conversation content." in body
+    assert "`--all` adds abandoned and archived quests" in flat
 
 
 def test_knowledge_imp_edit_bullet_documents_base_flag() -> None:

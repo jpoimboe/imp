@@ -25,7 +25,7 @@ def test_introspection_documents_bounded_events_search_workflow() -> None:
     assert "imp events search <query>" in text
     assert "the structured-event sibling of `imp search`" in text
     assert "title + intent, since drafts have no events" in text
-    assert "active → backlog → archive" in flat
+    assert "active → backlog → history" in flat
     assert "first three matched quests and the first three matching events per quest" in flat
     assert "`--limit N` changes only the matched-quest bound" in flat
     assert "`--list` scans every matched quest unless capped with `--limit N`" in flat
