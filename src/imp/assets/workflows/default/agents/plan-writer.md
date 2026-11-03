@@ -115,7 +115,7 @@ greening to a later plan. If the outline slice you were handed can't land green,
 that's an outline defect: flag it as a `— needs-decision:` item, don't plan a
 red tree.
 
-**Express carve-out.** On the **express** path threshold routes straight here with
+**Express carve-out.** On the **express** path threshold hands off here with
 `fast_path: true` and **no `spec-finalizer`**, so **no `## Plan outline` exists**. Do
 **not** hard-depend on the outline: when it is absent, **self-scope** the single plan
 directly from the spec exactly as `imp` does. The outline-consumption rules apply

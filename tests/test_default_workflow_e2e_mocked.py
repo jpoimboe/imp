@@ -296,14 +296,19 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # The finalize agent uses wait_for_user to solicit the human, but the fake
     # provider returns complete_step immediately (no wait_for_user call in the
     # scripted response), so the reply channel is never exercised.
-    result = await run_quest(
-        quest,
-        on_event=lambda _e: None,
-    )
+    started: list[str] = []
+
+    def on_event(rec: dict) -> None:
+        if rec["type"] == "step_started":
+            started.append(rec["payload"]["step"])
+
+    result = await run_quest(quest, on_event=on_event)
 
     assert result is RunResult.COMPLETED, (
         f"expected COMPLETED, got {result!r}"
     )
+    # The express-only draft-spec gate never runs on the full path.
+    assert "spec-written" not in started, started
 
 
 @pytest.mark.anyio
@@ -474,9 +479,9 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     tmp_path: Path,
 ) -> None:
     quest = _seed_default_workflow(tmp_path)
-    # ceremony:express -> threshold sets fast_path=true and routes straight to
-    # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
-    # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
+    # ceremony:express -> threshold sets fast_path=true and routes via the
+    # spec-written gate to plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer)
+    # and plan review (plan-verify-commit fast-path rule). The implement-side fast_path ->
     # finalize shortcut is GONE: express now runs the full pipeline. The single
     # forward plan SKIPS batch-code-reviewer (coverage_settled unset -> deferred-sweep);
     # gap-check then latches coverage_settled, sets review_scope=change, and fires the
@@ -510,6 +515,9 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     assert "spec-finalizer" not in started, started
     assert "spec-reviewer" not in started, started
     assert "plan-reviewer" not in started, started
+    # The draft-spec gate runs on express and hands straight to plan-writer.
+    assert "spec-written" in started, started
+    assert started[started.index("spec-written") + 1] == "plan-writer", started
     # The implement-side pipeline now runs in full.
     assert "plan-writer" in started, started
     assert "plan-finalized" in started, started

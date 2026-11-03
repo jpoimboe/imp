@@ -270,14 +270,44 @@ def test_scope_code_check_clean_routes_by_fast_path() -> None:
     express = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                              output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(express.action, Goto)
-    assert express.action.target == "plan-writer" and express.action.resume is False
+    assert express.action.target == "spec-written" and express.action.resume is False
     full = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
                           output={"exit": 0, "stdout": "", "stderr": ""})
     assert full.action.target == "spec-finalizer" and full.action.resume is False
-    # The clean-exit goto forwards the configured hand-off opener (the engine forwards
-    # a script step's configured feedback: on an exit-0 route).
-    assert express.action.feedback == "Plan this from the spec drafted with the user:"
+    # Express hops to the spec-written gate bare (it owns the plan-writer opener); the
+    # full clean-exit goto forwards its configured hand-off opener.
+    assert express.action.feedback is None and express.rule.label is None
     assert full.action.feedback == "Adopt the spec drafted with the user and finalize it:"
+
+
+def test_spec_written_gates_the_express_handoff() -> None:
+    from imp.assets import bundled_workflow_dir
+    wdir = bundled_workflow_dir("default")
+    wf = load_workflow(wdir)
+    threshold = next(p for p in wf.phases if p.name == "threshold")
+    names = [s.name for s in threshold.steps]
+    assert names[names.index("scope-code-check") + 1] == "spec-written"
+    step = _steps(wf)["spec-written"]
+    assert step.show_label is False and step.show_output is True
+    assert step.command == "./scripts/spec-written.sh"
+    ok = evaluate_rules(step.rules, vars={**_BASE_VARS, "fast_path": True},
+                        output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(ok.action, Goto)
+    assert ok.action.target == "plan-writer" and ok.action.resume is False
+    assert ok.action.feedback == "Plan this from the spec drafted with the user:"
+    assert ok.rule.label == "writing plan"
+    missing = evaluate_rules(step.rules, vars={**_BASE_VARS, "fast_path": True},
+                             output={"exit": 1, "stdout": "", "stderr": "No spec at x"})
+    assert isinstance(missing.action, Goto)
+    assert missing.action.target == "threshold" and missing.action.resume is True
+    # No configured feedback: — the engine delivers the script's stderr to threshold.
+    assert missing.action.feedback is None
+    assert missing.rule.label == "writing the missing spec"
+    # The workflow comments no longer claim express skips the spec beat or that the
+    # scope gate forwards an opener to plan-writer.
+    text = (wdir / "workflow.yaml").read_text()
+    assert "express skips the spec beat entirely" not in text
+    assert "plan-writer / spec-finalizer" not in text
 
 
 def test_scope_code_check_dirty_resumes_threshold() -> None:
