@@ -95,3 +95,50 @@ def interrupted_task_lead_events() -> list[dict[str, Any]]:
         ev("10", "step_completed", step="task-lead", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
     ]
+
+
+SPEC_MARKER = "✓ spec written · imp show abc123 spec"
+
+
+def express_spec_marker_events() -> list[dict[str, Any]]:
+    """Short path: hidden threshold -> hidden scope-code-check -> hidden spec-written
+    (show_output) printing the spec marker -> planning phase."""
+    return [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="threshold", kind="agent", phase="threshold",
+           model="m", provider="anthropic", label="chatting",
+           phase_label="threshold phase", show_label=False, phase_show_label=False),
+        ev("3", "agent_message", agent_id="step:threshold/threshold",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "Spec drafted."}]}),
+        ev("4", "step_completed", step="threshold", kind="agent",
+           action={"verb": "goto", "target": "scope-code-check", "resume": False},
+           var_mutations={}),
+        ev("5", "step_started", step="scope-code-check", kind="script",
+           phase="threshold", phase_label="threshold phase", show_label=False,
+           phase_show_label=False),
+        ev("6", "step_completed", step="scope-code-check", kind="script",
+           action={"verb": "goto", "target": "spec-written", "resume": False},
+           var_mutations={}),
+        ev("7", "step_started", step="spec-written", kind="script", phase="threshold",
+           phase_label="threshold phase", show_label=False, phase_show_label=False,
+           show_output=True),
+        ev("8", "script_output", step="spec-written", stdout=SPEC_MARKER + "\n"),
+        ev("9", "step_completed", step="spec-written", kind="script",
+           action={"verb": "goto", "target": "plan-writer", "resume": False},
+           var_mutations={}),
+        ev("10", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="writing plan",
+           phase_label="planning phase · plan 1/1"),
+    ]
+
+
+def assert_spec_marker_scrollback(lines: list[str]) -> None:
+    """The marker is a `• ` line, the hidden step has no header/breadcrumb, and the
+    planning-phase rule follows the marker after one blank separator."""
+    assert "• " + SPEC_MARKER in lines, lines
+    i = lines.index("• " + SPEC_MARKER)
+    assert len(lines) > i + 2, lines
+    assert not any("spec-written" in ln for ln in lines), lines
+    assert lines[i + 1] == "", lines
+    assert lines[i + 2] == "── planning phase · plan 1/1 ───", lines

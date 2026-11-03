@@ -18,7 +18,9 @@ from tests._event_fixtures import (
     TASK_LEAD_AID,
     _two_phase_events,
     agent_text,
+    assert_spec_marker_scrollback,
     ev,
+    express_spec_marker_events,
     interrupted_task_lead_events,
     task_lead_started,
 )
@@ -3727,6 +3729,16 @@ def test_frame_suppressed_opening_live_log_parity() -> None:
         drv.on_event(e)
     drv.finish()
     assert _body(out) == _render_body(events)   # live == imp log, byte-for-byte
+
+
+def test_hidden_spec_written_marker_live_matches_log() -> None:
+    events = express_spec_marker_events()
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert_spec_marker_scrollback(_body(out))
+    assert _body(out) == _render_body(events)   # live == imp log, line for line
 
 
 def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(

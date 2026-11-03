@@ -382,9 +382,11 @@ def test_architecture_default_workflow_intro_is_the_six_phase_text() -> None:
     )
     assert "After the last plan of a multi-plan quest, `converge` runs **once**" in text
     assert (
-        "An **express** quest (chosen at threshold) skips the whole spec phase and the "
-        "`plan-reviewer` gate; everything from `implement` onward is identical." in text
+        "An **express** quest (chosen at threshold) skips spec finalization, spec review "
+        "and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on "
+        "disk and announces it; everything from `implement` onward is identical." in text
     )
+    assert "skips the whole spec phase" not in text
     # the five-phase model and the false "fast path skips the supercycle" claim are gone
     assert "Five phases" not in text
     assert "skips the spec and plan-document review gates and the supercycle" not in text
@@ -405,7 +407,9 @@ def test_architecture_legend_names_the_real_branch_steps() -> None:
 THRESHOLD_DIAGRAM = """flowchart TD
   in([intent / seed]) --> TH["threshold<br/>(explorer · researcher · spiker)"]
   TH --> SCC{{"scope-code-check"}}
-  SCC -->|express| toplan([→ plan-writer])
+  SCC -->|express| SW{{"spec-written"}}
+  SW --> toplan([→ plan-writer])
+  SW -. "no spec on disk" .-> TH
   SCC -->|full| tospec([→ spec-finalizer])
   SCC -. "code committed while scoping" .-> TH"""
 

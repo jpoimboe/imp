@@ -37,8 +37,9 @@ defaults:
 phases:
   # ── threshold: phase 0, a bare conversation (show_label:false). It answers
   # questions, scouts existing work, or scopes a build; on go-live it sets the
-  # ceremony and routes into the pipeline. express skips the spec beat entirely
-  # (the new edge); full enters spec-finalizer for adopt-with-light-review.
+  # ceremony and routes into the pipeline. express skips spec finalization and
+  # review, but spec-written still gates and announces the drafted spec; full
+  # enters spec-finalizer for adopt-with-light-review.
   - name: threshold
     show_label: false
     steps:
@@ -53,13 +54,25 @@ phases:
       - name: scope-code-check
         show_label: false
         command: ./scripts/scope-code-check.sh
-        # An exit-0 goto forwards its configured `feedback:` (the hand-off opener) to
-        # plan-writer / spec-finalizer; the dirty (exit != 0) resume carries no feedback:,
-        # so the engine delivers the script's own stderr to the resumed threshold turn.
+        # The express exit-0 goto hops to spec-written bare; the full exit-0 goto forwards
+        # its configured `feedback:` (the hand-off opener) to spec-finalizer. The dirty
+        # (exit != 0) resume carries no feedback:, so the engine delivers the script's own
+        # stderr to the resumed threshold turn.
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
+          - {if: {exit: 0, fast_path: true}, goto: spec-written}
           - {if: {exit: 0}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
           - {else: true, resume: threshold, label: "undoing code committed during scoping"}
+
+      # Express only: the drafted spec must be on disk before planning; its stdout is the
+      # marker. The exit-0 goto forwards the plan-writer hand-off opener; the missing-spec
+      # resume carries no feedback:, so the engine delivers the script's stderr to threshold.
+      - name: spec-written
+        show_label: false
+        show_output: true
+        command: ./scripts/spec-written.sh
+        rules:
+          - {if: {exit: 0}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
+          - {else: true, resume: threshold, label: "writing the missing spec"}
 
   - name: spec
     label: "spec phase"

@@ -137,7 +137,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep when there is anything to drain, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips the whole spec phase and the `plan-reviewer` gate; everything from `implement` onward is identical.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep when there is anything to drain, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips spec finalization, spec review and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on disk and announces it; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -174,12 +174,16 @@ One interactive high-tier conversation that answers questions, scouts existing w
 scopes a build. On go-live it forks the worktree and writes a draft spec; its ceremony
 sets `fast_path`. `scope-code-check` then guards the hand-off — the threshold agent must
 not have committed code to the branch while scoping; if it did, it is resumed to undo it.
+On the express path `spec-written` then checks the draft spec is on disk and shows a
+one-line marker; if it is missing, threshold is resumed to write it.
 
 ```mermaid
 flowchart TD
   in([intent / seed]) --> TH["threshold<br/>(explorer · researcher · spiker)"]
   TH --> SCC{{"scope-code-check"}}
-  SCC -->|express| toplan([→ plan-writer])
+  SCC -->|express| SW{{"spec-written"}}
+  SW --> toplan([→ plan-writer])
+  SW -. "no spec on disk" .-> TH
   SCC -->|full| tospec([→ spec-finalizer])
   SCC -. "code committed while scoping" .-> TH
 ```

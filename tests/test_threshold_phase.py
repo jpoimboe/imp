@@ -41,7 +41,7 @@ def test_threshold_express_routes_to_scope_gate_and_sets_fast_path() -> None:
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "ceremony": "express"})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "scope-code-check"  # gate first; then plan-writer on a clean tree
+    assert m.action.target == "scope-code-check"  # gate first; then spec-written, plan-writer
     assert m.action.resume is False
     assert m.var_mutations["fast_path"] is True
 
@@ -282,15 +282,19 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
     full = evaluate_rules(steps["threshold"].rules, vars=_BASE_VARS,
                           output={"status": "Success", "ceremony": "full"})
     assert isinstance(full.action, Goto) and full.action.target == "scope-code-check"
-    # On a clean tree the gate forwards by fast_path: express -> plan-writer (spec
-    # phase bypassed), full -> spec-finalizer (the first chromed beat).
+    # On a clean tree the gate forwards by fast_path: express -> spec-written (the
+    # draft-spec presence gate), full -> spec-finalizer (the first chromed beat).
     gate = steps["scope-code-check"].rules
     gate_express = evaluate_rules(gate, vars={**_BASE_VARS, "fast_path": True},
                                   output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(gate_express.action, Goto) and gate_express.action.target == "plan-writer"
+    assert isinstance(gate_express.action, Goto) and gate_express.action.target == "spec-written"
     gate_full = evaluate_rules(gate, vars={**_BASE_VARS, "fast_path": False},
                                output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(gate_full.action, Goto) and gate_full.action.target == "spec-finalizer"
+    # spec-written's clean exit is the express hand-off to plan-writer (spec phase bypassed).
+    written = evaluate_rules(steps["spec-written"].rules, vars={**_BASE_VARS, "fast_path": True},
+                             output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(written.action, Goto) and written.action.target == "plan-writer"
     # The spec phase is still the second phase, entered only on the full path.
     assert [p.name for p in wf.phases][:2] == ["threshold", "spec"]
 
