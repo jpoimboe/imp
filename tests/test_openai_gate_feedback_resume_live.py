@@ -21,6 +21,7 @@ Skips unless `--run-live` selects openai. Costs a fraction of a cent.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ def _delivered_texts(inp: list[dict[str, Any]]) -> list[str]:
 @pytest.mark.anyio
 async def test_gate_feedback_reaches_model_on_openai_resume(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    register_quest_evidence: Callable[[Path], None],
 ) -> None:
     key = openai_key()
     assert key is not None
@@ -140,6 +142,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
 
     quest = Quest.create(
         tmp_path, title="gate-fb", quest_id="gate-fb", base_branch="main")
+    register_quest_evidence(quest.quest_dir)
 
     # The gate never passes, so the run pauses at max_loops. Reaching PAUSED (not
     # an exception) already proves the live API accepted every request, including

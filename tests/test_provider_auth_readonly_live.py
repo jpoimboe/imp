@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -123,7 +123,7 @@ def _project(root: Path, provider: str) -> None:
 @pytest.mark.anyio
 async def test_one_step_run_authenticates_from_the_read_only_copy(
     provider: str, provider_auth_copy: Path, tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, register_quest_evidence: Callable[[Path], None],
 ) -> None:
     copy = provider_auth_copy
     module = _MODULES[provider]
@@ -150,6 +150,7 @@ async def test_one_step_run_authenticates_from_the_read_only_copy(
     _project(proj, provider)
     quest = Quest.create(
         proj, title=f"live-ro-{provider}", quest_id=f"live-ro-{provider}", base_branch="main")
+    register_quest_evidence(quest.quest_dir)
 
     _set_read_only(copy)
     result = await run_quest(quest)

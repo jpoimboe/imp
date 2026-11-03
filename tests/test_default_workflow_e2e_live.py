@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ def _ensure_builtin_providers() -> None:
 @pytest.mark.anyio
 async def test_live_minimal_change_completes_one_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    register_quest_evidence: Callable[[Path], None],
 ) -> None:
     key = anthropic_key()
     assert key is not None
@@ -64,6 +66,7 @@ async def test_live_minimal_change_completes_one_step(
     _git(tmp_path, "commit", "-qm", "seed")
     quest = Quest.create(
         tmp_path, title="live-smoke", quest_id="live-smoke", base_branch="main")
+    register_quest_evidence(quest.quest_dir)
 
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED

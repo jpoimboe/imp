@@ -6,6 +6,7 @@ costs on your account (subscription, Bedrock, Vertex, etc.).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,9 @@ def _ensure_builtin_providers() -> None:
 
 @pytest.mark.live("claude")
 @pytest.mark.anyio
-async def test_one_step_walk_against_claude(tmp_path: Path) -> None:
+async def test_one_step_walk_against_claude(
+    tmp_path: Path, register_quest_evidence: Callable[[Path], None],
+) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
@@ -66,6 +69,7 @@ async def test_one_step_walk_against_claude(tmp_path: Path) -> None:
     _git(tmp_path, "commit", "-qm", "seed")
     quest = Quest.create(
         tmp_path, title="live-cc", quest_id="live-cc", base_branch="main")
+    register_quest_evidence(quest.quest_dir)
 
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED
