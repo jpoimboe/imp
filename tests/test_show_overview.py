@@ -87,11 +87,17 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
     assert "doneid" in out and "merged" in out
 
 
-def test_bare_show_prints_help_and_exits_2(capsys) -> None:
+def test_bare_show_with_quest_points_at_list(tmp_path: Path, monkeypatch, capsys) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["show"])
+    captured = capsys.readouterr()
     assert rc == 2
-    err = capsys.readouterr().err
-    assert "usage: imp show" in err
+    assert captured.err == "imp: show needs a quest id — see imp list\n"
+    assert captured.out == ""
 
 
 def test_show_rejects_all_flag() -> None:

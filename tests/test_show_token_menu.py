@@ -12,23 +12,30 @@ def _ns(token, resource=None):
     return argparse.Namespace(token=token, resource=resource, no_pager=True, json=False)
 
 
-def test_bare_show_prints_help_to_stderr_exit_2(capsys) -> None:
-    # AC 1: bare `imp show` prints its own help to stderr and exits 2, no picker.
+_SHOW_NO_QUESTS = "imp: show needs a quest id\n  No quests yet — start one with imp new\n"
+
+
+def test_bare_show_in_empty_project_says_start_one(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # Bare `imp show` names the missing id on stderr and exits 2, no picker.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["show"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp show" in captured.err
-    assert "--json" in captured.err          # the command's full help, not a one-liner
+    assert captured.err == _SHOW_NO_QUESTS
     assert captured.out == ""
 
 
-def test_bare_show_help_identical_when_interactive(monkeypatch, capsys) -> None:
-    # AC 1: no interactive branch — even with _interactive() True, help prints, exit 2.
+def test_bare_show_message_identical_when_interactive(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_interactive", lambda: True)
     rc = main(["show"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp show" in captured.err
+    assert captured.err == _SHOW_NO_QUESTS
     assert captured.out == ""
 
 
