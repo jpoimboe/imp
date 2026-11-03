@@ -192,6 +192,7 @@ async def serve_quest_session(
             quest.workflow_dir / "skills", name),
         on_query=build_session_handler(quest.control_root, parent_id=quest.id),
         set_provider=_set_provider,
+        current_step=lambda: State.load(quest.state_dir).step,
     )
     # Raw broadcast, not the liveness fan-out: interrupt records must not pulse
     # note_activity().
@@ -305,8 +306,10 @@ async def serve_quest_session(
                 log=quest.event_log())
         if result is RunResult.PAUSED and server.left_at is not None:
             state = State.load(quest.state_dir)
-            _record_landing(state, server.left_at.prompt, _resolve_step_kind(quest))
-            state.save(quest.state_dir)
+            # The run moved on since the leave: the executor's own resume arming stands.
+            if state.step == server.left_at.step:
+                _record_landing(state, server.left_at.prompt, _resolve_step_kind(quest))
+                state.save(quest.state_dir)
         return result
 
     # Snapshot crash liveness BEFORE acquire(): ProjectLock.acquire() overwrites

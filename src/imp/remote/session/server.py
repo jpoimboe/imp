@@ -83,8 +83,9 @@ _DEFAULT_FIRST_ATTACH_TIMEOUT = 30.0
 
 @dataclass(frozen=True)
 class LeftAt:
-    """Where the run was at the session's first leave: the pending prompt, or None mid-run."""
+    """Where the run was at the session's first leave: the step, and the prompt (None mid-run)."""
     prompt: dict[str, Any] | None
+    step: str | None
 
 
 class SessionServer:
@@ -102,6 +103,7 @@ class SessionServer:
         skill_loader: Callable[[str], str] | None = None,
         on_query: Callable[[str, dict[str, Any]], Any] | None = None,
         set_provider: Callable[[str], None] | None = None,
+        current_step: Callable[[], str | None] = lambda: None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
@@ -115,6 +117,7 @@ class SessionServer:
         self._first_attach_timeout = first_attach_timeout
         self._skill_loader = skill_loader
         self._set_provider = set_provider
+        self._current_step = current_step
         # Set on the first 0 -> 1 LEASED attach and never cleared: distinguishes
         # "no keep-alive client has arrived yet" (startup — wait) from "a
         # keep-alive client attached and left" (hibernate now) at the
@@ -395,7 +398,7 @@ class SessionServer:
 
     def _latch_leave(self) -> None:
         if self.left_at is None:
-            self.left_at = LeftAt(self._pending_prompt)
+            self.left_at = LeftAt(self._pending_prompt, self._current_step())
 
     def set_pending_prompt(self, event: dict[str, Any] | None) -> None:
         """Track a prompt event to re-emit to clients that connect after it fires."""

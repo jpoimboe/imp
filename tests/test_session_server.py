@@ -313,7 +313,7 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
         await client.aclose()
         await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
-        assert server.left_at == LeftAt(gate)   # latched before the gate unwinds
+        assert server.left_at == LeftAt(gate, None)   # latched before the gate unwinds
         tg.cancel_scope.cancel()
 
 
@@ -1058,7 +1058,7 @@ async def test_last_leased_detach_pauses_mid_step(tmp_path: Path) -> None:
         await wait_until(lambda: coord.should_pause)
         assert coord.should_pause
         assert coord.pause_reason == "detached"
-        assert server.left_at == LeftAt(None)   # left mid-run, no prompt open
+        assert server.left_at == LeftAt(None, None)   # left mid-run, no prompt open
         release.set()
         await wait_until(lambda: "r" in result)
         tg.cancel_scope.cancel()
@@ -1178,7 +1178,7 @@ def test_leave_frame_latches_the_pending_prompt_first_wins(tmp_path: Path) -> No
     server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
     server.set_pending_prompt({"type": "awaiting_user_input", "payload": {"prompt": "second"}})
     server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
-    assert server.left_at == LeftAt(first)
+    assert server.left_at == LeftAt(first, None)
 
 
 def test_leave_frame_dropped_on_control_queue_overflow_does_not_latch(
@@ -1207,7 +1207,7 @@ async def test_dispatched_leave_relatches_after_a_reply_cleared_the_arrival_latc
     server.left_at = None             # a queued reply was consumed: _chat cleared the latch
     server.set_pending_prompt(None)   # the run carried on mid-step
     await server._dispatch_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
-    assert server.left_at == LeftAt(None)
+    assert server.left_at == LeftAt(None, None)
 
 
 @pytest.mark.anyio
@@ -1221,7 +1221,7 @@ async def test_internal_pause_dispatched_at_a_prompt_latches_that_prompt(
     prompt = {"type": "awaiting_user_input", "payload": {"prompt": "go?"}}
     server.set_pending_prompt(prompt)   # opened between the enqueue and the dispatch
     await server._dispatch_control(_INTERNAL_PAUSE)
-    assert server.left_at == LeftAt(prompt)
+    assert server.left_at == LeftAt(prompt, None)
 
 
 @pytest.mark.anyio
@@ -1250,7 +1250,7 @@ async def test_side_effect_pauses_do_not_latch(tmp_path: Path) -> None:
 async def test_reply_at_a_prompt_clears_the_leave_latch(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
-    server.left_at = LeftAt(None)   # an earlier leave the session carried on past
+    server.left_at = LeftAt(None, None)   # an earlier leave the session carried on past
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
@@ -2277,3 +2277,12 @@ async def test_leave_controls_stamp_leave_reason_over_first_wins_pause(
     assert coord.pause_reason == "ctrl-c"
     if action == CONTROL_SAVE:
         assert server.save_reason == reason
+
+
+def test_leave_latch_records_the_step_at_first_leave(tmp_path: Path) -> None:
+    step = ["verify"]
+    server = SessionServer(str(tmp_path / "s.sock"), current_step=lambda: step[0])
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    step[0] = "task-lead"
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    assert server.left_at == LeftAt(None, "verify")

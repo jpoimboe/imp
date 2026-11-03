@@ -351,3 +351,70 @@ async def test_answer_at_a_reasked_question_reaches_the_agent(
 
     await _leg(quest, _real_run, _answer, resume=True)
     assert _lines(marker) == 3   # the agent replayed into the re-asked question
+
+
+_NAVIGATIONS = [
+    # verify's failure rule is `resume: task-lead`: Goto(resume=True) keeps the target.
+    pytest.param("verify", "task-lead", ("task-lead", None, False), id="bounce"),
+    # integrate-rebase's exit-6 rule continues into reconciler: navigation clears resume.
+    pytest.param("integrate-rebase", "reconciler", (None, None, False), id="continue"),
+]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("script", "agent", "landing"), _NAVIGATIONS)
+async def test_midrun_leave_on_a_script_that_navigates_keeps_the_executor_arming(
+    tmp_path: Path, script: str, agent: str, landing: Any,
+) -> None:
+    quest = _make_quest(tmp_path, QID)
+    _seed_step(quest, script)
+    started: list[int] = []
+
+    async def _script_navigates(_q: Quest, *, coordinator: Any, **_kw: Any) -> RunResult:
+        started.append(1)
+        await wait_until(lambda: coordinator.should_pause)
+        st = State.load(quest.state_dir)   # the script finished and navigated, then paused
+        st.step = agent
+        if landing[0] is None:
+            st.clear_step_resume()
+        else:
+            st.arm_step_resume(should_continue=False)
+        st.save(quest.state_dir)
+        return RunResult.PAUSED
+
+    async def _body(client: SessionClient, _r: Events) -> None:
+        await wait_until(lambda: bool(started))
+        await _leave(client, "ctrl-d")
+
+    assert await _leg(quest, _script_navigates, _body) is RunResult.PAUSED
+    assert _landing(quest) == landing
+
+
+@pytest.mark.anyio
+async def test_question_leave_then_lane_eviction_leaves_resume_cleared(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+
+    quest = _make_quest(tmp_path, QID)
+    _seed_step(quest, "reconciler")
+
+    async def _asks_then_evicts(
+        _q: Quest, *, on_event: Any, user_chat_input_fn: Any, **_kw: Any,
+    ) -> RunResult:
+        on_event({"type": "awaiting_user_input",
+                  "payload": {"prompt": "which way?", "interrupt": False}})
+        with contextlib.suppress(AwaitingUserInput):
+            await user_chat_input_fn("")
+        st = State.load(quest.state_dir)   # eviction rewinds to the acquire step
+        st.step = "wait-for-head"
+        st.clear_step_resume()
+        st.save(quest.state_dir)
+        return RunResult.PAUSED
+
+    async def _body(client: SessionClient, received: Events) -> None:
+        await wait_until(lambda: bool(_gates(received)))
+        await _leave(client, "lease-drop")
+
+    assert await _leg(quest, _asks_then_evicts, _body) is RunResult.PAUSED
+    assert _landing(quest) == (None, None, False)
