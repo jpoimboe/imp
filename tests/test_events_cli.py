@@ -11,6 +11,8 @@ from imp.cli.main import main
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import JsonlEventLog
 from imp.paths import project_state_dir
+from tests.conftest import _seed_control
+from tests.test_inflight_sort import _seed_inflight
 
 
 def _make_live_quest(control: Path, cid: str, events: list[dict]) -> None:
@@ -97,15 +99,17 @@ def test_events_comma_and_repeat_type_equivalent(tmp_path, monkeypatch) -> None:
     assert "#2" in comma and "#3" in comma
 
 
-def test_events_bare_no_id_prints_help_exit_2(tmp_path, monkeypatch, capsys) -> None:
+def test_events_bare_no_id_points_at_list(tmp_path, monkeypatch, capsys) -> None:
     import imp.cli.main as m
-    _make_live_quest(tmp_path, "aaa111", _EVENTS)
+    _seed_control(tmp_path)
+    _seed_inflight(tmp_path, "aaa111", created="2026-06-01T00:00:00+00:00",
+                   started="2026-06-01T00:00:00+00:00")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["events"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp events" in captured.err
-    assert "aaa111" not in captured.out
+    assert captured.err == "imp: events needs a quest id — see imp list\n"
+    assert captured.out == ""
 
 
 def test_events_unknown_quest_errors(tmp_path, monkeypatch) -> None:

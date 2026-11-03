@@ -2221,7 +2221,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     from imp.cli.store import make_store
     token = args.token
     if token is None:
-        args.parser.print_help(sys.stderr)
+        _emit_missing_quest_id("show")
         return 2
     control = _control_root()
     try:
@@ -2286,6 +2286,23 @@ def _row_display_intent(control: Path, r: _Row) -> str | None:
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
+
+
+def _emit_missing_quest_id(command: str) -> None:
+    """Bare `imp <command>`: name the missing id; outside a repo counts as no quests."""
+    from imp.engine import worktree
+    try:
+        control = _control_root()
+    except worktree.PreconditionError:
+        any_quest = False
+    else:
+        rows = _overview_rows(control, dispositions=_board_dispositions(show_all=True),
+                              cutoff=None)
+        any_quest = bool(rows.inflight or rows.backlog or rows.history)
+    if any_quest:
+        _emit_cli_error(f"{command} needs a quest id — see imp list")
+    else:
+        _emit_cli_error(f"{command} needs a quest id\n  {_NO_QUESTS_MESSAGE}")
 
 
 def _with_trailing_blank(lines: list[str]) -> list[str]:
@@ -2649,7 +2666,6 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
-    control = _control_root()
     if args.follow:
         conflict = _follow_conflict(args)
         if conflict is not None:
@@ -2657,8 +2673,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
             return 2
         args.no_pager = True
     if args.token is None:
-        args.parser.print_help(sys.stderr)
+        _emit_missing_quest_id("log")
         return 2
+    control = _control_root()
     quest_id: str
     try:
         quest_id = _resolve_id(control, args.token)
@@ -4115,7 +4132,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
     from imp.engine import events_index as ei
 
     if args.token is None:
-        args.parser.print_help(sys.stderr)
+        _emit_missing_quest_id("events")
         return 2
     control = _control_root()
     try:

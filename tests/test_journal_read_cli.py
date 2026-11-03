@@ -98,7 +98,7 @@ def test_log_unknown_slug_returns_rc_2(
     assert "ghost" in capsys.readouterr().err
 
 
-def test_log_no_slug_prints_help_exit_2(
+def test_log_no_slug_with_merged_quest_points_at_list(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.main as m
@@ -111,10 +111,10 @@ def test_log_no_slug_prints_help_exit_2(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = main(["log"])  # no slug → own help, exit 2 (no most-recent default)
+    rc = main(["log"])  # no slug → missing-id error, exit 2 (no most-recent default)
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp log" in captured.err
+    assert captured.err == "imp: log needs a quest id — see imp list\n"
     assert captured.out == ""
 
 

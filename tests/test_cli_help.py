@@ -127,19 +127,6 @@ def test_bare_events_search_prints_full_help_on_stderr(
     assert "--agent" in err
 
 
-def test_bare_events_lists_the_search_sibling_on_stderr(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-) -> None:
-    # AC 5: bare `imp events` (no id) prints its own help — which now carries the
-    # search-sibling line — to stderr and exits 2. The no-id guard precedes
-    # _control_root(), so no repo/monkeypatch is needed.
-    monkeypatch.setenv("COLUMNS", "200")
-    rc = main(["events"])
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "imp events search <query>" in captured.err
-
-
 def test_new_message_help_is_seed_alias(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

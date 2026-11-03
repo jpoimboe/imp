@@ -6,23 +6,30 @@ import imp.cli.main as m
 import imp.cli.store as s
 from imp.cli.main import main
 
+_EVENTS_NO_QUESTS = "imp: events needs a quest id\n  No quests yet — start one with imp new\n"
 
-def test_bare_events_prints_help_to_stderr_exit_2(capsys) -> None:
-    # AC 3: bare `imp events` prints its own help to stderr and exits 2.
+
+def test_bare_events_in_empty_project_says_start_one(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # Bare `imp events` names the missing id on stderr and exits 2.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["events"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp events" in captured.err
-    assert "--type" in captured.err
+    assert captured.err == _EVENTS_NO_QUESTS
     assert captured.out == ""
 
 
-def test_bare_events_help_identical_when_interactive(monkeypatch, capsys) -> None:
+def test_bare_events_message_identical_when_interactive(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_interactive", lambda: True)
     rc = main(["events"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "usage: imp events" in captured.err
+    assert captured.err == _EVENTS_NO_QUESTS
     assert captured.out == ""
 
 
