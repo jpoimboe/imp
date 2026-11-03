@@ -9,6 +9,7 @@ from imp.agents.skills import (
     SkillError,
     SkillNameError,
     SkillNotFound,
+    list_internal_skills,
     list_user_skills,
     load_internal_skill,
     load_user_skill,
@@ -157,6 +158,19 @@ def test_list_user_skills_missing_user_dir_is_empty(tmp_path: Path) -> None:
     skills = tmp_path / "workflow" / "skills"
     skills.mkdir(parents=True)
     assert list_user_skills(skills) == []
+
+
+def test_list_internal_skills_top_level_only(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    (skills / "b.md").write_text("# B\n")
+    (skills / "a.md").write_text("# A\n")
+    (skills / "notes.txt").write_text("not a skill\n")
+    (skills / "user" / "mine.md").write_text("# Mine\n")
+    assert list_internal_skills(skills) == ["a", "b"]
+
+
+def test_list_internal_skills_missing_dir_is_empty(tmp_path: Path) -> None:
+    assert list_internal_skills(tmp_path / "nope") == []
 
 
 def test_overlay_copies_project_skills_into_user_dir(tmp_path: Path) -> None:

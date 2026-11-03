@@ -129,6 +129,65 @@ def test_skills_builtin_cannot_be_shadowed(tmp_path: Path) -> None:
     assert "SHADOW" not in "\n".join(out)
 
 
+def test_skills_empty_user_pool_lists_agent_skills(tmp_path: Path) -> None:
+    quest = _FakeQuest(tmp_path)
+    skills = quest.workflow_dir / "skills"
+    for md in (skills / "user").glob("*.md"):
+        md.unlink()
+    (skills / "b.md").write_text("# B\n")
+    (skills / "a.md").write_text("# A\n")
+    out: list[str] = []
+    assert handle_slash_line("/skills", quest=quest, output_fn=out.append) is REPROMPT
+    assert out[2:] == [
+        "Your skills (load with /<name>):",
+        "  none — add .md files to imp/skills/ to create one",
+        "Agent skills (loaded by agents as needed, not with /<name>):",
+        "  a",
+        "  b",
+    ]
+
+
+def test_skills_user_section_precedes_agent_section(tmp_path: Path) -> None:
+    quest = _FakeQuest(tmp_path)
+    skills = quest.workflow_dir / "skills"
+    (skills / "user" / "refactor.md").write_text(
+        "---\ndescription: Refactor helper\n---\n# Refactor\n"
+    )
+    (skills / "imp-knowledge.md").write_text("# K\n")
+    out: list[str] = []
+    assert handle_slash_line("/skills", quest=quest, output_fn=out.append) is REPROMPT
+    assert out[2:] == [
+        "Your skills (load with /<name>):",
+        "  /debug",
+        "  /refactor    Refactor helper",
+        "Agent skills (loaded by agents as needed, not with /<name>):",
+        "  imp-knowledge",
+    ]
+
+
+def test_skills_agent_section_excludes_user_and_omits_when_empty(tmp_path: Path) -> None:
+    quest = _FakeQuest(tmp_path)
+    out: list[str] = []
+    # No top-level *.md: the agent heading is not printed at all.
+    assert handle_slash_line("/skills", quest=quest, output_fn=out.append) is REPROMPT
+    assert out[2:] == ["Your skills (load with /<name>):", "  /debug", "  /refactor"]
+    assert not any(line.startswith("Agent skills") for line in out)
+    # With a top-level skill, user/ files still never appear in the agent section.
+    (quest.workflow_dir / "skills" / "tdd.md").write_text("# TDD\n")
+    out.clear()
+    handle_slash_line("/skills", quest=quest, output_fn=out.append)
+    agent = out[out.index("Agent skills (loaded by agents as needed, not with /<name>):") + 1:]
+    assert agent == ["  tdd"]
+
+
+def test_help_describes_skills_both_pools() -> None:
+    from imp.cli.slash import _help
+    out: list[str] = []
+    _help(out.append, materialized=False)
+    assert "  /skills            List your skills and the agents' skills" in out
+    assert not any("List loadable skills" in line for line in out)
+
+
 class _FakePrompt:
     """Returns queued lines in order from ask_async; records the question kwarg."""
 

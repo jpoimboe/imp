@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from imp.agents.skills import list_user_skills
+from imp.agents.skills import list_internal_skills, list_user_skills
 from imp.cli.live_driver import compose_identity_toolbar
 from imp.cli.model_command import print_model_roster, validate_model_arg
 from imp.cli.palette import caret
@@ -209,19 +209,23 @@ def handle_slash_line(
 
 
 def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
-    skills = list_user_skills(skills_dir)
-    if not skills:
-        out("No skills available in this workflow.")
-        return
-    out("Available skills (load with /<name>):")
-    for name, description in skills:
+    out("Your skills (load with /<name>):")
+    user_skills = list_user_skills(skills_dir)
+    if not user_skills:
+        out("  none — add .md files to imp/skills/ to create one")
+    for name, description in user_skills:
         out(f"  /{name}    {description}" if description else f"  /{name}")
+    internal = list_internal_skills(skills_dir)
+    if internal:
+        out("Agent skills (loaded by agents as needed, not with /<name>):")
+        for name in internal:
+            out(f"  {name}")
 
 
 def _help(out: Callable[[str], None], *, materialized: bool) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
-    out("  /skills            List loadable skills")
+    out("  /skills            List your skills and the agents' skills")
     out("  /pause             Pause and exit; resume with imp resume <id>")
     if not materialized:
         out("  /archive           Archive this conversation (find it later with imp search)")
