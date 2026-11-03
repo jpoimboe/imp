@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from imp.cli.live_status import LiveStatus
     from imp.cli.quota_column import QuotaColumn, QuotaFallback
     from imp.cli.render_summary import StepRow, SummaryHeader
-    from imp.cli.store import QuestCard, SearchHit, Store, _Row
+    from imp.cli.store import QuestCard, SearchHit, Store, Zone, _Row
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.quest import Quest
     from imp.engine.state import State
@@ -3502,16 +3502,14 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
         picked.add("merged")
     if args.abandoned:
         picked.add("abandoned")
-    if args.shelved:
-        picked.add("archived")
     if args.archived:
-        picked |= {"merged", "done", "abandoned", "archived"}
+        picked.add("archived")
     return picked
 
 
 def _history_by_disposition(control: Path, *, dispositions: set[str],
                             live_ids: set[str] | None) -> list[_Row]:
-    """Archive-zone rows for the requested dispositions, newest-first."""
+    """History-zone rows for the requested dispositions, newest-first."""
     wanted = dispositions & {"merged", "done", "abandoned", "archived"}
     rows = _completed_rows(control, live_ids) + _archived_rows(control, live_ids)
     return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
@@ -3644,7 +3642,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                           color=color, name_cap=quest_row.NAME_CAP)
 
 
-def _board_entry_json(r: _Row, *, zone: Literal["active", "backlog", "archive"],
+def _board_entry_json(r: _Row, *, zone: Zone,
                       status: str, intent: str | None) -> dict[str, Any]:
     """One board entry's always-present keys. `status` is a parameter because a
     backlog row's slot 1 holds its origin word, not a status."""
@@ -3662,7 +3660,7 @@ def _board_entry_json(r: _Row, *, zone: Literal["active", "backlog", "archive"],
 
 def _board_json(control: Path, *, dispositions: set[str],
                 cutoff: datetime | None) -> list[dict[str, Any]]:
-    """The board as JSON entries in display order: in-flight, backlog, archive."""
+    """The board as JSON entries in display order: in-flight, backlog, history."""
     rows = _overview_rows(control, dispositions=dispositions, cutoff=cutoff)
     entries: list[dict[str, Any]] = []
     for r in rows.inflight:
@@ -3677,7 +3675,7 @@ def _board_json(control: Path, *, dispositions: set[str],
         entry["readiness"] = "blocked" if r[2] == "blocked" else "ready"
         entries.append(entry)
     for r in rows.history:
-        entries.append(_board_entry_json(r, zone="archive", status=r[1],
+        entries.append(_board_entry_json(r, zone="history", status=r[1],
                                          intent=rows.intents.get(r[0])))
     return entries
 
@@ -3695,20 +3693,18 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
-_SEARCH_ZONES = ("active", "backlog", "archive")
+_SEARCH_ZONES: tuple[Zone, ...] = ("active", "backlog", "history")
 
 
 def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
-    """(search_active, search_backlog, archive_statuses) from the search flags."""
+    """(search_active, search_backlog, history_statuses) from the search flags."""
     statuses: set[str] = set()
     if args.merged:
         statuses.add("merged")
     if args.abandoned:
         statuses.add("abandoned")
-    if args.shelved:
-        statuses.add("archived")
     if args.archived:
-        statuses |= {"merged", "done", "abandoned", "archived"}
+        statuses.add("archived")
     if args.merged_after is not None:
         statuses.add("merged")
     if not (args.active or args.backlog or statuses):
@@ -3717,10 +3713,10 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
 
 
 def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
-    """(active, backlog, archived) zone flags; none given searches all three."""
-    if not (args.active or args.backlog or args.archived):
+    """(active, backlog, history) zone flags; none given searches all three."""
+    if not (args.active or args.backlog or args.history):
         return True, True, True
-    return args.active, args.backlog, args.archived
+    return args.active, args.backlog, args.history
 
 
 def _matched_events(
@@ -3746,7 +3742,7 @@ def _matched_events(
 class EventSearchHit(NamedTuple):
     quest_id: str
     title: str
-    zone: str
+    zone: Zone
     last_activity: str | None
     events: list[tuple[int, dict[str, Any]]]
     handle_map: dict[str, str]
@@ -3801,7 +3797,7 @@ def _archived_hit_intent(store: Store, quest_id: str,
 def _events_search_archived(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
-    """Archived quests: index candidates re-scanned to specific matching events."""
+    """History-zone quests: index candidates re-scanned to specific matching events."""
     from imp.cli.store import make_store
     store = make_store(control)
     hits: list[EventSearchHit] = []
@@ -3811,7 +3807,7 @@ def _events_search_archived(
         if matched:
             intent = None if title.strip() else _archived_hit_intent(store, cid, events)
             hits.append(EventSearchHit(
-                cid, title, "archive", last, matched, handle_map, len(matched), overlays,
+                cid, title, "history", last, matched, handle_map, len(matched), overlays,
                 intent))
     return hits
 
@@ -3820,13 +3816,13 @@ def _events_search(
     control: Path, query: str, zones: tuple[bool, bool, bool], *,
     types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
-    active, backlog, archived = zones
+    active, backlog, history = zones
     hits: list[EventSearchHit] = []
     if active:
         hits += _events_search_active(control, query, types=types, agents=agents)
     if backlog:
         hits += _events_search_backlog(control, query, types=types, agents=agents)
-    if archived:
+    if history:
         hits += _events_search_archived(control, query, types=types, agents=agents)
     return hits
 
@@ -4222,7 +4218,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
             "Case-insensitive substring search over structured event content "
             "(tool calls, tool results, agent reasoning, skill loads) across "
             "quests — the structured-event sibling of `imp search` (prose only). "
-            "Searches active, backlog, and archive by default; --type / --agent "
+            "Searches active, backlog, and history by default; --type / --agent "
             "narrow which events match."),
     )
     p.add_argument(
@@ -4232,8 +4228,8 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
                    help="Search in-flight quests' events.")
     p.add_argument("--backlog", action="store_true",
                    help="Search backlog quests (matched on title + intent).")
-    p.add_argument("--archived", action="store_true",
-                   help="Search archived quests' events.")
+    p.add_argument("--history", action="store_true",
+                   help="Search history quests' events.")
     p.add_argument(
         "--type", action=SplitAppend, default=None,
         help="Keep only these event types (repeatable / comma-joined).")
@@ -4572,11 +4568,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, an overview of your quests — in-flight, the "
             "backlog, and every merged quest. -a/--all also includes "
-            "abandoned/shelved quests (the block is then labelled `history`)."),
+            "abandoned/archived quests (the block is then labelled `history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Also include abandoned and shelved quests "
+        help="Also include abandoned and archived quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--active", action="store_true",
@@ -4591,11 +4587,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--abandoned", action="store_true",
         help="Show only abandoned quests.")
     p_list.add_argument(
-        "--shelved", action="store_true",
-        help="Show only shelved conversations.")
-    p_list.add_argument(
         "--archived", action="store_true",
-        help="Show merged, abandoned, and shelved quests (the archive).")
+        help="Show only archived conversations.")
     p_list.add_argument(
         "--since", metavar="SPEC", default=None,
         help="Show only quests active since SPEC — today, yesterday, this-week, "
@@ -4636,7 +4629,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "search",
         help="Search quests by id, title, or conversation content.",
         description=(
-            "Search active (in-flight + drafts), backlog, and archived quests "
+            "Search active (in-flight + drafts), backlog, and history (merged, "
+            "abandoned, archived) quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
             "are searched. --merged scopes to merged quests."),
@@ -4657,11 +4651,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--abandoned", action="store_true",
         help="Search abandoned quests.")
     p_search.add_argument(
-        "--shelved", action="store_true",
-        help="Search shelved conversations.")
-    p_search.add_argument(
         "--archived", action="store_true",
-        help="Search archived (merged, abandoned, shelved) quests.")
+        help="Search archived conversations.")
     p_search.add_argument(
         "--merged-after", metavar="COMMIT", default=None,
         help="Keep only merged quests whose merge landed after COMMIT "

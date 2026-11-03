@@ -80,9 +80,9 @@ def test_render_hit_heading_then_two_space_excerpts() -> None:
 
 
 def test_render_hit_no_match_lines_when_only_heading_matches() -> None:
-    hit = _SearchHit("arcid", "Dark mode", "archive", "", None, None)
+    hit = _SearchHit("arcid", "Dark mode", "history", "", None, None)
     lines = _render_search_hit(hit, "dark", now=_NOW, color=False)
-    assert lines == ["arcid · Dark mode · archive · -"]
+    assert lines == ["arcid · Dark mode · history · -"]
     assert not any("matched on" in line for line in lines)
 
 

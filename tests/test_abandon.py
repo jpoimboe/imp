@@ -325,13 +325,13 @@ def test_search_finds_abandoned_draft(
 
     ns = argparse.Namespace(
         query="Zephyr", active=False, backlog=False, archived=False,
-        merged=False, abandoned=False, shelved=False, merged_after=None,
+        merged=False, abandoned=False, merged_after=None,
         list=False, no_pager=True)
     rc = _cmd_search(ns, tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
     assert "idea1" in out            # abandoned draft is found
-    assert "· archive ·" in out      # surfaced from the archive zone
+    assert "· history ·" in out      # surfaced from the history zone
 
 
 def test_abandon_returns_rc_and_message_without_printing(

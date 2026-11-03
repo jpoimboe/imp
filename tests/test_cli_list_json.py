@@ -87,7 +87,7 @@ def test_board_json_orders_the_three_zones_and_tags_each(tmp_path: Path) -> None
     data = m._board_json(tmp_path, dispositions=set(m._DEFAULT_LIST_DISPOSITIONS),
                          cutoff=None)
     assert [(e["id"], e["zone"]) for e in data] == [
-        ("live01", "active"), ("idea03", "backlog"), ("mrgd05", "archive")]
+        ("live01", "active"), ("idea03", "backlog"), ("mrgd05", "history")]
 
 
 def test_board_json_active_entry_carries_the_core_keys_and_step(
@@ -160,7 +160,7 @@ def test_board_json_archive_entry_omits_step_and_nulls_empty_timestamps(
     by_id = {e["id"]: e
              for e in m._board_json(tmp_path, dispositions={"merged"}, cutoff=None)}
     assert by_id["mrgd05"] == {
-        "id": "mrgd05", "zone": "archive", "title": "Mrgd05", "intent": None,
+        "id": "mrgd05", "zone": "history", "title": "Mrgd05", "intent": None,
         "status": "merged", "created": "2026-06-02T00:00:00+00:00",
         "last_activity": "2026-06-10T00:00:00+00:00"}
     assert by_id["nots01"]["created"] is None
@@ -170,13 +170,13 @@ def test_board_json_archive_entry_omits_step_and_nulls_empty_timestamps(
 def test_board_json_unnamed_archived_entry_carries_its_intent_and_omits_step(
         tmp_path: Path) -> None:
     # `_archive_with_event` seeds an `abandoned` quest whose step is `"spec"`, so a
-    # whole-entry equality here pins both halves of the archive zone: its intent
+    # whole-entry equality here pins both halves of the history zone: its intent
     # comes from the gatherer's `_resolve_row_intent` backfill (a different path
     # from the active zone's scanned-home map), and it emits no `step` key.
     _seed_control(tmp_path)
     _archive_with_event(tmp_path, "unna08", "", _ARCHIVED_INTENT_EVENT)
     assert m._board_json(tmp_path, dispositions={"abandoned"}, cutoff=None) == [{
-        "id": "unna08", "zone": "archive", "title": None,
+        "id": "unna08", "zone": "history", "title": None,
         "intent": "teach the poller a retry budget\n"
                   "then wire it through the config so a restart keeps the tally",
         "status": "abandoned", "created": "2026-06-01T00:00:00+00:00",
@@ -236,7 +236,7 @@ def test_list_json_emits_the_board_in_display_order(
     _seed_board(tmp_path)
     data = json.loads(_run(tmp_path, monkeypatch, ["list", "--json"]))
     assert [(e["id"], e["zone"]) for e in data] == [
-        ("live01", "active"), ("idea03", "backlog"), ("mrgd05", "archive")]
+        ("live01", "active"), ("idea03", "backlog"), ("mrgd05", "history")]
 
 
 def test_list_json_backlog_filter_matches_the_text_board(

@@ -59,7 +59,7 @@ def _init_git_commits(root: Path) -> tuple[str, str]:
 
 def _ns(**kw: object) -> argparse.Namespace:
     base = {"active": False, "backlog": False, "merged": False,
-            "abandoned": False, "shelved": False, "archived": False,
+            "abandoned": False, "archived": False,
             "merged_after": None}
     base.update(kw)
     return argparse.Namespace(**base)
@@ -77,12 +77,7 @@ def test_selected_search_single_zone_scopes() -> None:
 def test_selected_search_disposition_flags_map_to_statuses() -> None:
     assert _selected_search(_ns(merged=True)) == (False, False, {"merged"})
     assert _selected_search(_ns(abandoned=True)) == (False, False, {"abandoned"})
-    assert _selected_search(_ns(shelved=True)) == (False, False, {"archived"})
-
-
-def test_selected_search_archived_expands_to_four_statuses() -> None:
-    assert _selected_search(_ns(archived=True)) == (
-        False, False, {"merged", "done", "abandoned", "archived"})
+    assert _selected_search(_ns(archived=True)) == (False, False, {"archived"})
 
 
 def test_selected_search_merged_after_self_enables_merged() -> None:
@@ -124,7 +119,7 @@ def test_search_archived_filters_by_disposition_and_labels_zone(tmp_path: Path) 
     _archive(tmp_path, "arcaband", "Dark archived abandoned", status="abandoned")
     hits = _search_archived(tmp_path, "dark", {"abandoned"}, None)
     assert [h.quest_id for h in hits] == ["arcaband"]   # merged excluded by status
-    assert hits[0].zone == "archive"
+    assert hits[0].zone == "history"
 
 
 def _user_msg_line(text: str) -> str:

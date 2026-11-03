@@ -31,7 +31,7 @@ def test_show_help_names_quests_not_changes(capsys) -> None:
 
 def test_search_help_names_quests(capsys) -> None:
     out = _help_for("search", capsys)
-    assert "backlog, and archived quests" in out           # description=
+    assert "backlog, and history (merged, abandoned, archived) quests" in out  # description=
     assert "a quest's id, title, or conversation content" in out   # description=
     assert "change" not in out
 
