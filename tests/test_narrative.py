@@ -249,6 +249,40 @@ def test_tool_killed_marks_the_matching_call_in_burst() -> None:
     assert burst.calls[0].killed is True
 
 
+def test_unmatched_tool_killed_after_reply_opens_no_burst() -> None:
+    # Legacy empty-id kill drained after the user's reply: no call, no new burst.
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "sleep 45"}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"returncode": -15}', error=False),
+        _ev("3", "user_message", agent_id="step:p/s", role="user",
+            content=[{"type": "text", "text": "carry on"}]),
+        _ev("4", "tool_killed", agent_id="step:p/s", id="", name="bash"),
+    ))
+    step = _only_step(tree)
+    kinds = [type(c).__name__ for c in step.children
+             if isinstance(c, (nv.ToolBurstFold, nv.UserMessageNode))]
+    assert kinds == ["ToolBurstFold", "UserMessageNode"]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert [c.call_id for c in burst.calls] == ["b1"]
+
+
+def test_unmatched_tool_killed_in_open_burst_adds_no_call() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "sleep 45"}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"returncode": -15}', error=False),
+        _ev("3", "tool_killed", agent_id="step:p/s", id="", name="bash"),
+    ))
+    step = _only_step(tree)
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert len(bursts) == 1
+    assert [c.call_id for c in bursts[0].calls] == ["b1"]
+    assert bursts[0].calls[0].killed is False
+
+
 def test_read_task_grep_splits_into_three_nodes() -> None:
     # design §5.3 edge (a): a run [read_file, sub_agent, grep] yields
     # ToolBurstFold(read_file), SubagentFold, ToolBurstFold(grep).
@@ -1318,7 +1352,7 @@ def test_quest_renamed_ignores_legacy_partial_event() -> None:
     assert b.tree.root.title == "orig"          # unchanged (event ignored)
 
 
-def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
+def test_toolcall_call_ts_stamped_by_both_constructors() -> None:
     b = nv.NarrativeBuilder()
     b.add({"id": "1", "type": "step_started", "agent_id": None,
            "payload": {"step": "s", "kind": "agent", "phase": "p"}})
@@ -1326,10 +1360,6 @@ def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
     b.add({"id": "e1", "type": "tool_call", "agent_id": "a",
            "timestamp": "2026-06-10T00:00:01",
            "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
-    # tool_killed standalone-marker constructor (no matching open call)
-    b.add({"id": "e2", "type": "tool_killed", "agent_id": "a",
-           "timestamp": "2026-06-10T00:00:02",
-           "payload": {"id": "zz", "name": "sleep"}})
     # tool_result orphan constructor (no matching open call; "c1" is open but id
     # "orphan" doesn't match it, so a new orphan ToolCall is appended)
     b.add({"id": "e3", "type": "tool_result", "agent_id": "a",
@@ -1339,7 +1369,6 @@ def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
     assert burst is not None
     by_id = {c.call_id: c for c in burst.calls}
     assert by_id["c1"].call_ts == "2026-06-10T00:00:01"
-    assert by_id["zz"].call_ts == "2026-06-10T00:00:02"
     assert by_id["orphan"].call_ts == "2026-06-10T00:00:03"
 
 

@@ -2312,16 +2312,12 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
 def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     burst = self._current_burst
-    if burst is not None:
-        for call in burst.calls:
-            if call.call_id == rid:
-                call.killed = True
-                return
-    # No matching open burst call → record a standalone killed marker.
-    b = _ensure_burst(self)
-    b.calls.append(ToolCall(
-        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True,
-        call_ts=event.get("timestamp")))
+    if burst is None:
+        return
+    for call in burst.calls:
+        if call.call_id == rid:
+            call.killed = True
+            return
 
 
 def _flatten_block(b: Any) -> str:
