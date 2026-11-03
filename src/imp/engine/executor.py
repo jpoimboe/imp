@@ -753,8 +753,7 @@ async def run_quest(
                                  or action.reason
                                  in ("retry_ceiling", "reauth_needed"))))
                 reason = action.reason or "interrupt"
-                interrupt_reason = (coordinator.pause_reason
-                                    if coordinator.should_pause else None)
+                interrupt_reason = _interrupt_reason(coordinator)
                 if reason == "merge_blocked":
                     state.status = "merge_blocked"
                 elif classify_pause_halt(reason, interrupt_reason) == "error":
@@ -892,7 +891,7 @@ async def run_quest(
                 state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
-                    log, "interrupt", interrupt_reason=coordinator.pause_reason)
+                    log, "interrupt", interrupt_reason=_interrupt_reason(coordinator))
                 return RunResult.PAUSED
             state.halt_condition = None
             state.unsandboxed = coordinator.unsandboxed
@@ -939,6 +938,14 @@ async def run_quest(
             os.chdir(quest.control_root)
 
 
+def _interrupt_reason(coordinator: Any) -> str | None:
+    # The leave key relabels a pending interrupt pause; it never creates one.
+    if not coordinator.should_pause:
+        return None
+    reason: str | None = coordinator.leave_reason or coordinator.pause_reason
+    return reason
+
+
 def _complete_or_park(
     quest: Quest, state: State, log: EventLog, coordinator: Any,
 ) -> RunResult:
@@ -954,7 +961,7 @@ def _complete_or_park(
         state.halt_condition = None
         state.unsandboxed = coordinator.unsandboxed
         state.save(quest.state_dir)
-        _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
+        _emit_paused_event(log, "interrupt", interrupt_reason=_interrupt_reason(coordinator))
         return RunResult.PAUSED
     return _complete(quest, state, log)
 
@@ -2264,9 +2271,10 @@ def _emit_paused_event(
     log: EventLog, reason: str, *, kind: str | None = None,
     step: str | None = None, interrupt_reason: str | None = None,
 ) -> None:
-    """Central workflow_paused emit helper. `interrupt_reason` (coord.pause_reason)
-    rides alongside the engine-classified `reason` when a user interrupt drove
-    the pause — the live 'interrupted (esc)' marker renders from it (§2)."""
+    """Central workflow_paused emit helper. `interrupt_reason` (_interrupt_reason:
+    the leave key, else the first-wins pause_reason) rides alongside the
+    engine-classified `reason` when a user interrupt drove the pause — the live
+    'interrupted (esc)' marker renders from it (§2)."""
     payload: dict[str, Any] = {"reason": reason}
     if kind is not None:
         payload["kind"] = kind
