@@ -54,7 +54,7 @@ _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
-_PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "done", "archived", "abandoned", "error")
+_PRESERVE_ON_PAUSE = ("merge_blocked", "completed", "archived", "abandoned", "error")
 
 
 async def _wait_interrupt_deadline() -> None:

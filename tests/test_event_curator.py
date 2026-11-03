@@ -59,7 +59,7 @@ def test_curate_tracks_quest_merged_status() -> None:
     curator = EventCurator(id="cid", title_provider=lambda: "T", events=("all",))
     out = curator.curate({"type": "quest_merged", "payload": {}})
     assert out is not None
-    assert out["quest"]["status"] == "merged"
+    assert out["quest"]["status"] == "completed"
 
 
 def test_curate_rereads_title_while_empty_then_freezes() -> None:

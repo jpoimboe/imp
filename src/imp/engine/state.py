@@ -36,7 +36,7 @@ from imp.engine.pagecache import drop_page_cache
 from imp.engine.types import ResumeCause, ResumeTarget
 
 Status = Literal[
-    "new", "paused", "merge_blocked", "merged", "done", "archived", "abandoned", "error"
+    "new", "paused", "merge_blocked", "completed", "archived", "abandoned", "error"
 ]
 
 # Durable live-gate marker written to state.json. `waiting` = live, parked at a

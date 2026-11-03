@@ -287,7 +287,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_nonempty == [True]                # transcript kept and replayed
     from imp.engine.archive import read as archive_read
-    assert archive_read.status_of(quest.control_root, quest.id) == "done"
+    assert archive_read.status_of(quest.control_root, quest.id) == "completed"
 
 
 @pytest.mark.anyio
@@ -333,7 +333,7 @@ async def test_resume_empty_session_with_stored_context_runs_fresh(
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
     from imp.engine.archive import read as archive_read
-    assert archive_read.status_of(quest.control_root, quest.id) == "done"
+    assert archive_read.status_of(quest.control_root, quest.id) == "completed"
 
 
 @pytest.mark.anyio
@@ -377,4 +377,4 @@ async def test_resume_empty_session_seeds_fresh_and_advances(
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
     from imp.engine.archive import read as archive_read
-    assert archive_read.status_of(quest.control_root, quest.id) == "done"
+    assert archive_read.status_of(quest.control_root, quest.id) == "completed"

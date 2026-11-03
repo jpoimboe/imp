@@ -58,7 +58,7 @@ def _init_git_commits(root: Path) -> tuple[str, str]:
 
 
 def _ns(**kw: object) -> argparse.Namespace:
-    base = {"active": False, "backlog": False, "merged": False,
+    base = {"active": False, "backlog": False, "completed": False,
             "abandoned": False, "archived": False,
             "merged_after": None}
     base.update(kw)
@@ -66,7 +66,7 @@ def _ns(**kw: object) -> argparse.Namespace:
 
 
 def test_selected_search_defaults_to_active_backlog_and_all_archive() -> None:
-    assert _selected_search(_ns()) == (True, True, {"merged", "done", "abandoned", "archived"})
+    assert _selected_search(_ns()) == (True, True, {"completed", "abandoned", "archived"})
 
 
 def test_selected_search_single_zone_scopes() -> None:
@@ -75,13 +75,13 @@ def test_selected_search_single_zone_scopes() -> None:
 
 
 def test_selected_search_disposition_flags_map_to_statuses() -> None:
-    assert _selected_search(_ns(merged=True)) == (False, False, {"merged"})
+    assert _selected_search(_ns(completed=True)) == (False, False, {"completed"})
     assert _selected_search(_ns(abandoned=True)) == (False, False, {"abandoned"})
     assert _selected_search(_ns(archived=True)) == (False, False, {"archived"})
 
 
 def test_selected_search_merged_after_self_enables_merged() -> None:
-    assert _selected_search(_ns(merged_after="abc")) == (False, False, {"merged"})
+    assert _selected_search(_ns(merged_after="abc")) == (False, False, {"completed"})
 
 
 def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
@@ -161,9 +161,9 @@ def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
 
 
 def test_search_archived_merged_disposition_excludes_abandoned(tmp_path: Path) -> None:
-    _archive(tmp_path, "alpha", "Dark mode", status="merged")
+    _archive(tmp_path, "alpha", "Dark mode", status="completed")
     _archive(tmp_path, "beta", "Dark login", status="abandoned")
-    hits = _search_archived(tmp_path, "dark", {"merged"}, None)
+    hits = _search_archived(tmp_path, "dark", {"completed"}, None)
     assert [h.quest_id for h in hits] == ["alpha"]      # abandoned excluded
     assert hits[0].title == "Dark mode"
 
@@ -188,10 +188,10 @@ def test_merged_after_excludes_missing_and_unverifiable(tmp_path: Path) -> None:
 
 def test_search_archived_applies_merged_after_to_completed(tmp_path: Path) -> None:
     sha_a, sha_b = _init_git_commits(tmp_path)
-    _archive(tmp_path, "alpha", "Dark", status="merged", merge_commit=sha_b)
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_b)
     assert [h.quest_id for h in
-            _search_archived(tmp_path, "dark", {"merged"}, sha_a)] == ["alpha"]
-    assert _search_archived(tmp_path, "dark", {"merged"}, sha_b) == []
+            _search_archived(tmp_path, "dark", {"completed"}, sha_a)] == ["alpha"]
+    assert _search_archived(tmp_path, "dark", {"completed"}, sha_b) == []
 
 
 class _ScanOnlyStore:

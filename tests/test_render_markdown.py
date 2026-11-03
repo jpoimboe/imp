@@ -717,12 +717,12 @@ def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> N
                     start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
                     subagents=[SubagentRow(name="coder",
                                            start_ts="2026-01-01T00:00:10+00:00")])]
-    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+    hdr = SummaryHeader(workflow="imp", quest_id="c", status="completed",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | interrupted | — | — | — | — | — |" in out
     assert "| ↳ coder | interrupted | — | — | — | — | — |" in out
-    assert "| task-lead | merged |" not in out
+    assert "| task-lead | completed |" not in out
 
 
 def test_summary_markdown_merge_blocked_open_step_reads_two_words() -> None:

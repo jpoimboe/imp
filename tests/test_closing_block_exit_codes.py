@@ -82,7 +82,7 @@ def _paused(**payload: str) -> Any:
     pytest.param(_paused(reason="terminated"), "paused", 1, id="agent-error"),
     *(pytest.param(_paused(reason=r), "paused", 1, id=r) for r in _GOLD_FAILURES),
     pytest.param(_ended, "paused", 1, id="daemon-died"),
-    pytest.param(_cut, "merged", 0, id="disk-completed"),
+    pytest.param(_cut, "completed", 0, id="disk-completed"),
     pytest.param(_cut, None, 4, id="lost-connection"),
 ])
 async def test_each_ending_exits_with_its_contract_code(

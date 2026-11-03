@@ -84,7 +84,7 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
     out = buf.getvalue()
     assert rc == 0
     assert "history:" in out
-    assert "doneid" in out and "merged" in out
+    assert "doneid" in out and "completed" in out
 
 
 def test_bare_show_with_quest_points_at_list(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -118,7 +118,7 @@ def test_help_lists_list_then_show_with_copy(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setenv("COLUMNS", "80")
     summaries = _command_summaries()
-    assert summaries["list"] == "List your quests: in-flight, backlog, and merged."
+    assert summaries["list"] == "List your quests: in-flight, backlog, and completed."
     assert summaries["show"] == "Show one quest's detail or a named artifact (imp show <id>)."
     text = _top_level_help(_build_parser())
     assert text.index("\n    list ") < text.index("\n    show ")

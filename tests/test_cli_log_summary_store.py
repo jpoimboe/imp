@@ -168,7 +168,7 @@ def test_archived_summary_marks_inferred_and_interrupted_spans(
     Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr("imp.cli.store.make_store",
-                        lambda _c: _FakeStore(_INTERRUPTED_EVENTS, "merged"))
+                        lambda _c: _FakeStore(_INTERRUPTED_EVENTS, "completed"))
     monkeypatch.setenv("NO_COLOR", "1")
 
     rc = m.main(argv)

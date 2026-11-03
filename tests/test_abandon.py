@@ -325,7 +325,7 @@ def test_search_finds_abandoned_draft(
 
     ns = argparse.Namespace(
         query="Zephyr", active=False, backlog=False, archived=False,
-        merged=False, abandoned=False, merged_after=None,
+        completed=False, abandoned=False, merged_after=None,
         list=False, no_pager=True)
     rc = _cmd_search(ns, tmp_path)
     out = capsys.readouterr().out

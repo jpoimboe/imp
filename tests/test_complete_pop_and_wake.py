@@ -104,7 +104,7 @@ def test_complete_without_merge_archives_and_removes_home(tmp_path, monkeypatch)
     assert result == RunResult.COMPLETED
     assert not home.exists()                  # whole home reaped, not just steps/
     assert archive_read.is_archived(tmp_path, "feat")
-    assert archive_read.status_of(tmp_path, "feat") == "done"
+    assert archive_read.status_of(tmp_path, "feat") == "completed"
 
 
 def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) -> None:

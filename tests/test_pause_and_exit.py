@@ -25,6 +25,12 @@ def test_terminal_status_is_preserved(tmp_path: Path) -> None:
     assert State.load(quest.state_dir).status == "merge_blocked"
 
 
+def test_completed_status_is_preserved(tmp_path: Path) -> None:
+    quest = _change(tmp_path, status="completed")
+    pause_and_exit(quest, reason="ctrl-c")
+    assert State.load(quest.state_dir).status == "completed"
+
+
 def test_new_status_becomes_paused(tmp_path: Path) -> None:
     quest = _change(tmp_path, status="new")
     pause_and_exit(quest, reason="ctrl-d")

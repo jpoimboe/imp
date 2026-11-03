@@ -40,18 +40,18 @@ def _state_bytes(home: Path) -> bytes:
     return (home / "state" / "state.json").read_bytes()
 
 
-def test_helper_archives_merged_home(tmp_path: Path) -> None:
-    home = _home(tmp_path, "mrgd", "merged")
+def test_helper_archives_merged_completed_home(tmp_path: Path) -> None:
+    home = _home(tmp_path, "mrgd", "completed")
     _archive_stranded_home(tmp_path, "mrgd", home, _state_bytes(home))
     rows = make_store(tmp_path).completed_rows()
-    assert [(r.quest_id, r.status) for r in rows] == [("mrgd", "merged")]
+    assert [(r.quest_id, r.status) for r in rows] == [("mrgd", "completed")]
 
 
-def test_helper_archives_done_home(tmp_path: Path) -> None:
-    home = _home(tmp_path, "done", "done")
+def test_helper_archives_completed_home(tmp_path: Path) -> None:
+    home = _home(tmp_path, "done", "completed")
     _archive_stranded_home(tmp_path, "done", home, _state_bytes(home))
     rows = make_store(tmp_path).completed_rows()
-    assert [(r.quest_id, r.status) for r in rows] == [("done", "done")]
+    assert [(r.quest_id, r.status) for r in rows] == [("done", "completed")]
 
 
 def test_helper_archives_archived_home_resumable_with_steps(tmp_path: Path) -> None:
@@ -84,16 +84,16 @@ def test_helper_skips_unclassified_status(tmp_path: Path, status: str) -> None:
 
 
 def test_helper_does_not_rearchive(tmp_path: Path) -> None:
-    home = _home(tmp_path, "once", "merged")
+    home = _home(tmp_path, "once", "completed")
     _archive_stranded_home(tmp_path, "once", home, _state_bytes(home))
     (home / "state" / "state.json").write_text(json.dumps({
-        "id": "once", "status": "done", "step": None}))
+        "id": "once", "status": "abandoned", "step": None}))
     _archive_stranded_home(tmp_path, "once", home, _state_bytes(home))
-    assert archive_read.status_of(tmp_path, "once") == "merged"
+    assert archive_read.status_of(tmp_path, "once") == "completed"
 
 
 def test_scan_archives_stranded_merged_home(tmp_path: Path) -> None:
-    _home(tmp_path, "mrgd", "merged")
+    _home(tmp_path, "mrgd", "completed")
     _home(tmp_path, "runn", "running")
     ids = {h.quest_id for h in make_store(tmp_path).scan_homes()}
     assert ids == {"mrgd", "runn"}
@@ -102,7 +102,7 @@ def test_scan_archives_stranded_merged_home(tmp_path: Path) -> None:
 
 
 def test_live_locked_terminal_home_is_skipped(tmp_path: Path) -> None:
-    home = _home(tmp_path, "busy", "merged")
+    home = _home(tmp_path, "busy", "completed")
     (home / "lock").write_text(str(os.getpid()))
     digest = next(h for h in make_store(tmp_path).scan_homes() if h.quest_id == "busy")
     assert digest.lock_live is True
@@ -113,7 +113,7 @@ def test_list_shows_stranded_home_under_completed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_control(tmp_path)
-    _home(tmp_path, "mrgd", "merged")
+    _home(tmp_path, "mrgd", "completed")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
     buf = io.StringIO()
@@ -146,8 +146,8 @@ def test_stranded_archived_home_resumes_after_reap(tmp_path: Path) -> None:
 def test_failed_archiving_does_not_abort_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _home(tmp_path, "brokn", "merged")
-    _home(tmp_path, "fine", "merged")
+    _home(tmp_path, "brokn", "completed")
+    _home(tmp_path, "fine", "completed")
     real = archive.archive_quest
 
     def _boom(control: Path, quest_id: str, **kw: object) -> None:

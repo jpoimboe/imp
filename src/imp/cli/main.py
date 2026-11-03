@@ -233,13 +233,13 @@ def _emit_completed(quest: Quest, *, merged_base: str | None,
                     intent: str | None = None,
                     commits: Sequence[dict[str, str]] = ()) -> None:
     """The clean-finish block on the shared status spine: a gold `merged into <base>` /
-    `done · commits on imp/<id>` tail, then the run's commits indented beneath it,
+    `completed · commits on imp/<id>` tail, then the run's commits indented beneath it,
     oldest-first when any were recorded; one trailing blank. `merged_base` is the branch
     the merge landed on, None when the run completed without merging."""
     color = should_use_color(sys.stdout)
     intent = quest_row.fallback_intent(intent, quest.seed_opening)
     tail = (f"merged into {merged_base}" if merged_base is not None
-            else f"done · commits on imp/{quest.id}")
+            else f"completed · commits on imp/{quest.id}")
     print(_status_spine(quest.id, quest.title, tail, "wordmark", color=color,
                         intent=intent))
     for ln in _commit_lines(commits, color=color):
@@ -2510,7 +2510,7 @@ class _EventTail:
             pagecache.drop_page_cache(self._path)
 
 
-_FOLLOW_TERMINAL = frozenset({"merged", "done", "abandoned", "archived"})
+_FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "archived"})
 
 
 def _follow_paused_status(quest_id: str) -> Callable[[int], list[str]]:
@@ -3497,7 +3497,7 @@ def _since_cutoff(spec: str, now: datetime) -> datetime:
     return now - timedelta(days=365 * n)  # unit == "y"
 
 
-_DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "merged", "done"})
+_DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "completed"})
 
 
 def _board_dispositions(*, show_all: bool) -> set[str]:
@@ -3515,8 +3515,8 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
         picked.add("active")
     if args.backlog:
         picked.add("backlog")
-    if args.merged:
-        picked.add("merged")
+    if args.completed:
+        picked.add("completed")
     if args.abandoned:
         picked.add("abandoned")
     if args.archived:
@@ -3527,7 +3527,7 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
 def _history_by_disposition(control: Path, *, dispositions: set[str],
                             live_ids: set[str] | None) -> list[_Row]:
     """History-zone rows for the requested dispositions, newest-first."""
-    wanted = dispositions & {"merged", "done", "abandoned", "archived"}
+    wanted = dispositions & {"completed", "abandoned", "archived"}
     rows = _completed_rows(control, live_ids) + _archived_rows(control, live_ids)
     return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
 
@@ -3716,16 +3716,16 @@ _SEARCH_ZONES: tuple[Zone, ...] = ("active", "backlog", "history")
 def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     """(search_active, search_backlog, history_statuses) from the search flags."""
     statuses: set[str] = set()
-    if args.merged:
-        statuses.add("merged")
+    if args.completed:
+        statuses.add("completed")
     if args.abandoned:
         statuses.add("abandoned")
     if args.archived:
         statuses.add("archived")
     if args.merged_after is not None:
-        statuses.add("merged")
+        statuses.add("completed")
     if not (args.active or args.backlog or statuses):
-        return True, True, {"merged", "done", "abandoned", "archived"}
+        return True, True, {"completed", "abandoned", "archived"}
     return args.active, args.backlog, statuses
 
 
@@ -4581,10 +4581,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser(
         "list",
-        help="List your quests: in-flight, backlog, and merged.",
+        help="List your quests: in-flight, backlog, and completed.",
         description=(
             "With no argument, an overview of your quests — in-flight, the "
-            "backlog, and every merged quest. -a/--all also includes "
+            "backlog, and every completed quest. -a/--all also includes "
             "abandoned/archived quests (the block is then labelled `history`)."),
     )
     p_list.add_argument(
@@ -4598,8 +4598,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backlog", action="store_true",
         help="Show only backlog items.")
     p_list.add_argument(
-        "--merged", action="store_true",
-        help="Show only merged quests.")
+        "--completed", action="store_true",
+        help="Show only completed quests.")
     p_list.add_argument(
         "--abandoned", action="store_true",
         help="Show only abandoned quests.")
@@ -4644,13 +4644,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_search = sub.add_parser(
         "search",
+        allow_abbrev=False,
         help="Search quests by id, title, or conversation content.",
         description=(
-            "Search active (in-flight + drafts), backlog, and history (merged, "
+            "Search active (in-flight + drafts), backlog, and history (completed, "
             "abandoned, archived) quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
-            "are searched. --merged scopes to merged quests."),
+            "are searched. --completed scopes to completed quests."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
@@ -4662,8 +4663,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backlog", action="store_true",
         help="Search backlog quests.")
     p_search.add_argument(
-        "--merged", action="store_true",
-        help="Search merged quests.")
+        "--completed", action="store_true",
+        help="Search completed quests.")
     p_search.add_argument(
         "--abandoned", action="store_true",
         help="Search abandoned quests.")
@@ -4672,8 +4673,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Search archived conversations.")
     p_search.add_argument(
         "--merged-after", metavar="COMMIT", default=None,
-        help="Keep only merged quests whose merge landed after COMMIT "
-             "(implies --merged).")
+        help="Keep only completed quests whose merge landed after COMMIT "
+             "(implies --completed).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
         help="One terse line per quest (id, title, zone); no excerpts.")

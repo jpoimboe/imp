@@ -231,7 +231,7 @@ class LocalStore:
 # resumable `archived` home as non-resumable would drop its step blobs, so an unknown
 # status is skipped.
 _TERMINAL_ARCHIVE_RESUMABLE: dict[str, bool] = {
-    "merged": False, "done": False, "abandoned": False, "archived": True,
+    "completed": False, "abandoned": False, "archived": True,
 }
 
 
@@ -689,7 +689,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
             control, query):
         if status not in statuses:
             continue
-        if (status == "merged" and merged_after is not None
+        if (status == "completed" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
         hits.append(SearchHit(cid, title, "history", content, last,

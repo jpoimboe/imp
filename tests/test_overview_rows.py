@@ -30,7 +30,7 @@ def _archive_unnamed_with_intent(control: Path, cid: str, *, prompt: str,
         "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
+        "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(control, cid, events_path=events,
                           quest_json_path=quest_json, state_json_path=state_json)
 
@@ -38,7 +38,7 @@ def _archive_unnamed_with_intent(control: Path, cid: str, *, prompt: str,
 def test_history_by_disposition_selects_only_the_wanted_dispositions(
         tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
     _archive_status(tmp_path, "shlv", "archived", last_ts="2026-06-08T00:00:00+00:00")
     rows = m._history_by_disposition(
@@ -51,9 +51,9 @@ def test_history_by_disposition_selects_only_the_wanted_dispositions(
 
 def test_history_by_disposition_dedups_rows_with_a_live_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
     assert m._history_by_disposition(
-        tmp_path, dispositions={"merged"}, live_ids={"mrgd"}) == []
+        tmp_path, dispositions={"completed"}, live_ids={"mrgd"}) == []
 
 
 def test_overview_rows_groups_and_orders_the_three_zones(tmp_path: Path) -> None:
@@ -64,10 +64,10 @@ def test_overview_rows_groups_and_orders_the_three_zones(tmp_path: Path) -> None
                    started="2026-06-01T00:00:00+00:00")
     Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                        base_branch="main", origin="idea", seed_opening="Brief")
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
-    _archive_status(tmp_path, "oldm", "merged", last_ts="2026-06-04T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "oldm", "completed", last_ts="2026-06-04T00:00:00+00:00")
     rows = m._overview_rows(
-        tmp_path, dispositions={"active", "backlog", "merged", "done"}, cutoff=None)
+        tmp_path, dispositions={"active", "backlog", "completed"}, cutoff=None)
     assert [r[0] for r in rows.inflight] == ["erly03", "late03"]  # earliest start first
     assert [r[0] for r in rows.backlog] == ["bk1"]
     assert [r[0] for r in rows.history] == ["mrgd", "oldm"]       # newest-first
@@ -79,9 +79,9 @@ def test_overview_rows_gates_each_zone_on_dispositions(tmp_path: Path) -> None:
                    started="2026-06-01T00:00:00+00:00")
     Quest.create_draft(tmp_path, title="Brief", quest_id="bk2",
                        base_branch="main", origin="idea", seed_opening="Brief")
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
 
-    merged_only = m._overview_rows(tmp_path, dispositions={"merged"}, cutoff=None)
+    merged_only = m._overview_rows(tmp_path, dispositions={"completed"}, cutoff=None)
     assert merged_only.inflight == [] and merged_only.backlog == []
     assert [r[0] for r in merged_only.history] == ["mrgd"]
 
@@ -96,9 +96,9 @@ def test_overview_rows_gates_each_zone_on_dispositions(tmp_path: Path) -> None:
 
 def test_overview_rows_cutoff_drops_rows_older_than_the_cutoff(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "fresh", "merged", last_ts="2026-07-14T00:00:00+00:00")
-    _archive_status(tmp_path, "stale", "merged", last_ts="2026-06-01T00:00:00+00:00")
-    rows = m._overview_rows(tmp_path, dispositions={"merged"},
+    _archive_status(tmp_path, "fresh", "completed", last_ts="2026-07-14T00:00:00+00:00")
+    _archive_status(tmp_path, "stale", "completed", last_ts="2026-06-01T00:00:00+00:00")
+    rows = m._overview_rows(tmp_path, dispositions={"completed"},
                             cutoff=datetime(2026, 7, 13, tzinfo=UTC))
     assert [r[0] for r in rows.history] == ["fresh"]
 
@@ -108,7 +108,7 @@ def test_overview_rows_backfills_intent_for_a_titleless_archived_row(
     _seed_control(tmp_path)
     _archive_unnamed_with_intent(tmp_path, "unn002",
                                  prompt="add a retry budget to the poller")
-    rows = m._overview_rows(tmp_path, dispositions={"merged"}, cutoff=None)
+    rows = m._overview_rows(tmp_path, dispositions={"completed"}, cutoff=None)
     assert [r[0] for r in rows.history] == ["unn002"]
     assert rows.intents["unn002"] == "add a retry budget to the poller"
 
@@ -116,10 +116,10 @@ def test_overview_rows_backfills_intent_for_a_titleless_archived_row(
 def test_overview_rows_history_selects_both_boards(
         tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
     _archive_status(tmp_path, "shlv", "archived", last_ts="2026-06-08T00:00:00+00:00")
-    default = {"active", "backlog", "merged", "done"}
+    default = {"active", "backlog", "completed"}
     plain = m._overview_rows(tmp_path, dispositions=default, cutoff=None)
     every = m._overview_rows(
         tmp_path, dispositions=default | {"abandoned", "archived"}, cutoff=None)
@@ -130,7 +130,7 @@ def test_overview_rows_history_selects_both_boards(
 def test_overview_lines_routes_through_the_shared_gatherer(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd", "completed", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(tmp_path, "abnd", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
     asked: list[set[str]] = []
     real = m._overview_rows
@@ -143,11 +143,11 @@ def test_overview_lines_routes_through_the_shared_gatherer(
     monkeypatch.setattr(m, "_overview_rows", spy)
 
     all_lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
-    assert asked == [{"active", "backlog", "merged", "done", "abandoned", "archived"}]
+    assert asked == [{"active", "backlog", "completed", "abandoned", "archived"}]
     assert any(ln.startswith("abnd") for ln in all_lines)
 
     asked.clear()
     plain_lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
-    assert asked == [{"active", "backlog", "merged", "done"}]
+    assert asked == [{"active", "backlog", "completed"}]
     assert not any(ln.startswith("abnd") for ln in plain_lines)
     assert any(ln.startswith("mrgd") for ln in plain_lines)

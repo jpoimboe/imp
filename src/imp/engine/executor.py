@@ -967,16 +967,14 @@ def _complete_or_park(
 
 
 def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
-    """Terminal handler. Two paths:
-    - No merge happened: mark `done`, archive the terminal snapshot, reap the
-      whole home. Crash-safe: status='done' is saved before archive/reap, so a
-      crash mid-reap leaves re-entry clean — re-running re-enters _complete
-      (step=None, status='done') and idempotently re-archives + re-reaps.
+    """Terminal handler: both paths mark `completed`, saved before archive/reap.
+    - No merge happened: archive the terminal snapshot, reap the whole home.
+      Crash-safe: a crash mid-reap leaves re-entry clean — re-running re-enters
+      _complete (step=None, status='completed') and idempotently re-archives +
+      re-reaps.
     - merge-to-base already merged and exited the worktree (state.merge_commit set,
-      base ref durably advanced): finalize — mark completed, archive the final
-      snapshot. Ordering is crash-safe: status is written + saved BEFORE archive,
-      so a crash mid-finalize leaves the merge durable. Recovery: a crash AFTER
-      status='merged' is already done; a crash in the window between
+      base ref durably advanced): finalize — archive the final snapshot. A crash
+      after the status write leaves the merge durable; a crash in the window between
       _route_merge_and_exit_worktree recording merge_commit and this status write
       leaves status='running' — re-running re-enters the merge step, which
       short-circuits on state.merge_commit (idempotent, no second merge) and
@@ -998,7 +996,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     if not state.merge_commit:
         _exit_worktree(quest)
         merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
-        state.status = "done"
+        state.status = "completed"
         state.save(quest.state_dir)
         _emit(log, "workflow_completed", {
             "commits": worktree.commits_in_range(
@@ -1006,7 +1004,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         _archive_and_reap(quest, log)
         return RunResult.COMPLETED
 
-    state.status = "merged"
+    state.status = "completed"
     state.save(quest.state_dir)
     _emit(log, "quest_merged",
           {"base": quest.base_branch, "commit": state.merge_commit,

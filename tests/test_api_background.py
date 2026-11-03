@@ -107,6 +107,6 @@ def test_background_create_reaches_a_terminal_state_with_no_attach(
 
     handle = create_quest(tmp_path, "do the thing", background=True)
 
-    status = _await_archived_status(tmp_path, handle.id, "done")
-    assert status == "done", (
-        f"quest {handle.id} last read {status!r}, never reached 'done'")
+    status = _await_archived_status(tmp_path, handle.id, "completed")
+    assert status == "completed", (
+        f"quest {handle.id} last read {status!r}, never reached 'completed'")

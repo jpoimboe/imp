@@ -166,14 +166,14 @@ def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
 
 
 _HDR = SummaryHeader(workflow="feature", quest_id="abc",
-                     status="merged", total_seconds=2342.0)
+                     status="completed", total_seconds=2342.0)
 
 
 def test_plain_output_has_no_sgr_and_expected_lines():
     rows = [_row("plan", "plan-writer", 90)]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged",
+        "feature  ·  abc  ·  completed",
         "                 time  in  out  cost",
         "plan",
         "  plan-writer  1m 30s   —    —     —",
@@ -190,7 +190,7 @@ def test_plain_multi_step_shows_column_padding():
     ]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged",
+        "feature  ·  abc  ·  completed",
         "                 time  in  out  cost",
         "plan",
         "  plan-writer  1m 30s   —    —     —",
@@ -265,7 +265,7 @@ def test_open_trailing_step_on_paused_change_reflects_status():
 def test_header_status_color_and_workflow_magenta():
     out = render_summary([], header=_HDR, color=True, width=80)
     assert "\x1b[1m\x1b[35mfeature\x1b[0m" in out[0]   # workflow bold magenta
-    assert "merged" in out[0]                          # merged status plain (no color)
+    assert "completed" in out[0]                       # completed status plain (no color)
 
 
 def test_summary_total_is_first_to_last_timestamp():
@@ -1408,8 +1408,7 @@ def test_dur_text_marks_an_inferred_end_with_a_tilde():
 
 
 @pytest.mark.parametrize("status,expected", [
-    ("merged", "interrupted"),
-    ("done", "interrupted"),
+    ("completed", "interrupted"),
     ("abandoned", "interrupted"),
     ("running", "running"),
     ("waiting", "waiting"),
@@ -1443,15 +1442,15 @@ def test_open_spans_in_a_finished_quest_read_interrupted():
                    start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
                    subagents=[SubagentRow(name="coder",
                                           start_ts="2026-01-01T00:00:10+00:00")])
-    out = render_summary([step], header=_HDR, color=False, width=80)   # _HDR is merged
+    out = render_summary([step], header=_HDR, color=False, width=80)   # _HDR is completed
     assert out[3:5] == [
         "  task-lead  interrupted   —    —     —",
         "    ↳ coder  interrupted   —    —     —",
     ]
-    assert "merged" not in "\n".join(out[1:])   # the status word stays in the header
+    assert "completed" not in "\n".join(out[1:])   # the status word stays in the header
 
 
-@pytest.mark.parametrize("status", ["done", "abandoned"])
+@pytest.mark.parametrize("status", ["abandoned"])
 def test_other_finished_statuses_also_read_interrupted(status):
     hdr = SummaryHeader(workflow="feature", quest_id="abc", status=status,
                         total_seconds=100.0)
@@ -1651,7 +1650,7 @@ def test_title_row_is_dim_and_absent_when_there_are_no_step_rows():
     # AC 21: the dim title row appears with the first step row, not before it.
     # The totals row still renders, so a range with no step rows keeps its time.
     assert render_summary([], header=_HDR, color=False, width=80) == [
-        "feature  ·  abc  ·  merged",
+        "feature  ·  abc  ·  completed",
         "",
         "  total  39m 2s   —    —     —",
     ]

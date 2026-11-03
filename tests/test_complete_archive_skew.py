@@ -64,7 +64,7 @@ def test_skew_on_the_merged_branch_finishes_clean(tmp_path, monkeypatch) -> None
 
     assert _complete(q, state, log) == RunResult.COMPLETED
 
-    assert State.load(q.state_dir).status == "merged"
+    assert State.load(q.state_dir).status == "completed"
     assert (q.quest_dir / "quest.json").is_file()      # home whole for the sweep
     assert (q.state_dir / "state.json").is_file()
     assert q.events_path.is_file()
@@ -80,7 +80,7 @@ def test_skew_on_the_done_branch_finishes_clean(tmp_path, monkeypatch) -> None:
 
     assert _complete(q, state, log) == RunResult.COMPLETED
 
-    assert State.load(q.state_dir).status == "done"
+    assert State.load(q.state_dir).status == "completed"
     assert (q.quest_dir / "quest.json").is_file()
     assert (q.state_dir / "state.json").is_file()
     assert q.events_path.is_file()

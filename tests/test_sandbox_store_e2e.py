@@ -178,7 +178,7 @@ def _write_archived_quest(control: Path, qid: str, *, title: str, marker: str) -
     it must go through archive_read (blob), and its content must NOT be readable raw
     (blobs/ + index.db are masked)."""
     d = _write_quest(control, qid, title=title, events=_events(marker),
-                     status="merged")
+                     status="completed")
     archive.archive_quest(
         control, qid,
         events_path=d / "events.jsonl",

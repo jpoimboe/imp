@@ -292,7 +292,8 @@ async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     from imp.engine.archive import read as archive_read
-    assert archive_read.status_of(quest.control_root, quest.id) == "done"
+    assert archive_read.status_of(quest.control_root, quest.id) == "completed"
+    assert archive_read.merge_commit_of(quest.control_root, quest.id) is None
 
 
 @pytest.mark.anyio
@@ -2224,7 +2225,7 @@ async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
 
     assert result is RunResult.COMPLETED
     from imp.engine.archive import read as archive_read
-    assert archive_read.status_of(quest.control_root, quest.id) == "done"
+    assert archive_read.status_of(quest.control_root, quest.id) == "completed"
 
 
 @pytest.mark.anyio

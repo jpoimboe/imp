@@ -31,7 +31,7 @@ def test_show_help_names_quests_not_changes(capsys) -> None:
 
 def test_search_help_names_quests(capsys) -> None:
     out = _help_for("search", capsys)
-    assert "backlog, and history (merged, abandoned, archived) quests" in out  # description=
+    assert "backlog, and history (completed, abandoned, archived) quests" in out  # description=
     assert "a quest's id, title, or conversation content" in out   # description=
     assert "change" not in out
 
@@ -40,7 +40,7 @@ def test_command_summaries_name_quests() -> None:
     descs = " | ".join(_command_summaries().values())
     assert "scope a quest)." in descs
     assert "Start a new quest: run the workflow from an opening intent." in descs
-    assert "List your quests: in-flight, backlog, and merged." in descs
+    assert "List your quests: in-flight, backlog, and completed." in descs
     assert "Show one quest's detail or a named artifact (imp show <id>)." in descs
     assert "change" not in descs
 

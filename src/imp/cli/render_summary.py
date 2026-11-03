@@ -23,7 +23,7 @@ from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
 from imp.cli.render_text import fmt_seconds
 
-_FINISHED_STATUSES = frozenset({"merged", "done", "abandoned"})
+_FINISHED_STATUSES = frozenset({"completed", "abandoned"})
 
 
 def open_span_label(status: str) -> str:

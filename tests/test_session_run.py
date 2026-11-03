@@ -69,17 +69,34 @@ def _ending_with(ending: StreamEnding, *events: dict[str, Any]) -> Any:
 def test_resolve_settled_outcome_completed_when_merged_no_worktree(tmp_path: Path) -> None:
     # A merged change prunes the worktree but its state survives at the root home.
     quest = _make_quest(tmp_path, "2026-06-15-merged")
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
     outcome = resolve_settled_outcome(quest)
-    assert outcome.status == "merged"
+    assert outcome.status == "completed"
     assert outcome.completed is True
 
 
 def test_resolve_settled_outcome_completed_when_done_no_worktree(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-done")
-    State(id=quest.id, step=None, step_attempt=0, status="done").save(quest.state_dir)
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(quest.state_dir)
     assert resolve_settled_outcome(quest).completed is True
+
+
+def test_resolve_settled_outcome_carries_the_live_merge_commit(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-livemc")
+    State(id=quest.id, step=None, step_attempt=0, status="completed",
+          merge_commit="c0ffee").save(quest.state_dir)
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.completed is True
+    assert outcome.merge_commit == "c0ffee"
+
+
+def test_resolve_settled_outcome_carries_the_archived_merge_commit(tmp_path: Path) -> None:
+    quest = _archive_reaped_quest(tmp_path, "2026-07-03-arcmc", status="completed",
+                                  events=_MERGED_EVENT_LINE, merge_commit="c0ffee")
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.completed is True
+    assert outcome.merge_commit == "c0ffee"
 
 
 def test_resolve_settled_outcome_not_completed_for_parked_draft(tmp_path: Path) -> None:
@@ -93,7 +110,7 @@ def test_resolve_settled_outcome_not_completed_for_parked_draft(tmp_path: Path) 
 def test_resolve_settled_outcome_completed_when_merged_with_worktree(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-mergedwt")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
     assert resolve_settled_outcome(quest).completed is True
 
@@ -184,7 +201,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     assert rc_holder["rc"] == 0
     # The merge was witnessed across the wire; its payload names the base branch.
     assert "merged into main" in out
-    assert "done · commits on" not in out
+    assert "completed · commits on" not in out
 
 
 @pytest.mark.anyio
@@ -496,7 +513,7 @@ async def test_run_session_client_threads_resume_into_attach(
     quest = _make_quest(tmp_path, "2026-06-15-resume")
     # On-disk terminal state read after the (stubbed) daemon "exits".
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -593,7 +610,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
 
     quest = _make_quest(tmp_path, "fast-feat")
     # State is completed but no worktree: daemon finished before the client connected.
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     async def _boom(**_kwargs: Any) -> None:
@@ -621,7 +638,8 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     # The run merged and its home was reaped before the client could attach:
     # the startup-failure check must take its answer from the archive record.
     quest = _archive_reaped_quest(
-        tmp_path, "2026-07-03-fastmerge", status="merged", events=_MERGED_EVENT_LINE)
+        tmp_path, "2026-07-03-fastmerge", status="completed", events=_MERGED_EVENT_LINE,
+        merge_commit="abc123")
 
     async def _boom(**_kwargs: Any) -> None:
         raise TimeoutError
@@ -635,7 +653,31 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
-    assert "merged into main" in captured.out         # rendered from the archived record's status
+    assert "merged into main" in captured.out         # rendered from the archived merge commit
+
+
+@pytest.mark.anyio
+async def test_daemon_startup_timeout_renders_an_unmerged_completion_from_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-nomerge", status="completed", events=b"")
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"completed · commits on imp/{quest.id}" in out
+    assert "merged into" not in out
 
 
 @pytest.mark.anyio
@@ -706,7 +748,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     quest = _make_quest(tmp_path, "2026-06-15-title")   # _make_quest sets title="T"
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -736,7 +778,7 @@ async def test_run_session_client_passes_control_root(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-cr")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -805,7 +847,7 @@ async def test_run_session_client_threads_provided_leave_state(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ls")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     async def _capture(**kwargs: object) -> tuple[StreamEnding, RunWitness]:
@@ -841,7 +883,7 @@ async def test_run_session_client_reuses_passed_in_title(
 ) -> None:
     # A completed change with no worktree → the resolved outcome is completed, rc 0.
     quest = _make_quest(tmp_path, "2026-06-15-reuse")
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     # If run_session_client builds its own title despite one being passed, this fires.
@@ -886,7 +928,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-aut")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -998,6 +1040,7 @@ _INTENT_EVENT_LINE = (
 
 def _archive_reaped_quest(
     tmp_path: Path, quest_id: str, *, status: str, events: bytes,
+    merge_commit: str | None = None,
 ) -> Quest:
     """Archive a record for `quest_id`, then return a Quest whose live home was
     never created — the post-merge reaped state the client renders from."""
@@ -1012,7 +1055,7 @@ def _archive_reaped_quest(
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}-state.json"
     state_json.write_text(json.dumps(
-        {"id": quest_id, "status": status, "step": None}))
+        {"id": quest_id, "status": status, "step": None, "merge_commit": merge_commit}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events_file,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -1025,22 +1068,22 @@ def test_resolve_settled_outcome_falls_back_to_archive_when_home_reaped(
     tmp_path: Path,
 ) -> None:
     quest = _archive_reaped_quest(
-        tmp_path, "2026-07-03-reaped", status="merged", events=_MERGED_EVENT_LINE)
+        tmp_path, "2026-07-03-reaped", status="completed", events=_MERGED_EVENT_LINE)
     outcome = resolve_settled_outcome(quest)
-    assert outcome.status == "merged"                    # from the archived record
+    assert outcome.status == "completed"  # from the archived record
     assert outcome.completed is True
     assert [e["type"] for e in outcome.events] == ["quest_merged"]   # from the archived blob
 
 
 def test_resolve_settled_outcome_prefers_live_home_over_archive(tmp_path: Path) -> None:
     quest = _archive_reaped_quest(
-        tmp_path, "2026-07-03-live", status="merged", events=_MERGED_EVENT_LINE)
+        tmp_path, "2026-07-03-live", status="completed", events=_MERGED_EVENT_LINE)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
     quest.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
     outcome = resolve_settled_outcome(quest)
-    assert outcome.status == "paused"                    # live home wins over 'merged'
+    assert outcome.status == "paused"                    # live home wins over 'completed'
     assert [e["type"] for e in outcome.events] == ["workflow_paused"]
     assert outcome.completed is False
 
@@ -1080,7 +1123,7 @@ async def test_run_session_client_installs_startup_status(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-startup")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
@@ -1109,7 +1152,7 @@ async def test_run_session_client_threads_model(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-model")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -1154,7 +1197,7 @@ async def test_run_session_client_threads_opening_unsandboxed(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-unsbx")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -1248,7 +1291,7 @@ async def test_run_session_client_registers_ack_hook_when_interactive(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ack-on")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
@@ -1286,7 +1329,7 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ack-off")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
         quest.state_dir)
 
     async def _noop(**_kwargs: object) -> tuple[StreamEnding, RunWitness]:
@@ -1352,7 +1395,8 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
     monkeypatch.setenv("NO_COLOR", "1")
     # The daemon finished in the milliseconds after the cut (the behi75 case).
     quest = _make_quest(tmp_path, "2026-07-04-cut-merged")
-    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+    State(id=quest.id, step=None, step_attempt=0, status="completed",
+          merge_commit="abc123").save(
         quest.state_dir)
     quest.event_log().append(agent_id=None, type="quest_merged", payload={})
     monkeypatch.setattr(session_run, "run_terminal_client", _cut)
@@ -1424,12 +1468,12 @@ def test_resolve_settled_outcome_ignores_a_stray_live_event_line_when_home_reape
 ) -> None:
     # The keku73 shape: the home was reaped, then a later attach wrote one line back.
     quest = _archive_reaped_quest(
-        tmp_path, "2026-07-05-stray", status="merged",
+        tmp_path, "2026-07-05-stray", status="completed",
         events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
     quest.event_log().append(agent_id=None, type="cli_attached", payload={})
     assert not quest.state_dir.exists()          # only events.jsonl came back
     outcome = resolve_settled_outcome(quest)
-    assert outcome.status == "merged"
+    assert outcome.status == "completed"
     # state.json does not load, so BOTH fields come from the archive; the stray
     # live line never shadows the archived blob.
     assert [e["type"] for e in outcome.events] == ["user_message", "quest_merged"]
@@ -1439,7 +1483,7 @@ def test_resolve_settled_outcome_never_takes_events_from_the_archive_when_home_i
     tmp_path: Path,
 ) -> None:
     quest = _archive_reaped_quest(
-        tmp_path, "2026-07-05-live", status="merged",
+        tmp_path, "2026-07-05-live", status="completed",
         events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
@@ -1542,7 +1586,7 @@ async def test_cut_ending_with_no_resolvable_status_reports_lost_connection(
 
 
 @pytest.mark.anyio
-async def test_end_frame_with_done_state_renders_the_completed_block(
+async def test_end_frame_with_no_merge_completion_renders_the_completed_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1559,7 +1603,7 @@ async def test_end_frame_with_done_state_renders_the_completed_block(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == f"{quest.id} · T · done · commits on imp/{quest.id}"
+    assert out.split("\n")[0] == f"{quest.id} · T · completed · commits on imp/{quest.id}"
     assert "lost the connection" not in out
 
 
@@ -1941,7 +1985,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
 
 
 @pytest.mark.anyio
-async def test_witnessed_completion_renders_done_with_no_quest_home_at_all(
+async def test_witnessed_completion_renders_completed_with_no_quest_home_at_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1959,7 +2003,7 @@ async def test_witnessed_completion_renders_done_with_no_quest_home_at_all(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == f"{quest.id} · T · done · commits on imp/{quest.id}\n\n"
+    assert out == f"{quest.id} · T · completed · commits on imp/{quest.id}\n\n"
 
 
 @pytest.mark.anyio

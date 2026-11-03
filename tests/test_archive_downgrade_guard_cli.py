@@ -49,7 +49,7 @@ def _seed_newer_archive(control: Path) -> int:
         "materialized": True}))
     state_json = control / "arch.state.json"
     state_json.write_text(json.dumps({
-        "id": ARCH, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
+        "id": ARCH, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(
         control, ARCH, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

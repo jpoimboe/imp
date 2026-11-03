@@ -356,7 +356,9 @@ def test_error_is_a_status_value() -> None:
     from imp.engine.state import Status
     assert "error" in get_args(Status)
     assert "saved" not in get_args(Status)
-    assert "completed" not in get_args(Status)
+    assert "completed" in get_args(Status)
+    assert "merged" not in get_args(Status)
+    assert "done" not in get_args(Status)
 
 
 def test_reincarnation_counter_bumps_per_key() -> None:
