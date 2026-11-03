@@ -4795,7 +4795,7 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
     if not rest:
         print(_top_level_help(parser), end="")
         return 0
-    cmd = rest[0]
+    cmd = "help" if rest[0] in ("-h", "--help") else rest[0]
     if cmd not in _command_names(parser):
         _emit_cli_error(f"unknown command {cmd!r}. Run 'imp help'.")
         return 2
