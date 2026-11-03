@@ -202,8 +202,7 @@ def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
         except json.JSONDecodeError:
             continue
         payload = rec.get("payload", {})
-        if (rec.get("type") == "tool_call"
-                and payload.get("name") in ("bash", "mcp__imp__bash")):
+        if rec.get("type") == "tool_call" and payload.get("name") == "bash":
             tool_id = payload.get("id")
             if tool_id is not None:
                 bash_ids.add(tool_id)

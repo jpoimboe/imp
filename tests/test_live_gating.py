@@ -396,18 +396,6 @@ def test_precondition_tolerates_blank_and_garbage_lines(tmp_path):
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_detects_mcp_qualified_bash_name(tmp_path):
-    ev = tmp_path / "events.jsonl"
-    mcp_bash_call = {"type": "tool_call",
-                     "payload": {"id": "b1", "name": "mcp__imp__bash",
-                                 "input": {"command": "sleep 30"}}}
-    _write_events(ev, [
-        mcp_bash_call,
-        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
-    ])
-    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
-
-
 from tests.test_relay_hibernation_live import _interrupt_gate_engaged  # noqa: E402
 
 
