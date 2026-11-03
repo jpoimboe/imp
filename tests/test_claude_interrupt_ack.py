@@ -282,3 +282,51 @@ async def test_interrupt_while_parked_on_save_acks_without_an_sdk_interrupt(
     run.task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await run.task
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_during_a_claude_subagent_turn_end_never_escalates(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from imp.cli import signals as _signals
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.agent_run import drive_invocation
+    from tests.test_interrupt_events import RecordingLog
+
+    # Backstop only, under pytest's 60s timeout: a regression journals "timeout".
+    monkeypatch.setattr(_signals, "_COOPERATIVE_DEADLINE_S", 30.0)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    gate = asyncio.Event()
+    runner, holder = _runner([_complete(), gate, result(subtype="success")])
+    sub_inv = replace(_inv(tmp_path, agent_id="sub:code-reviewer/1"), coordinator=coord)
+    parent_calls: list[str] = []
+
+    async def parent_interrupt() -> None:
+        parent_calls.append("interrupt")
+
+    async def parent_kill() -> None:
+        parent_calls.append("force_kill")
+
+    with coord.runner_attached(parent_interrupt, force_kill=parent_kill,
+                               agent_id="step:p/s"):
+        drive = asyncio.create_task(drive_invocation(
+            sub_inv, runner, coordinator=coord, log=None, emit_events=False))
+        client = await _parked_at(holder, gate)
+        await wait_until(lambda: client.interrupts == 1)
+        deliver = asyncio.create_task(coord._deliver_interrupt())
+        await wait_until(lambda: client.interrupts == 2)
+        gate.set()
+        with anyio.fail_after(HANG_BACKSTOP):
+            await deliver
+            outcome = await drive
+
+    delivered = [(r["payload"]["agent_id"], r["payload"]["tier"], r["payload"]["outcome"])
+                 for r in log.records if r["type"] == "interrupt_delivered"]
+    assert delivered == [
+        ("sub:code-reviewer/1", "cooperative", "ok"),
+        ("step:p/s", "cooperative", "ok"),
+    ]
+    assert not any(r["type"] == "interrupt_escalated" for r in log.records)
+    assert parent_calls == ["interrupt"]
+    assert outcome.output == {"status": "Success"}
