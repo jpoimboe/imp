@@ -140,10 +140,10 @@ def test_search_list_line_dims_the_fallback_under_the_query_highlight() -> None:
 
 def test_search_list_line_flattens_and_clips_a_long_fallback_at_name_cap() -> None:
     opening = "summarize\n  " + "y" * 100
-    hit = _SearchHit("abc", "", "archive", "", None, opening)
+    hit = _SearchHit("abc", "", "history", "", None, opening)
     line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
     # NAME_CAP is 70: 69 text columns + "…"
-    assert line == "abc · summarize " + "y" * 59 + "… · archive · -"
+    assert line == "abc · summarize " + "y" * 59 + "… · history · -"
 
 
 def test_search_list_line_real_title_stays_plain_and_unclipped() -> None:
@@ -154,8 +154,8 @@ def test_search_list_line_real_title_stays_plain_and_unclipped() -> None:
 
 
 def test_search_list_line_clips_the_fallback_before_highlighting() -> None:
-    hit = _SearchHit("abc", "", "archive", "", None, "summarize " + "y" * 100 + " foo.py")
+    hit = _SearchHit("abc", "", "history", "", None, "summarize " + "y" * 100 + " foo.py")
     line = _search_list_line(hit, query="foo.py", now=_NOW, color=True)
     assert line == (
         "\x1b[33mabc\x1b[0m · \x1b[2msummarize " + "y" * 59 + "…\x1b[0m"
-        " · \x1b[2marchive · -\x1b[0m")
+        " · \x1b[2mhistory · -\x1b[0m")
