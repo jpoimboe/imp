@@ -905,6 +905,52 @@ def test_cmd_init_use_defaults_without_flag_keeps_the_default_workflow(
     assert (tmp_path / "imp" / "memory" / "default" / "all.md").is_file()
 
 
+_AUTO_HEADLESS_NOTICE = (
+    "No interactive terminal detected — writing defaults to imp/config.yaml. "
+    "Override with --workflow / --base / --pythonpath / --providers.")
+
+
+def _no_tty(monkeypatch) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: False, raising=False)
+
+
+def test_cmd_init_auto_headless_fresh_prints_the_notice(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    _no_tty(monkeypatch)
+    rc = m._cmd_init(_init_args(non_interactive=False))
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert _AUTO_HEADLESS_NOTICE in captured.err.splitlines()
+    assert (tmp_path / "imp" / "config.yaml").is_file()
+
+
+@pytest.mark.parametrize("non_interactive", [False, True])
+def test_cmd_init_reinit_without_tty_omits_the_notice(
+    tmp_path, monkeypatch, capsys, non_interactive
+):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    assert m._cmd_init(_init_args()) == 0  # --use-defaults: initialize first
+    assert (tmp_path / "imp" / "config.yaml").is_file()
+    capsys.readouterr()
+
+    _no_tty(monkeypatch)
+    rc = m._cmd_init(_init_args(non_interactive=non_interactive))
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "No interactive terminal detected" not in captured.err
+    assert ("Project already initialized (imp/config.yaml is committed)."
+            in captured.out.splitlines())
+
+
 def test_fresh_init_applies_the_detected_theme_before_the_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
