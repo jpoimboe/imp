@@ -142,6 +142,7 @@ class StepNode:
     closed: bool = False
     backoff_wait_s: float = 0.0        # this step's own accumulated backoff-wait
                                        # seconds (timer honesty)
+    excluded_s: float = 0.0            # pause/human-wait seconds inside the run window
     interrupted: bool = False
     collapsible = False
 
@@ -601,6 +602,7 @@ class NarrativeBuilder:
         # is the ISO timestamp the current in-progress wait began, or None.
         self._backoff_wait_accum: float = 0.0
         self._backoff_wait_start: str | None = None
+        self._exclusion_tracker = ExclusionTracker()
         # Parent-working stretch start + backoff accrued at that start. Set at the three
         # parent boundaries (step_started, user_message, subagent-return); never advanced by
         # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
@@ -945,6 +947,8 @@ class NarrativeBuilder:
         if not isinstance(event, dict) or "type" not in event:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
             return
+        # Before every early return below, so it sees the stream exclusion_spans does.
+        self._exclusion_tracker.feed(event)
         payload = event.get("payload")
         if not isinstance(payload, dict):
             self._append(ErrorNode(
@@ -1605,9 +1609,11 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
+        node.excluded_s = self._exclusion_tracker.exclusions.overlap(
+            node.run_start_ts or node.start_ts, node.end_ts)
         elapsed = elapsed_seconds(node.run_start_ts or node.start_ts, event.get("timestamp"))
         if elapsed is not None:
-            elapsed = max(0.0, elapsed - node.backoff_wait_s)
+            elapsed = max(0.0, elapsed - node.backoff_wait_s - node.excluded_s)
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_result),

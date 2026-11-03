@@ -838,7 +838,7 @@ def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
     label = compose_label([node.phase_label, _step_header_label(node)])
     raw = nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts)
     if raw is not None:
-        raw = max(0.0, raw - node.backoff_wait_s)
+        raw = max(0.0, raw - node.backoff_wait_s - node.excluded_s)
     segments = [*round_and_tally_parts(node.round, None), fmt_seconds_done(raw)]
     tail = " · complete" + "".join(f" · {s}" for s in segments if s)
     indent = _gutter_indent(depth, gutters, color)
