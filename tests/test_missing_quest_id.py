@@ -11,7 +11,7 @@ from tests.conftest import _seed_control
 from tests.test_cli_list_filters import _archive_status
 from tests.test_inflight_sort import _seed_inflight
 
-_COMMANDS = ("events", "show")
+_COMMANDS = ("log", "events", "show")
 _NO_QUESTS_COPY = "No quests yet — start one with imp new"
 
 
@@ -75,3 +75,16 @@ def test_no_quests_copy_has_one_source() -> None:
             if _NO_QUESTS_COPY in p.read_text(encoding="utf-8")]
     assert hits == [main_py]
     assert main_py.read_text(encoding="utf-8").count(_NO_QUESTS_COPY) == 1
+
+
+@pytest.mark.parametrize(("argv", "error"), [
+    (["log", "--show", "bogus"],
+     "imp: unknown category 'bogus' (choose from: thinking, tools, subagents, prompts, tiers)\n"),
+    (["log", "--summary", "--show", "tools"],
+     "imp: --show/--hide not allowed with -s/--summary\n"),
+    (["log", "-f", "--summary"],
+     "imp: -f/--follow not allowed with --summary\n"),
+])
+def test_bare_log_flag_errors_win_over_missing_id(argv, error, monkeypatch, capsys) -> None:
+    # Pure flag validation runs before any repo lookup, so it wins even outside a repo.
+    assert _run(monkeypatch, capsys, _not_a_repo, argv) == (2, "", error)

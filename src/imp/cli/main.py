@@ -2666,7 +2666,6 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
-    control = _control_root()
     if args.follow:
         conflict = _follow_conflict(args)
         if conflict is not None:
@@ -2674,8 +2673,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
             return 2
         args.no_pager = True
     if args.token is None:
-        args.parser.print_help(sys.stderr)
+        _emit_missing_quest_id("log")
         return 2
+    control = _control_root()
     quest_id: str
     try:
         quest_id = _resolve_id(control, args.token)
