@@ -31,7 +31,7 @@ def test_send_is_received_by_child() -> None:
     prog = "import sys; print(sys.stdin.readline().strip().upper())"
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.send("abc\r")
-        s.wait_idle()
+        s.wait_idle(hard=30.0, predicate=lambda: "ABC" in "\n".join(s.lines()))
         assert "ABC" in "\n".join(s.lines())
 
 
