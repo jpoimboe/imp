@@ -439,6 +439,7 @@ class LiveDriver:
         self._unsandboxed = False
         self._pending_provider: str | None = None
         self._emitted_any = False
+        self._recap_pending = suppress_replay
         self._emissions = 0
         self._deferred: list[tuple[list[str], bool, str]] = []
         # Every event this driver consumed, and the accounting total derived from
@@ -490,6 +491,24 @@ class LiveDriver:
         was_suppressing, self._suppressing = self._suppressing, False
         try:
             self._walk()
+        finally:
+            self._suppressing = was_suppressing
+        self._refresh_status()
+
+    def print_interrupt_recap(self) -> None:
+        # Keyed on an empty post-attach scrollback, not _suppressing: a live non-rendering
+        # node (interrupt bookkeeping) lifts suppression with nothing on screen.
+        if (not self._recap_pending or self._replayed_node_ids is None
+                or self._emitted_any):
+            return
+        self._recap_pending = False
+        text = self._builder.interrupt_recap()
+        if text is None or self._prompt_active:
+            return
+        self._prev_prose = True
+        was_suppressing, self._suppressing = self._suppressing, False
+        try:
+            self._print_lines([pal.ansi(text, "dim", enabled=self._color)], prose=True)
         finally:
             self._suppressing = was_suppressing
         self._refresh_status()
@@ -724,7 +743,7 @@ class LiveDriver:
         if (self._suppressing and self._replayed_node_ids is not None
                 and id(node) not in self._replayed_node_ids):
             self._suppressing = False
-            # _emitted_any is True only from the boot echo — preserve its armed blank.
+            # _emitted_any is True only from the boot echo or resume recap — keep its armed blank.
             self._prev_prose = self._emitted_any
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
