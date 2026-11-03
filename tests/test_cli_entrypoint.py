@@ -109,6 +109,16 @@ def test_imp_help_help_prints_the_help_subparsers_own_usage(tmp_path: Path) -> N
     assert "  <command>\n" in r.stdout
 
 
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_imp_help_dash_h_equals_imp_help_help(flag: str, tmp_path: Path) -> None:
+    helped = _front_door(["help", flag], tmp_path, {"NO_COLOR": "1"})
+    expected = _front_door(["help", "help"], tmp_path, {"NO_COLOR": "1"})
+    assert helped.returncode == 0, helped.stderr
+    assert helped.stderr == ""
+    assert helped.stdout == expected.stdout
+    assert helped.stdout.startswith("usage: imp help [-h] [<command>]\n")
+
+
 def test_front_door_four_ways_are_byte_identical_piped(tmp_path: Path) -> None:
     runs = [_front_door(argv, tmp_path, {"NO_COLOR": "1"}) for argv in _FRONT_DOOR]
     for r in runs:
@@ -161,6 +171,7 @@ def test_the_entrypoint_dispatches_without_touching_the_legacy_config(
 
 
 @pytest.mark.parametrize("argv", [["help"], ["help", "resume"], ["help", "frobnicate"],
+                                  ["help", "-h"], ["help", "--help"],
                                   [], ["-h"], ["--help"]])
 def test_no_help_form_falls_through_to_parse_args(argv: list[str], capsys) -> None:
     """_dispatch_meta must settle every help form itself (or exit inside argparse),
