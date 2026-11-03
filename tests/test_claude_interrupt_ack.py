@@ -11,6 +11,8 @@ import anyio
 import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+from imp.cli.signals import InterruptCoordinator
+from imp.engine.completion import build_continuation_fn
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
@@ -262,8 +264,6 @@ async def test_stream_closing_without_a_result_acks_at_teardown(tmp_path: Path) 
 @pytest.mark.anyio
 async def test_interrupt_while_parked_on_save_acks_without_an_sdk_interrupt(
         tmp_path: Path) -> None:
-    from imp.cli.signals import InterruptCoordinator
-
     coord = InterruptCoordinator()
     saves: list[Any] = []
     coord.set_save_hook(saves.append)
@@ -288,7 +288,6 @@ async def test_interrupt_while_parked_on_save_acks_without_an_sdk_interrupt(
 async def test_ctrl_c_during_a_claude_subagent_turn_end_never_escalates(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from imp.cli import signals as _signals
-    from imp.cli.signals import InterruptCoordinator
     from imp.engine.agent_run import drive_invocation
     from tests.test_interrupt_events import RecordingLog
 
@@ -333,18 +332,26 @@ async def test_ctrl_c_during_a_claude_subagent_turn_end_never_escalates(
 
 
 @pytest.mark.anyio
-async def test_interrupt_racing_a_bare_turn_end_skips_the_continuation(
-        tmp_path: Path) -> None:
-    gate = asyncio.Event()
+@pytest.mark.parametrize("case", ["nudge", "gate", "interject"])
+async def test_real_continuation_is_skipped_when_an_interrupt_converts_at_a_bare_turn_end(
+        tmp_path: Path, case: str) -> None:
+    coord = InterruptCoordinator()
+    if case == "interject":
+        coord.enqueue_interject("also check the docs")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    real = build_continuation_fn(coordinator=coord, event_log=inv.event_log,
+                                 agent_id=inv.agent_id, headless=True,
+                                 has_schema=case != "gate")
     calls: list[str] = []
 
-    def cont(last_text: str) -> tuple[str, bool]:
+    def cont(last_text: str) -> Any:
         calls.append(last_text)
-        return "keep going", False
+        return real(last_text)
 
+    gate = asyncio.Event()
     runner, holder = _runner([gate, assistant(text("thinking aloud")),
                               result(subtype="success")])
-    run = _Run(runner, replace(_inv(tmp_path), continuation_fn=cont))
+    run = _Run(runner, replace(inv, continuation_fn=cont))
 
     client = await _parked_at(holder, gate)
     it = await _interrupt_in_flight(runner, client, sdk_interrupts=1)
@@ -355,3 +362,9 @@ async def test_interrupt_racing_a_bare_turn_end_skips_the_continuation(
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["kind"] == "interrupted"
     assert len(client.queries) == 1
+    journaled = list(inv.event_log.read())
+    assert not [r for r in journaled if r["type"] == "awaiting_user_input"
+                or (r["type"] == "engine_message"
+                    and r["payload"]["subtype"] == "completion")]
+    if case == "interject":
+        assert coord.drain_interject() == "also check the docs"
