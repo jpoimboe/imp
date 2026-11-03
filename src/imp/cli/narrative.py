@@ -100,6 +100,8 @@ class PhaseNode:
     closed: bool = False
     label: str | None = None
     show_label: bool = True
+    # spans closed while this was the current phase
+    exclusion_spans: list[tuple[str, str]] = field(default_factory=list)
     collapsible = False
 
 
@@ -142,6 +144,7 @@ class StepNode:
     closed: bool = False
     backoff_wait_s: float = 0.0        # this step's own accumulated backoff-wait
                                        # seconds (timer honesty)
+    excluded_s: float = 0.0            # pause/human-wait seconds inside the run window
     interrupted: bool = False
     collapsible = False
 
@@ -601,6 +604,7 @@ class NarrativeBuilder:
         # is the ISO timestamp the current in-progress wait began, or None.
         self._backoff_wait_accum: float = 0.0
         self._backoff_wait_start: str | None = None
+        self._exclusion_tracker = ExclusionTracker()
         # Parent-working stretch start + backoff accrued at that start. Set at the three
         # parent boundaries (step_started, user_message, subagent-return); never advanced by
         # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
@@ -945,6 +949,11 @@ class NarrativeBuilder:
         if not isinstance(event, dict) or "type" not in event:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
             return
+        # Before every early return below, so it sees the stream exclusion_spans does.
+        closed = self._exclusion_tracker.feed(event)
+        # Before the handler: a span the next phase's first step_started closes stays here.
+        if self._current_phase is not None:
+            self._current_phase.exclusion_spans += closed
         payload = event.get("payload")
         if not isinstance(payload, dict):
             self._append(ErrorNode(
@@ -1605,9 +1614,11 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
+        node.excluded_s = self._exclusion_tracker.exclusions.overlap(
+            node.run_start_ts or node.start_ts, node.end_ts)
         elapsed = elapsed_seconds(node.run_start_ts or node.start_ts, event.get("timestamp"))
         if elapsed is not None:
-            elapsed = max(0.0, elapsed - node.backoff_wait_s)
+            elapsed = max(0.0, elapsed - node.backoff_wait_s - node.excluded_s)
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_result),
@@ -1830,12 +1841,17 @@ def _breadcrumb_extras(args: Any) -> list[str]:
 
 def phase_elapsed(phase: PhaseNode) -> float | None:
     """Phase duration derived from its steps: first step start_ts → last step
-    end_ts. No phase_started/phase_completed events exist (§7) — phase timing is
+    end_ts, minus the pauses/human waits inside that window. No
+    phase_started/phase_completed events exist (§7) — phase timing is
     derived. None when the phase has no timestamped steps."""
     steps = [c for c in phase.children if isinstance(c, StepNode)]
     if not steps:
         return None
-    return elapsed_seconds(steps[0].start_ts, steps[-1].end_ts)
+    start, end = steps[0].start_ts, steps[-1].end_ts
+    elapsed = elapsed_seconds(start, end)
+    if elapsed is None:
+        return None
+    return max(0.0, elapsed - Exclusions(tuple(phase.exclusion_spans)).overlap(start, end))
 
 
 def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
@@ -1848,6 +1864,101 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
                 - datetime.fromisoformat(start_ts)).total_seconds()
     except (ValueError, TypeError):
         return None
+
+
+def _union_seconds(segments: list[tuple[float, float]]) -> float:
+    """Total length of the union of half-open segments: overlaps counted once."""
+    total = 0.0
+    mark = float("-inf")
+    for lo, hi in sorted(segments):
+        lo = max(lo, mark)
+        if hi > lo:
+            total += hi - lo
+        mark = max(mark, hi)
+    return total
+
+
+@dataclass(frozen=True)
+class Exclusions:
+    """Wall-clock intervals of a run that are not work: human waits and pauses."""
+
+    spans: tuple[tuple[str, str], ...] = ()
+
+    def overlap(self, start_ts: str | None, end_ts: str | None) -> float:
+        """Union seconds falling inside [start_ts, end_ts]; 0.0 for an open span."""
+        width = elapsed_seconds(start_ts, end_ts)
+        if width is None or width <= 0:
+            return 0.0
+        clipped: list[tuple[float, float]] = []
+        for open_ts, close_ts in self.spans:
+            lo = elapsed_seconds(start_ts, open_ts)
+            hi = elapsed_seconds(start_ts, close_ts)
+            if lo is None or hi is None:
+                continue
+            lo, hi = max(0.0, lo), min(width, hi)
+            if hi > lo:
+                clipped.append((lo, hi))
+        return _union_seconds(clipped)
+
+    @property
+    def total(self) -> float:
+        """Union seconds over the whole run."""
+        if not self.spans:
+            return 0.0
+        ref = self.spans[0][0]  # spans aren't in start order, so offsets are deliberately signed
+        segments: list[tuple[float, float]] = []
+        for open_ts, close_ts in self.spans:
+            lo = elapsed_seconds(ref, open_ts)
+            hi = elapsed_seconds(ref, close_ts)
+            if lo is not None and hi is not None and hi > lo:
+                segments.append((lo, hi))
+        return _union_seconds(segments)
+
+
+class ExclusionTracker:
+    """Human waits (`awaiting_user_input` → the reply) and pauses (`workflow_paused`
+    → `workflow_resumed`), each also closed by the step boundary that ends it."""
+
+    def __init__(self) -> None:
+        self._spans: list[tuple[str, str]] = []
+        self._wait_start: str | None = None
+        self._pause_start: str | None = None
+
+    @property
+    def exclusions(self) -> Exclusions:
+        """The spans closed so far; a still-open wait or pause is not included."""
+        return Exclusions(tuple(self._spans))
+
+    def feed(self, event: dict[str, Any]) -> list[tuple[str, str]]:
+        etype = event.get("type")
+        ts = event.get("timestamp")
+        if not isinstance(ts, str):
+            return []
+        mark = len(self._spans)
+        if etype == "awaiting_user_input":
+            if self._wait_start is None:  # a re-armed gate keeps the first ask
+                self._wait_start = ts
+        elif etype == "workflow_paused":
+            if self._pause_start is None:
+                self._pause_start = ts
+        elif etype == "user_message":
+            self._close_wait(ts)
+        elif etype == "workflow_resumed":
+            self._close_pause(ts)
+        elif etype in ("step_started", "step_completed"):
+            self._close_wait(ts)
+            self._close_pause(ts)
+        return self._spans[mark:]
+
+    def _close_wait(self, ts: str) -> None:
+        if self._wait_start is not None:
+            self._spans.append((self._wait_start, ts))
+            self._wait_start = None
+
+    def _close_pause(self, ts: str) -> None:
+        if self._pause_start is not None:
+            self._spans.append((self._pause_start, ts))
+            self._pause_start = None
 
 
 def activity_elapsed(activity: Activity, now_iso: str) -> float:
