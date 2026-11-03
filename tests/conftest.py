@@ -603,9 +603,9 @@ def _seed_project(tmp_path: Path) -> None:
         output:
           status: {type: enum, values: [Success, Error]}
         ---
-        Run this shell command via bash: `sleep 30`. After bash returns
-        (even if it was interrupted), call complete_step with status=Success.
-        Do not call any other tool.
+        Call bash exactly once with the command `sleep 30`, in the foreground: do not
+        pass run_in_background or timeout. After bash returns (even if it was
+        interrupted), call complete_step with status=Success. Do not call any other tool.
     """))
     (wf / "workflow.yaml").write_text(textwrap.dedent("""\
         name: t

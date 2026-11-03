@@ -913,6 +913,29 @@ def test_group_a_sites_route_failures_through_the_evidence_helper():
     assert native_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
 
 
+def test_mid_step_sites_check_bash_compliance_before_sigint():
+    import re
+
+    import tests.test_mid_step_resume_live as mid
+    src = Path(mid.__file__).read_text()
+    sites = [m.end() for m in re.finditer(r"wait_for_bash_tool_call\(events, timeout=", src)]
+    assert len(sites) == 3
+    for start in sites:
+        check = src.index("skip_unless_foreground_sleep(bash_call)", start)
+        assert check < src.index("time.sleep(", start) < src.index("os.killpg(", start)
+
+
+def test_seed_project_writer_forbids_background_and_timeout(tmp_path):
+    from tests.conftest import _seed_project
+    _seed_project(tmp_path)
+    text = (tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md").read_text()
+    assert text.split("---\n", 2)[2] == (
+        "Call bash exactly once with the command `sleep 30`, in the foreground: do not\n"
+        "pass run_in_background or timeout. After bash returns (even if it was\n"
+        "interrupted), call complete_step with status=Success. Do not call any other tool.\n"
+    )
+
+
 def test_group_b_post_sigint_waits_report_evidence():
     import tests.test_mid_step_resume_live as mid
     import tests.test_native_session_resume_live as native
