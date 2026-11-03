@@ -42,6 +42,15 @@ def test_lifecycle_names_the_three_left_draft_dispositions() -> None:
     assert "archive_conversation" in body
 
 
+def test_lifecycle_left_draft_section_names_the_leave_commands() -> None:
+    body = DOC.read_text()
+    section = body.split("\n## What happens to a left draft\n", 1)[1].split("\n## ", 1)[0]
+    for command in ("`/pause`", "`/archive`", "`/clear`"):
+        assert command in section, command
+    assert "/save" not in section
+    assert "/shelve" not in section
+
+
 def test_lifecycle_carries_the_training_data_correction() -> None:
     body = DOC.read_text()
     # the correction: `imp new` runs save_as_draft (draft stays active), it does

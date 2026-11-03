@@ -35,9 +35,9 @@ lands stays maintainable.
 - **Deterministic engine.** The engine decides nothing about your code — it
   sequences steps, routes on their results, and records every byte to an
   append-only log that is the single source of truth.
-- **Pause, resume, interrupt.** Ctrl-D to set a quest aside for later; Ctrl-C to
-  interrupt a running agent and re-steer; a run interrupted mid-call resumes from
-  the log with nothing lost.
+- **Pause, resume, interrupt.** Ctrl-D or `/pause` to set a quest aside for later;
+  Ctrl-C to interrupt a running agent and re-steer; a run interrupted mid-call
+  resumes from the log with nothing lost.
 - **Full provenance.** Trace any line of code back through the run to the
   conversation that spawned it.
 - **Search & backlog.** Full search across every quest, and a tracked backlog

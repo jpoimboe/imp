@@ -86,10 +86,12 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 
 > **Leave-banner headline — state-first.** The `_pause_lines` leave head leads with the
 > **state**: `paused` (gold) followed by a dim ` · <Display>` qualifier naming the trigger —
-> `paused · Ctrl-D` for the keystroke leave, and `paused · SIGTERM` / `paused · SIGHUP` /
-> `paused · SIGQUIT` for signal leaves. The internal reason stays lowercase; only the display
-> form is capitalized. The keystroke leave also echoes a dim `> Ctrl-D` shadow at the caret
-> above the head (see the caret-shadow note below); signal leaves print no caret line.
+> `paused · Ctrl-D` for the keystroke leave, `paused · /pause` for a typed `/pause` at a
+> built quest's prompt, and `paused · SIGTERM` / `paused · SIGHUP` / `paused · SIGQUIT` for
+> signal leaves. The internal reason stays lowercase; only the display form differs. The
+> keystroke leave also echoes a dim `> Ctrl-D` shadow at the caret above the head (see the
+> caret-shadow note below); `/pause` (already echoed as typed) and signal leaves print no
+> caret line.
 
 > **Keystroke caret shadow — `> Ctrl-D` above the head.** On a keystroke (Ctrl-D) leave,
 > `pal.caret()` (gold `> `) prints immediately followed by the dim display form `Ctrl-D`, so a

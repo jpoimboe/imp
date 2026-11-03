@@ -56,7 +56,8 @@ def test_finalize_includes_grounding_partial() -> None:
 def test_threshold_action_rule_present() -> None:
     fd = FRONT_DOOR.read_text()
     assert "## Acting on imp" in fd
-    assert "/save" in fd
+    assert "`/pause`, `/archive`, `/abandon`, and `/clear`" in fd
+    assert "/save" not in fd
     assert "/keep" not in fd
     assert "/abandon" in fd
     assert "/clear" in fd

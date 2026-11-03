@@ -180,10 +180,13 @@ to score).
   authoritative (read it and check it matches reality). The real client-side set is smaller
   than a "full nine": `/help`, `/skills`, `/model <m>`, `/sandbox [on|off]`,
   `/provider [name]`, `/abandon`, and `/<skill>` at **every** prompt. `/compact` applies only
-  once a conversation is running. `/save`, `/shelve`, and `/clear` also need a running
-  conversation, and only while the quest is not yet built (`imp chat` or any
-  pre-materialized conversation). At a pre-session prompt (opening intent, post-`/clear`,
-  inert-resume reply) each of these four prints a redirect and re-prompts, and `/help` there
+  once a conversation is running. `/pause`, `/archive`, and `/clear` also need a running
+  conversation; `/archive` and `/clear` only while the quest is not yet built (`imp chat` or
+  any pre-materialized conversation). On a built quest they print a redirect naming
+  `/pause`, and `/pause` pauses it like Ctrl-D (`paused · /pause`). The retired `save` and
+  `shelve` leave names are unknown commands now (`Unknown command: …`). At a pre-session
+  prompt (opening intent, post-`/clear`, inert-resume reply) each of `/compact`, `/pause`,
+  `/archive`, and `/clear` prints a redirect and re-prompts, and `/help` there
   omits them. **There is no `/list`, `/search`, or `/resume`** client-side. Each is handled
   without spending a model turn; Tab completion covers them (`send("/sk\t")` → `/skills`), an
   unambiguous prefix fills and an ambiguous one lists candidates; Up-arrow recalls previous
@@ -193,10 +196,14 @@ to score).
   token (holding `/` or `.`, e.g. `/home/user/foo.py`) is submitted to the model verbatim. Test
   both: a typo errors client-side, and a pasted path submits as ordinary input.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
-  (ask something about the repo), then `/save` — is the kept-as-draft messaging clear? Try
-  `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
-  exchange (`archived`) vs in a brand-new chat with no exchange (`discarded`), both rc 130. Does chat read as a
-  distinct, lighter thing than `imp new`?
+  (ask something about the repo), then `/pause`. The block should end `· paused` and the chat
+  should stay in `imp list`. In fresh chats, after an exchange, try `/archive` and `/clear`
+  (`/clear` also starts a fresh one): each should end `· archived`, and the chat leaves
+  `imp list` but shows under `imp list --archived`. Also compare Ctrl-D dispositions: after an
+  exchange in an untitled chat (`archived`) vs in a brand-new chat with no exchange (`discarded`).
+  Every leave here is rc 130. On a built quest, `/pause` at a prompt should print `paused ·
+  /pause` and leave it `paused`, and `imp resume` should land where Ctrl-D would. Does chat read
+  as a distinct, lighter thing than `imp new`?
 - **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
   `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects. The picker **advertises `q` to
   cancel** (a bare `q` keystroke); ESC also cancels (escape-flush caveat, §2). A cancel erases

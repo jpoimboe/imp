@@ -72,13 +72,18 @@ failure pauses the quest with the command's output.
 
 When a phase-0 conversation is left, its fate depends on what happened:
 
-- **Never answered / no real exchange** → `discard_conversation` (it goes away).
-- **`imp new`, an explicit `/save`, or the quest was renamed (a design formed)**
-  → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
-  resumable later. It does **not** move to the backlog.
-- **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:
-  it leaves the active list but stays resumable (archived) via `imp resume` or
-  findable with `imp search`.
+- **Never answered / no real exchange** (and no `/pause`) → `discard_conversation`
+  (it goes away).
+- **`imp new`, an explicit `/pause`, or the quest was renamed (a design formed)**
+  → `save_as_draft`: the quest is `paused` and `origin` stays `draft`, so it
+  remains in the active list, resumable later. It does **not** move to the backlog.
+- **After a real exchange, an explicit `/archive` or `/clear`, or otherwise** (an
+  un-renamed `imp chat` conversation) → `archive_conversation`: it leaves the
+  active list but stays resumable (`archived`) via `imp resume` or findable with
+  `imp search`. `/clear` then opens a fresh conversation.
+
+On a built quest `/archive` and `/clear` are refused; `/pause` pauses it exactly
+like Ctrl-D at that prompt.
 
 This is the exact point **training data** gets wrong — it once claimed `imp new`
 "archives a draft as resumable"; it does not. `imp new` runs `save_as_draft`, so
