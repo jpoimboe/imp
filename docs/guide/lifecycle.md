@@ -98,7 +98,7 @@ A script can tell from imp's exit code alone how a run ended:
 | 2 | Usage error: bad arguments, no such quest |
 | 3 | The session failed to start |
 | 4 | Lost the connection to the run (it may still be running) |
-| 130 | You ended it and nothing failed: left, paused, saved, shelved, discarded, abandoned or cancelled. A left quest is resumable with `imp resume`. |
+| 130 | You ended it and nothing failed: left, paused, archived, discarded, abandoned or cancelled. A left quest is resumable with `imp resume`. |
 
 ---
 

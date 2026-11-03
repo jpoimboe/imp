@@ -101,7 +101,7 @@ HELP_TEXT = (
     "/subscribe @handle — follow a quest (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a quest\n"
     "/replay [n] (reply or @handle) — re-send last n messages\n"
-    "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
+    "/resume <id or text> — rehydrate and continue a paused/archived conversation\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/restart — reload the daemon to run the latest code\n"
     "/help — this message\n"

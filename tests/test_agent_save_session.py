@@ -130,7 +130,7 @@ async def test_agent_save_ends_with_paused(
     call, res = types.index("tool_call"), types.index("tool_result")
     assert events[call]["payload"]["name"] == "save_and_exit"
     assert events[res]["payload"]["content"] == (
-        "Saved. The session closes at the end of this turn.")
+        "Paused. The session closes at the end of this turn.")
     assert call < res < types.index("conversation_saved")
     assert types[-1] == "conversation_saved"
     assert State.load(quest.state_dir).status == "paused"

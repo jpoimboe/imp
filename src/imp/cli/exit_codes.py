@@ -13,5 +13,5 @@ class ExitCode(IntEnum):
     USAGE = 2
     STARTUP_FAILED = 3
     LOST_CONNECTION = 4
-    # Left, paused, saved, shelved, discarded, abandoned or cancelled: nothing failed.
+    # Left, paused, archived, discarded, abandoned or cancelled: nothing failed.
     USER_ENDED = 130

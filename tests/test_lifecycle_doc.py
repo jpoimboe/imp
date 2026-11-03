@@ -21,7 +21,7 @@ def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
                    "archived", "abandoned", "error"):
         assert status in body, status
     assert "(stored `archived`)" in body
-    assert "`shelved`" not in body
+    assert "shelved" not in body
     # running is derived, never stored
     assert "running" in body
     assert "derived" in body
@@ -83,3 +83,5 @@ def test_lifecycle_exit_code_table_matches_the_exit_code_constants() -> None:
     codes = [int(c) for c in re.findall(r"^\| (\d+) \|", section, flags=re.M)]
     assert codes == sorted(int(code) for code in ExitCode)
     assert "| 130 | You ended it and nothing failed" in section
+    assert ("left, paused, archived, discarded, abandoned or cancelled. "
+            "A left quest is resumable") in section

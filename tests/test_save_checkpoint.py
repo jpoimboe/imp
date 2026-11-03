@@ -56,7 +56,7 @@ def _coordinator(hook: _SaveHook) -> InterruptCoordinator:
     return coord
 
 
-SAVED = "Saved. The session closes at the end of this turn."
+PAUSED = "Paused. The session closes at the end of this turn."
 
 
 def _draft(tmp_path: Path) -> Quest:
@@ -108,7 +108,7 @@ def _assert_saved_after_the_turn(quest: Quest, tool_use_id: str) -> None:
     res = next(i for i, e in enumerate(events)
                if e["type"] == "tool_result" and e["payload"]["id"] == tool_use_id)
     assert events[call]["payload"]["name"] == "save_and_exit"
-    assert events[res]["payload"]["content"] == SAVED
+    assert events[res]["payload"]["content"] == PAUSED
     assert events[res]["payload"]["error"] is False
     assert types.index("agent_message") < call < res < types.index("conversation_saved")
     assert types[-1] == "conversation_saved"
@@ -225,7 +225,7 @@ async def test_claude_saves_after_the_logged_result(
     scripted = [
         cc.assistant(cc.text("setting this aside"),
                      cc.tool_use("s1", "save_and_exit", {})),
-        cc.user(cc.tool_result("s1", SAVED)),
+        cc.user(cc.tool_result("s1", PAUSED)),
         cc.assistant(cc.text("LATER TURN")),
         cc.result(),
     ]
@@ -235,7 +235,7 @@ async def test_claude_saves_after_the_logged_result(
             opts, scripted_messages=scripted))
     inv = _claude_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"}))
     saved = await _run_until_saved(runner, inv, quest)
-    assert trace == [f"body: {SAVED}", "AssistantMessage:", "UserMessage:",
+    assert trace == [f"body: {PAUSED}", "AssistantMessage:", "UserMessage:",
                      "SaveRequested after tool_call,tool_result"]
     assert saved.calls == [None]
     assert saved.yielded == []
@@ -256,7 +256,7 @@ async def test_codex_saves_after_the_logged_result(
         cx.thread_started("thr-1"),
         cx.agent_message("setting this aside"),
         cx.mcp_started("save_and_exit", item_id="s1"),
-        cx.mcp_call(name="save_and_exit", result=SAVED, item_id="s1"),
+        cx.mcp_call(name="save_and_exit", result=PAUSED, item_id="s1"),
         cx.agent_message("LATER TURN"),
         cx.turn_completed(input_tokens=100, output_tokens=50),
     ]]
@@ -265,7 +265,7 @@ async def test_codex_saves_after_the_logged_result(
         client_factory=lambda options=None: cx.FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = tmp_path / "auth.json"
     saved = await _run_until_saved(runner, _codex_inv(tmp_path), quest)
-    assert trace.index(f"body: {SAVED}") + 1 == trace.index("item.started:save_and_exit")
+    assert trace.index(f"body: {PAUSED}") + 1 == trace.index("item.started:save_and_exit")
     assert trace[-2:] == ["item.completed:save_and_exit",
                           "SaveRequested after tool_call,tool_result"]
     assert saved.calls == [None]
