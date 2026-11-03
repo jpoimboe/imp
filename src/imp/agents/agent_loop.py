@@ -176,6 +176,8 @@ async def run_agent_loop(
             return
         cont = invocation.continuation_fn
         if cont is not None:
+            if session.cancelled():
+                break
             next_text, human = cont(last_text)
             if inspect.isawaitable(next_text):
                 next_text = await next_text

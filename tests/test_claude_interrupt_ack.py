@@ -330,3 +330,28 @@ async def test_ctrl_c_during_a_claude_subagent_turn_end_never_escalates(
     assert not any(r["type"] == "interrupt_escalated" for r in log.records)
     assert parent_calls == ["interrupt"]
     assert outcome.output == {"status": "Success"}
+
+
+@pytest.mark.anyio
+async def test_interrupt_racing_a_bare_turn_end_skips_the_continuation(
+        tmp_path: Path) -> None:
+    gate = asyncio.Event()
+    calls: list[str] = []
+
+    def cont(last_text: str) -> tuple[str, bool]:
+        calls.append(last_text)
+        return "keep going", False
+
+    runner, holder = _runner([gate, assistant(text("thinking aloud")),
+                              result(subtype="success")])
+    run = _Run(runner, replace(_inv(tmp_path), continuation_fn=cont))
+
+    client = await _parked_at(holder, gate)
+    it = await _interrupt_in_flight(runner, client, sdk_interrupts=1)
+    gate.set()
+    events = await run.finish()
+    await _acked(it)
+    assert calls == []
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["kind"] == "interrupted"
+    assert len(client.queries) == 1
