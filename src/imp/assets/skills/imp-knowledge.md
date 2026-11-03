@@ -67,8 +67,8 @@ Don't dig through `.imp/` — the raw event log is masked and the rest is intern
 bookkeeping. Ask the CLI instead:
 
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
-  completed quests (merged or done); `--all` adds abandoned and shelved
-  conversations, `--json` emits the board as a structured array.
+  completed quests (merged or done); `--all` adds abandoned and archived
+  quests, `--json` emits the board as a structured array.
 - `imp show <id>` — a quest's card: status, why it halted, current step, intent,
   summary, and the run ledger — a `run:` line of time, tokens, and charge (the
   run's share of the weekly quota window, or its cost when that window is

@@ -18,8 +18,10 @@ def test_lifecycle_doc_exists_and_is_nonempty() -> None:
 def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
     body = DOC.read_text()
     for status in ("new", "paused", "merge_blocked", "merged",
-                   "shelved", "abandoned", "error"):
+                   "archived", "abandoned", "error"):
         assert status in body, status
+    assert "(stored `archived`)" in body
+    assert "`shelved`" not in body
     # running is derived, never stored
     assert "running" in body
     assert "derived" in body

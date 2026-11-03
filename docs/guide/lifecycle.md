@@ -16,7 +16,7 @@ prompts, partials, scripts, and skills that drove it.
 ## Statuses
 
 A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, `merged`,
-`shelved`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
+`archived`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
 at-rest status plus two runtime facts — whether a live process holds the quest's
 lock, and a durable **halt-condition** recorded on `state.json`:
 
@@ -25,7 +25,7 @@ lock, and a durable **halt-condition** recorded on `state.json`:
   `waiting`).
 - `error` — a not-live failure halt (stored `error`).
 - `merged` — merged into its base branch (stored `merged`).
-- `shelved` — an archived, resumable conversation (stored `shelved`).
+- `archived` — an archived, resumable conversation (stored `archived`).
 - `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
 - `paused` — not live, a clean stop (a yield or interrupt).
 - `new` — created, never started.
@@ -46,7 +46,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
-- **archive** — finished (`merged`/`abandoned`) and shelved conversations,
+- **archive** — finished (`merged`/`abandoned`) and archived conversations,
   reachable by search.
 
 ## Materialize / go-live
@@ -77,7 +77,7 @@ When a phase-0 conversation is left, its fate depends on what happened:
   → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
   resumable later. It does **not** move to the backlog.
 - **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:
-  it leaves the active list but stays resumable (shelved) via `imp resume` or
+  it leaves the active list but stays resumable (archived) via `imp resume` or
   findable with `imp search`.
 
 This is the exact point **training data** gets wrong — it once claimed `imp new`

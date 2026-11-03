@@ -92,7 +92,7 @@ Returns all quests — never-started backlog, in-flight, and finished — by sca
 the quest has not reached a step yet).
 
 `status` is `new`, `running`, `waiting`, `paused`, `error` or `merge_blocked` while a
-quest is in flight, and `merged`, `done`, `abandoned` or `shelved` once it is finished.
+quest is in flight, and `merged`, `done`, `abandoned` or `archived` once it is finished.
 
 ## Attaching
 

@@ -195,7 +195,7 @@ to score).
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
   (ask something about the repo), then `/save` — is the kept-as-draft messaging clear? Try
   `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
-  exchange (`shelved`) vs in a brand-new chat with no exchange (`discarded`), both rc 130. Does chat read as a
+  exchange (`archived`) vs in a brand-new chat with no exchange (`discarded`), both rc 130. Does chat read as a
   distinct, lighter thing than `imp new`?
 - **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
   `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects. The picker **advertises `q` to
