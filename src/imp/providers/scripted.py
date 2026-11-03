@@ -4,13 +4,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
 import os
-from collections.abc import AsyncGenerator
+import signal
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, cast
+
+import anyio
 
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.runner import (
@@ -23,7 +27,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ToolContext, kill_process_group
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     Transcript,
@@ -37,7 +41,7 @@ from imp.providers.resolve import spawn_subagent_via_registry
 
 ENV_VAR = "IMP_SCRIPTED_SCRIPT"
 
-InterruptMode = Literal["default", "cooperative"]
+InterruptMode = Literal["default", "cooperative", "hard_kill"]
 
 
 def _env_check() -> bool:
@@ -55,7 +59,7 @@ def _select_turns(script: dict[str, Any], agent_name: str) -> list[dict[str, Any
 
 def _interrupt_mode(script: dict[str, Any]) -> InterruptMode:
     mode = script.get("interrupt", "default")
-    if mode not in ("default", "cooperative"):
+    if mode not in ("default", "cooperative", "hard_kill"):
         raise ValueError(f"scripted: unknown interrupt mode {mode!r}")
     return cast(InterruptMode, mode)
 
@@ -85,6 +89,11 @@ class ScriptedAgentRunner:
         self._ctx: ToolContext | None = None
         self.interrupt_mode = interrupt_mode
         self._steer_requested = False
+        self._stop_requested = False
+        self._killed = asyncio.Event()
+        # A present force_kill opts the runner into the coordinator's hard tier.
+        self.force_kill: Callable[[], Awaitable[None]] | None = (
+            self._force_kill if interrupt_mode == "hard_kill" else None)
 
     async def run(
         self, invocation: AgentInvocation,
@@ -194,6 +203,12 @@ class ScriptedAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
 
+                if self._stop_requested:
+                    await self._killed.wait()
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "scripted runner force-killed"}}
+                    return
                 if self._steer_requested:
                     self._steer_requested = False
                     steer = build_inline_solicit(
@@ -249,12 +264,23 @@ class ScriptedAgentRunner:
 
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_tool_processes
+        if self.interrupt_mode == "hard_kill":
+            # Never acknowledges: models a runner wedged past the cooperative deadline.
+            self._stop_requested = True
+            await anyio.sleep_forever()
         if self.interrupt_mode == "cooperative":
             self._steer_requested = True
         ctx = self._ctx
         if ctx is not None:
             with contextlib.suppress(Exception):
                 await terminate_tool_processes(ctx)
+
+    async def _force_kill(self) -> None:
+        self._killed.set()
+        ctx = self._ctx
+        if ctx is not None:
+            for proc in list(ctx.running_processes):
+                await kill_process_group(proc, signal.SIGKILL)
 
 
 class ScriptedProvider:

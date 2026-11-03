@@ -9,6 +9,7 @@ import anyio
 import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+from imp.cli import signals
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.agent_run import AgentRunResult, drive_invocation
 from imp.engine.awaiting_user_input import AwaitingUserInput
@@ -149,11 +150,36 @@ async def test_cooperative_steer_leaving_client_pauses_awaiting(
     assert not _of(log, "interrupt_escalated")
 
 
+@pytest.mark.anyio
+async def test_hard_kill_escalates_and_pauses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(signals, "_COOPERATIVE_DEADLINE_S", 0.3)
+    marker = _write_script(tmp_path, monkeypatch, "hard_kill")
+    res, log, elapsed = await _drive_and_interrupt(
+        tmp_path, marker, "hard_kill", lambda _q: "unused")
+
+    assert res.paused and res.interrupt
+    assert res.output is None
+    assert not res.awaiting_user
+    esc = _of(log, "interrupt_escalated")
+    assert [e["payload"]["reason"] for e in esc] == ["cooperative_timeout"]
+    tiers = [(d["payload"]["tier"], d["payload"]["outcome"])
+             for d in _of(log, "interrupt_delivered")]
+    assert tiers == [("cooperative", "timeout"), ("hard", "ok")]
+    assert not _of(log, "awaiting_user_input")
+    assert [e["payload"]["kind"] for e in _of(log, "error")] == ["interrupted"]
+    assert not _of(log, "agent_result")
+    assert elapsed < 10
+
+
 def test_interrupt_mode_parsing_and_default_has_no_force_kill() -> None:
     assert getattr(ScriptedAgentRunner("x"), "force_kill", None) is None
     assert getattr(ScriptedAgentRunner("x", "cooperative"), "force_kill", None) is None
     assert _interrupt_mode({}) == "default"
     assert _interrupt_mode({"interrupt": "cooperative"}) == "cooperative"
+    assert _interrupt_mode({"interrupt": "hard_kill"}) == "hard_kill"
+    assert ScriptedAgentRunner("x", "hard_kill").force_kill is not None
     with pytest.raises(ValueError, match="unknown interrupt mode 'bogus'"):
         _interrupt_mode({"interrupt": "bogus"})
 
