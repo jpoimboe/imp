@@ -747,12 +747,16 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _run_header_line(quest_id: str, title: str, marker: str | None = None,
-                     *, color: bool) -> str:
-    stripped = title.strip()
-    if marker is None:
-        tail = f" · {stripped}" if stripped else ""
-    else:
-        tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
+                     *, color: bool, intent: str | None = None) -> str:
+    resolved = quest_row.resolve_display_name(title, intent)
+    segments: list[str] = []
+    if resolved.kind is quest_row.NameKind.TITLE:
+        segments.append(resolved.text)
+    elif resolved.kind is quest_row.NameKind.PROMPT:
+        segments.append(quest_row._truncate(resolved.text, quest_row.NAME_CAP))
+    if marker is not None:
+        segments.append(marker)
+    tail = "".join(f" · {s}" for s in segments)
     head = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
     return head + ansi(tail, "dim", enabled=color) if tail else head
 
@@ -2717,7 +2721,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
     tree = narrative.build_tree(events)
     card = store.quest_card(quest_id)
     title = card.title if card is not None else ""
-    run_header = _run_header_line(quest_id, title, color=color)
+    intent = (quest_row.fallback_intent(card.intent, card.seed_opening)
+              if card is not None else None)
+    run_header = _run_header_line(quest_id, title, color=color, intent=intent)
     lines = [run_header, "", *render_tree(tree, show=show, color=color, width=width,
                                           display_width=_display_width())]
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)

@@ -113,3 +113,89 @@ def test_log_snapshot_header_present_when_piped(tmp_path, monkeypatch) -> None:
     out = buf.getvalue()
     assert rc == 0
     assert out.startswith("alpha · A\n\n")
+
+
+_OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
+_LONG = "summarize " + "the whole tree " * 10
+
+
+def test_titleless_intent_is_the_name_before_the_marker() -> None:
+    line = _run_header_line("bedo08", "", "resuming", color=False, intent=_OPENING)
+    assert line == f"bedo08 · {_OPENING} · resuming"
+
+
+def test_titleless_intent_is_flattened_and_rides_the_dim_tail() -> None:
+    line = _run_header_line("bedo08", "  ", color=True, intent="  foo.py\n  -- why?  ")
+    assert line == "\x1b[33mbedo08\x1b[0m\x1b[2m · foo.py -- why?\x1b[0m"
+
+
+def test_titleless_intent_clips_at_name_cap() -> None:
+    from imp.cli.quest_row import NAME_CAP
+    line = _run_header_line("bedo08", "", "resuming", color=False, intent=_LONG)
+    name = line.removeprefix("bedo08 · ").removesuffix(" · resuming")
+    assert len(name) == NAME_CAP
+    assert name.endswith("…")
+    assert _LONG.startswith(name[:-1])
+
+
+def test_real_title_beats_intent_and_stays_unclipped() -> None:
+    title = "T" * 90
+    line = _run_header_line("bedo08", title, "resuming", color=False, intent=_OPENING)
+    assert line == f"bedo08 · {title} · resuming"
+
+
+def test_blank_intent_keeps_the_nameless_header() -> None:
+    assert _run_header_line("bedo08", "", "resuming", color=False, intent=" \n ") == (
+        "bedo08 · resuming")
+    assert _run_header_line("bedo08", "", color=False, intent=None) == "bedo08"
+
+
+def _titleless_quest(control, quest_id: str, *, intent: str | None,
+                     seed: str | None):
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    _seed_control(control)
+    q = Quest.create(control, title="", quest_id=quest_id, base_branch="main")
+    if seed is not None:
+        q.set_seed_opening(seed)
+    if intent is not None:
+        q.event_log().append(
+            agent_id=None, type="user_message",
+            payload={"subtype": "intent", "content": [{"type": "text", "text": intent}]})
+    return q
+
+
+def _log_header(control, monkeypatch, capsys, quest_id: str) -> str:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: control)
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert m.main(["log", quest_id, "--no-pager"]) == 0
+    return capsys.readouterr().out.split("\n", 1)[0]
+
+
+def test_log_header_names_a_titleless_quest_by_its_opening(
+        tmp_path, monkeypatch, capsys) -> None:
+    _titleless_quest(tmp_path, "bedo08", intent=_OPENING, seed=None)
+    assert _log_header(tmp_path, monkeypatch, capsys, "bedo08") == f"bedo08 · {_OPENING}"
+
+
+def test_log_header_clips_a_long_opening_at_name_cap(tmp_path, monkeypatch, capsys) -> None:
+    from imp.cli.quest_row import NAME_CAP
+    _titleless_quest(tmp_path, "bedo08", intent=_LONG, seed=None)
+    name = _log_header(tmp_path, monkeypatch, capsys, "bedo08").removeprefix("bedo08 · ")
+    assert len(name) == NAME_CAP and name.endswith("…")
+
+
+def test_log_header_names_an_unstarted_draft_by_its_prompt(
+        tmp_path, monkeypatch, capsys) -> None:
+    from imp.create import create_draft_quest
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    draft = create_draft_quest(tmp_path, "summarize\n  bar.py")
+    assert _log_header(tmp_path, monkeypatch, capsys, draft.id) == (
+        f"{draft.id} · summarize bar.py")
+
+
+def test_log_header_without_a_name_source_is_the_id(tmp_path, monkeypatch, capsys) -> None:
+    _titleless_quest(tmp_path, "bedo08", intent=None, seed=None)
+    assert _log_header(tmp_path, monkeypatch, capsys, "bedo08") == "bedo08"
