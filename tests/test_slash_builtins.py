@@ -18,7 +18,7 @@ CTRL_D_PAUSE = "  Ctrl+D             Pause and exit; resume with imp resume <id>
 UNBUILT_HELP = [
     "Available slash commands:",
     "  /help              Show this message",
-    "  /skills            List loadable skills",
+    "  /skills            List your skills and the agents' skills",
     "  /pause             Pause and exit; resume with imp resume <id>",
     "  /archive           Archive this conversation (find it later with imp search)",
     "  /clear             Archive this conversation and start a fresh one",

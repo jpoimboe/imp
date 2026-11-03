@@ -4,7 +4,7 @@
 interactive slash dispatcher (human path).
 
 Skills live under <skills_dir>/:
-  <skills_dir>/*.md       — internal skills loaded by agents (load_internal_skill)
+  <skills_dir>/*.md       — internal skills for agents (load_internal_skill / list_internal_skills)
   <skills_dir>/user/*.md  — skills surfaced to the human (load_user_skill / list_user_skills)
 
 Internal path: resolves skills/<name>.md, falling back to skills/user/<name>.md.
@@ -155,3 +155,11 @@ def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
             description = _split_frontmatter(p.read_text())[0]
             out.append((p.stem, description))
     return out
+
+
+def list_internal_skills(skills_dir: Path) -> list[str]:
+    """Sorted stems of <skills_dir>/*.md (top level only, never user/). Empty list
+    if skills_dir is absent."""
+    if not skills_dir.is_dir():
+        return []
+    return [p.stem for p in sorted(skills_dir.glob("*.md")) if p.is_file()]
