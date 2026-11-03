@@ -228,8 +228,11 @@ async def run_terminal_client(
             # The run yielded to the paused prompt: the ctrl-c round is over.
             # Reset the client gesture latch so the next ctrl-c is a fresh round.
             coord.end_gesture_round()
-            prompt = (event.get("payload") or {}).get("steer_hint") or ""
-            interrupt = bool((event.get("payload") or {}).get("interrupt"))
+            payload = event.get("payload") or {}
+            prompt = payload.get("steer_hint") or ""
+            interrupt = bool(payload.get("interrupt"))
+            if interrupt and not str(event.get("agent_id") or "").startswith("sub:"):
+                driver.print_interrupt_recap()
             gate_send.send_nowait((prompt, interrupt))
             if title is not None:
                 title.idle()

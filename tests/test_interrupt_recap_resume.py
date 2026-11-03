@@ -2,20 +2,39 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import anyio
+import pytest
 
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
+from imp.cli.session_terminal import run_terminal_client
+from imp.cli.signals import InterruptCoordinator
+from imp.remote.session.client import SessionClient
+from imp.remote.session.protocol import encode_event
 from tests._event_fixtures import _TTY, agent_text, ev
+from tests._session_fakes import serve_raw_frames
+from tests.async_wait import HANG_BACKSTOP
 from tests.test_narrative_interrupt_recap import (
     LEAD,
     LIVE_GATE,
+    SCRIPT_HINT,
     Event,
     _ctrl_c,
     _cut_off_then_resume,
     _dispatch,
+    _gate,
+    _lead_cut_off_mid,
+    _leave_and_resume,
+    _opening_explorer,
     _opening_thinking,
+    _spec_review,
     _sub_work,
     _task_lead,
+    _two_cut_off,
 )
 from tests.test_resume_startup_spinner import Screen, _trimmed
 
@@ -120,3 +139,141 @@ def test_no_recap_text_leaves_the_resume_screen_unchanged() -> None:
     lines = _prompt_screen(events, [LIVE_GATE], recap=False)
     assert lines == ["banner", "", "", "> PROMPT"]
     assert _prompt_screen(events, [LIVE_GATE], recap=True) == lines
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def _no_confirm(_q: str) -> bool:
+    raise AssertionError("confirm must not be called")
+
+
+async def _client_output(tmp_path: Path, frames: list[Event], *, color: bool = False) -> str:
+    """Stream `frames` through a real SessionClient into run_terminal_client's _on_event."""
+    sock = str(tmp_path / "s.sock")
+    out = _Pipe()
+    driver = _resume_driver(out, color=color)
+    payload = b"".join(encode_event(f).encode("utf-8") + b"\n" for f in frames)
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable")
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await serve_raw_frames(sock, payload, tg)
+            await run_terminal_client(
+                attach=_attach, driver=driver, coord=InterruptCoordinator(),
+                solicit=_solicit, confirm=_no_confirm, leave_mode="new")
+            tg.cancel_scope.cancel()
+    return out.getvalue()
+
+
+def _resumed_at(events: list[Event], *live: Event) -> list[Event]:
+    return [*_replayed(events), BOUNDARY, *(live or (LIVE_GATE,))]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("events", "live", "expected"), [
+    pytest.param(_cut_off_then_resume("coder", "writing code"), LIVE_GATE,
+                 CODER_RECAP, id="task-coder"),
+    pytest.param(_cut_off_then_resume("code-reviewer", "reviewing code"), LIVE_GATE,
+                 "was: task 1/2 · reviewing code", id="task-code-reviewer"),
+    pytest.param(_two_cut_off(), LIVE_GATE,
+                 "was: task 1/2 · running 2 subagents", id="task-two-subagents"),
+    pytest.param(_lead_cut_off_mid(ev("t1", "thinking", LEAD, content="hmm")), LIVE_GATE,
+                 "was: task 1/2", id="task-mid-thinking"),
+    pytest.param(_lead_cut_off_mid(ev("t1", "tool_call", LEAD, id="tc1", name="bash",
+                                      input={"command": "make check"})), LIVE_GATE,
+                 "was: task 1/2", id="task-mid-tool"),
+    pytest.param(_spec_review(), LIVE_GATE, "was: reviewing spec", id="spec-review"),
+    pytest.param([ev("s1", "step_started", step="verify", kind="script", phase="implement",
+                     label="running tests", command="make check"), *_leave_and_resume("a")],
+                 _gate("live", None, SCRIPT_HINT), "was: running tests", id="verify-gate"),
+    pytest.param(_opening_explorer(), LIVE_GATE, "was: exploring codebase",
+                 id="opening-explorer"),
+    pytest.param([_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"),
+                  _sub_work("d1"), *_leave_and_resume("a")],
+                 LIVE_GATE, CODER_RECAP, id="pause-finalize-only"),
+    pytest.param([_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"),
+                  _sub_work("d1"),
+                  ev("r-d1", "tool_result", LEAD, id="blk-d1", content="stopped",
+                     kind="interrupted", error=True, id_ns="block")],
+                 LIVE_GATE, CODER_RECAP, id="interrupted-tool-result-only"),
+])
+async def test_resumed_hold_gate_prints_the_recap(
+    tmp_path: Path, events: list[Event], live: Event, expected: str,
+) -> None:
+    assert await _client_output(tmp_path, _resumed_at(events, live)) == expected + "\n"
+
+
+@pytest.mark.anyio
+async def test_nothing_cut_off_in_opening_conversation_prints_nothing(tmp_path: Path) -> None:
+    assert await _client_output(tmp_path, _resumed_at(_opening_thinking())) == ""
+
+
+@pytest.mark.anyio
+async def test_recap_is_dim_with_color_on(tmp_path: Path) -> None:
+    out = await _client_output(
+        tmp_path, _resumed_at(_cut_off_then_resume("coder", "writing code")), color=True)
+    assert out == f"\x1b[2m{CODER_RECAP}\x1b[0m\n"
+
+
+def _parked_at_steer_gate() -> list[Event]:
+    """A live session parked at the task-lead's inline steer gate (no leave yet)."""
+    return [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"), _sub_work("d1"),
+            *_ctrl_c("a", LEAD, "sub:d1")]
+
+
+@pytest.mark.anyio
+async def test_attach_to_parked_steer_gate_prints_the_recap(tmp_path: Path) -> None:
+    resent = _gate(f"a-g-{LEAD}", LEAD)            # the pending gate, re-sent untagged
+    frames = [*_replayed(_parked_at_steer_gate()), BOUNDARY, resent]
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+@pytest.mark.anyio
+async def test_quiet_attach_ctrl_c_recaps_once_at_the_step_agents_gate(
+    tmp_path: Path,
+) -> None:
+    running = [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"),
+               _sub_work("d1")]
+    frames = [*_replayed(running), BOUNDARY, *_ctrl_c("a", LEAD, "sub:d1")]
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+@pytest.mark.anyio
+async def test_subagent_gate_alone_prints_nothing(tmp_path: Path) -> None:
+    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), _gate("sg", "sub:d1"))
+    assert await _client_output(tmp_path, frames) == ""
+
+
+@pytest.mark.anyio
+async def test_no_recap_once_a_live_node_has_emitted(tmp_path: Path) -> None:
+    live_text = agent_text("lt", "Looking at the failing test.", agent_id=LEAD)
+    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), live_text, LIVE_GATE)
+    out = await _client_output(tmp_path, frames)
+    assert "Looking at the failing test." in out
+    assert "was:" not in out
+
+
+@pytest.mark.anyio
+async def test_second_interrupt_gate_prints_no_second_recap(tmp_path: Path) -> None:
+    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"),
+                         LIVE_GATE, _gate("live2", None))
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+@pytest.mark.anyio
+async def test_question_gate_prints_no_recap(tmp_path: Path) -> None:
+    question = ev("q", "awaiting_user_input", LEAD, steer_hint="",
+                  last_agent_message="Which file?", interrupt=False)
+    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), question)
+    assert await _client_output(tmp_path, frames) == ""
