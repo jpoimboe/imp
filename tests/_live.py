@@ -30,6 +30,8 @@ from typing import Any, NoReturn
 
 import pytest
 
+from imp.engine.archive.read import read_events
+from imp.engine.errors import ArchiveMismatch
 from imp.paths import project_state_dir
 from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
@@ -466,10 +468,32 @@ def _tail(path: Path, lines: int = _EVIDENCE_TAIL_LINES) -> str:
         return f"<unreadable {path.name}: {exc}>"
 
 
+def _archived_events(quest_dir: Path) -> bytes | None:
+    """The archived events.jsonl of a quest whose live home was reaped, else None."""
+    # Live home is <state dir>/quests/<id>; the state dir's `repo` file names the control root.
+    marker = quest_dir.parents[1] / "repo"
+    if not marker.is_file():
+        return None
+    try:
+        return read_events(Path(marker.read_text().strip()), quest_dir.name)
+    except ArchiveMismatch:
+        return None
+
+
+def _events_section(quest_dir: Path) -> str:
+    live = quest_dir / "events.jsonl"
+    if not live.exists():
+        archived = _archived_events(quest_dir)
+        if archived is not None:
+            tail = archived.decode(errors="replace").splitlines()[-_EVIDENCE_TAIL_LINES:]
+            return "events.jsonl tail (archived):\n" + "\n".join(tail)
+    return f"events.jsonl tail:\n{_tail(live)}"
+
+
 def evidence(quest_dir: Path) -> str:
-    """Failure evidence for a live run: events.jsonl, daemon.stderr, each step's stderr.log."""
+    """Failure evidence: events.jsonl (archived if reaped), daemon.stderr, step stderr.logs."""
     sections = [
-        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}",
+        _events_section(quest_dir),
         f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}",
     ]
     sections += [

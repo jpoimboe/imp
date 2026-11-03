@@ -664,6 +664,55 @@ def test_evidence_marks_missing_files_instead_of_raising(tmp_path):
     assert "<no daemon.stderr>" in text
 
 
+def _archived_quest_dir(tmp_path, quest_id, events_text):
+    """Archive a quest's events and return its (now reaped) live home path."""
+    from imp.engine import archive
+    from imp.paths import project_state_dir
+    control = tmp_path / "control"
+    control.mkdir()
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "events.jsonl").write_text(events_text)
+    (src / "quest.json").write_text(_json.dumps(
+        {"id": quest_id, "title": "t", "base_branch": "main"}))
+    (src / "state.json").write_text(_json.dumps({"id": quest_id, "status": "done"}))
+    archive.archive_quest(
+        control, quest_id, events_path=src / "events.jsonl",
+        quest_json_path=src / "quest.json", state_json_path=src / "state.json")
+    return project_state_dir(control) / "quests" / quest_id
+
+
+def test_evidence_falls_back_to_archived_events_when_live_home_is_gone(tmp_path):
+    lines = [_json.dumps({"type": "e", "n": i}) for i in range(_EVIDENCE_TAIL_LINES + 10)]
+    quest_dir = _archived_quest_dir(tmp_path, "arch01", "\n".join(lines) + "\n")
+    assert not quest_dir.exists()
+    text = evidence(quest_dir)
+    expected_tail = "\n".join(lines[-_EVIDENCE_TAIL_LINES:])
+    assert f"events.jsonl tail (archived):\n{expected_tail}" in text
+    assert lines[9] not in text
+    assert "<no events.jsonl>" not in text
+
+
+def test_evidence_without_archived_record_marks_events_missing(tmp_path):
+    from imp.paths import project_state_dir
+    control = tmp_path / "control"
+    control.mkdir()
+    quest_dir = project_state_dir(control) / "quests" / "gone01"
+    text = evidence(quest_dir)
+    assert "events.jsonl tail:\n<no events.jsonl>" in text
+    assert "(archived)" not in text
+
+
+def test_evidence_with_unreadable_archive_marks_events_missing(tmp_path):
+    from imp.engine import archive
+    quest_dir = _archived_quest_dir(tmp_path, "arch02", '{"type": "e"}\n')
+    # Records without a data_version marker read as floor 0: read_events raises ArchiveMismatch.
+    archive.data_version_path(tmp_path / "control").unlink()
+    text = evidence(quest_dir)
+    assert "events.jsonl tail:\n<no events.jsonl>" in text
+    assert "(archived)" not in text
+
+
 def test_tail_returns_only_the_last_lines(tmp_path):
     log = tmp_path / "events.jsonl"
     total = _EVIDENCE_TAIL_LINES + 10
