@@ -109,7 +109,7 @@ def test_a_writable_stale_index_stamp_is_rebuilt(tmp_path: Path) -> None:
 
     archive.ensure_current(tmp_path)
 
-    assert _user_version(tmp_path) == 7          # rebuilt and re-stamped current
+    assert _user_version(tmp_path) == index._SCHEMA_VERSION   # rebuilt and re-stamped current
 
 
 def test_a_newer_read_only_archive_still_raises(

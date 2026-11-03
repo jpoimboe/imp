@@ -57,8 +57,8 @@ def test_archive_quest_into_an_empty_archive_stamps_the_marker(tmp_path: Path) -
 
     _archive_one(tmp_path, ARCH)
 
-    assert archive._DATA_VERSION == 14
-    assert archive.data_version_path(tmp_path).read_text().strip() == "14"
+    assert archive._DATA_VERSION == 15
+    assert archive.data_version_path(tmp_path).read_text().strip() == "15"
     assert record.read_record(records_root(tmp_path), ARCH) is not None
 
 
