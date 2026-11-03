@@ -38,6 +38,7 @@ from imp.agents.runner import (
     message_from_json,
     message_to_json,
 )
+from imp.agents.tool_killed import emit_tool_killed
 
 if TYPE_CHECKING:
     from imp.engine.state import EventLog
@@ -451,8 +452,9 @@ def answer_unanswered_tool_uses_on_resume(
         messages[start] = Message(
             role="user", content=(*results, *messages[start].content, *note))
         transcript.rewrite(messages)
-    for rb in results:
+    for tu, rb in zip(unanswered, results, strict=True):
         elog.append_tool_result(agent_id=agent_id, block=rb)
+        emit_tool_killed(elog, agent_id, tu.name, rb)
 
 
 def answer_complete_step_on_resume(

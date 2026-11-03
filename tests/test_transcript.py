@@ -1453,6 +1453,33 @@ def test_sweep_answers_parallel_fragments_in_a_new_turn(tmp_path: Path) -> None:
     assert [(p["id"], p["error"]) for p in events] == [("r1", False), ("b1", True)]
 
 
+def test_sweep_journals_a_captured_killed_bash_as_killed(tmp_path: Path) -> None:
+    from imp.agents.transcript import (
+        answer_unanswered_tool_uses_on_resume,
+        captured_result_key,
+    )
+
+    args = {"command": "sleep 45"}
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b0", name="mcp__imp__bash", input={"command": "sleep 1"}),
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input=args),)),
+    ]
+    t = _write(tmp_path, msgs)
+    elog = InMemoryEventLog()
+
+    answer_unanswered_tool_uses_on_resume(
+        msgs, t, elog, "step:p/s",
+        captured={captured_result_key("bash", args): (
+            '{"returncode": -15, "stdout": ""}', False)})
+
+    events = list(elog.read())
+    assert [(e["type"], e["payload"]["id"]) for e in events] == [
+        ("tool_result", "b0"), ("tool_result", "b1"), ("tool_killed", "b1")]
+    assert events[2]["payload"] == {"id": "b1", "name": "bash", "signal": 15}
+
+
 def test_sweep_prepends_results_to_the_trailing_user_run(tmp_path: Path) -> None:
     """With user turns already trailing, the answers head the run's first turn and
     the run's later turns are untouched."""

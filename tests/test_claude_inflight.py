@@ -146,6 +146,25 @@ async def test_a_withheld_filler_is_replaced_by_imps_own_result() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_withheld_bash_killed_by_the_interrupt_is_journaled_as_killed() -> None:
+    state = _RunState()
+    args = {"command": "sleep 45"}
+    key = captured_result_key("bash", args)
+    state.register_inflight(key, "bash")
+    state.withhold_inflight(
+        ToolUseBlock(id="u1", name="mcp__imp__bash", input=args),
+        FILLER, journaled=False)
+
+    log = InMemoryEventLog()
+    _correct_withheld_results(log, "step:p/s", state,
+                              {key: ('{"returncode": -15}', False)})
+
+    events = list(log.read())
+    assert [e["type"] for e in events] == ["tool_call", "tool_result", "tool_killed"]
+    assert events[2]["payload"] == {"id": "u1", "name": "bash", "signal": 15}
+
+
+@pytest.mark.anyio
 async def test_an_already_journaled_call_gains_only_its_result() -> None:
     """One call and one result per tool_use_id: when the streaming site already
     emitted the tool_call, the late append must not emit a second one."""

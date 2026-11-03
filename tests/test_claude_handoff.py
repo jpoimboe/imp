@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -821,6 +822,36 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
 
 
 @pytest.mark.anyio
+async def test_a_killed_bash_result_on_the_crossing_turn_emits_tool_killed(
+        tmp_path: Path) -> None:
+    """The crossing returns before the call reaches _pending_tools, so the kill's
+    tool name comes from the transcript's tool_use."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    scripted = [
+        _occupancy(170_000),
+        assistant(text("working"),
+                  tool_use("tu1", "mcp__imp__bash", {"command": "sleep 45"})),
+        user(tool_result("tu1", '{"returncode": -15, "stdout": ""}')),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name=_MODEL,
+        client_factory=lambda opts: FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    events = list(log.read())
+    i = next(i for i, e in enumerate(events)
+             if e["type"] == "tool_result" and e["payload"]["id"] == "tu1")
+    assert events[i + 1]["type"] == "tool_killed"
+    assert events[i + 1]["payload"] == {"id": "tu1", "name": "bash", "signal": 15}
+
+
+@pytest.mark.anyio
 async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
         tmp_path: Path) -> None:
     """A fatal tool error returns from events() BEFORE _is_terminal runs, so neither
@@ -1209,3 +1240,99 @@ async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
     assert "was not recorded" not in content
     assert json.loads(content)["returncode"] < 0
     assert json.loads(content)["stdout"] == "hello\n"
+
+
+@pytest.mark.anyio
+async def test_steer_renders_a_bash_killed_by_the_interrupt_on_its_own_call(
+        tmp_path: Path) -> None:
+    """The kill is journaled with the call's own result, so the narrative marks the
+    original row [killed] instead of a phantom call after the reply."""
+    from imp.agents.tools import get_registry
+    from imp.cli.narrative import build_tree
+    from imp.cli.render_text import render_tree
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    args = {"command": "sleep 45"}
+    before_result = [
+        assistant(text("running"), tool_use("u1", "mcp__imp__bash", args)),
+        user(tool_result("u1", REJECTION, is_error=True)),
+        user(text("[Request interrupted by user for tool use]")),
+    ]
+    after_steer = [
+        message_start("m2", {"input_tokens": 10}),
+        assistant(text("The sleep was killed, so I stopped."),
+                  tool_use("c1", "mcp__imp__complete_step", {"status": "Success"})),
+        result(),
+    ]
+    started = asyncio.Event()
+
+    async def _killed_bash(ctx: Any, **_kw: Any) -> str:
+        started.set()
+        await asyncio.sleep(0.2)
+        return json.dumps({"stdout": "", "stderr": "", "returncode": -15})
+
+    bash = replace(get_registry()["bash"], fn=_killed_bash)
+    coord = InterruptCoordinator()
+    holder: dict[str, Any] = {}
+
+    class DispatchingCooperativeClient(CooperativeClient):
+        async def interrupt(self) -> None:
+            if "call" not in holder:
+                runner = holder["runner"]
+                wrapped = _wrap_one("bash", bash, runner._ctx, runner._state,
+                                    _passthrough)
+                holder["call"] = asyncio.create_task(wrapped(dict(args)))
+                await started.wait()
+            await super().interrupt()
+
+    def factory(opts: Any) -> Any:
+        holder["c"] = DispatchingCooperativeClient(
+            opts, after_steer=after_steer, before_result=before_result)
+        return holder["c"]
+
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "stop and tell me")
+    holder["runner"] = runner
+    inv = replace(_inv(tmp_path, log), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(2000):
+        if "c" in holder and holder["c"].queries:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("client never received a query")
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=60)
+    await holder["call"]
+
+    events = [{"id": "s0", "agent_id": None, "type": "step_started",
+               "payload": {"step": "s", "kind": "agent", "phase": "p",
+                           "model": "m", "provider": "claude"}}, *log.read()]
+
+    def _render(full: bool) -> list[str]:
+        return list(render_tree(build_tree(events), full=full, color=False, width=80))
+
+    lean = _render(False)
+    reply = lean.index("> stop and tell me")
+    answer = lean.index("• The sleep was killed, so I stopped.")
+    [recap] = [ln for ln in lean[:reply] if " call" in ln]
+    assert re.fullmatch(r"  1 call · bash( · (\d+m )?\d+s)?", recap)
+    assert not [ln for ln in lean[reply:answer] if " call" in ln]
+
+    full = _render(True)
+    reply = full.index("> stop and tell me")
+    answer = full.index("• The sleep was killed, so I stopped.")
+    assert [ln for ln in full[:reply] if ln.startswith("  · ")] == [
+        "  · bash [killed]  command=sleep 45"]
+    assert full[:reply].count("▾ tools") == 1
+    assert "▾ tools" not in full[reply:answer]

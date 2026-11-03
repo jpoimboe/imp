@@ -1367,6 +1367,53 @@ def test_full_burst_killed_wins_over_error_tag() -> None:
     assert "[error]" not in out
 
 
+def _legacy_interrupt_events(*, kill_after_reply: bool):
+    a = "step:p/s"
+
+    def t(s):
+        return f"2026-11-01T00:00:{s:02d}+00:00"
+
+    def at(e, s):
+        return {**e, "timestamp": t(s)}
+
+    kill = at(_ev("k", "tool_killed", agent_id=a, id="", name="bash", signal=15), 20)
+    reply = at(_ev("u", "user_message", agent_id=a, role="user",
+                   content=[{"type": "text", "text": "ok, carry on"}]), 20)
+    return [
+        at(_ev("1", "step_started", step="s", kind="agent", phase="p",
+               model="m", provider="claude"), 0),
+        at(_ev("2", "agent_message", agent_id=a, provider="claude", model="m",
+               stop_reason="tool_use", usage={},
+               raw={"content": [{"type": "text", "text": "I'll run that command now."}]}), 1),
+        at(_ev("3", "tool_call", agent_id=a, id="b1", name="bash",
+               input={"command": "sleep 45 && echo finished"}), 1),
+        at(_ev("4", "tool_result", agent_id=a, id="b1",
+               content='{"returncode": -15, "stdout": ""}', error=False), 6),
+        *([reply, kill] if kill_after_reply else [kill, reply]),
+        at(_ev("6", "agent_message", agent_id=a, provider="claude", model="m",
+               stop_reason="end_turn", usage={},
+               raw={"content": [{"type": "text", "text": "The command was cut off."}]}), 22),
+    ]
+
+
+def test_legacy_empty_id_kill_after_reply_renders_no_phantom_recap() -> None:
+    events = _legacy_interrupt_events(kill_after_reply=True)
+    lean = _lines(events)
+    reply = lean.index("> ok, carry on")
+    prose = next(i for i, ln in enumerate(lean) if "The command was cut off." in ln)
+    assert "  1 call · bash · 5s" in lean[:reply]
+    assert not any(" call" in ln for ln in lean[reply + 1:prose])
+    full = "\n".join(_lines(events, full=True))
+    assert full.count("▾ tools") == 1
+    assert "[killed]" not in full
+
+
+def test_legacy_empty_id_kill_in_burst_does_not_inflate_count() -> None:
+    lean = "\n".join(_lines(_legacy_interrupt_events(kill_after_reply=False)))
+    assert "1 call · bash · 5s" in lean
+    assert "2 calls" not in lean
+
+
 def test_full_burst_empty_result_no_arrow_but_footer_renders() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p"),

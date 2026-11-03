@@ -427,6 +427,10 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
     # tool_killed is now in the log, not the yield stream
     assert "tool_killed" in log_types
     assert "tool_killed" not in kinds
+    evs = list(log.read())
+    i = next(i for i, e in enumerate(evs) if e["type"] == "tool_killed")
+    assert (evs[i - 1]["type"], evs[i - 1]["payload"]["id"]) == ("tool_result", "c1")
+    assert evs[i]["payload"]["id"] == "c1"
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["kind"] == "interrupted"
 

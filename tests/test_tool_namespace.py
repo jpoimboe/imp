@@ -309,13 +309,11 @@ def test_the_returncode_invariant_holds_on_a_joined_command():
 
 
 def test_a_command_imp_kills_reports_a_negative_returncode():
-    # AC 12b, the other side of the same invariant: the SIGN is what a provider
-    # turns into killed_tool_uses, so imp's own group kill must stay negative
-    # where the command's own signal does not. This pins the half that moved —
-    # a REAL imp kill through a join still yields a negative code. The other half,
-    # negative code -> killed_tool_uses, is unchanged by this quest and already
-    # pinned per provider against a stubbed rc: test_claude_wrap.py:285 and
-    # test_codex_mcp_dispatch.py::test_negative_rc_bash_records_killed_tool.
+    # AC 12b, the other side of the same invariant: the SIGN is what imp journals
+    # as tool_killed, so imp's own group kill must stay negative where the
+    # command's own signal does not. This pins the half that moved — a REAL imp
+    # kill through a join still yields a negative code. The other half, negative
+    # code -> tool_killed, is pinned against a stubbed rc in test_tool_killed.py.
     root = _make_root()
     try:
         ctx = _ctx(root)

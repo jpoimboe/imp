@@ -30,6 +30,7 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.subagents import make_task_tool, raise_if_suspended
+from imp.agents.tool_killed import emit_tool_killed
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -688,13 +689,6 @@ class CodexSession(ObserveSession):
                 err, kind=getattr(err, "kind", ""))["payload"]))
             return
 
-    def _drain_kills(self) -> list[dict[str, Any]]:
-        state = self._state
-        infos: list[dict[str, Any]] = []
-        while state.killed_tool_uses:
-            infos.append(state.killed_tool_uses.pop(0))
-        return infos
-
     def _fatal_error(self) -> dict[str, Any] | None:
         state = self._state
         if state.fatal_tool_error is not None:
@@ -1228,12 +1222,10 @@ def process_event(
                     agent_id=agent_id,
                     block=ToolUseBlock(id=call_id, name=name, input=args),
                 )
-                elog.append_tool_result(
-                    agent_id=agent_id,
-                    block=ToolResultBlock(
-                        tool_use_id=call_id, content=content, is_error=is_error,
-                    ),
-                )
+                result_block = ToolResultBlock(
+                    tool_use_id=call_id, content=content, is_error=is_error)
+                elog.append_tool_result(agent_id=agent_id, block=result_block)
+                emit_tool_killed(elog, agent_id, name, result_block)
             if name == "save_and_exit" and not is_error:
                 state["save_and_exit_logged"] = True
             if name == "complete_step":

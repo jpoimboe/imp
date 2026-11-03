@@ -95,9 +95,6 @@ class ObserveSession:
             async for raw in received:
                 async for item in self._message_to_items(raw):
                     yield item
-                for info in self._drain_kills():
-                    self.elog.append(agent_id=self.aid, type="tool_killed",
-                                     payload=info)
                 fatal = self._fatal_error()
                 if fatal is not None:
                     yield Error(payload=fatal)
@@ -208,7 +205,6 @@ class ObserveSession:
     def _receive(self) -> AsyncGenerator[Any, None]: raise NotImplementedError
     def _message_to_items(self, raw: Any) -> AsyncIterator[Any]:
         raise NotImplementedError
-    def _drain_kills(self) -> list[dict[str, Any]]: raise NotImplementedError
     def _fatal_error(self) -> dict[str, Any] | None: raise NotImplementedError
     async def _is_terminal(self, raw: Any) -> bool: raise NotImplementedError
     def _flush_turn_record(self) -> Any: raise NotImplementedError

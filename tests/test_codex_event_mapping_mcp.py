@@ -33,3 +33,15 @@ def test_mcp_tool_call_complete_step_records_args_on_state() -> None:
         provider="codex", model="gpt-5.5",
     )
     assert state["complete_step_args"] == {"answer": "the-answer"}
+
+
+def test_mcp_tool_call_killed_bash_appends_tool_killed_after_its_result() -> None:
+    elog = InMemoryEventLog()
+    process_event(
+        mcp_call(name="bash", args={"command": "sleep 100"},
+                 result='{"returncode": -15, "stdout": "", "stderr": ""}', item_id="b1"),
+        elog=elog, agent_id="step:a", state={}, provider="codex", model="gpt-5.5",
+    )
+    events = list(elog.read())
+    assert [e["type"] for e in events] == ["tool_call", "tool_result", "tool_killed"]
+    assert events[2]["payload"] == {"id": "b1", "name": "bash", "signal": 15}

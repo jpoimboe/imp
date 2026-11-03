@@ -4223,51 +4223,14 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
 
 
 @pytest.mark.anyio
-async def test_claude_impl_records_tool_duration(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    import imp.providers.claude as cc_mod
-    from imp.agents.tools.context import ToolContext
-
-    async def _noop(_ctx: Any) -> None:
-        return None
-    monkeypatch.setattr(cc_mod._bg, "_sweep_bg", _noop)
-
-    target = tmp_path / "f.txt"
-    target.write_text("hello")
-    log = InMemoryEventLog()
-    inv = _inv(tmp_path, event_log=log, tools=frozenset({"read_file"}))
-    state = cc_mod._RunState()
-    state.agent_id = "step:p/s"
-    ctx = ToolContext(project_root=tmp_path,
-                      events_path=tmp_path / "events.jsonl",
-                      event_log=log, agent_id="step:p/s")
-
-    captured: dict[str, Any] = {}
-
-    def sdk_tool(name: str, desc: str, schema: Any, annotations: Any = None) -> Any:
-        def deco(fn: Any) -> Any:
-            captured["impl"] = fn
-            return fn
-        return deco
-
-    tool = cc_mod._build_tools(inv)["read_file"]
-    cc_mod._wrap_one("read_file", tool, ctx, state, sdk_tool)
-    await captured["impl"]({"path": str(target), "__tool_use_id__": "u9"})
-
-    assert "u9" in state.tool_durations
-    assert 0 <= state.tool_durations["u9"] < 5_000
-
-
-@pytest.mark.anyio
-async def test_claude_tool_result_carries_recorded_duration(
+async def test_claude_killed_bash_result_is_followed_by_tool_killed(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "art").mkdir()
     scripted = [
-        assistant(tool_use("u1", "read_file", {"path": "a"}),
+        assistant(tool_use("tu1", "mcp__imp__bash", {"command": "sleep 45"}),
                   message_id="m1", model="served-x", stop_reason="tool_use"),
-        user(tool_result("u1", "file body")),
+        user(tool_result("tu1", '{"returncode": -15, "stdout": ""}')),
         assistant(text("done"),
                   tool_use("c1", "complete_step", {"status": "Success"}),
                   message_id="m2", model="served-x", stop_reason="end_turn"),
@@ -4278,65 +4241,16 @@ async def test_claude_tool_result_carries_recorded_duration(
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
-    inv = _inv(tmp_path, event_log=log,
-               tools=frozenset({"complete_step", "read_file"}))
-    runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
-    captured_calls: list[Any] = []
-    orig = log.append_tool_result
-
-    def spy(**kwargs: Any) -> Any:
-        captured_calls.append(kwargs)
-        return orig(**kwargs)
-    log.append_tool_result = spy  # type: ignore[method-assign]
-
+    inv = _inv(tmp_path, event_log=log, tools=frozenset({"complete_step", "bash"}))
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
 
-    u1 = next(k for k in captured_calls
-              if getattr(k["block"], "tool_use_id", None) == "u1")
-    assert "duration_ms" in u1                  # keyword always passed; None when unrun
-
-
-@pytest.mark.anyio
-async def test_claude_tool_result_duration_non_none_e2e(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.providers.claude as cc_mod
-    orig_cls = cc_mod._RunState
-    def _seeded_state():
-        s = orig_cls()
-        s.tool_durations["u1"] = 99.0
-        return s
-    monkeypatch.setattr(cc_mod, "_RunState", _seeded_state)
-
-    (tmp_path / "art").mkdir()
-    scripted = [
-        assistant(tool_use("u1", "read_file", {"path": "a"}),
-                  message_id="m1", model="served-x", stop_reason="tool_use"),
-        user(tool_result("u1", "file body")),
-        assistant(text("done"),
-                  tool_use("c1", "complete_step", {"status": "Success"}),
-                  message_id="m2", model="served-x", stop_reason="end_turn"),
-        result(stop_reason="end_turn"),
-    ]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    log = InMemoryEventLog()
-    inv = _inv(tmp_path, event_log=log,
-               tools=frozenset({"complete_step", "read_file"}))
-    runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
-    async for _ev in runner.run(inv):
-        pass
-
-    tr = next(
-        e for e in log.read()
-        if e["type"] == "tool_result" and e["payload"]["id"] == "u1"
-    )
-    assert tr["payload"]["duration_ms"] == 99.0
+    tu1 = [e for e in log.read() if e["payload"].get("id") == "tu1"]
+    assert [e["type"] for e in tu1] == ["tool_call", "tool_result", "tool_killed"]
+    evs = list(log.read())
+    assert evs[evs.index(tu1[1]) + 1] == tu1[2]
+    assert tu1[2]["payload"] == {"id": "tu1", "name": "bash", "signal": 15}
 
 
 def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
