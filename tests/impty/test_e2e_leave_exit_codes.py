@@ -117,9 +117,9 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
     assert paused[-1]["interrupt_reason"] == "pause"
     state = json.loads((quest_dir / "state" / "state.json").read_text())
     assert state["status"] == "paused"
-    # Ctrl-D's disposition at this prompt: native-resume the step and continue it.
+    # A question landing: resume re-asks it.
     assert (state["resume_target"], state["resume_pending"],
-            state["resume_should_continue"]) == ("agent", "gate", True)
+            state["resume_should_continue"]) == (None, "gate", False)
 
     with TerminalSession(
         [sys.executable, "-m", "imp", "resume", quest_dir.name],

@@ -1525,19 +1525,28 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
     assert captured["autonomous"] is True
 
 
+@pytest.mark.parametrize("step,armed,landing", [
+    # A bare _make_quest resolves the bundled default workflow: "task-lead" is an
+    # agent step, "verify" a script step.
+    ("task-lead", False, ("prompt-interrupted", "task-lead", True)),
+    ("task-lead", True, ("prompt-interrupted", "task-lead", True)),
+    ("verify", False, ("prompt-paused", "verify", False)),
+])
 @pytest.mark.anyio
-async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
-    tmp_path: Path,
+async def test_unattended_hold_prompt_lands_on_that_prompt(
+    tmp_path: Path, step: str, armed: bool, landing: tuple[str, str, bool],
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-dph")
-    st = State.load(quest.state_dir)
-    st.step = "code"               # the active step at detach time
-    st.save(quest.state_dir)
+    _seed_step(quest, step)
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
+        if armed:   # the executor's mid-turn Ctrl-C steer arming
+            s = State.load(quest.state_dir)
+            s.arm_step_resume(should_continue=True)
+            s.save(quest.state_dir)
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
@@ -1547,70 +1556,52 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
-    assert state.resume_target == "prompt-paused"
-    assert state.resume_pending == "code"    # non-ctrl-d branch arms solicit on state.step
-    assert state.resume_should_continue is False    # detaching at the hold prompt re-solicits
+    assert (state.resume_target, state.resume_pending, state.resume_should_continue) == landing
 
 
+@pytest.mark.parametrize("reason", ["ctrl-d", "pause", "sigterm"])
 @pytest.mark.anyio
-async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
-    tmp_path: Path,
-) -> None:
-    quest = _make_quest(tmp_path, "2026-06-15-dis")
-    st = State.load(quest.state_dir)
-    st.step = "code"               # the active step at detach time
-    st.save(quest.state_dir)
-
-    async def fake_run(
-        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
-        coordinator: Any, wait_for_turn_fn: Any = None,
-    ) -> RunResult:
-        # The executor arms the interrupt disposition before unwinding to the
-        # daemon hold (mid-turn Ctrl-C steer: Pause(interrupt=True) ->
-        # arm_step_resume(should_continue=True)).
-        s = State.load(quest.state_dir)
-        s.arm_step_resume(should_continue=True)
-        s.save(quest.state_dir)
-        await coordinator.signal_pause(reason="ctrl-c")
-        return RunResult.PAUSED
-
-    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
-        result = await serve_quest_session(
-            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
-
-    assert result is RunResult.PAUSED
-    state = State.load(quest.state_dir)
-    assert state.resume_target == "prompt-interrupted"
-    assert state.resume_pending == "code"    # executor's arming is preserved
-    assert state.resume_should_continue is True   # NOT overwritten with solicit
-
-
-@pytest.mark.parametrize("reason", ["ctrl-d", "pause"])
-@pytest.mark.anyio
-async def test_detach_after_leave_midrun_stamps_resume_target_agent(
+async def test_leave_frame_midrun_lands_on_agent_despite_hold_prompt(
     tmp_path: Path, reason: str,
 ) -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+
     quest = _make_quest(tmp_path, "2026-06-15-cda")
-    st = State.load(quest.state_dir)
-    st.step = "review"
-    st.save(quest.state_dir)
+    _seed_step(quest, "task-lead")
+    sock = str(session_socket_path(quest.id))
+    hold_prompts: list[dict[str, Any]] = []
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        await coordinator.signal_pause(reason=reason)
+        await wait_until(lambda: coordinator.should_pause)   # mid-run until the leave lands
         return RunResult.PAUSED
 
-    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
-        result = await serve_quest_session(
-            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+    def _on_event(e: dict[str, Any]) -> None:
+        if e.get("type") == "awaiting_user_input":
+            hold_prompts.append(e)
 
-    assert result is RunResult.PAUSED
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(quest, run_fn=fake_run, hibernate=True)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, quest.id, quest.title, on_event=_on_event, lease=True)
+        await client.connect()
+        await client.send_control(CONTROL_INTERRUPT_LEAVE, reason)
+        await client.aclose()
+        await wait_until(lambda: "r" in result)
+        tg.cancel_scope.cancel()
+
+    assert result["r"] is RunResult.PAUSED
     state = State.load(quest.state_dir)
-    assert state.resume_target == "agent"
-    assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
-    assert state.resume_should_continue is True    # a deliberate detach continues on reattach
+    assert (state.resume_target, state.resume_pending, state.resume_should_continue) == (
+        None, "task-lead", True,
+    )
 
 
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto
