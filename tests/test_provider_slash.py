@@ -169,7 +169,7 @@ def test_pre_session_re_pinning_the_pinned_vendor_is_redundant(
 def test_help_advertises_provider_at_the_pinned_column() -> None:
     from imp.cli.slash import _help
     out: list[str] = []
-    _help(out.append, materialized=False, pre_session=True)
+    _help(out.append, materialized=False)
     assert "  /provider [name]   Show or switch the provider for this quest" in out
 
 

@@ -15,6 +15,28 @@ HELP_ARCHIVE = "  /archive           Archive this conversation (find it later wi
 HELP_CLEAR = "  /clear             Archive this conversation and start a fresh one"
 CTRL_D_LEAVE = "  Ctrl+D             Leave this conversation; resume with imp resume <id>"
 CTRL_D_PAUSE = "  Ctrl+D             Pause and exit; resume with imp resume <id>"
+UNBUILT_HELP = [
+    "Available slash commands:",
+    "  /help              Show this message",
+    "  /skills            List loadable skills",
+    "  /pause             Pause and exit; resume with imp resume <id>",
+    "  /archive           Archive this conversation (find it later with imp search)",
+    "  /clear             Archive this conversation and start a fresh one",
+    "  /model <model>     Switch this step's model (or provider:model)",
+    "  /sandbox [on|off]  Show or set the filesystem sandbox for this session",
+    "  /provider [name]   Show or switch the provider for this quest",
+    "  /compact           Shed old tool results to reclaim context (keeps the narrative)",
+    "  /abandon           Abandon the current quest",
+    "  /<name> [args]     Load a skill (trailing args appended to it)",
+    "",
+    "Keybindings:",
+    "  Ctrl+D             Leave this conversation; resume with imp resume <id>",
+    "  Ctrl+C             Clear the typed line, or interrupt a running step",
+    "  Alt+Enter          Insert a newline (Enter sends)",
+    "  Up-arrow           Recall previous input",
+    "  Tab                Complete a /command or skill name",
+]
+ALT_ENTER = "  Alt+Enter          Insert a newline (Enter sends)"
 
 
 def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:
@@ -433,17 +455,36 @@ def test_unknown_command_errors_after_compact(tmp_path: Path) -> None:
     assert any("Unknown command: /nope — /help for the list" in line for line in out)
 
 
-def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
+def test_help_unbuilt_is_the_exact_block() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
-    _help(lines.append, materialized=False, pre_session=True)
-    body = "\n".join(lines)
-    assert not any(line.strip().startswith(("/pause", "/archive", "/clear"))
-                   for line in lines)
-    assert "/abandon" in body
-    # Keybindings block is unchanged: materialized=False still says "Leave...".
-    assert "Leave this conversation; resume with imp resume <id>" in body
-    assert "Pause and exit" not in body
+    _help(lines.append, materialized=False)
+    assert lines == UNBUILT_HELP
+
+
+def test_help_typed_pre_session_prints_the_unbuilt_block(tmp_path: Path) -> None:
+    quest = SimpleNamespace(control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/help", quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert out[:2] == ["> /help", ""]
+    assert out[2:] == UNBUILT_HELP
+
+
+def test_help_built_lists_pause_compact_and_alt_enter_in_order() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append, materialized=True)
+    assert HELP_PAUSE in lines
+    assert any(line.strip().startswith("/compact") for line in lines)
+    assert not any(line.strip().startswith(("/archive", "/clear")) for line in lines)
+    keys = [ln for ln in lines if ln.strip().startswith(("Ctrl+C", "Alt+Enter", "Up-arrow"))]
+    assert keys == [
+        "  Ctrl+C             Clear the typed line, or interrupt a running step",
+        ALT_ENTER,
+        "  Up-arrow           Recall previous input",
+    ]
 
 
 COMPACT_PRE_SESSION_REDIRECT = (
@@ -458,17 +499,3 @@ def test_compact_pre_session_shows_redirect_and_reprompts(tmp_path: Path) -> Non
     assert result is REPROMPT
     assert out[0] == "> /compact"
     assert COMPACT_PRE_SESSION_REDIRECT in out
-
-
-def test_help_pre_session_omits_compact() -> None:
-    from imp.cli.slash import _help
-    lines: list[str] = []
-    _help(lines.append, materialized=False, pre_session=True)
-    assert not any(line.strip().startswith("/compact") for line in lines)
-
-
-def test_help_mid_session_lists_compact() -> None:
-    from imp.cli.slash import _help
-    lines: list[str] = []
-    _help(lines.append, materialized=False, pre_session=False)
-    assert any(line.strip().startswith("/compact") for line in lines)
