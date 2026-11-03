@@ -1387,19 +1387,6 @@ class ClaudeSession(ObserveSession):
     shared driver.
     """
 
-    def __init__(self, invocation: Any, runner: Any) -> None:
-        super().__init__(invocation, runner)
-        self._interrupt_tasks: set[asyncio.Task[None]] = set()
-
-    async def _spawn_interrupt(self, client: Any) -> None:
-        # Never await inline: the SDK reader parks on a buffer only this loop drains.
-        async def _send() -> None:
-            with contextlib.suppress(Exception):
-                await client.interrupt()
-        self._interrupt_tasks.add(asyncio.create_task(_send()))
-        # Best-effort yield so the send can start; nothing depends on it completing.
-        await asyncio.sleep(0)
-
     # complete_step is captured race-free by the MCP wrapper into runner._state.
     @property
     def _complete_step_called(self) -> bool:
@@ -1748,40 +1735,47 @@ class ClaudeSession(ObserveSession):
     async def _receive(self) -> Any:
         coord = self.invocation.coordinator
         client = self.runner._client
-        while True:
-            await client.query(self._next_query)
-            requery = False
-            got_result = False
-            async with contextlib.aclosing(request_bracketed(
-                    coord, client.receive_response())) as _stream:
-                async for sdk_msg in _stream:
-                    if self.runner._cancel:
-                        return
-                    if coord is not None:
-                        coord.note_activity()
-                    # Post-API-site analog (Decision 10): one sweep per SDK
-                    # message; the model-API/CLI latency between messages is the
-                    # longest registry-blind gap under this provider.
-                    await _bg._sweep_bg(self.ctx)
-                    yield sdk_msg
-                    if type(sdk_msg).__name__ == "ResultMessage":
-                        got_result = True
-                        if self._requery_pending:
-                            self._requery_pending = False
-                            requery = True
-                        break
-            if requery:
-                continue
-            if got_result:
+        try:
+            while True:
+                if self.runner._cancel:
+                    return
+                self.runner._turn_ended.clear()
+                await client.query(self._next_query)
+                requery = False
+                got_result = False
+                async with contextlib.aclosing(request_bracketed(
+                        coord, client.receive_response())) as _stream:
+                    async for sdk_msg in _stream:
+                        if self.runner._cancel:
+                            return
+                        if coord is not None:
+                            coord.note_activity()
+                        # Post-API-site analog (Decision 10): one sweep per SDK
+                        # message; the model-API/CLI latency between messages is the
+                        # longest registry-blind gap under this provider.
+                        await _bg._sweep_bg(self.ctx)
+                        yield sdk_msg
+                        if type(sdk_msg).__name__ == "ResultMessage":
+                            got_result = True
+                            if self._requery_pending:
+                                self._requery_pending = False
+                                requery = True
+                            break
+                if requery:
+                    continue
+                if got_result:
+                    return
+                # receive_response() exhausted without a ResultMessage.
+                if self.runner._cancel:
+                    return
+                self.runner._last_no_result_diag = {
+                    **_subprocess_diag(client),
+                    "stderr_tail": self.runner._stderr_sink.tail()}
+                yield _NO_RESULT_SENTINEL
                 return
-            # receive_response() exhausted without a ResultMessage.
-            if self.runner._cancel:
-                return
-            self.runner._last_no_result_diag = {
-                **_subprocess_diag(client),
-                "stderr_tail": self.runner._stderr_sink.tail()}
-            yield _NO_RESULT_SENTINEL
-            return
+        finally:
+            # Also covers a save_and_exit park, which closes this stream with no ResultMessage.
+            self.runner._turn_ended.set()
 
     async def _message_to_items(self, raw: Any) -> Any:
         if raw is _NO_RESULT_SENTINEL:
@@ -1895,7 +1889,7 @@ class ClaudeSession(ObserveSession):
                         self._flush_llm_group()
                         self.runner._handoff_requested = True
                         self._handoff_phase = "interrupt_requested"
-                        await self._spawn_interrupt(client)
+                        await self.runner._spawn_interrupt(client)
                         return
                     if any(isinstance(b, ToolUseBlock)
                            for b in imp_msg.content):
@@ -1924,7 +1918,7 @@ class ClaudeSession(ObserveSession):
                                             input=b.input))
                                     self._flush_llm_group()
                                     self.runner._complete_requested = True
-                                    await self._spawn_interrupt(client)
+                                    await self.runner._spawn_interrupt(client)
                                     continue
                             if (self.ceiling is not None
                                     and self.tool_calls_used >= self.ceiling):
@@ -2029,6 +2023,15 @@ class ClaudeSession(ObserveSession):
             permission_denials=getattr(raw, "permission_denials", None),
             errors=getattr(raw, "errors", None))
         subtype = getattr(raw, "subtype", None)
+        runner._turn_ended.set()
+        # Only the steer branch consumes a pending interrupt; elsewhere it becomes a cancel.
+        steer_lands = (runner._steer_requested
+                       and subtype == "error_during_execution"
+                       and not runner._complete_requested
+                       and not runner._handoff_requested)
+        if runner._steer_requested and not steer_lands:
+            runner._steer_requested = False
+            runner._cancel = True
         if (runner._complete_requested and subtype == "error_during_execution"):
             # Part A: interrupt landed — fall through to complete_step terminal;
             # deliberately do NOT balance the tail (the dangling result-less
@@ -2053,7 +2056,14 @@ class ClaudeSession(ObserveSession):
                     self.messages, self.transcript, captured=captured)
                 repair_dangling_tool_use_on_resume(
                     self.messages, self.transcript, captured=captured)
-                instr = correction_increment(settled) + handoff_instruction()
+                increment = correction_increment(settled)
+                if runner._cancel:
+                    # Converted interrupt: the run ends here; don't journal an unsent instruction.
+                    if increment:
+                        deliver_engine_continuation(
+                            self.messages, self.transcript, elog, aid, increment)
+                    return False
+                instr = increment + handoff_instruction()
                 instr_msg = Message(
                     role="user", content=(TextBlock(text=instr),))
                 self.messages.append(instr_msg)
@@ -2064,9 +2074,7 @@ class ClaudeSession(ObserveSession):
                 self._handoff_phase = "instruction_sent"
                 self._requery_pending = True
                 return False
-            # Cooperative interrupt landed: unblock the waiting interrupt() and
-            # route into the attended inline-yield.
-            runner._steer_unblocked.set()
+            # Cooperative interrupt landed: route into the attended inline-yield.
             runner._steer_requested = False
             self._flush_turn_record()
             # Kills only: this branch RE-QUERIES with the same ctx, so closing the
@@ -2119,12 +2127,10 @@ class ClaudeSession(ObserveSession):
                     self.messages, self.transcript, elog, aid, reply, human=True)
             self._requery_pending = True
             return False
-        elif (runner._handoff_requested or runner._steer_requested
-                or runner._complete_requested):
+        elif runner._handoff_requested or runner._complete_requested:
             if runner._handoff_requested:
                 runner._handoff_requested = False
                 self._handoff_phase = None
-            runner._steer_requested = False
             runner._complete_requested = False
 
         # Every other terminal outcome corrects nothing, so anything still withheld
@@ -2259,10 +2265,11 @@ class ClaudeAgentRunner:
         self._spawn_token_expiry: int | None = None
         # Cooperative-interrupt (steer) state. _steer_requested is the distinct
         # intent flag (separate from _cancel, which keeps meaning hard-cancel /
-        # teardown); the receive loop sets _steer_unblocked when the
-        # post-interrupt ResultMessage arrives, letting interrupt() return.
+        # teardown). _turn_ended is set exactly while no turn is in flight.
         self._steer_requested = False
-        self._steer_unblocked = asyncio.Event()
+        self._turn_ended = asyncio.Event()
+        self._turn_ended.set()
+        self._interrupt_tasks: set[asyncio.Task[None]] = set()
         # Tier A proactive-handoff intent flag (separate from _steer_requested):
         # set when the threshold watchdog interrupts the live turn, consumed at the
         # generalized balanced-close site to continue with a handoff-instruction
@@ -2420,6 +2427,8 @@ class ClaudeAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
+            # Before the sweep below, so interrupt() can spawn no task after it.
+            self._turn_ended.set()
             # A leave control cancels the run; teardown must still complete.
             with anyio.CancelScope(shield=True):
                 if self._state is not None:
@@ -2447,7 +2456,7 @@ class ClaudeAgentRunner:
                         self._impty_driver.close()
                     self._impty_driver = None
                 # Cancel, not await: a reply may never come; wait() won't re-raise CancelledError.
-                pending = [t for t in session._interrupt_tasks if not t.done()]
+                pending = [t for t in self._interrupt_tasks if not t.done()]
                 for t in pending:
                     t.cancel()
                 if pending:
@@ -2465,6 +2474,15 @@ class ClaudeAgentRunner:
                     shutil.rmtree(self._config_dir, ignore_errors=True)
                     self._config_dir = None
 
+    async def _spawn_interrupt(self, client: Any) -> None:
+        # Never await inline: the SDK reader parks on a buffer only this loop drains.
+        async def _send() -> None:
+            with contextlib.suppress(Exception):
+                await client.interrupt()
+        self._interrupt_tasks.add(asyncio.create_task(_send()))
+        # Best-effort yield so the send can start; nothing depends on it completing.
+        await asyncio.sleep(0)
+
     def _interrupted(self) -> bool:
         """Read the cancel flag through a call so mypy doesn't narrow it to a
         constant after the per-message guard. interrupt() flips `_cancel` from
@@ -2473,23 +2491,19 @@ class ClaudeAgentRunner:
         return self._cancel
 
     async def interrupt(self) -> None:
-        # Cooperative tier ONLY: ask the SDK to end the turn balanced and wait for
-        # the receive loop to set _steer_unblocked. Deliberately UNBOUNDED — every
-        # caller wraps this in an outer deadline (the coordinator's 2s cooperative
-        # budget; the stall watchdog's grace) and escalates to force_kill() on
-        # overrun. Fire client.interrupt() BEFORE any process termination so a
-        # killed-process tool_result can never race the interrupt past the stop.
+        # Cooperative tier ONLY: returns once no turn is in flight. Deliberately
+        # UNBOUNDED — every caller wraps this in an outer deadline and escalates to
+        # force_kill() on overrun. No await between the check and the flag, so a
+        # ResultMessage can't slip between them; the SDK interrupt still goes out
+        # before any process termination.
         client = self._client
-        if client is None or not hasattr(client, "interrupt"):
+        if (client is None or not hasattr(client, "interrupt")
+                or self._turn_ended.is_set()):
             self._cancel = True
             return
         self._steer_requested = True
-        # Reset the latch on EVERY interrupt: a prior steer left it set, and a
-        # stale-set Event would make the wait return immediately.
-        self._steer_unblocked.clear()
-        with contextlib.suppress(Exception):
-            await client.interrupt()
-        await self._steer_unblocked.wait()
+        await self._spawn_interrupt(client)
+        await self._turn_ended.wait()
 
     async def force_kill(self) -> None:
         """Non-waiting SIGKILL of the claude-p transport group on teardown overrun;

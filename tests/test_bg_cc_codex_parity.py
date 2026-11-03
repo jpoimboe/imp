@@ -121,11 +121,8 @@ async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) ->
 
     task = asyncio.create_task(drive())
     try:
-        for _ in range(1000):
-            if "c" in holder and runner._ctx is not None:
-                break
-            await asyncio.sleep(0)
-        await asyncio.sleep(0.02)
+        await wait_until(lambda: "c" in holder and runner._ctx is not None
+                         and bool(holder["c"].queries))
         out = await _spawn_bg(runner._ctx)
 
         await coord.signal_pause()

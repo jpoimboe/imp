@@ -25,6 +25,7 @@ from imp.providers.claude_session_store import (
     resume_session_id,
     session_store_for,
 )
+from tests.async_wait import wait_until
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
@@ -3109,11 +3110,7 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
             events.append(ev)
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
@@ -3269,11 +3266,7 @@ async def test_cooperative_interrupt_headless_pauses_balanced(
             pass
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     with pytest.raises(AwaitingUserInput):
@@ -3336,11 +3329,7 @@ async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
             events.append(ev)
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
@@ -3393,11 +3382,7 @@ async def test_cooperative_steer_drive_invocation_not_paused(
             inv, runner, coordinator=coord, log=None, emit_events=False)
 
     task = asyncio.create_task(do_drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
@@ -3451,11 +3436,7 @@ async def test_second_interrupt_during_steer_skips_requery(
             events.append(ev)
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
@@ -4672,11 +4653,7 @@ async def test_brake_holds_until_reply_submitted(tmp_path: Path) -> None:
             pass
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
@@ -4687,8 +4664,8 @@ async def test_brake_holds_until_reply_submitted(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
-    """interrupt() asks the SDK to end the turn and returns once the receive loop
-    sets the steer latch. It does NOT self-escalate to a hard kill — the coordinator
+    """interrupt() asks the SDK to end the turn and returns once the turn
+    ends. It does NOT self-escalate to a hard kill — the coordinator
     (and the stall watchdog) own the deadline and force_kill()."""
     import asyncio
 
@@ -4715,13 +4692,9 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
             pass
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
-    # Cooperative: client.interrupt() lands and the steer latch releases interrupt().
+    # Cooperative: client.interrupt() lands and the turn ending releases interrupt().
     await asyncio.wait_for(runner.interrupt(), timeout=1)
     assert "interrupt" in holder["c"].order  # client.interrupt() was called
     assert "disconnect" not in holder["c"].order  # no hard kill from interrupt() itself
@@ -4730,7 +4703,7 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> None:
-    """interrupt() waits for the steer landing however long it takes and never
+    """interrupt() waits for the turn to end however long it takes and never
     calls disconnect() on its own — escalation is the coordinator's job.
     The land gate models a >2s (unbounded) SDK landing deterministically."""
     import asyncio
@@ -4759,11 +4732,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
             pass
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     interrupt_task = asyncio.create_task(runner.interrupt())
     # Yield enough turns for client.interrupt() to fire and the receive loop to
@@ -4771,7 +4740,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
     for _ in range(20):
         await asyncio.sleep(0)
 
-    # Landing is NOT complete: interrupt() is still awaiting the steer latch.
+    # Landing is NOT complete: interrupt() is still awaiting the turn's end.
     assert not interrupt_task.done(), "interrupt() should still be pending"
     assert "interrupt" in holder["c"].order   # client.interrupt() was called
     assert "disconnect" not in holder["c"].order  # no self-escalation while waiting
@@ -4856,11 +4825,7 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
             events.append(ev)
 
     task = asyncio.create_task(drive())
-    for _ in range(1000):
-        if "c" in holder:
-            break
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.02)
+    await wait_until(lambda: "c" in holder and bool(holder["c"].queries))
 
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
