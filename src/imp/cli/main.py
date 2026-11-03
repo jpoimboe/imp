@@ -705,7 +705,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     headless, auto_headless = _select_headless(args)
     try:
         if headless:
-            if auto_headless:
+            if auto_headless and not (project / "imp" / "config.yaml").is_file():
                 print(
                     "No interactive terminal detected — writing defaults to "
                     "imp/config.yaml. Override with --workflow / --base / "
