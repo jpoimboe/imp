@@ -12,7 +12,14 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
-from tests._event_fixtures import agent_text, ev, interrupted_task_lead_events, task_lead_started
+from tests._event_fixtures import (
+    agent_text,
+    assert_spec_marker_scrollback,
+    ev,
+    express_spec_marker_events,
+    interrupted_task_lead_events,
+    task_lead_started,
+)
 
 _MAX_LOOPS_COPY = (
     "a step kept sending work back and hit its loop limit; the quest is "
@@ -518,6 +525,10 @@ def test_visible_step_with_body_renders_header_not_collapsed() -> None:
     assert "finalizing plan · complete" in joined      # breadcrumb, not a collapsed line
     hits = [ln for ln in out if "finalizing plan" in ln]
     assert len(hits) >= 2                              # header line + breadcrumb line
+
+
+def test_hidden_spec_written_marker_precedes_planning_rule() -> None:
+    assert_spec_marker_scrollback(_lines(express_spec_marker_events()))
 
 
 def test_visible_show_output_false_step_with_error_body_renders_full_frame() -> None:
