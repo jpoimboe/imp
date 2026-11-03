@@ -300,7 +300,7 @@ def test_a_background_command_that_signals_itself_reports_128_plus_n(
 ) -> None:
     # Spec §7 at the bg read site: the command killed ITSELF, so the descriptor
     # must not read as imp having killed the agent's tool (returncode < 0 is what
-    # the providers turn into killed_tool_uses).
+    # imp journals as tool_killed).
     async def main() -> None:
         from imp.agents.tools.bg import _sweep_bg
         ctx = _ctx(tmp_path)
@@ -323,8 +323,8 @@ def test_a_background_command_that_signals_itself_reports_128_plus_n(
 def test_an_imp_killed_background_command_keeps_its_negative_returncode(
     tmp_path: Path,
 ) -> None:
-    # The other half of the same invariant: imp's own kill stays negative, or the
-    # provider stops recording it in killed_tool_uses.
+    # The other half of the same invariant: imp's own kill stays negative, or imp
+    # stops journaling it as tool_killed.
     async def main() -> None:
         from imp.agents.tools.bg import terminate_background_processes
         ctx = _ctx(tmp_path)

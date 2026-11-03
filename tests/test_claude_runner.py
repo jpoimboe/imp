@@ -4222,6 +4222,37 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
     assert len(resps) == len(distinct_ids) == qr["payload"]["num_turns"] == 2
 
 
+@pytest.mark.anyio
+async def test_claude_killed_bash_result_is_followed_by_tool_killed(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("tu1", "mcp__imp__bash", {"command": "sleep 45"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("tu1", '{"returncode": -15, "stdout": ""}')),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, tools=frozenset({"complete_step", "bash"}))
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    tu1 = [e for e in log.read() if e["payload"].get("id") == "tu1"]
+    assert [e["type"] for e in tu1] == ["tool_call", "tool_result", "tool_killed"]
+    evs = list(log.read())
+    assert evs[evs.index(tu1[1]) + 1] == tu1[2]
+    assert tu1[2]["payload"] == {"id": "tu1", "name": "bash", "signal": 15}
+
+
 def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])

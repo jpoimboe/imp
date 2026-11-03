@@ -77,6 +77,7 @@ from imp.agents.subagents import (
     make_task_tool,
     raise_if_suspended,
 )
+from imp.agents.tool_killed import emit_tool_killed
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -445,7 +446,6 @@ class _RunState:
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     save_and_exit_logged: bool = False
     runtime_errors: list[str] = field(default_factory=list)
-    killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
     # When a tool raises FatalToolError the wrapper captures (tool, message)
     # here so the main runner loop can yield an `error` event with
     # kind="fatal_tool_error" and bail out instead of letting Claude keep
@@ -561,9 +561,9 @@ def _journal_withheld(
     never journaled one, then its one result."""
     if w.call is not None:
         elog.append_tool_call(agent_id=aid, block=w.call)
-    elog.append_tool_result(
-        agent_id=aid,
-        block=ToolResultBlock(w.tool_use_id, content, is_error=is_error))
+    block = ToolResultBlock(w.tool_use_id, content, is_error=is_error)
+    elog.append_tool_result(agent_id=aid, block=block)
+    emit_tool_killed(elog, aid, w.name, block)
 
 
 def _correct_withheld_results(
@@ -936,18 +936,6 @@ def _wrap_one(
                 state.resolve_inflight(inflight_key, caption, is_error=False)
                 return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
-            if name == "bash":
-                try:
-                    parsed = json.loads(content_str)
-                except (TypeError, ValueError):
-                    parsed = {}
-                rc = parsed.get("returncode")
-                if isinstance(rc, int) and rc < 0:
-                    state.killed_tool_uses.append({
-                        "id": args.get("__tool_use_id__", ""),
-                        "name": "bash",
-                        "signal": -rc,
-                    })
             if ctx.parent_transcript_dir is not None:
                 _append_captured_tool_result(
                     ctx.parent_transcript_dir, name, clean_args, content_str)
@@ -1988,6 +1976,12 @@ class ClaudeSession(ObserveSession):
                                 journaled=pend is not None))
                         if not is_task and not withheld:
                             elog.append_tool_result(agent_id=aid, block=b)
+                            if pend is not None:
+                                name = pend.name
+                            else:
+                                call = _tool_use_block(self.messages, b.tool_use_id)
+                                name = call.name if call is not None else ""
+                            emit_tool_killed(elog, aid, name, b)
                             if (pend is not None and pend.name == "save_and_exit"
                                     and not b.is_error):
                                 state.save_and_exit_logged = True
@@ -1995,13 +1989,6 @@ class ClaudeSession(ObserveSession):
                             pend.is_error = b.is_error
                             pend.result_preview = \
                                 _result_preview(b.content)
-
-    def _drain_kills(self) -> list[dict[str, Any]]:
-        state = self.runner._state
-        infos: list[dict[str, Any]] = []
-        while state.killed_tool_uses:
-            infos.append(state.killed_tool_uses.pop(0))
-        return infos
 
     def _fatal_error(self) -> dict[str, Any] | None:
         state = self.runner._state
