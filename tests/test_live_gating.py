@@ -781,26 +781,27 @@ def test_assert_sigint_exit_reports_evidence_on_hang(tmp_path):
         proc.wait()
 
 
-def test_wait_for_bash_tool_call_finds_bash_call(tmp_path):
+def test_wait_for_bash_tool_call_returns_first_bash_payload(tmp_path):
     from tests._live import wait_for_bash_tool_call
     ev = tmp_path / "events.jsonl"
     # A trailing partial JSON line must not choke the scan.
-    _write_events(ev, [_bash_call()], extra_lines=('{"type": "tool_ca',))
-    assert wait_for_bash_tool_call(ev, timeout=2.0) is True
+    _write_events(ev, [_bash_call("b1"), _bash_call("b2")],
+                  extra_lines=('{"type": "tool_ca',))
+    assert wait_for_bash_tool_call(ev, timeout=2.0) == _bash_call("b1")["payload"]
 
 
-def test_wait_for_bash_tool_call_false_when_only_other_tools(tmp_path):
+def test_wait_for_bash_tool_call_none_when_only_other_tools(tmp_path):
     from tests._live import wait_for_bash_tool_call
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"type": "tool_call", "payload": {"id": "r1", "name": "read_file"}},
     ])
-    assert wait_for_bash_tool_call(ev, timeout=2.0) is False
+    assert wait_for_bash_tool_call(ev, timeout=2.0) is None
 
 
-def test_wait_for_bash_tool_call_false_when_events_missing(tmp_path):
+def test_wait_for_bash_tool_call_none_when_events_missing(tmp_path):
     from tests._live import wait_for_bash_tool_call
-    assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is False
+    assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is None
 
 
 def test_bash_tool_call_poller_defined_once_in_live_helpers():

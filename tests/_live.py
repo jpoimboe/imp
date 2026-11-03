@@ -507,9 +507,9 @@ def assert_sigint_exit(proc: subprocess.Popen, quest_dir: Path, timeout: float) 
         pytest.fail(f"expected exit 130, got {rc}\n{evidence(quest_dir)}")
 
 
-def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
+def wait_for_bash_tool_call(events_path: Path, timeout: float) -> dict[str, Any] | None:
     """Re-scan events.jsonl from the start until a tool_call(name=bash) event
-    appears. Returns True on found, False on timeout.
+    appears. Returns that first bash call's payload, or None on timeout.
 
     Re-scanning each tick (instead of tracking an offset) sidesteps the
     partial-line read race: EventLog.append issues two `write()` calls
@@ -533,11 +533,11 @@ def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue  # partial write; next tick picks it up
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
+            payload = rec.get("payload", {})
+            if rec.get("type") == "tool_call" and payload.get("name") == "bash":
+                return payload
         time.sleep(0.2)
-    return False
+    return None
 
 
 def wait_for_status(state_path: Path, want: str, timeout: float) -> str:
