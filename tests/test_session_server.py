@@ -16,6 +16,10 @@ from imp.agents.skills import SkillNotFound
 from imp.agents.transcript import SkillReply
 from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
+    CONTROL_ARCHIVE,
+    CONTROL_DISCARD,
+    CONTROL_INTERRUPT_LEAVE,
+    CONTROL_SAVE,
     EndOfRun,
     encode_attach,
     encode_control,
@@ -853,7 +857,7 @@ async def test_archive_is_delivered_even_when_the_control_queue_is_full() -> Non
     for _ in range(_CONTROL_QUEUE_DEPTH):
         server._enqueue_control("interrupt")
     server._enqueue_control("archive")
-    assert server._archive_requested is True  # signal set regardless of queue state
+    assert CONTROL_ARCHIVE in server._dispositions  # set regardless of queue state
     async with anyio.create_task_group() as tg:
         server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
@@ -867,7 +871,7 @@ async def test_discard_is_delivered_even_when_the_control_queue_is_full() -> Non
     for _ in range(_CONTROL_QUEUE_DEPTH):
         server._enqueue_control("interrupt")
     server._enqueue_control("discard")
-    assert server._discard_requested is True  # signal set regardless of queue state
+    assert CONTROL_DISCARD in server._dispositions  # set regardless of queue state
     async with anyio.create_task_group() as tg:
         server._run_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
@@ -1366,7 +1370,7 @@ async def test_save_reason_survives_a_full_control_queue() -> None:
     for _ in range(_CONTROL_QUEUE_DEPTH):
         server._enqueue_control(CONTROL_INTERRUPT)
     server._enqueue_control(CONTROL_SAVE, "ctrl-d")
-    assert server._save_requested is True   # flag set regardless of queue state
+    assert CONTROL_SAVE in server._dispositions   # set regardless of queue state
 
     async with anyio.create_task_group() as tg:
         server._run_scope = tg.cancel_scope
@@ -1375,6 +1379,20 @@ async def test_save_reason_survives_a_full_control_queue() -> None:
         # which cancels the task group — the loop exits cleanly.
     assert server.saved is True
     assert server.save_reason == "ctrl-d"   # the stored reason, not a buffered frame's None
+
+
+@pytest.mark.anyio
+async def test_save_keeps_its_own_reason_when_archive_follows() -> None:
+    server = SessionServer("/unused.sock")
+    server._enqueue_control(CONTROL_SAVE, "ctrl-d")
+    server._enqueue_control(CONTROL_ARCHIVE, None)
+
+    async with anyio.create_task_group() as tg:
+        server._run_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+    assert server.saved is True
+    assert server.archived is False
+    assert server.save_reason == "ctrl-d"
 
 
 @pytest.mark.anyio
@@ -1814,8 +1832,7 @@ async def test_retry_now_control_is_noop_when_no_backoff_armed(tmp_path: Path) -
 def test_request_save_sets_save_flags(tmp_path: Path) -> None:
     server = SessionServer(str(tmp_path / "s.sock"))
     server.request_save("save_and_exit")
-    assert server._save_requested is True
-    assert server._save_reason == "save_and_exit"
+    assert server._dispositions == {CONTROL_SAVE: "save_and_exit"}
 
 
 def test_server_registers_save_hook_on_coordinator(tmp_path: Path) -> None:
@@ -1824,8 +1841,7 @@ def test_server_registers_save_hook_on_coordinator(tmp_path: Path) -> None:
     coord = InterruptCoordinator()
     server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
     coord.request_save(reason="save_and_exit")
-    assert server._save_requested is True
-    assert server._save_reason == "save_and_exit"
+    assert server._dispositions == {CONTROL_SAVE: "save_and_exit"}
 
 
 @pytest.mark.anyio
@@ -2122,3 +2138,32 @@ async def test_a_viewer_too_far_behind_to_queue_the_end_frame_is_recorded(
          {"message": "a viewer fell behind and was disconnected",
           "detail": "its event queue passed 256 pending events"})]
     recv.close()
+
+
+@pytest.mark.parametrize("action,reason", [
+    (CONTROL_INTERRUPT_LEAVE, "ctrl-d"),
+    (CONTROL_INTERRUPT_LEAVE, "pause"),
+    (CONTROL_ARCHIVE, "ctrl-d"),
+    (CONTROL_SAVE, "ctrl-d"),
+    (CONTROL_DISCARD, "ctrl-d"),
+    (CONTROL_ARCHIVE, None),
+])
+@pytest.mark.anyio
+async def test_leave_controls_stamp_leave_reason_over_first_wins_pause(
+    tmp_path: Path, action: str, reason: str | None,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    await coord.signal_pause(reason="ctrl-c")
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    async with anyio.create_task_group() as tg:
+        server._run_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+        server._enqueue_control(action, reason)
+        # Closing the input side ends the loop right after it dispatches this frame.
+        server._control_send.close()
+    assert coord.leave_reason == reason
+    assert coord.pause_reason == "ctrl-c"
+    if action == CONTROL_SAVE:
+        assert server.save_reason == reason

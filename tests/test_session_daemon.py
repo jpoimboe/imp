@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import shutil
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -8,7 +10,8 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.completion import INTERRUPT_STEER_HINT
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.engine.completion import INTERRUPT_STEER_HINT, build_inline_solicit
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -20,6 +23,8 @@ from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
+    CONTROL_INTERRUPT,
+    CONTROL_INTERRUPT_LEAVE,
     CONTROL_SAVE,
 )
 from tests.async_wait import HANG_BACKSTOP, wait_until
@@ -2835,3 +2840,188 @@ def test_main_exits_zero_on_reaped_home(
 
     rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 0
+
+
+def _register_steer_provider(provider_registry: Any) -> anyio.Event:
+    started = anyio.Event()
+
+    class _SteerRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            started.set()
+            await wait_until(lambda: inv.coordinator.should_pause)
+            steer = build_inline_solicit(
+                user_input_fn=inv.user_input_fn, coordinator=inv.coordinator,
+                event_log=inv.event_log, agent_id=inv.agent_id,
+                steer_prompt=INTERRUPT_STEER_HINT, interrupt=True,
+                halt_writer=inv.halt_writer, halt_clearer=inv.halt_clearer)
+            await steer("last")
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "anthropic"
+        model = "x"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _SteerRunner()
+
+    provider_registry("anthropic", lambda: True, lambda _m: _P())
+    return started
+
+
+def _events(quest: Quest) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in quest.events_path.read_text().splitlines()
+            if line.strip()]
+
+
+def _index(evs: list[dict[str, Any]], etype: str) -> int:
+    return next(i for i, e in enumerate(evs) if e["type"] == etype)
+
+
+@pytest.mark.anyio
+async def test_interrupt_then_save_relabels_pause_with_leave_reason(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create_draft(
+        tmp_path, title="x", quest_id="draft-save", base_branch="main")
+    started = _register_steer_provider(provider_registry)
+    sock = str(session_socket_path(quest.id))
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(lambda: serve_quest_session(quest, hibernate=False))
+        await _wait_for_socket(sock)
+        gate = anyio.Event()
+
+        def _on_event(e: dict[str, Any]) -> None:
+            if (e.get("type") == "awaiting_user_input"
+                    and (e.get("payload") or {}).get("interrupt") is True):
+                gate.set()
+
+        client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            # An interrupt landing before the step dispatches parks pre-step with
+            # no inline steer gate; interrupt the running agent instead.
+            await started.wait()
+            await client.send_control(CONTROL_INTERRUPT)
+            await gate.wait()
+        await client.send_control(CONTROL_SAVE, "ctrl-d")
+        await wait_until(
+            lambda: any(e["type"] == "conversation_saved" for e in _events(quest)))
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+    evs = _events(quest)
+    paused = [e for e in evs if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == "interrupt"
+    assert paused[0]["payload"]["interrupt_reason"] == "ctrl-d"
+    requested = _index(evs, "interrupt_requested")
+    assert evs[requested]["payload"]["source"] == "ctrl-c"
+    assert requested < _index(evs, "workflow_paused") < _index(evs, "conversation_saved")
+    saved = evs[_index(evs, "conversation_saved")]
+    assert saved["payload"] == {"interrupt_reason": "ctrl-d"}
+
+
+async def _interrupt_then_leave(
+    quest: Quest, started: anyio.Event, *, gate_from_daemon_hold: bool,
+) -> list[dict[str, Any]]:
+    sock = str(session_socket_path(quest.id))
+    done = anyio.Event()
+
+    async def _serve() -> None:
+        await serve_quest_session(quest, hibernate=True)
+        done.set()
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_serve)
+            await _wait_for_socket(sock)
+            gate = anyio.Event()
+
+            def _on_event(e: dict[str, Any]) -> None:
+                p = e.get("payload") or {}
+                if (e.get("type") == "awaiting_user_input" and p.get("interrupt") is True
+                        and (p.get("last_agent_message") is None) == gate_from_daemon_hold):
+                    gate.set()
+
+            client = SessionClient(
+                sock, quest.id, quest.title, on_event=_on_event, lease=True)
+            await client.connect()
+            tg.start_soon(client.receive_events)
+            await started.wait()   # see the save test: interrupt the running agent
+            await client.send_control(CONTROL_INTERRUPT)
+            await gate.wait()
+            # Mirrors run_terminal_client: the leave frame, then an immediate close.
+            await client.send_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+            await client.aclose()
+            await done.wait()
+    return _events(quest)
+
+
+@pytest.mark.anyio
+async def test_interrupt_leave_at_inline_steer_relabels_pause(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="mat-steer", base_branch="main")
+    started = _register_steer_provider(provider_registry)
+
+    evs = await _interrupt_then_leave(quest, started, gate_from_daemon_hold=False)
+
+    paused = [e for e in evs if e["type"] == "workflow_paused"]
+    assert [p["payload"] for p in paused] == [
+        {"reason": "interrupt", "interrupt_reason": "ctrl-d"}]
+    state = State.load(quest.state_dir)
+    assert state.status == "paused"
+    assert state.resume_pending == state.step
+    assert state.resume_should_continue is True
+
+
+@pytest.mark.anyio
+async def test_interrupt_leave_at_hold_prompt_keeps_prompt_interrupted_target(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="mat-hold", base_branch="main")
+    started = anyio.Event()
+
+    class _PausingRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            started.set()
+            await wait_until(lambda: inv.coordinator.should_pause)
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "anthropic"
+        model = "x"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _PausingRunner()
+
+    provider_registry("anthropic", lambda: True, lambda _m: _P())
+
+    evs = await _interrupt_then_leave(quest, started, gate_from_daemon_hold=True)
+
+    state = State.load(quest.state_dir)
+    assert state.resume_target == "prompt-interrupted"
+    assert state.resume_should_continue is True
+    paused = [e for e in evs if e["type"] == "workflow_paused"]
+    # The park precedes the leave gesture, so it truthfully records the ctrl-c.
+    assert [p["payload"] for p in paused] == [
+        {"reason": "interrupt", "interrupt_reason": "ctrl-c"}]

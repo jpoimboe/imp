@@ -47,6 +47,7 @@ RunFn = Callable[..., Awaitable[Any]]
 
 _CONTROL_QUEUE_DEPTH = 64
 _INTERNAL_PAUSE = "__detach_pause__"  # server-internal: never a client frame action
+_DISPOSITION_PRECEDENCE = (CONTROL_SAVE, CONTROL_ARCHIVE, CONTROL_DISCARD)
 
 # Emitted from the CONTROL_SET_SANDBOX handler as script_output scrollback, mirroring
 # _run_compaction's "compacted — …". Wording is byte-identical to the former client copy.
@@ -115,10 +116,7 @@ class SessionServer:
         self.leave: str | None = None   # the leave control that ended the run
         self.save_reason: str | None = None
         self._abandon_requested = False
-        self._save_requested = False
-        self._save_reason: str | None = None
-        self._archive_requested = False
-        self._discard_requested = False
+        self._dispositions: dict[str, str | None] = {}
         self._run_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         self._last_gate_event: dict[str, Any] | None = None
@@ -451,24 +449,10 @@ class SessionServer:
             with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
-        if action == CONTROL_SAVE:
-            # Same guaranteed-delivery pattern as abandon: flag is always set;
-            # enqueue is best-effort so the loop wakes immediately when possible.
-            # The reason rides on the flag, not the queue item — a full-queue drop
-            # must not lose it, and the loop's per-iteration reason may be another
-            # buffered frame's.
-            self._save_requested = True
-            self._save_reason = reason
-            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
-                self._control_send.send_nowait((action, reason))
-            return
-        if action == CONTROL_ARCHIVE:
-            self._archive_requested = True
-            with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
-                self._control_send.send_nowait((action, reason))
-            return
-        if action == CONTROL_DISCARD:
-            self._discard_requested = True
+        if action in _DISPOSITION_PRECEDENCE:
+            # Guaranteed delivery like abandon: the request and its reason live
+            # off-queue, so a full-queue drop loses neither.
+            self._dispositions[action] = reason
             with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError):
                 self._control_send.send_nowait((action, reason))
             return
@@ -485,15 +469,11 @@ class SessionServer:
             if self._abandon_requested:
                 await self._dispatch_control(CONTROL_ABANDON)
                 return
-            if self._save_requested:
-                await self._dispatch_control(CONTROL_SAVE, self._save_reason)
-                return
-            if self._archive_requested:
-                await self._dispatch_control(CONTROL_ARCHIVE)
-                return
-            if self._discard_requested:
-                await self._dispatch_control(CONTROL_DISCARD)
-                return
+            for disposition in _DISPOSITION_PRECEDENCE:
+                if disposition in self._dispositions:
+                    await self._dispatch_control(
+                        disposition, self._dispositions[disposition])
+                    return
             await self._dispatch_control(action, reason)
 
     async def _dispatch_control(self, action: str, reason: str | None = None) -> None:
@@ -542,6 +522,8 @@ class SessionServer:
             if self._pending_prompt is not None:
                 self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
+            if reason is not None:
+                self._coordinator.leave_reason = reason
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:
             await self._coordinator.signal_force()
@@ -555,6 +537,8 @@ class SessionServer:
                 self.save_reason = reason
             if action == CONTROL_ABANDON and self._on_abandon is not None:
                 self._on_abandon()
+            if self._coordinator is not None and reason is not None:
+                self._coordinator.leave_reason = reason
             if self._run_scope is None:
                 raise RuntimeError(f"{action} dispatched outside serve()")
             self._run_scope.cancel()

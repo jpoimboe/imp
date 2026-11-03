@@ -176,6 +176,7 @@ def test_clear_pause_resets_flag_and_reason_but_keeps_gesture() -> None:
     coord = InterruptCoordinator()
     coord._should_pause = True
     coord.pause_reason = "ctrl-c"
+    coord.leave_reason = "ctrl-d"
     coord._first_gesture_at = 123.0
     coord.escalated = True
 
@@ -184,6 +185,7 @@ def test_clear_pause_resets_flag_and_reason_but_keeps_gesture() -> None:
     # The pause is consumed: the run continues, not pauses.
     assert coord.should_pause is False
     assert coord.pause_reason is None
+    assert coord.leave_reason is None
     # The gesture/escalation window is untouched so a follow-up force-quit
     # Ctrl-C still escalates.
     assert coord._first_gesture_at == 123.0
