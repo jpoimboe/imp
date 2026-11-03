@@ -339,13 +339,14 @@ def test_pause_lines_max_loops_head_is_gold_paused_dim_qualifier() -> None:
     assert lines[2] == "resume: imp resume dufa26"
 
 
-def test_leave_display_keeps_exactly_its_four_triggers() -> None:
+def test_leave_display_keeps_exactly_its_five_triggers() -> None:
     from imp.cli.main import _LEAVE_DISPLAY, _PauseInfo
     assert _LEAVE_DISPLAY == {
         "ctrl-d": "Ctrl-D",
         "sigterm": "SIGTERM",
         "sighup": "SIGHUP",
         "sigquit": "SIGQUIT",
+        "pause": "/pause",
     }
     for trigger, display in _LEAVE_DISPLAY.items():
         lines = _pause_lines("dufa26", "dufa26", title="T",

@@ -239,8 +239,9 @@ def test_emit_leave_pause_keystroke_prints_the_caret_shadow_above_the_head(
 
 @pytest.mark.parametrize(
     ("trigger", "display"),
-    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT")])
-def test_emit_leave_pause_signal_prints_no_caret(
+    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT"),
+     ("pause", "/pause")])
+def test_emit_leave_pause_non_keystroke_prints_no_caret(
     trigger, display, monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)

@@ -1579,9 +1579,10 @@ async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
     assert state.resume_should_continue is True   # NOT overwritten with solicit
 
 
+@pytest.mark.parametrize("reason", ["ctrl-d", "pause"])
 @pytest.mark.anyio
-async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
-    tmp_path: Path,
+async def test_detach_after_leave_midrun_stamps_resume_target_agent(
+    tmp_path: Path, reason: str,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-cda")
     st = State.load(quest.state_dir)
@@ -1592,7 +1593,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        await coordinator.signal_pause(reason="ctrl-d")
+        await coordinator.signal_pause(reason=reason)
         return RunResult.PAUSED
 
     with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
@@ -1603,7 +1604,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     state = State.load(quest.state_dir)
     assert state.resume_target == "agent"
     assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
-    assert state.resume_should_continue is True    # ctrl-d detach continues on reattach
+    assert state.resume_should_continue is True    # a deliberate detach continues on reattach
 
 
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto

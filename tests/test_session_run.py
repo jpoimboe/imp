@@ -1806,6 +1806,31 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
 
 
 @pytest.mark.anyio
+async def test_pause_on_a_built_quest_renders_the_trigger_block_without_a_caret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-07-04-leave-pause-built")
+    # A built quest's /pause: the gesture sets the trigger, and no disposition is sent.
+    monkeypatch.setattr(
+        session_run, "run_terminal_client", _leaving("pause", intent="pause"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 130
+    assert out == (
+        "paused · /pause\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+
+
+@pytest.mark.anyio
 async def test_shelve_leave_still_renders_archived(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

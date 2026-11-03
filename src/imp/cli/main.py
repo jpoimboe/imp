@@ -268,15 +268,16 @@ _ERROR_LABELS: dict[str, str] = {
     "crash": "crash",
 }
 
-# Deliberate-leave trigger -> its capitalized banner display form. Internal reason
+# Deliberate-leave trigger -> its banner display form. Internal reason
 # strings stay lowercase; only the banner display is transformed.
 _LEAVE_DISPLAY: dict[str, str] = {
     "ctrl-d": "Ctrl-D",
     "sigterm": "SIGTERM",
     "sighup": "SIGHUP",
     "sigquit": "SIGQUIT",
+    "pause": "/pause",
 }
-# The single keystroke leave; signals get no caret shadow (nothing was typed).
+# The single keystroke leave; signals and the typed /pause (already echoed) get no caret shadow.
 _LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
 # Adds the machine-triggered loop ceiling; _LEAVE_DISPLAY stays leave-only for its second consumer.
 _PAUSE_QUALIFIER: dict[str, str] = {**_LEAVE_DISPLAY, "max_loops": "loop limit"}
