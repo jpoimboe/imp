@@ -4687,8 +4687,8 @@ async def test_brake_holds_until_reply_submitted(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
-    """interrupt() asks the SDK to end the turn and returns once the receive loop
-    sets the steer latch. It does NOT self-escalate to a hard kill — the coordinator
+    """interrupt() asks the SDK to end the turn and returns once the turn
+    ends. It does NOT self-escalate to a hard kill — the coordinator
     (and the stall watchdog) own the deadline and force_kill()."""
     import asyncio
 
@@ -4721,7 +4721,7 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
         await asyncio.sleep(0)
     await asyncio.sleep(0.02)
 
-    # Cooperative: client.interrupt() lands and the steer latch releases interrupt().
+    # Cooperative: client.interrupt() lands and the turn ending releases interrupt().
     await asyncio.wait_for(runner.interrupt(), timeout=1)
     assert "interrupt" in holder["c"].order  # client.interrupt() was called
     assert "disconnect" not in holder["c"].order  # no hard kill from interrupt() itself
@@ -4730,7 +4730,7 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> None:
-    """interrupt() waits for the steer landing however long it takes and never
+    """interrupt() waits for the turn to end however long it takes and never
     calls disconnect() on its own — escalation is the coordinator's job.
     The land gate models a >2s (unbounded) SDK landing deterministically."""
     import asyncio
@@ -4771,7 +4771,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
     for _ in range(20):
         await asyncio.sleep(0)
 
-    # Landing is NOT complete: interrupt() is still awaiting the steer latch.
+    # Landing is NOT complete: interrupt() is still awaiting the turn's end.
     assert not interrupt_task.done(), "interrupt() should still be pending"
     assert "interrupt" in holder["c"].order   # client.interrupt() was called
     assert "disconnect" not in holder["c"].order  # no self-escalation while waiting

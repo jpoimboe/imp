@@ -349,3 +349,37 @@ class CooperativeClient:
     async def disconnect(self) -> None:
         self.disconnected = True
         self.order.append("disconnect")
+
+
+class GatedClient(FakeClaudeSDKClient):
+    """FakeClaudeSDKClient whose script may hold asyncio.Event gates: receive_response()
+    parks at each one (exposed as `waiting`) until the test sets it. stall_interrupt
+    models a CLI that never answers the interrupt control request."""
+
+    def __init__(self, opts: Any, *, scripted_messages: list[Any],
+                 stall_interrupt: bool = False) -> None:
+        super().__init__(opts, scripted_messages=scripted_messages)
+        self.waiting: asyncio.Event | None = None
+        self.interrupt_tasks: list[asyncio.Task[Any]] = []
+        self._stall_interrupt = stall_interrupt
+
+    async def receive_response(self) -> Any:
+        while self._pos < len(self._scripted):
+            msg = self._scripted[self._pos]
+            self._pos += 1
+            if isinstance(msg, asyncio.Event):
+                self.waiting = msg
+                await msg.wait()
+                self.waiting = None
+                continue
+            yield msg
+            if type(msg).__name__ == "ResultMessage":
+                return
+
+    async def interrupt(self) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        self.interrupt_tasks.append(task)
+        self.interrupts += 1
+        if self._stall_interrupt:
+            await asyncio.Event().wait()
