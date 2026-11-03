@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,12 @@ _DROP_COPY: dict[DropReason, tuple[str, str]] = {
 _DEFAULT_FIRST_ATTACH_TIMEOUT = 30.0
 
 
+@dataclass(frozen=True)
+class LeftAt:
+    """Where the run was at the session's first leave: the pending prompt, or None mid-run."""
+    prompt: dict[str, Any] | None
+
+
 class SessionServer:
     def __init__(
         self,
@@ -114,6 +121,7 @@ class SessionServer:
         # zero-leased gates.
         self._first_leased_attach_fired: bool = False
         self.leave: str | None = None   # the leave control that ended the run
+        self.left_at: LeftAt | None = None
         self.save_reason: str | None = None
         self._abandon_requested = False
         self._dispositions: dict[str, str | None] = {}
@@ -238,6 +246,7 @@ class SessionServer:
         try:
             got = (await self._hibernation_gate() if self._hibernate
                    else await self._socket.next_input())
+            self.left_at = None   # answered: the session carried on past any leave
             self._emit({"type": "user_input_resolved", "payload": {}})
             if isinstance(got, SkillRequest):
                 assert self._skill_loader is not None
@@ -294,6 +303,7 @@ class SessionServer:
 
             async def _await_hibernate() -> None:
                 await self._wait_until_unleased()
+                self._latch_leave()
                 tg.cancel_scope.cancel()
 
             async def _await_side_effect() -> None:
@@ -383,6 +393,10 @@ class SessionServer:
         finally:
             self._in_wait_for_turn = False
 
+    def _latch_leave(self) -> None:
+        if self.left_at is None:
+            self.left_at = LeftAt(self._pending_prompt)
+
     def set_pending_prompt(self, event: dict[str, Any] | None) -> None:
         """Track a prompt event to re-emit to clients that connect after it fires."""
         self._pending_prompt = event
@@ -463,6 +477,10 @@ class SessionServer:
                 "session control queue overflow; dropping ordinary control %r", action)
         except anyio.ClosedResourceError:
             pass   # the run is over; the end frame may still be draining
+        else:
+            if action == CONTROL_INTERRUPT_LEAVE:
+                # On arrival, ahead of the unwind that clears _pending_prompt.
+                self._latch_leave()
 
     async def _control_loop(self) -> None:
         async for action, reason in self._control_recv:
@@ -479,6 +497,7 @@ class SessionServer:
     async def _dispatch_control(self, action: str, reason: str | None = None) -> None:
         if action == _INTERNAL_PAUSE:
             if self._coordinator is not None and self.leased_count == 0:
+                self._latch_leave()
                 await self._coordinator.signal_pause(reason="detached", via="frame")
             return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
@@ -522,6 +541,7 @@ class SessionServer:
             if self._pending_prompt is not None:
                 self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
+            self._latch_leave()
             if reason is not None:
                 self._coordinator.leave_reason = reason
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")

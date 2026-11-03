@@ -27,7 +27,7 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_event,
 )
-from imp.remote.session.server import SessionServer
+from imp.remote.session.server import LeftAt, SessionServer
 from imp.remote.session.socket_server import PumpItem, _Client
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
@@ -287,9 +287,11 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
     gate_reached = anyio.Event()
+    gate = {"type": "awaiting_user_input", "payload": {"prompt": "go?"}}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count >= 1)
+        on_event(gate)
         try:
             gate_reached.set()
             await user_chat_input_fn("")
@@ -311,6 +313,7 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
         await client.aclose()
         await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
+        assert server.left_at == LeftAt(gate)   # latched before the gate unwinds
         tg.cancel_scope.cancel()
 
 
@@ -1055,6 +1058,7 @@ async def test_last_leased_detach_pauses_mid_step(tmp_path: Path) -> None:
         await wait_until(lambda: coord.should_pause)
         assert coord.should_pause
         assert coord.pause_reason == "detached"
+        assert server.left_at == LeftAt(None)   # left mid-run, no prompt open
         release.set()
         await wait_until(lambda: "r" in result)
         tg.cancel_scope.cancel()
@@ -1163,6 +1167,112 @@ async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
         await client.send((encode_input("the reply") + "\n").encode())
         await wait_until(lambda: "r" in result)
         assert result["r"] == "the reply"   # consumed, NOT dropped to hibernation
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+def test_leave_frame_latches_the_pending_prompt_first_wins(tmp_path: Path) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"))
+    first = {"type": "awaiting_user_input", "payload": {"prompt": "first"}}
+    server.set_pending_prompt(first)
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    server.set_pending_prompt({"type": "awaiting_user_input", "payload": {"prompt": "second"}})
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    assert server.left_at == LeftAt(first)
+
+
+def test_leave_frame_dropped_on_control_queue_overflow_does_not_latch(
+    tmp_path: Path,
+) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"))
+    while True:
+        try:
+            server._control_send.send_nowait(("filler", None))
+        except anyio.WouldBlock:
+            break
+    server.set_pending_prompt({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    assert server.left_at is None
+
+
+@pytest.mark.anyio
+async def test_dispatched_leave_relatches_after_a_reply_cleared_the_arrival_latch(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=InterruptCoordinator())
+    server.set_pending_prompt({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+    server._enqueue_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    server.left_at = None             # a queued reply was consumed: _chat cleared the latch
+    server.set_pending_prompt(None)   # the run carried on mid-step
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE, "ctrl-d")
+    assert server.left_at == LeftAt(None)
+
+
+@pytest.mark.anyio
+async def test_internal_pause_dispatched_at_a_prompt_latches_that_prompt(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.server import _INTERNAL_PAUSE
+
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=InterruptCoordinator())
+    prompt = {"type": "awaiting_user_input", "payload": {"prompt": "go?"}}
+    server.set_pending_prompt(prompt)   # opened between the enqueue and the dispatch
+    await server._dispatch_control(_INTERNAL_PAUSE)
+    assert server.left_at == LeftAt(prompt)
+
+
+@pytest.mark.anyio
+async def test_wait_for_turn_hibernation_does_not_latch(tmp_path: Path) -> None:
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+
+    server = SessionServer(str(tmp_path / "s.sock"))
+    server._first_leased_attach_fired = True   # a keep-alive client attached + left
+    with pytest.raises(AwaitingUserInput):
+        await server.wait_for_turn(lambda: False)
+    assert server.left_at is None
+
+
+@pytest.mark.anyio
+async def test_side_effect_pauses_do_not_latch(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_COMPACT, CONTROL_SET_MODEL
+
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=InterruptCoordinator())
+    await server._dispatch_control(CONTROL_SET_MODEL, "some-model")
+    await server._dispatch_control(CONTROL_COMPACT)
+    assert server.left_at is None
+
+
+@pytest.mark.anyio
+async def test_reply_at_a_prompt_clears_the_leave_latch(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    server.left_at = LeftAt(None)   # an earlier leave the session carried on past
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count >= 1)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+        gate_reached.set()
+        return await user_chat_input_fn("")
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        await gate_reached.wait()
+        await client.send((encode_input("yes") + "\n").encode())
+        await wait_until(lambda: "r" in result)
+        assert result["r"] == "yes"
+        assert server.left_at is None
         await client.aclose()
         tg.cancel_scope.cancel()
 
