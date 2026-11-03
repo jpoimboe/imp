@@ -696,3 +696,49 @@ def test_events_search_archived_titleless_hit_falls_back_to_card_seed_opening(
                     seed_opening="seeded never-run brief")
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
     assert [(h.quest_id, h.intent) for h in hits] == [("arc003", "seeded never-run brief")]
+
+
+def test_events_search_list_line_names_a_titleless_hit_dim() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == (
+        f"bedo08 · {_OPENING} · archive")
+    assert m._events_search_list_line(hit, query="zzz", color=True) == (
+        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2marchive\x1b[0m")
+
+
+def test_events_search_list_line_clips_a_long_fallback_at_name_cap() -> None:
+    opening = "summarize " + "y" * 100
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, opening)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == (
+        "bedo08 · summarize " + "y" * 59 + "… · archive")
+
+
+def test_events_search_list_line_omits_the_name_with_neither_title_nor_intent() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, None)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · archive"
+
+
+def _headings(out: str) -> dict[str, str]:
+    return {ln.split(" · ")[0]: ln for ln in out.splitlines()
+            if " · " in ln and not ln.startswith(" ")}
+
+
+def test_cmd_events_search_names_titleless_quests_in_every_zone(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _titleless_in_every_zone(tmp_path)
+    for listed in (True, False):
+        assert m._cmd_events_search(_search_ns("foo.py", list=listed), tmp_path) == 0
+        heads = _headings(capsys.readouterr().out)
+        assert heads["act001"].startswith(f"act001 · {_OPENING} · active")
+        assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archive")
+
+
+def test_events_search_list_line_highlights_the_query_over_the_dim_fallback() -> None:
+    hit = m.EventSearchHit("bedo08", "", "archive", None, [], {}, 1, {}, _OPENING)
+    assert m._events_search_list_line(hit, query="foo.py", color=True) == (
+        "\x1b[33mbedo08\x1b[0m · "
+        "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
+        "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
+        " · \x1b[2marchive\x1b[0m")

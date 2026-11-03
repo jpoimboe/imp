@@ -117,3 +117,45 @@ def test_excerpts_empty_when_no_match() -> None:
 
 def test_excerpts_empty_query_returns_empty_not_infinite_loop() -> None:
     assert _excerpts("any content here", "", color=False) == ([], 0)
+
+
+_OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
+
+
+def test_search_list_line_names_a_titleless_hit_by_its_opening() -> None:
+    hit = _SearchHit("bedo08", "", "active", "", "2026-07-10T00:00:00+00:00", _OPENING)
+    line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
+    assert line == f"bedo08 · {_OPENING} · active · 3d"
+
+
+def test_search_list_line_dims_the_fallback_under_the_query_highlight() -> None:
+    hit = _SearchHit("bedo08", "", "active", "", "2026-07-10T00:00:00+00:00", _OPENING)
+    line = _search_list_line(hit, query="foo.py", now=_NOW, color=True)
+    assert line == (
+        "\x1b[33mbedo08\x1b[0m · "
+        "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
+        "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
+        " · \x1b[2mactive · 3d\x1b[0m")
+
+
+def test_search_list_line_flattens_and_clips_a_long_fallback_at_name_cap() -> None:
+    opening = "summarize\n  " + "y" * 100
+    hit = _SearchHit("abc", "", "archive", "", None, opening)
+    line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
+    # NAME_CAP is 70: 69 text columns + "…"
+    assert line == "abc · summarize " + "y" * 59 + "… · archive · -"
+
+
+def test_search_list_line_real_title_stays_plain_and_unclipped() -> None:
+    title = "a real title " + "t" * 100
+    hit = _SearchHit("abc", title, "active", "", None, None)
+    line = _search_list_line(hit, query="zzz", now=_NOW, color=True)
+    assert line == f"\x1b[33mabc\x1b[0m · {title} · \x1b[2mactive · -\x1b[0m"
+
+
+def test_search_list_line_clips_the_fallback_before_highlighting() -> None:
+    hit = _SearchHit("abc", "", "archive", "", None, "summarize " + "y" * 100 + " foo.py")
+    line = _search_list_line(hit, query="foo.py", now=_NOW, color=True)
+    assert line == (
+        "\x1b[33mabc\x1b[0m · \x1b[2msummarize " + "y" * 59 + "…\x1b[0m"
+        " · \x1b[2marchive · -\x1b[0m")

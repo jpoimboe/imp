@@ -436,3 +436,17 @@ def test_search_hits_carry_the_titleless_name_source_in_every_zone(tmp_path: Pat
     assert archived == {"arc001": _OPENING}
     assert [h.intent for h in _search_archived(tmp_path, "arc002", _ALL_ARCHIVED, None)] == [
         "seed only brief"]
+
+
+def test_cmd_search_names_titleless_quests_in_every_zone(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _titleless_in_every_zone(tmp_path)
+    for listed in (True, False):
+        assert _cmd_search(_ns("foo.py", list=listed), tmp_path) == 0
+        heads = {ln.split(" · ")[0]: ln for ln in capsys.readouterr().out.splitlines()
+                 if " · " in ln and not ln.startswith(" ")}
+        assert heads["act001"].startswith(f"act001 · {_OPENING} · active · ")
+        assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog · ")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archive · ")

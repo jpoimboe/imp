@@ -3845,6 +3845,18 @@ def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
     return "".join(out)
 
 
+def _search_name_segment(title: str, intent: str | None, query: str, *,
+                         color: bool) -> str | None:
+    """A search heading's name: a real title plain, else the dim NAME_CAP-clipped fallback."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.UNNAMED:
+        return None
+    if resolved.kind is quest_row.NameKind.TITLE:
+        return _spine_segment(resolved.text, query, color=color)
+    return _spine_segment(quest_row._truncate(resolved.text, quest_row.NAME_CAP),
+                          query, "dim", color=color)
+
+
 def _highlight(text: str, query: str, *, color: bool) -> str:
     """Wrap every case-insensitive occurrence of `query` in `text` with a bold-yellow accent."""
     if not color or not query:
@@ -3895,16 +3907,15 @@ def _render_search_hit(
 def _search_list_line(
     hit: SearchHit, *, query: str, now: datetime, color: bool,
 ) -> str:
-    """Spine heading id · title · zone · age; query highlighted; title dropped when empty."""
+    """Spine heading id · name · zone · age; query highlighted; name dropped when absent."""
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
     age = quest_row.relative_age(hit.last_activity, now=now)
     tail = pal.ansi(f"{hit.zone} · {age}", "dim", enabled=color)
-    title = hit.title.strip()
-    if not title:
+    name = _search_name_segment(hit.title, hit.intent, query, color=color)
+    if name is None:
         return f"{id_seg} · {tail}"
-    title_seg = _spine_segment(title, query, color=color)
-    return f"{id_seg} · {title_seg} · {tail}"
+    return f"{id_seg} · {name} · {tail}"
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -3942,11 +3953,10 @@ def _events_search_list_line(
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
     tail = pal.ansi(hit.zone, "dim", enabled=color)
-    title = hit.title.strip()
-    if not title:
+    name = _search_name_segment(hit.title, hit.intent, query, color=color)
+    if name is None:
         return f"{id_seg} · {tail}"
-    title_seg = _spine_segment(title, query, color=color)
-    return f"{id_seg} · {title_seg} · {tail}"
+    return f"{id_seg} · {name} · {tail}"
 
 
 def _render_events_search_hit(
