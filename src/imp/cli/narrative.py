@@ -1493,6 +1493,7 @@ def _append_resume_header(step: StepNode, route_label: str | None) -> None:
 
 
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._cut_off.clear()
     self._flush_pending_rename()
     self._flush_burst()
     # Consumed HERE, not at the _resuming capture below: the internal-retry branch
@@ -2011,6 +2012,7 @@ def _rotate_status_phrase(self: NarrativeBuilder) -> None:
 
 
 def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._cut_off.clear()
     subtype = str(p.get("subtype") or "")
     if subtype == "completion":
         # Preserve old completion_nudge behavior exactly: arm the WAITING-drop and
@@ -2031,6 +2033,7 @@ def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._cut_off.clear()
     self._flush_burst()
     _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")

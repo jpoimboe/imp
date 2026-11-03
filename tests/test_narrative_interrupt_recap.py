@@ -196,3 +196,57 @@ def test_nested_cut_off_alone_names_no_helper() -> None:
               ev("t1", "thinking", LEAD, content="next"),
               *_ctrl_c("a", LEAD), *_leave_and_resume("a"), LIVE_GATE]
     assert _recap(events) == "was: task 1/2"
+
+
+def test_resumed_step_clears_earlier_cut_off() -> None:
+    events = [*_cut_off_then_resume("coder", "writing code"),
+              _task_lead("s2", resumed=True, restarted=False),
+              ev("t2", "thinking", LEAD, content="checking"),
+              *_ctrl_c("b", LEAD), *_leave_and_resume("b"), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2"
+
+
+STEER_REPLY = ev("u1", "user_message", LEAD, role="user",
+                 content=[{"type": "text", "text": "try a smaller diff"}], subtype="reply")
+ENTER_CONTINUE = ev("u1", "engine_message", LEAD, role="user",
+                    content=[{"type": "text", "text": "continue"}], subtype="continuation")
+
+
+def _coder_cut_off_then(progress: Event) -> list[Event]:
+    """Coder cut off at a steer gate; the human answers it in the same step instance."""
+    return [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"), _sub_work("d1"),
+            *_ctrl_c("a", LEAD, "sub:d1"), _interrupted_result("d1", LEAD, "coder"),
+            progress]
+
+
+@pytest.mark.parametrize("progress", [
+    pytest.param(STEER_REPLY, id="steer-reply"),
+    pytest.param(ENTER_CONTINUE, id="enter-continue"),
+])
+def test_step_agent_message_clears_earlier_cut_off(progress: Event) -> None:
+    events = [*_coder_cut_off_then(progress), ev("t2", "thinking", LEAD, content="ok"),
+              *_ctrl_c("b", LEAD), *_leave_and_resume("b"), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2"
+
+
+def test_only_the_latest_interrupts_subagents_are_named() -> None:
+    events = [*_coder_cut_off_then(STEER_REPLY),
+              _dispatch("d2", LEAD, "code-reviewer", "reviewing code"), _sub_work("d2"),
+              *_ctrl_c("b", LEAD, "sub:d2"), _interrupted_result("d2", LEAD, "code-reviewer"),
+              *_leave_and_resume("b"), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2 · reviewing code"
+
+
+def test_late_result_for_an_already_stopped_fold_does_not_rejoin() -> None:
+    events = [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"), _sub_work("d1"),
+              *_ctrl_c("a", LEAD, "sub:d1"), *_leave_and_resume("a"), STEER_REPLY,
+              _interrupted_result("d1", LEAD, "coder"), ev("t2", "thinking", LEAD, content="ok"),
+              *_ctrl_c("b", LEAD), *_leave_and_resume("b"), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2"
+
+
+def test_ctrl_d_at_resumed_prompt_keeps_helper() -> None:
+    events = [*_cut_off_then_resume("coder", "writing code"),
+              ev("cd", "interrupt_requested", source="ctrl-d", via="frame"),
+              ev("wr2", "workflow_resumed"), ev("ca2", "cli_attached"), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2 · writing code"
