@@ -41,6 +41,7 @@ from imp.agents.subagents import (
     dispatch_task,
     raise_if_suspended,
 )
+from imp.agents.tool_killed import emit_tool_killed
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
@@ -195,23 +196,11 @@ async def dispatch_one_tool_use(
 
     content_str = (raw_result if isinstance(raw_result, str)
                    else json.dumps(raw_result, default=str))
-    if tu.name == "bash":
-        # rc<0 -> tool_killed heuristic. Gated on tu.name == "bash" so it
-        # never sees bash_kill's result: an agent-requested kill is EXPECTED
-        # (spec Decision 6); the negative returncode flows back as plain data.
-        try:
-            parsed = json.loads(content_str)
-        except (TypeError, ValueError):
-            parsed = {}
-        rc = parsed.get("returncode")
-        if isinstance(rc, int) and rc < 0:
-            elog.append(agent_id=aid, type="tool_killed",
-                        payload={"id": tu.id, "name": "bash",
-                                 "signal": -rc})
     block = ToolResultBlock(tu.id, content_str)
     tool_results.append(block)
     elog.append_tool_result(agent_id=aid, block=block,
                             duration_ms=(time.perf_counter() - start) * 1000.0)
+    emit_tool_killed(elog, aid, tu.name, block)
     return _dep_wait_event(ctx)
 
 
