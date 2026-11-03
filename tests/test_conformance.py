@@ -4,13 +4,19 @@ pinned to a committed golden captured from the pre-refactor runner."""
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
+from imp.agents.runner import QuestContext
+from imp.agents.subagents import dispatch_task
+from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import RESUME_STUB_NOTE
+from imp.cli.signals import InterruptCoordinator
 from imp.engine.completion import build_continuation_fn
+from imp.paths import project_state_dir
 from tests.anthropic_fakes import response as a_response
 from tests.anthropic_fakes import text as a_text
 from tests.anthropic_fakes import tool_use as a_tool_use
@@ -37,6 +43,7 @@ from tests.conformance_adapters import (
     OBSERVE,
     PAIRS,
     PUSH,
+    agent_def,
     build,
     drive,
     run_scenario,
@@ -442,3 +449,59 @@ async def test_cross_session_error_kind_identical(pair: str, tmp_path: Path) -> 
     assert (driven.control[-1]["payload"]["category"],
             driven.control[-1]["payload"]["kind"]) == ("loop", "repeated_failure")
     check_golden(f"repeated_invalid__{pair}", record(driven))
+
+
+def _bare_text_script(pair: str, text: str):
+    if pair == "anthropic":
+        return [a_response(a_text(text), stop_reason="end_turn")]
+    if pair == "openai":
+        return [resp_response(resp_message(text))]
+    if pair == "claude":
+        return [cc_assistant(cc_text(text)), cc_result()]
+    return [[cx_start("thr-1"), cx_msg(text), cx_done()]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_subagent_result_racing_pause_is_dropped(pair: str, tmp_path: Path) -> None:
+    # Ctrl-C wins: a child's agent_result racing a pause latch yields the [interrupted] handback.
+    deliverable = "the racing deliverable"
+    inner, inner_inv = build(pair, tmp_path, _bare_text_script(pair, deliverable),
+                             agent_id="sub:ev-1", subagent_depth=1)
+    coord = InterruptCoordinator()
+    forwarded: list[dict] = []
+
+    class _LatchPauseOnResult:
+        # Drives the pair's own invocation (codex needs build's seeded repo + tx dir).
+        async def run(self, _inv):
+            async with contextlib.aclosing(inner.run(inner_inv)) as gen:
+                async for ev in gen:
+                    if ev["type"] == "agent_result":
+                        # Pause flag only: a delivered interrupt() would steer claude instead.
+                        coord._should_pause = True
+                        forwarded.append(ev)
+                    yield ev
+
+        async def interrupt(self) -> None:
+            await inner.interrupt()
+
+    async def _spawn(_inv):
+        return _LatchPauseOnResult()
+
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": agent_def()}
+    ctx.provider_name = pair
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = coord
+    ctx.spawn_subagent = _spawn
+    ctx.quest_context = QuestContext(
+        id="change-42", title="Q", project_root=tmp_path,
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow")
+
+    with pytest.raises(RuntimeError) as ei:
+        await dispatch_task(ctx, "reviewer", "do x", tool_call_event_id="ev-1")
+
+    assert [e["payload"] for e in forwarded] == [{"text": deliverable}]
+    assert "[interrupted]" in str(ei.value)
+    assert deliverable not in str(ei.value)
