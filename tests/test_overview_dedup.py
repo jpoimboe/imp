@@ -114,7 +114,7 @@ def _archive_paused(
         "materialized": False}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "shelved", "step": None}))
+        "id": cid, "status": "archived", "step": None}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -127,49 +127,49 @@ def test_completed_rows_honors_live_ids(tmp_path: Path) -> None:
     assert m._completed_rows(tmp_path, live_ids={"gamma"}) == []
 
 
-def test_shelved_rows_selects_paused_not_live(tmp_path: Path) -> None:
+def test_archived_rows_selects_paused_not_live(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_paused(tmp_path, "delta")
     _archive_completed(tmp_path, "epsilon")
-    # A shelved (archived `paused`) conversation is a shelved row; a completed
+    # An archived-but-resumable conversation is an archived row; a completed
     # one is NOT (this pins the `paused` filter — dropping it would surface epsilon).
-    shelved = m._shelved_rows(tmp_path)
-    assert {r[0] for r in shelved} == {"delta"}
-    assert all(r[1] == "shelved" for r in shelved)
-    # The completed change is a completed row, not a shelved row (AC 4).
+    archived = m._archived_rows(tmp_path)
+    assert {r[0] for r in archived} == {"delta"}
+    assert all(r[1] == "archived" for r in archived)
+    # The completed change is a completed row, not an archived row (AC 4).
     assert {r[0] for r in m._completed_rows(tmp_path)} == {"epsilon"}
-    # A resumed (now live) shelved conversation drops out via live_ids (AC 3).
-    assert m._shelved_rows(tmp_path, live_ids={"delta"}) == []
+    # A resumed (now live) archived conversation drops out via live_ids (AC 3).
+    assert m._archived_rows(tmp_path, live_ids={"delta"}) == []
 
 
-def test_shelved_conversation_only_in_all_history(tmp_path: Path) -> None:
+def test_archived_conversation_only_in_all_history(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_completed(tmp_path, "gamma")          # merged,  last=2026-06-01
-    _archive_paused(tmp_path, "delta")             # shelved, last=2026-06-03
+    _archive_paused(tmp_path, "delta")             # archived, last=2026-06-03
 
-    every = {"merged", "done", "abandoned", "shelved"}
+    every = {"merged", "done", "abandoned", "archived"}
     plain = {"merged", "done"}
 
     # AC 1: under --all, delta appears in history, sorted newest-first (before
     # the older merged gamma).
     all_hist = m._history_by_disposition(tmp_path, dispositions=every, live_ids=None)
     assert [r[0] for r in all_hist] == ["delta", "gamma"]
-    assert dict((r[0], r[1]) for r in all_hist)["delta"] == "shelved"
+    assert dict((r[0], r[1]) for r in all_hist)["delta"] == "archived"
 
-    # AC 2: plain imp show never lists the shelved conversation.
+    # AC 2: plain imp show never lists the archived conversation.
     plain_hist = m._history_by_disposition(tmp_path, dispositions=plain, live_ids=None)
     assert {r[0] for r in plain_hist} == {"gamma"}
 
-    # AC 3: a resumed (now live) shelved conversation is not duplicated in history.
+    # AC 3: a resumed (now live) archived conversation is not duplicated in history.
     assert {r[0] for r in
             m._history_by_disposition(
                 tmp_path, dispositions=every, live_ids={"delta"},
             )} == {"gamma"}
 
-    # AC 6: rendered overview tags the row "shelved" under --all (never "left").
+    # AC 6: rendered overview tags the row "archived" under --all (never "left").
     now = datetime(2026, 6, 28, tzinfo=UTC)
     all_lines = m._overview_lines(tmp_path, show_all=True, now=now, color=False)
-    assert any(ln.startswith("delta") and "shelved" in ln for ln in all_lines)
+    assert any(ln.startswith("delta") and "archived" in ln for ln in all_lines)
     assert not any(ln.startswith("delta") and "left" in ln for ln in all_lines)
     plain_lines = m._overview_lines(tmp_path, show_all=False, now=now, color=False)
     assert not any(ln.startswith("delta") for ln in plain_lines)

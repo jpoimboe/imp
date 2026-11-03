@@ -66,7 +66,7 @@ def _ns(**kw: object) -> argparse.Namespace:
 
 
 def test_selected_search_defaults_to_active_backlog_and_all_archive() -> None:
-    assert _selected_search(_ns()) == (True, True, {"merged", "done", "abandoned", "shelved"})
+    assert _selected_search(_ns()) == (True, True, {"merged", "done", "abandoned", "archived"})
 
 
 def test_selected_search_single_zone_scopes() -> None:
@@ -77,12 +77,12 @@ def test_selected_search_single_zone_scopes() -> None:
 def test_selected_search_disposition_flags_map_to_statuses() -> None:
     assert _selected_search(_ns(merged=True)) == (False, False, {"merged"})
     assert _selected_search(_ns(abandoned=True)) == (False, False, {"abandoned"})
-    assert _selected_search(_ns(shelved=True)) == (False, False, {"shelved"})
+    assert _selected_search(_ns(shelved=True)) == (False, False, {"archived"})
 
 
 def test_selected_search_archived_expands_to_four_statuses() -> None:
     assert _selected_search(_ns(archived=True)) == (
-        False, False, {"merged", "done", "abandoned", "shelved"})
+        False, False, {"merged", "done", "abandoned", "archived"})
 
 
 def test_selected_search_merged_after_self_enables_merged() -> None:

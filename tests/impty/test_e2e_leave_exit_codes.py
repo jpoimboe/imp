@@ -112,8 +112,8 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
         assert_screen(s, contains=("paused · SIGTERM",))
 
 
-def test_ctrl_d_in_chat_after_an_exchange_exits_130_shelved(tmp_path: Path) -> None:
-    # No create_and_enter_worktree: the chat stays phase-0, so Ctrl-D shelves it.
+def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> None:
+    # No create_and_enter_worktree: the chat stays phase-0, so Ctrl-D archives it.
     script = _seed_scripted_gate_project(tmp_path, turns=[
         {"text": "setting up", "tools": [
             {"name": "bash", "input": {"command": _ATTACH_POLL}},
@@ -132,4 +132,4 @@ def test_ctrl_d_in_chat_after_an_exchange_exits_130_shelved(tmp_path: Path) -> N
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("shelved",))
+        assert_screen(s, contains=("archived",))

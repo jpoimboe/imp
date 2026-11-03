@@ -1635,9 +1635,9 @@ def _ended_by(leave: str, *events: dict[str, Any], **marks: str) -> Any:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(("disposition", "tail"), [
-    ("archive", "shelved\nresume: imp resume {id} — or find it later with imp search\n"),
+    ("archive", "archived\nresume: imp resume {id} — or find it later with imp search\n"),
     ("discard", "discarded\n"),
-    ("save", "saved as draft\nresume: imp resume {id}\n"),
+    ("save", "paused\nresume: imp resume {id}\n"),
     ("abandon", "abandoned\n"),
 ])
 async def test_an_end_frame_disposition_renders_that_leaves_block(
@@ -1699,7 +1699,7 @@ async def test_the_clients_own_leave_outranks_the_end_frame_disposition(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
-    assert out == (f"{quest.id} · T · shelved\n"
+    assert out == (f"{quest.id} · T · archived\n"
                    f"resume: imp resume {quest.id} — or find it later with imp search\n\n")
 
 
@@ -1754,7 +1754,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
 
 
 @pytest.mark.anyio
-async def test_save_leave_still_renders_saved_as_draft(
+async def test_save_leave_still_renders_paused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1772,7 +1772,7 @@ async def test_save_leave_still_renders_saved_as_draft(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        f"{quest.id} · T · saved as draft\n"
+        f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -1798,7 +1798,7 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        f"{quest.id} · T · saved as draft\n"
+        f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "> Ctrl-D" not in out          # row 1 prints no caret shadow
@@ -1806,7 +1806,7 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
 
 
 @pytest.mark.anyio
-async def test_shelve_leave_still_renders_shelved(
+async def test_shelve_leave_still_renders_archived(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1824,7 +1824,7 @@ async def test_shelve_leave_still_renders_shelved(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        f"{quest.id} · T · shelved\n"
+        f"{quest.id} · T · archived\n"
         f"resume: imp resume {quest.id} — or find it later with imp search\n"
         "\n")
 

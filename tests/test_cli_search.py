@@ -64,7 +64,7 @@ def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
     _archive_conv(tmp_path, "darkid", "Dark mode", "2026-06-10T00:00:00+00:00",
                   "a dark note")
     hits = _search_archived(tmp_path, "dark",
-                            {"merged", "abandoned", "shelved"}, None)
+                            {"merged", "abandoned", "archived"}, None)
     assert len(hits) == 1
     assert hits[0].last_activity == "2026-06-10T00:00:00+00:00"
 
@@ -238,7 +238,7 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
 
 
 def test_cmd_search_shelved_filters_to_paused(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "shlv", "Dark shelved chat", status="shelved")
+    _archive(tmp_path, "shlv", "Dark shelved chat", status="archived")
     _archive(tmp_path, "done", "Dark merged work", status="merged")
     rc = _cmd_search(_ns("dark", shelved=True, list=True), tmp_path)
     out = capsys.readouterr().out

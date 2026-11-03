@@ -192,7 +192,7 @@ def _seed_board(control: Path) -> None:
                        seed_opening="Add OAuth\nwire it up")
     _archive_status(control, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(control, "abnd06", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
-    _archive_status(control, "shlv07", "shelved", last_ts="2026-06-08T00:00:00+00:00")
+    _archive_status(control, "shlv07", "archived", last_ts="2026-06-08T00:00:00+00:00")
 
 
 def _run(control: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str:
@@ -249,7 +249,7 @@ def test_list_json_backlog_filter_matches_the_text_board(
     assert {e["id"] for e in data} == _text_ids(text) == {"idea03"}
 
 
-def test_list_json_all_adds_abandoned_and_shelved(
+def test_list_json_all_adds_abandoned_and_archived(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     _seed_board(tmp_path)
@@ -259,6 +259,7 @@ def test_list_json_all_adds_abandoned_and_shelved(
     assert {e["id"] for e in every} == _text_ids(text)
     assert {e["id"] for e in every} - {e["id"] for e in plain} == {"abnd06", "shlv07"}
     assert [e["status"] for e in every if e["id"] == "abnd06"] == ["abandoned"]
+    assert [e["status"] for e in every if e["id"] == "shlv07"] == ["archived"]
 
 
 def test_list_json_since_drops_rows_older_than_the_cutoff(

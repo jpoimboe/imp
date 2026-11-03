@@ -545,8 +545,8 @@ def _emit_daemon_died(quest: Quest, *, intent: str | None = None) -> None:
 
 
 _LEAVE_TAILS: dict[str, str] = {
-    CONTROL_SAVE: "saved as draft",
-    CONTROL_ARCHIVE: "shelved",
+    CONTROL_SAVE: "paused",
+    CONTROL_ARCHIVE: "archived",
     CONTROL_DISCARD: "discarded",
     CONTROL_ABANDON: "abandoned",
 }
@@ -2492,7 +2492,7 @@ class _EventTail:
             pagecache.drop_page_cache(self._path)
 
 
-_FOLLOW_TERMINAL = frozenset({"merged", "done", "abandoned", "shelved"})
+_FOLLOW_TERMINAL = frozenset({"merged", "done", "abandoned", "archived"})
 
 
 def _follow_paused_status(quest_id: str) -> Callable[[int], list[str]]:
@@ -2850,7 +2850,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return quest
 
 
-RESUMABLE = ("new", "paused", "error", "merge_blocked", "shelved")
+RESUMABLE = ("new", "paused", "error", "merge_blocked", "archived")
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
@@ -2861,20 +2861,20 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for r in make_store(control).completed_rows():
-        if r.quest_id in live or r.status in _INFLIGHT or r.status == "shelved":
-            continue  # shelved rows come only from _shelved_rows (never double-listed)
+        if r.quest_id in live or r.status in _INFLIGHT or r.status == "archived":
+            continue  # archived rows come only from _archived_rows (never double-listed)
         rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None))
     return rows
 
 
-def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Shelved conversations — archived final status `shelved` with no live home —
-    for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
+def _archived_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
+    """Archived conversations — final status `archived` with no live home — for the
+    `--all` history block. Mirrors _completed_rows' live-id dedup."""
     from imp.cli.store import _status_rows, make_store
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
-            if r.status == "shelved" and r.quest_id not in live]
+            if r.status == "archived" and r.quest_id not in live]
 
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
@@ -2938,7 +2938,7 @@ def _resumable_matches(
 
     Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
     records — an archived id whose archive record reads `resumable=True` (a
-    "shelved" conversation whose live home was deleted). A live row wins when an id
+    "archived" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu.
     An archived candidate this install cannot read is NOT omitted: it is reported
@@ -3483,10 +3483,10 @@ _DEFAULT_LIST_DISPOSITIONS = frozenset({"active", "backlog", "merged", "done"})
 
 
 def _board_dispositions(*, show_all: bool) -> set[str]:
-    """The unfiltered board's zones: the defaults, plus abandoned/shelved under --all."""
+    """The unfiltered board's zones: the defaults, plus abandoned/archived under --all."""
     picked = set(_DEFAULT_LIST_DISPOSITIONS)
     if show_all:
-        picked |= {"abandoned", "shelved"}
+        picked |= {"abandoned", "archived"}
     return picked
 
 
@@ -3502,17 +3502,17 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     if args.abandoned:
         picked.add("abandoned")
     if args.shelved:
-        picked.add("shelved")
+        picked.add("archived")
     if args.archived:
-        picked |= {"merged", "done", "abandoned", "shelved"}
+        picked |= {"merged", "done", "abandoned", "archived"}
     return picked
 
 
 def _history_by_disposition(control: Path, *, dispositions: set[str],
                             live_ids: set[str] | None) -> list[_Row]:
     """Archive-zone rows for the requested dispositions, newest-first."""
-    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
-    rows = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
+    wanted = dispositions & {"merged", "done", "abandoned", "archived"}
+    rows = _completed_rows(control, live_ids) + _archived_rows(control, live_ids)
     return _sort_rows_newest_first([r for r in rows if r[1] in wanted])
 
 
@@ -3705,13 +3705,13 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     if args.abandoned:
         statuses.add("abandoned")
     if args.shelved:
-        statuses.add("shelved")
+        statuses.add("archived")
     if args.archived:
-        statuses |= {"merged", "done", "abandoned", "shelved"}
+        statuses |= {"merged", "done", "abandoned", "archived"}
     if args.merged_after is not None:
         statuses.add("merged")
     if not (args.active or args.backlog or statuses):
-        return True, True, {"merged", "done", "abandoned", "shelved"}
+        return True, True, {"merged", "done", "abandoned", "archived"}
     return args.active, args.backlog, statuses
 
 

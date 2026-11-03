@@ -31,7 +31,7 @@ def test_archive_conversation_materialized_tears_down_resumable(tmp_path: Path) 
     # Archived, resumable, NOT abandoned.
     rec = archive_read.read_quest_json(tmp_path, "conv")
     assert rec is not None
-    assert archive_read.status_of(tmp_path, "conv") == "shelved"             # not "abandoned"
+    assert archive_read.status_of(tmp_path, "conv") == "archived"             # not "abandoned"
     events = archive_read.read_events(tmp_path, "conv")
     assert events is not None and b"conversation_archived" in events
     assert b"quest_abandoned" not in events
@@ -50,7 +50,7 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
     full = record.read_record(records_root(tmp_path), "draft")
     assert full is not None
     assert full["resumable"] is True
-    assert archive_read.status_of(tmp_path, "draft") == "shelved"
+    assert archive_read.status_of(tmp_path, "draft") == "archived"
     assert full["quest_meta"]["materialized"] is False        # faithful draft state preserved
 
 

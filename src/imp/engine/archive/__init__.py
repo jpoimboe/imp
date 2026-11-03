@@ -62,7 +62,7 @@ def archive_quest(
     steps_dir: Path | None = None,
     resumable: bool = False,
 ) -> None:
-    """Finalize one completed/abandoned/shelved quest into the archive. Idempotent."""
+    """Finalize one completed/abandoned/archived quest into the archive. Idempotent."""
     check_data_floor(control_root)
     ensure_current(control_root)
     marker = data_version_path(control_root)

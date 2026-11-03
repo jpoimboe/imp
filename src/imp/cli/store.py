@@ -225,9 +225,10 @@ class LocalStore:
 
 
 # Terminal status -> resumable. Explicit, never the _INFLIGHT complement: archiving a
-# shelved home non-resumably would drop its step blobs, so an unknown status is skipped.
+# resumable `archived` home as non-resumable would drop its step blobs, so an unknown
+# status is skipped.
 _TERMINAL_ARCHIVE_RESUMABLE: dict[str, bool] = {
-    "merged": False, "done": False, "abandoned": False, "shelved": True,
+    "merged": False, "done": False, "abandoned": False, "archived": True,
 }
 
 

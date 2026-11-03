@@ -54,8 +54,8 @@ def test_helper_archives_done_home(tmp_path: Path) -> None:
     assert [(r.quest_id, r.status) for r in rows] == [("done", "done")]
 
 
-def test_helper_archives_shelved_home_resumable_with_steps(tmp_path: Path) -> None:
-    home = _home(tmp_path, "shlv", "shelved")
+def test_helper_archives_archived_home_resumable_with_steps(tmp_path: Path) -> None:
+    home = _home(tmp_path, "shlv", "archived")
     (home / "steps" / "plan").mkdir(parents=True)
     (home / "steps" / "plan" / "1.md").write_text("draft plan")
     _archive_stranded_home(tmp_path, "shlv", home, _state_bytes(home))
@@ -124,11 +124,11 @@ def test_list_shows_stranded_home_under_completed(
     assert "mrgd" in out.split("completed:")[1]
 
 
-def test_stranded_shelved_home_resumes_after_reap(tmp_path: Path) -> None:
+def test_stranded_archived_home_resumes_after_reap(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     q = Quest.create_draft(tmp_path, title="Conv", quest_id="conv", base_branch="main")
     st = State.load(q.state_dir)
-    st.status = "shelved"
+    st.status = "archived"
     st.save(q.state_dir)
     (q.quest_dir / "steps" / "plan").mkdir(parents=True, exist_ok=True)
     (q.quest_dir / "steps" / "plan" / "1.md").write_text("draft plan")

@@ -29,7 +29,7 @@ def test_no_flag_selects_nothing() -> None:
 
 def test_single_flag_selects_that_disposition() -> None:
     assert _selected_list_dispositions(_ns(abandoned=True)) == {"abandoned"}
-    assert _selected_list_dispositions(_ns(shelved=True)) == {"shelved"}
+    assert _selected_list_dispositions(_ns(shelved=True)) == {"archived"}
     assert _selected_list_dispositions(_ns(active=True)) == {"active"}
     assert _selected_list_dispositions(_ns(backlog=True)) == {"backlog"}
 
@@ -41,10 +41,10 @@ def test_flags_union_additively() -> None:
 
 def test_archived_expands_to_the_four_archive_dispositions() -> None:
     assert _selected_list_dispositions(
-        _ns(archived=True)) == {"merged", "done", "abandoned", "shelved"}
+        _ns(archived=True)) == {"merged", "done", "abandoned", "archived"}
     # --archived unioned with a redundant flag stays the same set.
     assert _selected_list_dispositions(
-        _ns(archived=True, merged=True)) == {"merged", "done", "abandoned", "shelved"}
+        _ns(archived=True, merged=True)) == {"merged", "done", "abandoned", "archived"}
 
 
 _NOW = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC)
@@ -79,7 +79,7 @@ def test_filtered_selects_only_the_requested_disposition(tmp_path: Path) -> None
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
         tmp_path, dispositions={"abandoned"}, cutoff=None, now=_NOW, color=False)
     out = "\n".join(lines)
@@ -91,19 +91,19 @@ def test_filtered_unions_dispositions(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"merged", "abandoned", "shelved"},
+        tmp_path, dispositions={"merged", "abandoned", "archived"},
         cutoff=None, now=_NOW, color=False)
     assert _ids(lines) >= {"mrgd", "abnd", "shlv"}
 
 
-def test_filtered_shelved_selects_shelved_status(tmp_path: Path) -> None:
+def test_filtered_archived_selects_archived_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     _archive_status(tmp_path, "mrgd", "merged")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"shelved"}, cutoff=None, now=_NOW, color=False)
+        tmp_path, dispositions={"archived"}, cutoff=None, now=_NOW, color=False)
     out = "\n".join(lines)
     assert "shlv" in out and "mrgd" not in out
 
@@ -185,7 +185,7 @@ def test_list_archived_unions_all_three(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     out = _run_list(tmp_path, monkeypatch, ["list", "--archived"])
     assert "mrgd" in out and "abnd" in out and "shlv" in out
 
@@ -271,20 +271,20 @@ def test_search_help_names_shelved_not_left(capsys) -> None:
     assert "left" not in out
 
 
-def test_filtered_lists_shelved_once(tmp_path: Path) -> None:
+def test_filtered_lists_archived_once(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._filtered_overview_lines(
-        tmp_path, dispositions={"merged", "abandoned", "shelved"},
+        tmp_path, dispositions={"merged", "abandoned", "archived"},
         cutoff=None, now=_NOW, color=False)
     body = [ln for ln in lines if ln and ln[0].isalnum()]
     assert [ln.split()[0] for ln in body].count("shlv") == 1
 
 
-def test_all_history_lists_shelved_once(tmp_path: Path) -> None:
+def test_all_history_lists_archived_once(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
-    _archive_status(tmp_path, "shlv", "shelved")
+    _archive_status(tmp_path, "shlv", "archived")
     lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
     body = [ln for ln in lines if ln and ln[0].isalnum()]
     ids = [ln.split()[0] for ln in body]
@@ -292,9 +292,9 @@ def test_all_history_lists_shelved_once(tmp_path: Path) -> None:
     assert ids.count("mrgd") == 1
 
 
-def test_past_quest_count_excludes_shelved(tmp_path: Path) -> None:
+def test_past_quest_count_excludes_archived(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "mrgd", "merged")
     _archive_status(tmp_path, "abnd", "abandoned")
-    _archive_status(tmp_path, "shlv", "shelved")
-    assert m._past_quest_count(tmp_path) == 2   # merged + abandoned; shelved is not a past quest
+    _archive_status(tmp_path, "shlv", "archived")
+    assert m._past_quest_count(tmp_path) == 2   # merged + abandoned; archived is not a past quest
