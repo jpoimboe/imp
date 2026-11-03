@@ -542,6 +542,12 @@ _RESUMES_WAIT = frozenset({
 })
 
 
+def _record_cut_off(fold: SubagentFold, was_running: bool) -> None:
+    owner = fold.nested._owner_builder
+    if was_running and fold.terminal_state == "interrupted" and owner is not None:
+        owner._cut_off[fold.event_id] = fold
+
+
 class NarrativeBuilder:
     """Per-agent_id state machine. add(event) routes one event into the tree.
 
@@ -618,6 +624,8 @@ class NarrativeBuilder:
         self._open_sub_by_block: dict[str, SubagentFold] = {}
         self._open_sub_by_event: dict[str, SubagentFold] = {}
         self._closed_sub_by_block: dict[str, SubagentFold] = {}
+        # Direct-child folds cut off since the run last made progress.
+        self._cut_off: dict[str, SubagentFold] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -694,6 +702,18 @@ class NarrativeBuilder:
     def running_subagents(self) -> list[SubagentFold]:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]
+
+    def interrupt_recap(self) -> str | None:
+        """`was: <step label> · <cut-off helper>` for the resume recap; None if both absent."""
+        top = self._step_stack[-1] if self._step_stack else None
+        folds = list(self._cut_off.values())
+        helper: str | None = None
+        if len(folds) > 1:
+            helper = f"running {len(folds)} subagents"
+        elif folds:
+            helper = folds[0].label or f"subagent({folds[0].subagent_name})"
+        body = _join(top.label if top is not None else None, helper)
+        return f"was: {body}" if body else None
 
     def backoff_wait_seconds(self, ref_iso: str | None) -> float:
         """Total backoff-wait seconds for this builder's agent: completed spans
@@ -905,8 +925,10 @@ class NarrativeBuilder:
     def _mark_descendant_subtree_interrupted(self, fold: SubagentFold) -> None:
         for child in list(fold.nested._sub_by_agent_id.values()):
             fold.nested._mark_descendant_subtree_interrupted(child)
+        was_running = fold.running
         fold.running = False
         fold.terminal_state = "interrupted"
+        _record_cut_off(fold, was_running)
 
     def mark_subagents_interrupted(self) -> None:
         for fold in list(self._sub_by_agent_id.values()):
@@ -926,6 +948,7 @@ class NarrativeBuilder:
         ts: str | None,
         terminal_state: str | None = None,
     ) -> None:
+        was_running = fold.running
         fold.nested._finalize_direct_descendant_subtrees(ts, terminal_state)
         fold.nested._release_pending_error_prose()
         self._open_sub_by_block.pop(fold.block_id, None)
@@ -934,6 +957,7 @@ class NarrativeBuilder:
         fold.end_ts = ts
         if terminal_state is not None:
             fold.terminal_state = terminal_state
+        _record_cut_off(fold, was_running)
         self._remember_salvage_closed(fold)
         self._retire_descendant_subtree(fold)
 
@@ -2169,6 +2193,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
                          end_ts: str | None = None) -> None:
+    was_running = fold.running
     fold.nested._release_pending_error_prose()
     fold.running = False
     fold.end_ts = end_ts
@@ -2190,6 +2215,7 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
         kind = next((s for s in _kinds if f"[{s}]" in (text or "")), None)
     if kind in ("stalled", "interrupted", "context_exhausted", "suspended"):
         fold.terminal_state = kind
+    _record_cut_off(fold, was_running)
 
 
 def _take_subagent_fold(
