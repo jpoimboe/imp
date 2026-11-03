@@ -392,11 +392,14 @@ def _is_backlog_home(
     )
 
 
+def _meta_seed_opening(control: Path, quest_id: str) -> str | None:
+    return (_quest_meta(control, quest_id) or {}).get("seed_opening")
+
+
 def _display_intent_for_id(control: Path, quest_id: str) -> str | None:
     """A titleless quest's human name source: its opening message, else its seed_opening."""
-    seed = (_quest_meta(control, quest_id) or {}).get("seed_opening")
     return fallback_intent(_resolve_intent(_load_events_for_id(control, quest_id) or []),
-                           seed if isinstance(seed, str) else None)
+                           _meta_seed_opening(control, quest_id))
 
 
 def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | None:

@@ -2276,12 +2276,6 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
 
 
-def _row_seed_opening(control: Path, quest_id: str) -> str | None:
-    from imp.cli.store import _quest_meta
-    seed = (_quest_meta(control, quest_id) or {}).get("seed_opening")
-    return seed if isinstance(seed, str) else None
-
-
 def _row_display_intent(control: Path, r: _Row) -> str | None:
     """A title-less row's human name source: its opening prompt, else its seed_opening."""
     from imp.cli.store import _display_intent_for_id
@@ -3612,7 +3606,7 @@ def _overview_rows(control: Path, *, dispositions: set[str],
                    cutoff: datetime | None) -> _OverviewRows:
     """Board rows for the requested dispositions, zone-sorted and cutoff-filtered,
     with the display intents title-less rows fall back to."""
-    from imp.cli.store import _backlog_rows, _status_rows, make_store
+    from imp.cli.store import _backlog_rows, _meta_seed_opening, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
@@ -3633,7 +3627,7 @@ def _overview_rows(control: Path, *, dispositions: set[str],
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
             display_intents[r[0]] = quest_row.fallback_intent(
-                intents[r[0]], _row_seed_opening(control, r[0]))
+                intents[r[0]], _meta_seed_opening(control, r[0]))
     return _OverviewRows(inflight, backlog, history, intents, display_intents)
 
 
