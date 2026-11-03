@@ -26,7 +26,7 @@ from imp.providers.claude import (
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
-    context_usage,
+    message_start,
     result,
     text,
     tool_result,
@@ -64,10 +64,19 @@ def _inv(tmp_path: Path, log: InMemoryEventLog) -> AgentInvocation:
         agent_id="step:p/s", event_log=log)
 
 
+# claude-sonnet-4-6's 200k window gives a 160k handoff limit.
+_MODEL = "claude-sonnet-4-6"
+
+
+def _occupancy(tokens: int) -> Any:
+    """The open API message's message_start usage, read by the Tier A probe."""
+    return message_start("m1", {"input_tokens": tokens})
+
+
 @pytest.mark.anyio
 async def test_threshold_crossing_continues_with_instruction_increment(
         tmp_path: Path) -> None:
-    """Crossing the live context threshold mid-turn signals interrupt(), lets the
+    """Crossing the stream-usage handoff limit mid-turn signals interrupt(), lets the
     SDK close the turn balanced (error_during_execution), then continues the LIVE
     session with a plain handoff-instruction increment — NOT a _stream_history
     replay (the regression that doubled the context). The handoff event fires."""
@@ -76,8 +85,10 @@ async def test_threshold_crossing_continues_with_instruction_increment(
     log = InMemoryEventLog()
 
     scripted = [
-        # Turn 1: an assistant turn carrying a (soon-dangling) tool_use; the live
-        # context is 170000/200000 = 0.85 >= 0.8, so the runner interrupts here.
+        _occupancy(170_000),
+        # Turn 1: an assistant turn carrying a (soon-dangling) tool_use; the open
+        # message's stream usage (170k) is past the 160k limit, so the runner
+        # interrupts here.
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         # The SDK closes the interrupted turn balanced.
@@ -88,18 +99,15 @@ async def test_threshold_crossing_continues_with_instruction_increment(
         result(),
     ]
 
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -136,6 +144,7 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
     log = InMemoryEventLog()
 
     scripted = [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         # A second assistant message lands before the balanced close, still above
@@ -147,18 +156,15 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
         result(),
     ]
 
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -180,6 +186,7 @@ async def test_handoff_reported_even_when_note_missing_and_error(
     log = InMemoryEventLog()
 
     scripted = [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         result(subtype="error_during_execution", is_error=True),
@@ -189,18 +196,15 @@ async def test_handoff_reported_even_when_note_missing_and_error(
         result(is_error=True),
     ]
 
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -218,22 +222,20 @@ async def test_below_threshold_completing_turn_interrupts_and_completes(
     log = InMemoryEventLog()
 
     scripted = [
+        _occupancy(100_000),
         assistant(text("done"),
                   tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.50,
-                       total_tokens=100_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -248,7 +250,7 @@ async def test_below_threshold_completing_turn_interrupts_and_completes(
 async def test_completing_turn_above_threshold_completes_not_handoff(
         tmp_path: Path) -> None:
     """Completion wins: a turn that calls complete_step is never preempted into
-    a handoff, even when live context is at/above the threshold. Under Part A it
+    a handoff, even when stream usage is at/above the limit. Under Part A it
     IS preempted — via the completion-interrupt — so it completes, not hands off.
     Drives the
     PRODUCTION tool name `mcp__imp__complete_step` (the SDK namespaces imp's
@@ -259,22 +261,20 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     log = InMemoryEventLog()
 
     scripted = [
+        _occupancy(170_000),
         assistant(text("done"),
                   tool_use("c1", "mcp__imp__complete_step", {"status": "Success"})),
         result(),
     ]
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -291,7 +291,8 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
     log = InMemoryEventLog()
 
     scripted = [
-        # Turn 1: live context 170000/200000 = 0.85 >= 0.8 — the runner interrupts.
+        _occupancy(170_000),
+        # Turn 1: stream usage 170k is past the 160k limit — the runner interrupts.
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         result(subtype="error_during_execution", is_error=True),
@@ -300,15 +301,11 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
         result(),
     ]
 
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
-
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                   context_usage=cu)
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -370,6 +367,7 @@ def _interrupted_script() -> list[Any]:
     """The shape the jibu68 spike observed: imp's tool_use, the SDK's matched
     rejection filler, its interrupt marker, then the balanced error close."""
     return [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "mcp__imp__write_file", SLOW_ARGS)),
         user(tool_result("u1", REJECTION, is_error=True)),
@@ -378,6 +376,36 @@ def _interrupted_script() -> list[Any]:
         assistant(text("writing handoff")),
         result(),
     ]
+
+
+class _DispatchingClient(FakeClaudeSDKClient):
+    """Each interrupt() dispatches imp's real write_file through the wrapper and
+    lands once that call is in flight. Like the CLI, the stream yields nothing
+    past an interrupt until it has landed."""
+
+    def __init__(self, opts: Any, *, scripted_messages: list[Any],
+                 holder: dict[str, Any]) -> None:
+        super().__init__(opts, scripted_messages=scripted_messages)
+        self._holder = holder
+        self._started = asyncio.Event()
+        self._landed = asyncio.Event()
+        self._landed.set()
+
+    async def interrupt(self) -> None:
+        self._landed.clear()
+        runner = self._holder["runner"]
+        wrapped = _wrap_one("write_file", _slow_write_tool(self._started),
+                            runner._ctx, runner._state, _passthrough)
+        self._holder.setdefault("calls", []).append(
+            asyncio.create_task(wrapped(dict(SLOW_ARGS))))
+        await self._started.wait()
+        await super().interrupt()
+        self._landed.set()
+
+    async def receive_response(self) -> Any:
+        async for msg in super().receive_response():
+            await self._landed.wait()
+            yield msg
 
 
 @pytest.mark.anyio
@@ -400,30 +428,19 @@ async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
     monkeypatch.setattr(cc, "_load_captured_tool_results", _spy)
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
-
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=_interrupted_script(),
-                                 context_usage=cu)
+        return _DispatchingClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     body = (tmp_path / "step" / "transcript.jsonl").read_text()
     rows = [json.loads(x) for x in body.splitlines()]
@@ -447,8 +464,6 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
     monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
     key = captured_result_key("write_file", SLOW_ARGS)
 
@@ -458,11 +473,10 @@ async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
             await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return WedgedClient(opts, scripted_messages=_interrupted_script(),
-                            context_usage=cu)
+        return WedgedClient(opts, scripted_messages=_interrupted_script())
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -489,8 +503,6 @@ async def test_handoff_closes_out_the_call_its_bound_gave_up_on(
     monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
     key = captured_result_key("write_file", SLOW_ARGS)
 
@@ -500,11 +512,10 @@ async def test_handoff_closes_out_the_call_its_bound_gave_up_on(
             await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return WedgedClient(opts, scripted_messages=_interrupted_script(),
-                            context_usage=cu)
+        return WedgedClient(opts, scripted_messages=_interrupted_script())
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -524,21 +535,19 @@ async def test_handoff_dangling_assistant_tail_stays_balanced(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     scripted = [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         result(subtype="error_during_execution", is_error=True),
         assistant(text("writing handoff")),
         result(),
     ]
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                   context_usage=cu)
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -571,20 +580,9 @@ async def test_handoff_note_is_written_from_imps_real_result(
     (tmp_path / "art").mkdir()
     hp = handoff_path_for(tmp_path / "step")
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
 
-    class NoteWritingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
-
+    class NoteWritingClient(_DispatchingClient):
         async def query(self, prompt: Any) -> None:
             await super().query(prompt)
             if isinstance(prompt, str) and "approaching the context limit" in prompt:
@@ -595,16 +593,17 @@ async def test_handoff_note_is_written_from_imps_real_result(
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
         client = NoteWritingClient(
-            opts, scripted_messages=_interrupted_script(), context_usage=cu)
+            opts, scripted_messages=_interrupted_script(), holder=holder)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     client = holder["client"]
     requery = client.queries[1]
@@ -637,8 +636,6 @@ async def test_handoff_increment_states_uncertainty_when_the_bound_expires(
     monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
     key = captured_result_key("write_file", SLOW_ARGS)
 
@@ -648,13 +645,12 @@ async def test_handoff_increment_states_uncertainty_when_the_bound_expires(
             await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = WedgedClient(opts, scripted_messages=_interrupted_script(),
-                              context_usage=cu)
+        client = WedgedClient(opts, scripted_messages=_interrupted_script())
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
@@ -674,24 +670,22 @@ async def test_handoff_with_nothing_in_flight_queries_the_bare_instruction(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     scripted = [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         result(subtype="error_during_execution", is_error=True),
         assistant(text("writing handoff")),
         result(),
     ]
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
-                                     context_usage=cu)
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         holder["client"] = client
         return client
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
 
@@ -711,30 +705,19 @@ async def test_handoff_event_log_carries_imps_real_result_not_the_filler(
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
-
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
-            await started.wait()
-            await super().interrupt()
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=_interrupted_script(),
-                                 context_usage=cu)
+        return _DispatchingClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    await holder["call"]
+    (call,) = holder["calls"]
+    await call
 
     events = list(log.read())
     assert REJECTION not in json.dumps(events)
@@ -772,18 +755,16 @@ async def test_a_filler_imp_cannot_account_for_stays_in_the_event_log(
     call's only record."""
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=_interrupted_script(),
-                                   context_usage=cu)
+        return FakeClaudeSDKClient(opts, scripted_messages=_interrupted_script())
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
 
-    [ev async for ev in runner.run(_inv(tmp_path, log))]
+    evs = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
+    assert len([e for e in evs if e["type"] == "handoff"]) == 1
     results = [e for e in log.read() if e["type"] == "tool_result"]
     assert [(e["payload"]["id"], e["payload"]["content"]) for e in results] == [
         ("u1", REJECTION)]
@@ -798,11 +779,9 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
     result both present, and nothing left pending on the run state."""
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
     scripted = [
+        _occupancy(170_000),
         assistant(text("working"),
                   tool_use("u1", "mcp__imp__write_file", SLOW_ARGS)),
         user(tool_result("u1", REJECTION, is_error=True)),
@@ -815,26 +794,17 @@ async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
         result(),
     ]
 
-    class DispatchingClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder.setdefault("calls", []).append(
-                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
-            await started.wait()
-            await super().interrupt()
-
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return DispatchingClient(opts, scripted_messages=scripted,
-                                 context_usage=cu)
+        return _DispatchingClient(
+            opts, scripted_messages=scripted, holder=holder)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     [ev async for ev in runner.run(_inv(tmp_path, log))]
-    for task in holder.get("calls", []):
+    assert len(holder["calls"]) == 2
+    for task in holder["calls"]:
         await task
 
     events = list(log.read())
@@ -858,27 +828,15 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
     can honour the deferral; without it the call's only record is deleted."""
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
-                       total_tokens=170_000)
     holder: dict[str, Any] = {}
-    started = asyncio.Event()
 
-    class FatalClient(FakeClaudeSDKClient):
-        async def interrupt(self) -> None:
-            runner = holder["runner"]
-            wrapped = _wrap_one("write_file", _slow_write_tool(started),
-                                runner._ctx, runner._state, _passthrough)
-            holder.setdefault("calls", []).append(
-                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
-            await started.wait()
-            await super().interrupt()
-
+    class FatalClient(_DispatchingClient):
         async def receive_response(self) -> Any:
             seen = 0
             async for msg in super().receive_response():
                 yield msg
                 seen += 1
-                if seen == 2:
+                if seen == 3:
                     # Resumed once the runner has processed the filler, so it is
                     # withheld now and the fatal lands before any ResultMessage —
                     # the window _is_terminal never sees. This is the tuple
@@ -887,15 +845,16 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
                         "create_and_enter_worktree", "worktree already exists")
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FatalClient(opts, scripted_messages=_interrupted_script(),
-                           context_usage=cu)
+        return FatalClient(
+            opts, scripted_messages=_interrupted_script(), holder=holder)
 
     runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name=_MODEL, client_factory=factory)
     holder["runner"] = runner
 
     evs = [ev async for ev in runner.run(_inv(tmp_path, log))]
-    for task in holder.get("calls", []):
+    assert holder.get("calls")
+    for task in holder["calls"]:
         await task
 
     assert [e["payload"]["kind"] for e in evs if e["type"] == "error"] == [
@@ -908,6 +867,78 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
         (e["payload"]["id"], e["payload"]["name"]) for e in events
         if e["type"] == "tool_call"]
     assert not runner._state.withheld
+
+
+class _RecordingClient(FakeClaudeSDKClient):
+    """Records runner._handoff_requested at each interrupt() call."""
+
+    def __init__(self, opts: Any, *, scripted_messages: list[Any],
+                 holder: dict[str, Any]) -> None:
+        super().__init__(opts, scripted_messages=scripted_messages)
+        self._holder = holder
+
+    async def interrupt(self) -> None:
+        self._holder.setdefault("requested", []).append(
+            self._holder["runner"]._handoff_requested)
+        await super().interrupt()
+
+
+@pytest.mark.anyio
+async def test_stream_usage_at_the_handoff_limit_requests_handoff(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    holder: dict[str, Any] = {}
+    scripted = [
+        # 150k input + 10k cache read = 160k: exactly the limit, cache included.
+        message_start("m1", {"input_tokens": 150_000,
+                             "cache_read_input_tokens": 10_000}),
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name=_MODEL,
+        client_factory=lambda opts: _RecordingClient(
+            opts, scripted_messages=scripted, holder=holder))
+    holder["runner"] = runner
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert holder.get("requested") == [True]
+    assert len([e for e in events if e["type"] == "handoff"]) == 1
+
+
+@pytest.mark.anyio
+async def test_stream_usage_below_the_handoff_limit_does_not_request_handoff(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    holder: dict[str, Any] = {}
+    scripted = [
+        message_start("m1", {"input_tokens": 149_999,
+                             "cache_read_input_tokens": 10_000}),
+        # Probed (no complete_step) at 159,999 — one under the limit.
+        assistant(text("working"), message_id="m1"),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1"),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name=_MODEL,
+        client_factory=lambda opts: _RecordingClient(
+            opts, scripted_messages=scripted, holder=holder))
+    holder["runner"] = runner
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    # The only interrupt is the complete_step preemption, with no handoff asked.
+    assert holder.get("requested") == [False]
+    assert not [e for e in events if e["type"] == "handoff"]
+    assert any(e["type"] == "agent_result" for e in events)
 
 
 def _steer_script() -> tuple[list[Any], list[Any]]:

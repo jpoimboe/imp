@@ -151,17 +151,13 @@ FakeResultMessage.__name__ = "ResultMessage"
 class FakeClaudeSDKClient:
     """In-memory drop-in for ClaudeSDKClient. Use via async-with."""
 
-    def __init__(self, opts: Any, *, scripted_messages: list[Any],
-                 context_usage: Any = None,
-                 context_usage_raises: bool = False) -> None:
+    def __init__(self, opts: Any, *, scripted_messages: list[Any]) -> None:
         self.opts = opts
         self._scripted = list(scripted_messages)
         self._pos = 0
         self.queries: list[Any] = []  # whatever was passed to .query()
         self.closed = False
         self.interrupts = 0  # count of interrupt() calls
-        self._context_usage = context_usage
-        self._context_usage_raises = context_usage_raises
 
     async def __aenter__(self) -> FakeClaudeSDKClient:
         return self
@@ -196,11 +192,6 @@ class FakeClaudeSDKClient:
 
     async def interrupt(self) -> None:
         self.interrupts += 1
-
-    async def get_context_usage(self) -> Any:
-        if self._context_usage_raises:
-            raise RuntimeError("simulated get_context_usage failure")
-        return self._context_usage
 
     async def disconnect(self) -> None:
         self.closed = True
@@ -294,20 +285,6 @@ def message_stop() -> FakeStreamEvent:
     return FakeStreamEvent(event={"type": "message_stop"})
 
 
-@dataclass
-class FakeContextUsage:
-    rawMaxTokens: int
-    percentage: float
-    totalTokens: int
-
-
-def context_usage(*, raw_max_tokens: int, percentage: float,
-                  total_tokens: int) -> FakeContextUsage:
-    return FakeContextUsage(
-        rawMaxTokens=raw_max_tokens, percentage=percentage,
-        totalTokens=total_tokens)
-
-
 class CooperativeClient:
     """Models the cooperative interrupt: first receive_response() parks until
     interrupt() fires, then yields each before_result message (if given) followed
@@ -372,6 +349,3 @@ class CooperativeClient:
     async def disconnect(self) -> None:
         self.disconnected = True
         self.order.append("disconnect")
-
-    async def get_context_usage(self) -> Any:
-        return None

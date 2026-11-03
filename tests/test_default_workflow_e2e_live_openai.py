@@ -7,6 +7,7 @@ API call → tool dispatch → complete_step → agent_result validation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ def _ensure_builtin_providers() -> None:
 @pytest.mark.anyio
 async def test_one_step_walk_against_openai(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    register_quest_evidence: Callable[[Path], None],
 ) -> None:
     key = openai_key()
     assert key is not None
@@ -71,6 +73,7 @@ async def test_one_step_walk_against_openai(
     _git(tmp_path, "commit", "-qm", "seed")
     quest = Quest.create(
         tmp_path, title="live-openai", quest_id="live-openai", base_branch="main")
+    register_quest_evidence(quest.quest_dir)
 
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED

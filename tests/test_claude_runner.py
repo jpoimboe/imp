@@ -64,13 +64,6 @@ def _agent_def(tools: frozenset[str] = frozenset({"complete_step"})) -> AgentDef
     )
 
 
-def _passthrough(name, desc, schema, annotations=None):  # type: ignore[no-untyped-def]
-    """Stub `claude_agent_sdk.tool` — returns a no-op decorator."""
-    def deco(fn):  # type: ignore[no-untyped-def]
-        return fn
-    return deco
-
-
 def _inv(
     tmp_path: Path,
     tools: frozenset[str] | None = None,
@@ -2952,63 +2945,112 @@ def test_high_tier_floor_defaults_to_opus_5_5() -> None:
 
 
 @pytest.mark.anyio
-async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
-    from tests.cc_fakes import context_usage
-
+async def test_agent_message_context_fields_come_from_stream_usage(
+        tmp_path: Path) -> None:
+    # m1 is text-only and its message_stop lands before the m2 boundary flushes it,
+    # so the flush selects m1's harvested stream usage (not the fragment's 999).
+    # m2 carries a tool_use and is flushed before any message_stop, so the flush
+    # selects the AssistantMessage's own usage. The window is keyed on the
+    # configured runner.model ("opus", 1M), not the served id (haiku-4-5, 200k).
     scripted = [
+        message_start("m1", usage={
+            "input_tokens": 10, "cache_read_input_tokens": 30_000,
+            "cache_creation_input_tokens": 2_000, "output_tokens": 1}),
+        assistant(text("reading"), message_id="m1",
+                  model="claude-haiku-4-5-20251001",
+                  usage={"input_tokens": 999, "output_tokens": 1}),
+        message_delta(usage={"output_tokens": 40}, stop_reason="end_turn"),
+        message_stop(),
+        message_start("m2", usage={"input_tokens": 77, "output_tokens": 1}),
         assistant(
             text("done"),
             tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
-        ),
+            message_id="m2", model="claude-haiku-4-5-20251001",
+            usage={"input_tokens": 5, "cache_read_input_tokens": 40_000,
+                   "output_tokens": 3}),
         result(),
     ]
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(
-            opts, scripted_messages=scripted,
-            context_usage=context_usage(
-                raw_max_tokens=1_000_000, percentage=4.2, total_tokens=42_000),
-        )
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeAgentRunner(model_name="opus", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    msgs = [e["payload"] for e in log.read() if e["type"] == "agent_message"]
+    assert [m["message_id"] for m in msgs] == ["m1", "m2"]
+    assert msgs[0]["context_tokens"] == 10 + 30_000 + 2_000
+    assert msgs[1]["context_tokens"] == 5 + 40_000
+    assert [m["context_window"] for m in msgs] == [1_000_000, 1_000_000]
+    assert all("context_pct" not in m for m in msgs)
+
+
+@pytest.mark.anyio
+async def test_agent_message_has_no_context_window_for_an_uncatalogued_model(
+        tmp_path: Path) -> None:
+    from imp.providers.catalog import limits_for
+
+    assert limits_for("claude", "claude-sonnet-4-5") is None
+    scripted = [
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+            message_id="m1", usage={"input_tokens": 1_234, "output_tokens": 3}),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
     runner = ClaudeAgentRunner(
-        model_name="claude-opus-4-8[1m]", client_factory=factory)
+        model_name="claude-sonnet-4-5", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
 
     resp = next(e for e in log.read() if e["type"] == "agent_message")
-    assert resp["payload"]["context_window"] == 1_000_000
-    assert "context_pct" not in resp["payload"]
-    assert resp["payload"]["context_tokens"] == 42_000
+    assert resp["payload"].get("context_window") is None
+    assert resp["payload"]["context_tokens"] == 1_234
 
 
 @pytest.mark.anyio
-async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
+async def test_agent_message_has_no_context_tokens_for_empty_prompt_usage(
+        tmp_path: Path) -> None:
     scripted = [
         assistant(
             text("done"),
             tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
-        ),
+            message_id="m1", usage={"output_tokens": 3}),
         result(),
     ]
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(
-            opts, scripted_messages=scripted, context_usage_raises=True)
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
     runner = ClaudeAgentRunner(
-        model_name="claude-opus-4-8[1m]", client_factory=factory)
-    events = [ev async for ev in runner.run(inv)]
+        model_name="claude-sonnet-4-6", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
 
-    assert [e["type"] for e in events if e["type"] != "tool_heartbeat"] == [
-        "agent_result"]
     resp = next(e for e in log.read() if e["type"] == "agent_message")
-    assert "context_window" not in resp["payload"]
-    assert "context_pct" not in resp["payload"]
-    assert "context_tokens" not in resp["payload"]
+    assert resp["payload"]["context_window"] == 200_000
+    assert resp["payload"].get("context_tokens") is None
+
+
+def test_flush_llm_group_is_synchronous() -> None:
+    import inspect
+
+    from imp.providers.claude import ClaudeSession
+
+    # A suspension point in the flush would let _impl's eager flush interleave
+    # with the receive loop's and emit the prose group twice.
+    assert not inspect.iscoroutinefunction(ClaudeSession._flush_llm_group)
 
 
 def test_run_state_has_no_wait_for_user_pause_fields() -> None:
@@ -4856,206 +4898,6 @@ async def test_reclassified_auth_error_carries_last_agent_text_detail(
     payload = error_events[0]["payload"]
     assert payload["category"] == "auth"
     assert payload["detail"]["last_agent_text"] == prose
-
-
-@pytest.mark.anyio
-async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Faithful reproduction of the pinned race (spec Background): the receive-loop
-    transition flush enters _flush_llm_group first and SUSPENDS in the
-    get_context_usage() await (holding the flush lock); _impl fires DURING that
-    window, calls the plumbed flush, and appends the sub_agent tool_call. The flush
-    lock (barrier) must make _impl's flush BLOCK until the in-flight prose flush
-    emits, so the log carries prose agent_message -> sub_agent tool_call, with
-    EXACTLY ONE agent_message.
-
-    Falsifiability: with a bare no-op guard (or the original unlocked flush),
-    _impl's flush either no-ops with no await or passes the still-open guard and
-    emits a SECOND agent_message, and in both cases _impl appends the tool_call
-    before caller A emits -> the count==1 and ordering assertions fail. Only the
-    completion barrier makes both hold. (Pre-implementation, before _RunState is
-    plumbed onto the runner, `runner._state` does not exist; the resulting
-    AttributeError is swallowed by _context_usage_fields, so no _impl task is
-    fired and the `next(... sub_agent ...)` lookup raises -> red.)
-    """
-    import asyncio
-
-    from imp.agents.subagents import make_task_tool
-    from imp.providers import claude as cc
-
-    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
-        cap["tool_call_event_id"] = tool_call_event_id
-        return "sub done"
-
-    async def noop_sweep(_ctx):
-        return None
-
-    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
-    monkeypatch.setattr(cc._bg, "_sweep_bg", noop_sweep)
-
-    cap: dict[str, Any] = {}
-    sub_def = replace(_agent_def(), name="sub", label=None)
-
-    scripted = [
-        assistant(
-            text("dispatching a subagent"),
-            tool_use("s1", "sub_agent",
-                     {"subagent_name": "sub", "task_description": "do"}),
-            tool_use("c1", "complete_step", {"status": "Success"}),
-            message_id="m1",
-        ),
-        result(),
-    ]
-
-    box: dict[str, Any] = {}
-    log = InMemoryEventLog()
-
-    class RaceClient(FakeClaudeSDKClient):
-        def __init__(self, opts: Any) -> None:
-            super().__init__(opts, scripted_messages=scripted)
-            self._fired = False
-
-        async def get_context_usage(self) -> Any:
-            # Runs inside caller A's (receive-loop transition) flush await, which
-            # holds the flush lock. Fire a REAL _impl sub_agent call as a separate
-            # task so it contends for that lock exactly as the SDK's out-of-band
-            # handler task does in production.
-            if not self._fired:
-                self._fired = True
-                runner = box["runner"]
-                impl = cc._wrap_one("sub_agent", make_task_tool(),
-                                    runner._ctx, runner._state, _passthrough)
-                box["impl_task"] = asyncio.create_task(
-                    impl({"subagent_name": "sub", "task_description": "do"}))
-                # Let the _impl task make progress, bounded and wall-clock-free.
-                # With the lock it parks at its flush call and nothing lands, so
-                # the loop runs out; without the lock it emits a duplicate
-                # agent_message / appends the tool_call here (the falsifying window).
-                for _ in range(200):
-                    if any(e["type"] in ("tool_call", "agent_message")
-                           for e in log._events):
-                        break
-                    await asyncio.sleep(0)
-            return None
-
-    def factory(opts: Any) -> RaceClient:
-        return RaceClient(opts)
-
-    inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
-               event_log=log)
-    inv = replace(inv, subagent_defs={"sub": sub_def})
-    runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
-    box["runner"] = runner
-
-    async for _ev in runner.run(inv):
-        pass
-    await box["impl_task"]
-
-    events = log._events
-    agent_messages = [e for e in events if e["type"] == "agent_message"]
-    assert len(agent_messages) == 1, (
-        f"expected exactly one agent_message, got {len(agent_messages)}")
-    assert agent_messages[0]["payload"]["message_id"] == "m1"
-    i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
-    i_sub = next(i for i, e in enumerate(events)
-                 if e["type"] == "tool_call"
-                 and e["payload"]["name"] == "sub_agent")
-    assert i_llm < i_sub, "prose agent_message must precede the sub_agent tool_call"
-    assert cap["tool_call_event_id"] == events[i_sub]["id"], (
-        "dispatch received the sub_agent tool_call EVENT id (parent link)")
-
-
-@pytest.mark.anyio
-async def test_parallel_sub_agents_emit_single_llm_response_before_both(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two parallel sub_agent calls in one turn produce two concurrent _impl
-    flush callers during the receive-loop flush's await window. The barrier must
-    serialize them so the prose group emits EXACTLY ONE agent_message, appearing
-    BEFORE both sub_agent tool_calls.
-    """
-    import asyncio
-
-    from imp.agents.subagents import make_task_tool
-    from imp.providers import claude as cc
-
-    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
-        return "sub done"
-
-    async def noop_sweep(_ctx):
-        return None
-
-    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
-    monkeypatch.setattr(cc._bg, "_sweep_bg", noop_sweep)
-
-    sub_def = replace(_agent_def(), name="sub", label=None)
-
-    scripted = [
-        assistant(
-            text("dispatching two subagents"),
-            tool_use("s1", "sub_agent",
-                     {"subagent_name": "sub", "task_description": "a"}),
-            tool_use("s2", "sub_agent",
-                     {"subagent_name": "sub", "task_description": "b"}),
-            tool_use("c1", "complete_step", {"status": "Success"}),
-            message_id="m1",
-        ),
-        result(),
-    ]
-
-    box: dict[str, Any] = {}
-    log = InMemoryEventLog()
-
-    class RaceClient(FakeClaudeSDKClient):
-        def __init__(self, opts: Any) -> None:
-            super().__init__(opts, scripted_messages=scripted)
-            self._fired = False
-
-        async def get_context_usage(self) -> Any:
-            if not self._fired:
-                self._fired = True
-                runner = box["runner"]
-                impl = cc._wrap_one("sub_agent", make_task_tool(),
-                                    runner._ctx, runner._state, _passthrough)
-                box["impl_tasks"] = [
-                    asyncio.create_task(
-                        impl({"subagent_name": "sub", "task_description": t}))
-                    for t in ("a", "b")
-                ]
-                for _ in range(200):
-                    if any(e["type"] in ("tool_call", "agent_message")
-                           for e in log._events):
-                        break
-                    await asyncio.sleep(0)
-            return None
-
-    def factory(opts: Any) -> RaceClient:
-        return RaceClient(opts)
-
-    inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
-               event_log=log)
-    inv = replace(inv, subagent_defs={"sub": sub_def})
-    runner = ClaudeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
-    box["runner"] = runner
-
-    async for _ev in runner.run(inv):
-        pass
-    await asyncio.gather(*box["impl_tasks"])
-
-    events = log._events
-    agent_messages = [e for e in events if e["type"] == "agent_message"]
-    assert len(agent_messages) == 1, (
-        f"expected exactly one agent_message, got {len(agent_messages)}")
-    i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
-    sub_calls = [i for i, e in enumerate(events)
-                 if e["type"] == "tool_call"
-                 and e["payload"]["name"] == "sub_agent"]
-    assert len(sub_calls) == 2, f"expected two sub_agent tool_calls, got {len(sub_calls)}"
-    assert all(i_llm < i for i in sub_calls), (
-        "the single agent_message must precede BOTH sub_agent tool_calls")
 
 
 @pytest.mark.anyio

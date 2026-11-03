@@ -24,9 +24,9 @@ Two ordering invariants are load-bearing and match the old loop:
       classifier.
 
 `_message_to_items` / `_is_terminal` are async (the claude per-message body
-interleaves `await`ed LLM-group flushes, context-usage probes, and cooperative
-interrupts); the item/decision ORDERING they enforce is what the goldens pin,
-not the sync/async signature.
+spawns cooperative interrupts as background tasks and yields); the
+item/decision ORDERING they enforce is what the goldens pin, not the sync/async
+signature.
 """
 
 from __future__ import annotations
