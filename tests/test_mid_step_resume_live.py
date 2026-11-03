@@ -3,7 +3,8 @@
 Verifies §6.15 mechanics end-to-end:
   1. Spawn `imp new` as a subprocess.
   2. Wait for the writer's bash subprocess to start (poll for the
-     events.jsonl `tool_call` event named "bash").
+     events.jsonl `tool_call` event named "bash"); skip unless it is a
+     foreground `sleep 30`.
   3. Send SIGINT to the imp subprocess.
   4. Confirm the imp subprocess exits cleanly with code 130.
   5. Confirm state.json is "paused" with the writer step still set.
@@ -34,6 +35,7 @@ from tests._live import (
     fail_no_bash_tool_call,
     openai_key,
     sandbox_sleep_precondition_failed,
+    skip_unless_foreground_sleep,
     wait_for_archived_status,
     wait_for_bash_tool_call,
 )
@@ -122,8 +124,10 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not wait_for_bash_tool_call(events, timeout=60.0):
+        bash_call = wait_for_bash_tool_call(events, timeout=60.0)
+        if bash_call is None:
             fail_no_bash_tool_call(proc, quest_dir, 60.0)
+        skip_unless_foreground_sleep(bash_call)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         # Generous deadlines: under `-n` concurrency the post-SIGINT exit and the
@@ -210,8 +214,10 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not wait_for_bash_tool_call(events, timeout=60.0):
+        bash_call = wait_for_bash_tool_call(events, timeout=60.0)
+        if bash_call is None:
             fail_no_bash_tool_call(proc, quest_dir, 60.0)
+        skip_unless_foreground_sleep(bash_call)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         assert_sigint_exit(proc, quest_dir, timeout=60)
@@ -284,8 +290,10 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not wait_for_bash_tool_call(events, timeout=120.0):
+        bash_call = wait_for_bash_tool_call(events, timeout=120.0)
+        if bash_call is None:
             fail_no_bash_tool_call(proc, quest_dir, 120.0)
+        skip_unless_foreground_sleep(bash_call)
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace
         os.killpg(proc.pid, signal.SIGINT)
         assert_sigint_exit(proc, quest_dir, timeout=60)

@@ -396,18 +396,6 @@ def test_precondition_tolerates_blank_and_garbage_lines(tmp_path):
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
-def test_precondition_detects_mcp_qualified_bash_name(tmp_path):
-    ev = tmp_path / "events.jsonl"
-    mcp_bash_call = {"type": "tool_call",
-                     "payload": {"id": "b1", "name": "mcp__imp__bash",
-                                 "input": {"command": "sleep 30"}}}
-    _write_events(ev, [
-        mcp_bash_call,
-        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
-    ])
-    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
-
-
 from tests.test_relay_hibernation_live import _interrupt_gate_engaged  # noqa: E402
 
 
@@ -664,6 +652,55 @@ def test_evidence_marks_missing_files_instead_of_raising(tmp_path):
     assert "<no daemon.stderr>" in text
 
 
+def _archived_quest_dir(tmp_path, quest_id, events_text):
+    """Archive a quest's events and return its (now reaped) live home path."""
+    from imp.engine import archive
+    from imp.paths import project_state_dir
+    control = tmp_path / "control"
+    control.mkdir()
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "events.jsonl").write_text(events_text)
+    (src / "quest.json").write_text(_json.dumps(
+        {"id": quest_id, "title": "t", "base_branch": "main"}))
+    (src / "state.json").write_text(_json.dumps({"id": quest_id, "status": "done"}))
+    archive.archive_quest(
+        control, quest_id, events_path=src / "events.jsonl",
+        quest_json_path=src / "quest.json", state_json_path=src / "state.json")
+    return project_state_dir(control) / "quests" / quest_id
+
+
+def test_evidence_falls_back_to_archived_events_when_live_home_is_gone(tmp_path):
+    lines = [_json.dumps({"type": "e", "n": i}) for i in range(_EVIDENCE_TAIL_LINES + 10)]
+    quest_dir = _archived_quest_dir(tmp_path, "arch01", "\n".join(lines) + "\n")
+    assert not quest_dir.exists()
+    text = evidence(quest_dir)
+    expected_tail = "\n".join(lines[-_EVIDENCE_TAIL_LINES:])
+    assert f"events.jsonl tail (archived):\n{expected_tail}" in text
+    assert lines[9] not in text
+    assert "<no events.jsonl>" not in text
+
+
+def test_evidence_without_archived_record_marks_events_missing(tmp_path):
+    from imp.paths import project_state_dir
+    control = tmp_path / "control"
+    control.mkdir()
+    quest_dir = project_state_dir(control) / "quests" / "gone01"
+    text = evidence(quest_dir)
+    assert "events.jsonl tail:\n<no events.jsonl>" in text
+    assert "(archived)" not in text
+
+
+def test_evidence_with_unreadable_archive_marks_events_missing(tmp_path):
+    from imp.engine import archive
+    quest_dir = _archived_quest_dir(tmp_path, "arch02", '{"type": "e"}\n')
+    # Records without a data_version marker read as floor 0: read_events raises ArchiveMismatch.
+    archive.data_version_path(tmp_path / "control").unlink()
+    text = evidence(quest_dir)
+    assert "events.jsonl tail:\n<no events.jsonl>" in text
+    assert "(archived)" not in text
+
+
 def test_tail_returns_only_the_last_lines(tmp_path):
     log = tmp_path / "events.jsonl"
     total = _EVIDENCE_TAIL_LINES + 10
@@ -781,26 +818,73 @@ def test_assert_sigint_exit_reports_evidence_on_hang(tmp_path):
         proc.wait()
 
 
-def test_wait_for_bash_tool_call_finds_bash_call(tmp_path):
+def test_wait_for_bash_tool_call_returns_first_bash_payload(tmp_path):
     from tests._live import wait_for_bash_tool_call
     ev = tmp_path / "events.jsonl"
     # A trailing partial JSON line must not choke the scan.
-    _write_events(ev, [_bash_call()], extra_lines=('{"type": "tool_ca',))
-    assert wait_for_bash_tool_call(ev, timeout=2.0) is True
+    _write_events(ev, [_bash_call("b1"), _bash_call("b2")],
+                  extra_lines=('{"type": "tool_ca',))
+    assert wait_for_bash_tool_call(ev, timeout=2.0) == _bash_call("b1")["payload"]
 
 
-def test_wait_for_bash_tool_call_false_when_only_other_tools(tmp_path):
+def test_wait_for_bash_tool_call_none_when_only_other_tools(tmp_path):
     from tests._live import wait_for_bash_tool_call
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"type": "tool_call", "payload": {"id": "r1", "name": "read_file"}},
     ])
-    assert wait_for_bash_tool_call(ev, timeout=2.0) is False
+    assert wait_for_bash_tool_call(ev, timeout=2.0) is None
 
 
-def test_wait_for_bash_tool_call_false_when_events_missing(tmp_path):
+def test_wait_for_bash_tool_call_none_when_events_missing(tmp_path):
     from tests._live import wait_for_bash_tool_call
-    assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is False
+    assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is None
+
+
+# Expected skip reason; `{}` is the json.dumps of the call's input.
+_NONCOMPLIANT_REASON = (
+    "the model's first bash call was not a foreground `sleep 30` (input: {}); "
+    "the mid-bash interrupt precondition is unmet. This is model non-compliance, "
+    "not an interrupt-resume regression."
+)
+
+_FOREGROUND_SLEEP_INPUTS = [
+    {"command": "sleep 30"},
+    {"command": " sleep 30 ", "timeout": 60},
+]
+
+_NON_FOREGROUND_SLEEP_INPUTS = [
+    {"command": "sleep 30", "run_in_background": True},
+    {"command": "sleep 30", "timeout": 30},
+    {"command": "sleep 30", "timeout": 5},
+    {"command": "sleep 30 &"},
+    {"command": "sleep 30", "timeout": "60"},
+]
+
+
+def _bash_payload(inp, *, as_str):
+    # as_str: some providers log `input` as a JSON string rather than a dict.
+    return {"id": "b1", "name": "bash", "input": _json.dumps(inp) if as_str else inp}
+
+
+@pytest.mark.parametrize("as_str", [False, True])
+@pytest.mark.parametrize("inp", _FOREGROUND_SLEEP_INPUTS)
+def test_foreground_sleep_bash_call_does_not_skip(inp, as_str):
+    from tests._live import skip_unless_foreground_sleep
+    # A wrongful skip would surface as SKIPPED, not FAIL; convert it.
+    try:
+        skip_unless_foreground_sleep(_bash_payload(inp, as_str=as_str))
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"compliant bash call was skipped: {exc.msg}")
+
+
+@pytest.mark.parametrize("as_str", [False, True])
+@pytest.mark.parametrize("inp", _NON_FOREGROUND_SLEEP_INPUTS)
+def test_non_foreground_sleep_bash_call_skips_with_reason(inp, as_str):
+    from tests._live import skip_unless_foreground_sleep
+    with pytest.raises(pytest.skip.Exception) as exc:
+        skip_unless_foreground_sleep(_bash_payload(inp, as_str=as_str))
+    assert exc.value.msg == _NONCOMPLIANT_REASON.format(_json.dumps(inp))
 
 
 def test_bash_tool_call_poller_defined_once_in_live_helpers():
@@ -864,6 +948,29 @@ def test_group_a_sites_route_failures_through_the_evidence_helper():
     assert mid_src.count("wait_for_bash_tool_call(events, timeout=60.0)") == 2
     assert mid_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
     assert native_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
+
+
+def test_mid_step_sites_check_bash_compliance_before_sigint():
+    import re
+
+    import tests.test_mid_step_resume_live as mid
+    src = Path(mid.__file__).read_text()
+    sites = [m.end() for m in re.finditer(r"wait_for_bash_tool_call\(events, timeout=", src)]
+    assert len(sites) == 3
+    for start in sites:
+        check = src.index("skip_unless_foreground_sleep(bash_call)", start)
+        assert check < src.index("time.sleep(", start) < src.index("os.killpg(", start)
+
+
+def test_seed_project_writer_forbids_background_and_timeout(tmp_path):
+    from tests.conftest import _seed_project
+    _seed_project(tmp_path)
+    text = (tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md").read_text()
+    assert text.split("---\n", 2)[2] == (
+        "Call bash exactly once with the command `sleep 30`, in the foreground: do not\n"
+        "pass run_in_background or timeout. After bash returns (even if it was\n"
+        "interrupted), call complete_step with status=Success. Do not call any other tool.\n"
+    )
 
 
 def test_group_b_post_sigint_waits_report_evidence():

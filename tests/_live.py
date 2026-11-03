@@ -30,6 +30,8 @@ from typing import Any, NoReturn
 
 import pytest
 
+from imp.engine.archive.read import read_events
+from imp.engine.errors import ArchiveMismatch
 from imp.paths import project_state_dir
 from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
@@ -200,8 +202,7 @@ def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
         except json.JSONDecodeError:
             continue
         payload = rec.get("payload", {})
-        if (rec.get("type") == "tool_call"
-                and payload.get("name") in ("bash", "mcp__imp__bash")):
+        if rec.get("type") == "tool_call" and payload.get("name") == "bash":
             tool_id = payload.get("id")
             if tool_id is not None:
                 bash_ids.add(tool_id)
@@ -466,10 +467,32 @@ def _tail(path: Path, lines: int = _EVIDENCE_TAIL_LINES) -> str:
         return f"<unreadable {path.name}: {exc}>"
 
 
+def _archived_events(quest_dir: Path) -> bytes | None:
+    """The archived events.jsonl of a quest whose live home was reaped, else None."""
+    # Live home is <state dir>/quests/<id>; the state dir's `repo` file names the control root.
+    marker = quest_dir.parents[1] / "repo"
+    if not marker.is_file():
+        return None
+    try:
+        return read_events(Path(marker.read_text().strip()), quest_dir.name)
+    except ArchiveMismatch:
+        return None
+
+
+def _events_section(quest_dir: Path) -> str:
+    live = quest_dir / "events.jsonl"
+    if not live.exists():
+        archived = _archived_events(quest_dir)
+        if archived is not None:
+            tail = archived.decode(errors="replace").splitlines()[-_EVIDENCE_TAIL_LINES:]
+            return "events.jsonl tail (archived):\n" + "\n".join(tail)
+    return f"events.jsonl tail:\n{_tail(live)}"
+
+
 def evidence(quest_dir: Path) -> str:
-    """Failure evidence for a live run: events.jsonl, daemon.stderr, each step's stderr.log."""
+    """Failure evidence: events.jsonl (archived if reaped), daemon.stderr, step stderr.logs."""
     sections = [
-        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}",
+        _events_section(quest_dir),
         f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}",
     ]
     sections += [
@@ -507,9 +530,9 @@ def assert_sigint_exit(proc: subprocess.Popen, quest_dir: Path, timeout: float) 
         pytest.fail(f"expected exit 130, got {rc}\n{evidence(quest_dir)}")
 
 
-def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
+def wait_for_bash_tool_call(events_path: Path, timeout: float) -> dict[str, Any] | None:
     """Re-scan events.jsonl from the start until a tool_call(name=bash) event
-    appears. Returns True on found, False on timeout.
+    appears. Returns that first bash call's payload, or None on timeout.
 
     Re-scanning each tick (instead of tracking an offset) sidesteps the
     partial-line read race: EventLog.append issues two `write()` calls
@@ -533,11 +556,28 @@ def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue  # partial write; next tick picks it up
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
+            payload = rec.get("payload", {})
+            if rec.get("type") == "tool_call" and payload.get("name") == "bash":
+                return payload
         time.sleep(0.2)
-    return False
+    return None
+
+
+def skip_unless_foreground_sleep(payload: dict[str, Any]) -> None:
+    """Skip unless the bash call can still be running when the SIGINT lands."""
+    args = call_args(payload)
+    command = args.get("command")
+    timeout = args.get("timeout")
+    if (isinstance(command, str) and command.strip() == "sleep 30"
+            and not args.get("run_in_background")
+            and (timeout is None
+                 or (isinstance(timeout, int | float) and timeout > 30))):
+        return
+    pytest.skip(
+        "the model's first bash call was not a foreground `sleep 30` (input: "
+        f"{json.dumps(args)}); the mid-bash interrupt precondition is unmet. "
+        "This is model non-compliance, not an interrupt-resume regression."
+    )
 
 
 def wait_for_status(state_path: Path, want: str, timeout: float) -> str:
