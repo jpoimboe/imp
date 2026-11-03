@@ -199,3 +199,41 @@ def test_log_header_names_an_unstarted_draft_by_its_prompt(
 def test_log_header_without_a_name_source_is_the_id(tmp_path, monkeypatch, capsys) -> None:
     _titleless_quest(tmp_path, "bedo08", intent=None, seed=None)
     assert _log_header(tmp_path, monkeypatch, capsys, "bedo08") == "bedo08"
+
+
+def test_resume_opening_names_a_titleless_quest_by_its_opening(tmp_path, capsys) -> None:
+    from imp.cli.main import _print_resume_opening
+    q = _titleless_quest(tmp_path, "bedo08", intent=_OPENING, seed="stale seed")
+    _print_resume_opening(q, "resuming", None, color=False)
+    assert capsys.readouterr().out == f"bedo08 · {_OPENING} · resuming\n"
+
+
+def test_resume_opening_falls_back_to_seed_opening(tmp_path, capsys) -> None:
+    from imp.cli.main import _print_resume_opening
+    q = _titleless_quest(tmp_path, "bedo08", intent=None, seed="seeded brief")
+    _print_resume_opening(q, "resuming", None, color=True)
+    assert capsys.readouterr().out == (
+        "\x1b[33mbedo08\x1b[0m\x1b[2m · seeded brief · resuming\x1b[0m\n")
+
+
+def test_resume_opening_without_a_name_source_is_id_and_marker(tmp_path, capsys) -> None:
+    from imp.cli.main import _print_resume_opening
+    q = _titleless_quest(tmp_path, "bedo08", intent=None, seed=None)
+    _print_resume_opening(q, "resuming", None, color=False)
+    assert capsys.readouterr().out == "bedo08 · resuming\n"
+
+
+def test_resume_opening_of_a_titled_quest_skips_the_event_log(
+        tmp_path, monkeypatch, capsys) -> None:
+    from imp.cli.main import _print_resume_opening
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    q = Quest.create(tmp_path, title="Real title", quest_id="bedo08", base_branch="main")
+
+    def _forbidden():
+        raise AssertionError("event log read for a titled quest")
+
+    monkeypatch.setattr(q, "event_log", _forbidden)
+    _print_resume_opening(q, "resuming", None, color=False)
+    assert capsys.readouterr().out == "bedo08 · Real title · resuming\n"

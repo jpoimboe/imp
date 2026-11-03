@@ -1462,7 +1462,10 @@ def _resume_live_framing(
 def _print_resume_opening(
     quest: Quest, marker: str, notice: str | None, *, color: bool,
 ) -> None:
-    print(_run_header_line(quest.id, quest.title, marker, color=color))
+    from imp.cli.store import _resolve_intent
+    intent = None if quest.title.strip() else quest_row.fallback_intent(
+        _resolve_intent(list(quest.event_log().read())), quest.seed_opening)
+    print(_run_header_line(quest.id, quest.title, marker, color=color, intent=intent))
     if notice is not None:
         print(ansi(notice, "dim", enabled=color))
 
