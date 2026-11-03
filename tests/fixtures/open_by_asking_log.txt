@@ -148,7 +148,7 @@ spec-writer · complete · 22s
 
 spec-verify-commit · complete
 
-spec phase complete · 3m 9s
+spec phase complete · 2m 48s
 
 ── plan phase ───
 

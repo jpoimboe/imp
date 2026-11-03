@@ -213,3 +213,50 @@ def test_step_durations_match_ledger_work_time() -> None:
     ledger = {row.step: row.work_seconds for row in build_summary(events)}
     assert ledger == {"spec-writer": 30.0, "verify": 25.0}
     assert _breadcrumb_seconds(events) == pytest.approx(ledger)
+
+
+def _phase_seconds(events: list[dict[str, Any]]) -> dict[str, float | None]:
+    tree = nv.build_tree(events)
+    return {phase.name: nv.phase_elapsed(phase)
+            for phase in tree.root.children if isinstance(phase, nv.PhaseNode)}
+
+
+def _step(eid: int, name: str, phase: str, start: int, end: int) -> list[dict[str, Any]]:
+    return [
+        ev(f"{eid}s", "step_started", step=name, kind="script", phase=phase,
+           label=name, timestamp=_ts(start)),
+        ev(f"{eid}c", "step_completed", step=name, kind="script", **_DONE, timestamp=_ts(end)),
+    ]
+
+
+def test_phase_excludes_a_pause_inside_one_of_its_steps() -> None:
+    # AC5(a)
+    events = [ev("0", "quest_created", quest_id=1, title="x", timestamp=_ts(0)),
+              *_paused_verify(resumed=True)[1:]]
+    assert _phase_seconds(events) == {"implement": 30.0}   # 195s wall - 165s paused
+
+
+@pytest.mark.parametrize("resumed", [True, False], ids=["resumed", "attached"])
+def test_phase_excludes_a_pause_between_two_of_its_steps(resumed: bool) -> None:
+    # AC5(b): paused after s1 completed; s2's step_started closes it if nothing else did.
+    events = [ev("0", "quest_created", quest_id=1, title="x", timestamp=_ts(0)),
+              *_step(1, "s1", "implement", 0, 10),
+              ev("p", "workflow_paused", reason="ctrl-c", timestamp=_ts(15))]
+    if resumed:
+        events.append(ev("r", "workflow_resumed", timestamp=_ts(115)))
+    events += _step(2, "s2", "implement", 115, 125)
+    assert _phase_seconds(events) == {"implement": 25.0}   # 125s wall - 100s paused
+
+
+def test_pause_across_a_phase_boundary_is_charged_to_neither_phase() -> None:
+    # AC5(c): opens after spec's last step, closed by implement's first step; stays on spec.
+    events = [ev("0", "quest_created", quest_id=1, title="x", timestamp=_ts(0)),
+              *_step(1, "s1", "spec", 0, 10),
+              ev("p", "workflow_paused", reason="ctrl-c", timestamp=_ts(12)),
+              *_step(2, "s2", "implement", 100, 130)]
+    assert _phase_seconds(events) == {"spec": 10.0, "implement": 30.0}
+    body = "\n".join(_log_lines(events))
+    assert "spec phase complete · 10s" in body
+    spans = {p.name: p.exclusion_spans
+             for p in nv.build_tree(events).root.children if isinstance(p, nv.PhaseNode)}
+    assert spans == {"spec": [(_ts(12), _ts(100))], "implement": []}

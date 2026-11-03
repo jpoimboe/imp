@@ -100,6 +100,8 @@ class PhaseNode:
     closed: bool = False
     label: str | None = None
     show_label: bool = True
+    # spans closed while this was the current phase
+    exclusion_spans: list[tuple[str, str]] = field(default_factory=list)
     collapsible = False
 
 
@@ -948,7 +950,10 @@ class NarrativeBuilder:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
             return
         # Before every early return below, so it sees the stream exclusion_spans does.
-        self._exclusion_tracker.feed(event)
+        closed = self._exclusion_tracker.feed(event)
+        # Before the handler: a span the next phase's first step_started closes stays here.
+        if self._current_phase is not None:
+            self._current_phase.exclusion_spans += closed
         payload = event.get("payload")
         if not isinstance(payload, dict):
             self._append(ErrorNode(
@@ -1836,12 +1841,17 @@ def _breadcrumb_extras(args: Any) -> list[str]:
 
 def phase_elapsed(phase: PhaseNode) -> float | None:
     """Phase duration derived from its steps: first step start_ts → last step
-    end_ts. No phase_started/phase_completed events exist (§7) — phase timing is
+    end_ts, minus the pauses/human waits inside that window. No
+    phase_started/phase_completed events exist (§7) — phase timing is
     derived. None when the phase has no timestamped steps."""
     steps = [c for c in phase.children if isinstance(c, StepNode)]
     if not steps:
         return None
-    return elapsed_seconds(steps[0].start_ts, steps[-1].end_ts)
+    start, end = steps[0].start_ts, steps[-1].end_ts
+    elapsed = elapsed_seconds(start, end)
+    if elapsed is None:
+        return None
+    return max(0.0, elapsed - Exclusions(tuple(phase.exclusion_spans)).overlap(start, end))
 
 
 def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
@@ -1919,11 +1929,12 @@ class ExclusionTracker:
         """The spans closed so far; a still-open wait or pause is not included."""
         return Exclusions(tuple(self._spans))
 
-    def feed(self, event: dict[str, Any]) -> None:
+    def feed(self, event: dict[str, Any]) -> list[tuple[str, str]]:
         etype = event.get("type")
         ts = event.get("timestamp")
         if not isinstance(ts, str):
-            return
+            return []
+        mark = len(self._spans)
         if etype == "awaiting_user_input":
             if self._wait_start is None:  # a re-armed gate keeps the first ask
                 self._wait_start = ts
@@ -1937,6 +1948,7 @@ class ExclusionTracker:
         elif etype in ("step_started", "step_completed"):
             self._close_wait(ts)
             self._close_pause(ts)
+        return self._spans[mark:]
 
     def _close_wait(self, ts: str) -> None:
         if self._wait_start is not None:
