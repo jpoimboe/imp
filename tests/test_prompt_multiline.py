@@ -99,9 +99,9 @@ async def _drive_keys(skills_dir: Path, editing_mode: str, keys: list[str]) -> s
 async def test_enter_submits_selected_completion_first_press(
     tmp_path: Path, editing_mode: str
 ) -> None:
-    # Builtins only: the first `/sa` candidate is `/save`.
-    result = await _drive_keys(tmp_path, editing_mode, ["/", "s", "a", "\t", "\r"])
-    assert result == "/save"
+    # Builtins only: the first `/pa` candidate is `/pause`.
+    result = await _drive_keys(tmp_path, editing_mode, ["/", "p", "a", "\t", "\r"])
+    assert result == "/pause"
     assert "\n" not in result
 
 

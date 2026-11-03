@@ -10,6 +10,12 @@ from imp.cli.slash import REPROMPT, handle_slash_line
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
+HELP_PAUSE = "  /pause             Pause and exit; resume with imp resume <id>"
+HELP_ARCHIVE = "  /archive           Archive this conversation (find it later with imp search)"
+HELP_CLEAR = "  /clear             Archive this conversation and start a fresh one"
+CTRL_D_LEAVE = "  Ctrl+D             Leave this conversation; resume with imp resume <id>"
+CTRL_D_PAUSE = "  Ctrl+D             Pause and exit; resume with imp resume <id>"
+
 
 def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:
     # `/ls` matches no builtin and no skill; command-shaped, so it is a real
@@ -59,22 +65,22 @@ def test_abandon_is_in_the_help_text() -> None:
     assert any("/abandon" in line for line in lines)
 
 
-def test_save_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
-    # /save is a built-in (NOT a skill): it returns the literal so the session gate
-    # loop (cli/session_terminal) records the save-as-draft intent and detaches.
+def test_pause_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /pause is a built-in (NOT a skill): it returns the literal so the session gate
+    # loop (cli/session_terminal) records the pause intent and detaches.
     quest = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/save", quest=quest, output_fn=out.append)
-    assert result == "/save"
-    assert not any("no such skill" in line for line in out)
+    result = handle_slash_line("/pause", quest=quest, output_fn=out.append)
+    assert result == "/pause"
+    assert out == []
 
 
-def test_save_is_in_the_help_text() -> None:
+def test_pause_is_in_the_help_text() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append, materialized=False)
-    assert any("/save" in line for line in lines)
-    assert not any("/keep" in line for line in lines)
+    assert HELP_PAUSE in lines
+    assert not any(line.strip().startswith(("/save", "/keep")) for line in lines)
 
 
 def test_clear_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
@@ -94,55 +100,58 @@ def test_clear_is_in_the_help_text() -> None:
     assert any("/clear" in line for line in lines)
 
 
-def test_shelve_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
-    # /shelve is a built-in (NOT a skill): it returns the literal so the session
-    # gate loop records the shelve intent and detaches (archive, no reopen).
+def test_archive_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /archive is a built-in (NOT a skill): it returns the literal so the session
+    # gate loop records the archive intent and detaches (archive, no reopen).
     quest = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/shelve", quest=quest, output_fn=out.append)
-    assert result == "/shelve"
-    assert not any("no such skill" in line for line in out)
+    result = handle_slash_line("/archive", quest=quest, output_fn=out.append)
+    assert result == "/archive"
+    assert out == []
 
 
-def test_shelve_is_in_the_help_text() -> None:
+def test_archive_is_in_the_help_text() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append, materialized=False)
-    assert any("/shelve" in line for line in lines)
+    assert HELP_ARCHIVE in lines
+    assert not any(line.strip().startswith("/shelve") for line in lines)
+
+
+@pytest.mark.parametrize("command", ["/save", "/shelve"])
+def test_retired_leave_commands_are_unknown(tmp_path: Path, command: str) -> None:
+    quest = SimpleNamespace(workflow_dir=tmp_path, control_root=tmp_path)
+    out: list[str] = []
+    assert handle_slash_line(command, quest=quest, output_fn=out.append) is REPROMPT
+    assert f"Unknown command: {command} — /help for the list" in out
 
 
 def test_help_prelive_lists_leave_commands_and_leave_keybinding() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append, materialized=False)
-    body = "\n".join(lines)
-    assert "/save" in body
-    assert "/shelve" in body
-    assert "/clear" in body
-    assert "/abandon" in body
-    assert "Leave this conversation; resume with imp resume <id>" in body
-    assert "Pause and exit" not in body
+    assert HELP_PAUSE in lines
+    assert HELP_ARCHIVE in lines
+    assert HELP_CLEAR in lines
+    assert any(line.strip().startswith("/abandon") for line in lines)
+    assert [ln for ln in lines if ln.strip().startswith("Ctrl+D")] == [CTRL_D_LEAVE]
     # /clear names "conversation", not "chat".
-    assert "/clear             Shelve this conversation and start a fresh one" in body
-    assert "chat" not in body
+    assert "chat" not in "\n".join(lines)
 
 
-def test_help_materialized_omits_leave_commands_and_uses_pause_keybinding() -> None:
+def test_help_materialized_lists_pause_and_omits_archive_and_clear() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append, materialized=True)
-    body = "\n".join(lines)
-    # Command lines are absent (leading-space format distinguishes from "shelved"
-    # in the /list description which contains "/shelved" as a substring).
-    assert not any(line.strip().startswith("/save") for line in lines)
-    assert not any(line.strip().startswith("/shelve") for line in lines)
-    assert not any(line.strip().startswith("/clear") for line in lines)
-    assert "/abandon" in body                       # stays available live
-    assert "Pause and exit; resume with imp resume <id>" in body
-    assert "Leave this conversation" not in body
+    assert HELP_PAUSE in lines
+    assert not any(line.strip().startswith(("/archive", "/clear", "/save", "/shelve"))
+                   for line in lines)
+    assert any(line.strip().startswith("/abandon") for line in lines)   # stays available live
+    assert [ln for ln in lines if ln.strip().startswith("Ctrl+D")] == [CTRL_D_PAUSE]
+    assert "Leave this conversation" not in "\n".join(lines)
 
 
-@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/archive", "/clear"])
 def test_leave_command_on_materialized_quest_is_rejected(
     tmp_path: Path, command: str,
 ) -> None:
@@ -159,14 +168,27 @@ def test_leave_command_on_materialized_quest_is_rejected(
     result = handle_slash_line(command, quest=quest, output_fn=out.append)
     assert result is REPROMPT                        # no disposition literal returned
     expected = (
-        "/save, /shelve, and /clear apply only before a quest is built — this "
-        "one is live. Press Ctrl-D to pause it (resume with imp resume mat9), "
-        "or /abandon to tear it down.")
-    assert any(expected in line for line in out)
+        "/archive and /clear apply only before a quest is built — this one is "
+        "live. Type /pause or press Ctrl-D to pause it (resume with imp resume "
+        "mat9), or /abandon to tear it down.")
+    assert expected in out
+
+
+def test_pause_on_materialized_quest_returns_literal(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    quest = Quest.create_draft(
+        tmp_path, title="Live one", quest_id="mat8", base_branch="main")
+    meta_path = quest.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["materialized"] = True
+    meta_path.write_text(json.dumps(meta))
+    out: list[str] = []
+    assert handle_slash_line("/pause", quest=quest, output_fn=out.append) == "/pause"
+    assert out == []
 
 
 @pytest.mark.timeout(240)  # ~9 git subprocesses starve under -n auto saturation
-@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/pause", "/archive", "/clear"])
 def test_leave_command_on_prelive_quest_returns_literal(
     tmp_path: Path, command: str,
 ) -> None:
@@ -243,12 +265,11 @@ def test_skills_is_echoed_with_caret(tmp_path: Path) -> None:
 
 
 PRE_SESSION_REDIRECT = (
-    "/save, /shelve, and /clear apply to a conversation already under way — "
-    "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
-    "(resume with imp resume pre9), or /abandon to tear it down.")
+    "/pause, /archive, and /clear apply once the conversation is running — "
+    "send a message first.")
 
 
-@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/pause", "/archive", "/clear"])
 def test_leave_command_pre_session_shows_redirect(
     tmp_path: Path, command: str,
 ) -> None:
@@ -259,11 +280,11 @@ def test_leave_command_pre_session_shows_redirect(
     result = handle_slash_line(
         command, quest=quest, output_fn=out.append, pre_session=True)
     assert result is REPROMPT
-    assert any(PRE_SESSION_REDIRECT in line for line in out)
+    assert PRE_SESSION_REDIRECT in out
     assert out[0] == f"> {command}"          # command is echoed with the caret
 
 
-@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/pause", "/archive", "/clear"])
 def test_leave_command_pre_session_takes_precedence_over_materialized(
     tmp_path: Path, command: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,7 +297,7 @@ def test_leave_command_pre_session_takes_precedence_over_materialized(
         command, quest=quest, output_fn=out.append, pre_session=True)
     assert result is REPROMPT
     assert not any("apply only before a quest is built" in line for line in out)
-    assert any("there's nothing to leave yet" in line for line in out)
+    assert PRE_SESSION_REDIRECT in out
 
 
 def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
@@ -417,9 +438,8 @@ def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
     lines: list[str] = []
     _help(lines.append, materialized=False, pre_session=True)
     body = "\n".join(lines)
-    assert not any(line.strip().startswith("/save") for line in lines)
-    assert not any(line.strip().startswith("/shelve") for line in lines)
-    assert not any(line.strip().startswith("/clear") for line in lines)
+    assert not any(line.strip().startswith(("/pause", "/archive", "/clear"))
+                   for line in lines)
     assert "/abandon" in body
     # Keybindings block is unchanged: materialized=False still says "Leave...".
     assert "Leave this conversation; resume with imp resume <id>" in body

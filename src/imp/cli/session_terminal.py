@@ -338,7 +338,7 @@ async def run_terminal_client(
                             # (non-reconciling); a built quest's /abandon was
                             # echoed before its confirm.
                             control = reply.strip()
-                            if (control in ("/save", "/shelve", "/clear",
+                            if (control in ("/pause", "/archive", "/clear",
                                             "/sandbox on", "/sandbox off", "/compact")
                                     or control.startswith("/model ")
                                     or control.startswith("/provider ")
@@ -351,9 +351,10 @@ async def run_terminal_client(
                                         leave_state["removed"] = removed
                                 await controls.abandon()
                                 return
-                            if reply.strip() == "/save":
+                            if reply.strip() == "/pause":
                                 if leave_state is not None:
-                                    leave_state["intent"] = "save"
+                                    leave_state["intent"] = "pause"
+                                coord.leave_reason = "pause"
                                 coord.escalation_event.set()
                                 return
                             if reply.strip() == "/clear":
@@ -361,9 +362,9 @@ async def run_terminal_client(
                                     leave_state["intent"] = "clear"
                                 coord.escalation_event.set()
                                 return
-                            if reply.strip() == "/shelve":
+                            if reply.strip() == "/archive":
                                 if leave_state is not None:
-                                    leave_state["intent"] = "shelve"
+                                    leave_state["intent"] = "archive"
                                 coord.escalation_event.set()
                                 return
                             if reply.strip().startswith("/model "):
@@ -439,8 +440,8 @@ async def run_terminal_client(
             driver.finish(interrupted=leaving)
             if title is not None:
                 title.reset()
-            # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /save /
-            # /shelve / /clear / headless): decide the disposition lock-free and flush a
+            # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /pause /
+            # /archive / /clear / headless): decide the disposition lock-free and flush a
             # control frame BEFORE aclose so the daemon observes it ahead of the
             # detach (spec "Sequencing"). A materialized/mid-run leave has no
             # disposition frame — it instead carries its trigger on a single
@@ -455,7 +456,7 @@ async def run_terminal_client(
                 # A bare interrupt-pause (mid-run SIGINT with no leave gesture) trips
                 # escalation via the headless detach but sets no leave_reason: it must
                 # pause, not resolve a save/archive disposition. Resolve only for a
-                # genuine leave (leave_reason set) or an explicit /save|/shelve|/clear.
+                # genuine leave (leave_reason set) or an explicit /pause|/archive|/clear.
                 if (leave_state is not None and control_root is not None
                         and (intent is not None
                              or coord.leave_reason is not None)):

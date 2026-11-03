@@ -141,7 +141,7 @@ class SlashCompleter:
     """Completes client-side slash commands and user skill names when the line starts with '/'."""
 
     _BUILTINS = (
-        "help", "skills", "save", "shelve", "clear", "model", "sandbox",
+        "help", "skills", "pause", "archive", "clear", "model", "sandbox",
         "provider",
         "compact", "abandon")
 

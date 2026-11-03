@@ -154,7 +154,7 @@ def test_leave_trigger_returns_reason_only_when_escalated_and_stamped() -> None:
 
     # A deliberate leave: escalation set AND a stamped trigger.
     assert _leave_trigger(_Coord("ctrl-d", _Evt(True))) == "ctrl-d"
-    # Escalation set but no trigger stamped (a /save-style disposition leave).
+    # Escalation set but no trigger stamped (an /archive-style disposition leave).
     assert _leave_trigger(_Coord(None, _Evt(True))) is None
     # A trigger present but escalation not fired (defensive: not a completed leave).
     assert _leave_trigger(_Coord("sigterm", _Evt(False))) is None

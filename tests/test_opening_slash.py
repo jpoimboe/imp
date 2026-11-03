@@ -112,7 +112,7 @@ async def test_opening_prompt_intercepts_help_then_returns_intent(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("command", ["/clear", "/save", "/shelve"])
+@pytest.mark.parametrize("command", ["/clear", "/pause", "/archive"])
 async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
     command: str, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -124,11 +124,9 @@ async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
         _prompt_factory=lambda: _QueuePrompt([command, "real intent"]))
     assert reply == "real intent"        # the leave-verb did not become the draft intent
     out = capsys.readouterr().out
-    assert (
-        "apply to a conversation already under way — there's nothing to leave yet"
-        in out)
-    assert "resume with imp resume z9y8x7" in out
-    assert "/abandon to tear it down" in out
+    assert ("/pause, /archive, and /clear apply once the conversation is running — "
+            "send a message first.") in out
+    assert "keep this quest as a draft" not in out
 
 
 @pytest.mark.anyio

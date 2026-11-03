@@ -1754,17 +1754,17 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
 
 
 @pytest.mark.anyio
-async def test_save_leave_still_renders_paused(
+async def test_pause_leave_on_a_draft_renders_only_the_paused_spine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    quest = _paused_quest(tmp_path, "2026-07-04-leave-save")
+    quest = _paused_quest(tmp_path, "2026-07-04-leave-pause")
     monkeypatch.setattr(
         session_run, "run_terminal_client",
-        _leaving(None, intent="save", disposition="save"))
+        _leaving("pause", intent="pause", disposition="save"))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
@@ -1775,6 +1775,7 @@ async def test_save_leave_still_renders_paused(
         f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
+    assert "paused · /pause" not in out   # the disposition outranks the trigger
 
 
 @pytest.mark.anyio
@@ -1831,17 +1832,17 @@ async def test_pause_on_a_built_quest_renders_the_trigger_block_without_a_caret(
 
 
 @pytest.mark.anyio
-async def test_shelve_leave_still_renders_archived(
+async def test_archive_leave_still_renders_archived(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    quest = _paused_quest(tmp_path, "2026-07-04-leave-shelve")
+    quest = _paused_quest(tmp_path, "2026-07-04-leave-archive")
     monkeypatch.setattr(
         session_run, "run_terminal_client",
-        _leaving(None, intent="shelve", disposition="archive"))
+        _leaving(None, intent="archive", disposition="archive"))
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),

@@ -47,10 +47,10 @@ def _paused(**payload: str) -> Any:
 @pytest.mark.parametrize("interrupted", [False, True], ids=["fresh", "after-interrupt"])
 @pytest.mark.parametrize(("client", "status", "expected"), [
     pytest.param(_abandoning, "paused", 130, id="abandoned"),
-    pytest.param(_leaving(None, intent="save", disposition="save"), "paused", 130,
-                 id="saved-as-draft"),
-    pytest.param(_leaving(None, intent="shelve", disposition="archive"), "paused", 130,
-                 id="shelved"),
+    pytest.param(_leaving("pause", intent="pause", disposition="save"), "paused", 130,
+                 id="paused-draft"),
+    pytest.param(_leaving(None, intent="archive", disposition="archive"), "paused", 130,
+                 id="archived"),
     pytest.param(_leaving("ctrl-d", disposition="discard"), "paused", 130,
                  id="discarded"),
     pytest.param(_leaving("ctrl-d", send_failed="1"), "paused", 130, id="left-running"),
@@ -70,7 +70,7 @@ def _paused(**payload: str) -> Any:
     pytest.param(_leaving("sigterm"), "paused", 130, id="sigterm"),
     pytest.param(_leaving("sighup"), "paused", 130, id="sighup"),
     pytest.param(_leaving("sigquit"), "paused", 130, id="sigquit"),
-    pytest.param(_leaving(None, intent="save"), "paused", 130, id="save-on-built-quest"),
+    pytest.param(_leaving("pause", intent="pause"), "paused", 130, id="pause-on-built-quest"),
     pytest.param(_leaving(None), "paused", 130, id="headless-detach"),
     pytest.param(_paused(reason="awaiting_user"), "paused", 130, id="awaiting-user"),
     pytest.param(_paused(reason="awaiting_turn"), "paused", 130, id="awaiting-turn"),
