@@ -194,14 +194,20 @@ def test_introspection_reader_section_says_history_for_filed_quests() -> None:
     assert "imp list --all` — also includes abandoned and archived quests" in flat
 
 
-def test_introspection_documents_merged_search_and_merge_commit() -> None:
-    body = _introspection_doc()
-    # The merged-subset flag is documented alongside the zone flags.
-    assert "--merged" in body
+def test_introspection_documents_completed_search_and_merge_commit() -> None:
+    flat = " ".join(_introspection_doc().split())
+    assert "the backlog (parked items for later), and completed quests." in flat
+    assert "**history** (completed, abandoned, archived) quests" in flat
+    assert ("`--backlog` / `--completed` / `--abandoned` / `--archived` flags "
+            "scope it") in flat
+    assert ("`--merged-after <commit>` to keep only completed quests whose merge "
+            "landed after `<commit>` (implies `--completed`).") in flat
+    assert "`--merged`" not in flat
+    assert "merged or done" not in flat
     # The imp show detail card surfaces the quest's merge commit.
-    assert "merge_commit" in body
+    assert "merge_commit" in flat
     # The stale archive-only framing must not be reintroduced by the edit.
-    assert "search the archive (completed, abandoned, and left" not in body
+    assert "search the archive (completed, abandoned, and left" not in flat
 
 
 def test_memory_doc_is_present_and_frontmatter_free() -> None:
@@ -308,16 +314,15 @@ def test_memory_teaches_the_authoring_affordance() -> None:
     assert "finalize" in body
 
 
-def test_knowledge_list_bullet_names_done_completions() -> None:
+def test_knowledge_list_bullet_names_completed_quests() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # imp list now surfaces done (no-merge) completions alongside merged ones
-    assert "completed quests (merged or done)" in body
-    # the stale merged-only framing of the imp list bullet is gone
-    assert "the backlog, and merged\n  quests;" not in body
-    # the structured encoding rides the imp list bullet, not a neighbour's
-    assert (body.index("completed quests (merged or done)")
-            < body.index("`--json` emits the board as a structured array.")
-            < body.index("- `imp show <id>`"))
+    flat = " ".join(body.split())
+    bullet = ("- `imp list` — the board: in-flight quests and drafts, the backlog, "
+              "and completed quests; `--all` adds abandoned and archived quests, "
+              "`--json` emits the board as a structured array.")
+    assert bullet in flat
+    assert "merged or done" not in flat
+    assert flat.index(bullet) < flat.index("- `imp show <id>`")
 
 
 def test_knowledge_cheatsheet_documents_bounded_events_search() -> None:

@@ -17,7 +17,7 @@ def test_lifecycle_doc_exists_and_is_nonempty() -> None:
 
 def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
     body = DOC.read_text()
-    for status in ("new", "paused", "merge_blocked", "merged",
+    for status in ("new", "paused", "merge_blocked", "completed",
                    "archived", "abandoned", "error"):
         assert status in body, status
     assert "(stored `archived`)" in body
@@ -25,6 +25,23 @@ def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
     # running is derived, never stored
     assert "running" in body
     assert "derived" in body
+
+
+def test_lifecycle_documents_the_single_completed_status() -> None:
+    flat = " ".join(DOC.read_text().split())
+    assert ("A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, "
+            "`completed`, `archived`, `abandoned`, `error`.") in flat
+    assert ("- `completed` — finished its workflow (stored `completed`): merged into "
+            "its base branch, or — for a workflow with no merge step — its commits "
+            "left on `imp/<id>`. `imp show` gives the merge commit when there is "
+            "one.") in flat
+    assert ("- `abandoned` — closed for good; searchable, not resumable (stored "
+            "`abandoned`).") in flat
+    assert ("- **history** — finished (`completed`/`abandoned`) and archived "
+            "conversations,") in flat
+    assert "| 0 | Finished: completed, or the command succeeded |" in flat
+    for retired in ("`merged`", "`done`", "merged or done"):
+        assert retired not in flat, retired
 
 
 def test_lifecycle_covers_zones_and_materialize() -> None:

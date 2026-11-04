@@ -22,7 +22,7 @@ RELIED_ON = (
 # Scope 6: every value `QuestSummary.status` can take, in-flight then finished.
 STATUSES = (
     "new", "running", "waiting", "paused", "error", "merge_blocked",
-    "merged", "done", "abandoned", "archived",
+    "completed", "abandoned", "archived",
 )
 
 _PY_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
@@ -108,6 +108,8 @@ def test_embedding_doc_names_every_summary_status() -> None:
     sentence = flat[start:flat.index(".", start) + 1]
     for status in STATUSES:
         assert f"`{status}`" in sentence, status
+    for retired in ("merged", "done"):
+        assert f"`{retired}`" not in sentence, retired
 
 
 def test_embedding_doc_documents_creation_preflight() -> None:

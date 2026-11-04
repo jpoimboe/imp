@@ -27,7 +27,7 @@ directly, and complete the run once they are satisfied.
 the minimal workflow has nothing deferred to seed, so there is nothing to review
 interactively. Do **not** open a gate or solicit a decision — instead
 complete immediately without soliciting, finishing with `complete_step(status="Success")`.
-The run then runs off the end into the no-merge `done` completion, leaving the commits on
+The run then runs off the end into the no-merge completion, leaving the commits on
 `imp/{{ quest.id }}`.
 {% else %}
 
@@ -63,7 +63,7 @@ subagent rather than guessing.
 
 Close on a recommendation-anchored affirmative (e.g. "Ready to wrap up?"). On approval,
 finish with `complete_step(status="Success")` — the run then runs off the end into the
-no-merge `done` completion, leaving the commits on `imp/{{ quest.id }}`.
+no-merge completion, leaving the commits on `imp/{{ quest.id }}`.
 {% endif %}
 
 ## Output

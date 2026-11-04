@@ -103,12 +103,22 @@ def test_architecture_documents_the_minimal_workflow() -> None:
     assert "in-place" not in low_section
 
 
-def test_architecture_documents_the_done_terminal_status() -> None:
+def test_architecture_documents_the_completed_terminal_status() -> None:
     text = ARCH.read_text()
-    assert "terminal status" in text
-    assert "`done`" in text
-    # a no-merge completion is archived, not merged
-    assert "archived" in text.lower()
+    flat = " ".join(text.split())
+    assert ("A no-merge completion (e.g. the `minimal` workflow) reaches the terminal "
+            "status `completed` and is archived the same way — searchable, with its "
+            "home cleaned up — rather than merged into a base.") in flat
+    assert ("It completes with the terminal status **`completed`** and is archived "
+            "like any completed quest — searchable, home cleaned up — with its "
+            "worktree removed and the `imp/<id>` branch kept, holding the commits "
+            "(it has no `merge_commit`).") in flat
+    assert "terminal status `done`" not in flat
+    assert "**`done`**" not in flat
+    assert "display it as `done`" not in flat
+    # the mermaid merge-outcome nodes label the default workflow, not a status
+    assert "done([merged])" in text
+    assert "|MERGED|" in text
 
 
 def test_architecture_documents_the_shared_partials_overlay() -> None:
