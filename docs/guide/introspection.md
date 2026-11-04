@@ -43,19 +43,19 @@ names rather than guessing them.
 ## What work exists
 
 - `imp list` — the board: active in-flight and draft quests, the backlog
-  (parked items for later), and completed quests (merged or done).
+  (parked items for later), and completed quests.
 - `imp list --all` — also includes abandoned and archived quests; `--archived`
   alone shows only archived conversations.
 - `imp list --json` — the same board as a structured JSON array, one
   object per quest tagged with its zone; composes with every filter.
 - `imp search <query>` — a live-and-history scout: search **active** (in-flight +
-  drafts), **backlog**, and **history** (merged, abandoned, archived) quests for
+  drafts), **backlog**, and **history** (completed, abandoned, archived) quests for
   `<query>` as a case-insensitive substring of a quest's id, title, or conversation
   content (a required substring; bare `imp search` errors). Composable `--active` /
-  `--backlog` / `--merged` / `--abandoned` / `--archived` flags scope it, with
+  `--backlog` / `--completed` / `--abandoned` / `--archived` flags scope it, with
   `--archived` meaning archived conversations only; with none given, all three zones
-  are searched. Add `--merged-after <commit>` to keep only merged quests whose merge
-  landed after `<commit>` (implies `--merged`). Default output is grep-style matched
+  are searched. Add `--merged-after <commit>` to keep only completed quests whose
+  merge landed after `<commit>` (implies `--completed`). Default output is grep-style matched
   excerpts per quest; `-l` / `--list` prints one terse line per quest
   (`id  title  [zone]`).
 - `imp events search <query>` — the structured-event sibling of `imp search`: the
@@ -88,7 +88,8 @@ the charge (its share of the weekly quota window, or the dollar cost) — then a
 `ledger:` section holding the full per-step table. A quest that has not run a
 step yet shows none of the three, and neither does one still in the backlog.
 A quest that completed with a recorded merge SHA also shows a `merge_commit:`
-line beneath `base_branch:`. A quest halted as paused or error shows a
+line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
+when the quest has none). A quest halted as paused or error shows a
 `reason:` line beneath `status:` naming why it stopped; `--json` carries the
 raw token as `pause_reason`. A running quest shows a `vars:` line of its
 effective workflow variables; one still in the backlog shows the overrides it

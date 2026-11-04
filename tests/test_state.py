@@ -117,7 +117,7 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
     from imp.engine.state import State
     s = State(
         id="c5", step=None, step_attempt=0,
-        status="merged",
+        status="completed",
     )
     s.save(tmp_path)
     loaded = State.load(tmp_path)
@@ -356,7 +356,9 @@ def test_error_is_a_status_value() -> None:
     from imp.engine.state import Status
     assert "error" in get_args(Status)
     assert "saved" not in get_args(Status)
-    assert "completed" not in get_args(Status)
+    assert "completed" in get_args(Status)
+    assert "merged" not in get_args(Status)
+    assert "done" not in get_args(Status)
 
 
 def test_reincarnation_counter_bumps_per_key() -> None:

@@ -397,7 +397,7 @@ def test_emit_completed_not_merged_renders_the_same_commit_list(monkeypatch, cap
         commits=[{"sha": _SHA_A, "subject": "first"},
                  {"sha": _SHA_B, "subject": "second"}])
     assert capsys.readouterr().out == (
-        "soro82 · Closing commit list layout · done · commits on imp/soro82\n"
+        "soro82 · Closing commit list layout · completed · commits on imp/soro82\n"
         "  4091ab6d  first\n"
         "  832c04d7  second\n"
         "\n")
@@ -469,9 +469,9 @@ def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
     # client quest object is still materialized=False.
     assert out.split("\n")[0] == (
         f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
-        f'{pal.ansi("done · commits on imp/soro82", "wordmark")}')
+        f'{pal.ansi("completed · commits on imp/soro82", "wordmark")}')
     assert "commits on master" not in out
-    assert pal.ansi("done · commits on imp/soro82", "green") not in out
+    assert pal.ansi("completed · commits on imp/soro82", "green") not in out
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
@@ -667,7 +667,7 @@ def test_the_closing_block_prints_the_commits_recorded_on_a_plain_done(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "2026-06-12-run-x · (unnamed) · done · commits on imp/2026-06-12-run-x\n"
+        "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x\n"
         "  832c04d7  only\n"
         "\n")
 
@@ -706,7 +706,7 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
         coord=_NO_LEAVE, leave_state={}) == 0
     assert capsys.readouterr().out == no_key
     assert no_key == (
-        "2026-06-12-run-x · (unnamed) · done · commits on imp/2026-06-12-run-x\n"
+        "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x\n"
         "\n")
 
 

@@ -145,6 +145,7 @@ class LocalStore:
 
     def scan_homes(self) -> list[HomeDigest]:
         from imp.cli.render_helpers import conversation_prose
+        from imp.engine.archive import heal_live_status
         from imp.engine.state import lock_is_live
 
         out: list[HomeDigest] = []
@@ -155,14 +156,16 @@ class LocalStore:
                 meta = json.loads(quest_json)
             except (FileNotFoundError, json.JSONDecodeError):
                 continue
+            state_path = cdir / "state" / "state.json"
             try:
-                state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
+                state_json: bytes | None = state_path.read_bytes()
             except FileNotFoundError:
                 state_json = None
             lock_live = lock_is_live(cdir / "lock")
             if state_json is not None and not lock_live:
-                # one unarchivable home must not abort the whole listing
+                # one unhealable or unarchivable home must not abort the whole listing
                 with contextlib.suppress(Exception):
+                    state_json = heal_live_status(state_path) or state_json
                     _archive_stranded_home(
                         self.control_root, quest_id, cdir, state_json)
             events_path = cdir / "events.jsonl"
@@ -231,7 +234,7 @@ class LocalStore:
 # resumable `archived` home as non-resumable would drop its step blobs, so an unknown
 # status is skipped.
 _TERMINAL_ARCHIVE_RESUMABLE: dict[str, bool] = {
-    "merged": False, "done": False, "abandoned": False, "archived": True,
+    "completed": False, "abandoned": False, "archived": True,
 }
 
 
@@ -689,7 +692,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
             control, query):
         if status not in statuses:
             continue
-        if (status == "merged" and merged_after is not None
+        if (status == "completed" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
         hits.append(SearchHit(cid, title, "history", content, last,

@@ -234,7 +234,7 @@ def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
         "id": "2026-06-20-mrg01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mrg01", status="merged", step="done",
+    State(id="2026-06-20-mrg01", status="completed", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW, color=False)
     card = "\n".join(lines)
@@ -328,7 +328,7 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "arc.state.json"
     state_json.write_text(json.dumps({
-        "id": "2026-06-20-arc01", "status": "merged", "step": None,
+        "id": "2026-06-20-arc01", "status": "completed", "step": None,
         "merge_commit": "beefcafe1234"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-arc01", events_path=events,
@@ -384,7 +384,7 @@ def _archive_dep(control: Path, qid: str, title: str) -> None:
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     sj = control / f"{qid}.state.json"
     sj.write_text(json.dumps({
-        "id": qid, "status": "merged", "step": None, "merge_commit": "abc123"}))
+        "id": qid, "status": "completed", "step": None, "merge_commit": "abc123"}))
     archive.archive_quest(control, qid, events_path=events,
                           quest_json_path=qj, state_json_path=sj)
 
@@ -495,7 +495,7 @@ def test_detail_card_shows_archived_for_archived_paused_quest(tmp_path: Path) ->
     assert not any(ln.startswith("step:") for ln in card_s.splitlines())
 
 
-def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
+def test_quest_card_shows_completed_for_merged_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mgd01"
     (cdir / "state").mkdir(parents=True)
@@ -503,15 +503,15 @@ def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
         "id": "2026-06-20-mgd01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mgd01", status="merged", step="done",
+    State(id="2026-06-20-mgd01", status="completed", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mgd01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "merged" in status_line          # merge_commit set -> display word is merged
-    assert "completed" not in status_line    # raw internal word not shown
+    assert "completed" in status_line
+    assert "merged" not in status_line and "done" not in status_line
 
 
-def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
+def test_quest_card_shows_completed_for_unmerged_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-cmp01"
     (cdir / "state").mkdir(parents=True)
@@ -519,15 +519,15 @@ def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
         "id": "2026-06-20-cmp01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-cmp01", status="merged", step="done",
+    State(id="2026-06-20-cmp01", status="completed", step="done",
           step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-cmp01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "merged" in status_line           # stored word merged displays as merged
-    assert "completed" not in status_line
+    assert "completed" in status_line
+    assert "merged" not in status_line and "done" not in status_line
 
 
-def test_quest_json_status_is_merged_for_completed(tmp_path: Path) -> None:
+def test_quest_json_status_is_completed_for_merged_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mgj01"
     (cdir / "state").mkdir(parents=True)
@@ -535,14 +535,32 @@ def test_quest_json_status_is_merged_for_completed(tmp_path: Path) -> None:
         "id": "2026-06-20-mgj01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mgj01", status="merged", step="done",
+    State(id="2026-06-20-mgj01", status="completed", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     data = main._quest_json(tmp_path, "2026-06-20-mgj01")
     assert data is not None
-    assert data["status"] == "merged"        # --json emits the resolved display word
+    assert data["status"] == "completed"
+    assert data["merge_commit"] == "deadbeefcafe"
 
 
-def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:
+def test_quest_json_status_is_completed_for_unmerged_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-cmj01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-cmj01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-cmj01", status="completed", step="done",
+          step_attempt=0).save(cdir / "state")
+    data = main._quest_json(tmp_path, "2026-06-20-cmj01")
+    assert data is not None
+    assert data["status"] == "completed"
+    assert "merge_commit" in data
+    assert data["merge_commit"] is None
+
+
+def test_quest_card_shows_completed_for_archived_merged_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     events = tmp_path / "arcm.jsonl"
     events.write_text("")
@@ -552,18 +570,18 @@ def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "arcm.state.json"
     state_json.write_text(json.dumps({
-        "id": "2026-06-20-arm01", "status": "merged", "step": None,
+        "id": "2026-06-20-arm01", "status": "completed", "step": None,
         "merge_commit": "beefcafe1234"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-arm01", events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arm01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "merged" in status_line          # archived merged quest -> display word is merged
-    assert "completed" not in status_line    # raw internal word not shown
+    assert "completed" in status_line
+    assert "merged" not in status_line and "done" not in status_line
 
 
-def test_quest_card_shows_done_for_archived_no_merge_quest(tmp_path: Path) -> None:
+def test_quest_card_shows_completed_for_archived_no_merge_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     events = tmp_path / "arcd.jsonl"
     events.write_text("")
@@ -573,14 +591,41 @@ def test_quest_card_shows_done_for_archived_no_merge_quest(tmp_path: Path) -> No
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "arcd.state.json"
     state_json.write_text(json.dumps({
-        "id": "2026-06-20-done1", "status": "done", "step": None}))
+        "id": "2026-06-20-done1", "status": "completed", "step": None}))
     archive.archive_quest(
         tmp_path, "2026-06-20-done1", events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-done1", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "done" in status_line
-    assert "merged" not in status_line
+    assert "completed" in status_line
+    assert "merged" not in status_line and "done" not in status_line
+
+
+def test_quest_json_carries_merge_commit_for_archived_quests(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    for qid, merge_commit in (("2026-06-20-ajm01", "beefcafe1234"),
+                              ("2026-06-20-ajn01", None)):
+        events = tmp_path / f"{qid}.jsonl"
+        events.write_text("")
+        quest_json = tmp_path / f"{qid}.quest.json"
+        quest_json.write_text(json.dumps({
+            "id": qid, "title": "Archived", "base_branch": "main",
+            "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+        state: dict[str, object] = {"id": qid, "status": "completed", "step": None}
+        if merge_commit is not None:
+            state["merge_commit"] = merge_commit
+        state_json = tmp_path / f"{qid}.state.json"
+        state_json.write_text(json.dumps(state))
+        archive.archive_quest(
+            tmp_path, qid, events_path=events,
+            quest_json_path=quest_json, state_json_path=state_json)
+    merged = main._quest_json(tmp_path, "2026-06-20-ajm01")
+    unmerged = main._quest_json(tmp_path, "2026-06-20-ajn01")
+    assert merged is not None and unmerged is not None
+    assert merged["merge_commit"] == "beefcafe1234"
+    assert "merge_commit" in unmerged
+    assert unmerged["merge_commit"] is None
+    assert '"merge_commit": null' in json.dumps(unmerged)
 
 
 def test_quest_json_omits_seed_opening_for_an_unstarted_draft(tmp_path: Path) -> None:

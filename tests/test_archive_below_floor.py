@@ -22,7 +22,7 @@ def _triad(control: Path, quest_id: str) -> tuple[Path, Path, Path]:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{quest_id}-state.json"
     state_json.write_text(json.dumps({
-        "id": quest_id, "status": "merged", "step": "finalize"}))
+        "id": quest_id, "status": "completed", "step": "finalize"}))
     return events, quest_json, state_json
 
 
@@ -57,8 +57,8 @@ def test_archive_quest_into_an_empty_archive_stamps_the_marker(tmp_path: Path) -
 
     _archive_one(tmp_path, ARCH)
 
-    assert archive._DATA_VERSION == 15
-    assert archive.data_version_path(tmp_path).read_text().strip() == "15"
+    assert archive._DATA_VERSION == 16
+    assert archive.data_version_path(tmp_path).read_text().strip() == "16"
     assert record.read_record(records_root(tmp_path), ARCH) is not None
 
 

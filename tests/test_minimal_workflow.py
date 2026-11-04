@@ -167,6 +167,14 @@ def test_finalize_body_guards_on_autonomous_with_both_branches() -> None:
     assert "complete immediately without soliciting" not in attended
 
 
+def test_finalize_names_the_no_merge_completion_without_a_status_word() -> None:
+    flat = " ".join(_wf().agents["finalize"].prompt_template_source.split())
+    assert flat.count(
+        "runs off the end into the no-merge completion, leaving the commits on "
+        "`imp/{{ quest.id }}`.") == 2
+    assert "`done`" not in flat
+
+
 def test_minimal_front_door_forks_worktree_others_do_not() -> None:
     wf = _wf()
     assert all(s.kind != "merge_and_exit_worktree" for s in wf.flat_steps())

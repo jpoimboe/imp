@@ -68,11 +68,12 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     from imp.engine.archive import index, record
     rec = record.read_record(archive.records_root(tmp_path), "feat")
     assert rec is not None
-    assert rec["final_state"]["status"] == "merged"
+    assert rec["final_state"]["status"] == "completed"
+    assert rec["final_state"]["merge_commit"]
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT status FROM quests WHERE id='feat'").fetchone() == ("merged",)
+            "SELECT status FROM quests WHERE id='feat'").fetchone() == ("completed",)
         assert conn.execute(
             "SELECT last_event_ts FROM quests WHERE id='feat'"
         ).fetchone()[0] is not None
@@ -280,7 +281,8 @@ def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
     from imp.engine.archive import record
     rec = record.read_record(archive.records_root(tmp_path), "feat")
     assert rec is not None
-    assert rec["final_state"]["status"] == "merged"
+    assert rec["final_state"]["status"] == "completed"
+    assert rec["final_state"]["merge_commit"]
 
 
 PARA = ("Give the four stack-dependent settings one uniform three-state shape, so\n"

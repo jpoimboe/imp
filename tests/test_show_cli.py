@@ -447,7 +447,7 @@ def test_show_spec_from_wip_ref_when_home_absent(
         )
     )
     sj = tmp_path / "ghost-state.json"
-    sj.write_text(json.dumps({"id": "ghost01", "status": "merged", "step": None}))
+    sj.write_text(json.dumps({"id": "ghost01", "status": "completed", "step": None}))
     archive.archive_quest(
         tmp_path, "ghost01", events_path=events, quest_json_path=cj, state_json_path=sj
     )
@@ -564,7 +564,7 @@ def test_show_json_emits_structured_overview(
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     dep_sj = tmp_path / "dep.state.json"
     dep_sj.write_text(json.dumps({
-        "id": "depa01", "status": "merged", "step": None,
+        "id": "depa01", "status": "completed", "step": None,
         "merge_commit": "abc123"}))
     archive.archive_quest(tmp_path, "depa01", events_path=dep_events,
                           quest_json_path=dep_qj, state_json_path=dep_sj)

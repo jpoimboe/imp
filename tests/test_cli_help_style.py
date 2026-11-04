@@ -286,7 +286,7 @@ positional arguments:
     resume          Resume a paused or interrupted quest by id or token.
     log             Show the narrative for a quest.
     events          Slice and dice a quest's event log (imp events <id>).
-    list            List your quests: in-flight, backlog, and merged.
+    list            List your quests: in-flight, backlog, and completed.
     show            Show one quest's detail or a named artifact (imp show
                     <id>).
     search          Search quests by id, title, or conversation content.

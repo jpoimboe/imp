@@ -93,7 +93,7 @@ def _archive_completed(control: Path, cid: str) -> None:
         "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
+        "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -147,8 +147,8 @@ def test_archived_conversation_only_in_all_history(tmp_path: Path) -> None:
     _archive_completed(tmp_path, "gamma")          # merged,  last=2026-06-01
     _archive_paused(tmp_path, "delta")             # archived, last=2026-06-03
 
-    every = {"merged", "done", "abandoned", "archived"}
-    plain = {"merged", "done"}
+    every = {"completed", "abandoned", "archived"}
+    plain = {"completed"}
 
     # AC 1: under --all, delta appears in history, sorted newest-first (before
     # the older merged gamma).
@@ -192,10 +192,10 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     _seed_control(tmp_path)
     monkeypatch.setattr(
         "imp.engine.archive.read.completed_rows",
-        lambda control: [("cid", "merged", "-", "iso", "Title", "created", None)])
+        lambda control: [("cid", "completed", "-", "iso", "Title", "created", None)])
     monkeypatch.setattr(s, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)
-    assert rows == [("cid", "merged", "-", "iso", "Title", "created", None, None, None)]
+    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None, None)]
 
 
 

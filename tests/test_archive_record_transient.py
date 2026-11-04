@@ -34,7 +34,7 @@ def _quest_meta() -> dict:
 
 def _rec() -> dict:
     return record.build_record(
-        _quest_meta(), {"id": "alpha", "status": "merged"}, "hash123")
+        _quest_meta(), {"id": "alpha", "status": "completed"}, "hash123")
 
 
 def test_read_record_recovers_from_transient_head_drop(
@@ -78,7 +78,7 @@ def _hammer_writer(records_dir: str, stop, writes) -> None:
     rec = rec_mod.build_record(
         {"id": "alpha", "title": "Alpha", "base_branch": "main",
          "created_at": "2026-06-01T00:00:00+00:00"},
-        {"id": "alpha", "status": "merged", "vars": {"pad": "x" * 8192}},
+        {"id": "alpha", "status": "completed", "vars": {"pad": "x" * 8192}},
         "hash123")
     while not stop.is_set():
         rec_mod.write_record(Path(records_dir), rec)

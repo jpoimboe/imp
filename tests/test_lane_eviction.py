@@ -135,7 +135,7 @@ def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_re
     # After eviction the change re-acquires, runs touch-base, and completes with
     # no merge — the no-merge completion path must release the lane (AC2), so the
     # queue is empty rather than leaking the re-acquired entry.
-    assert State.load(ch.state_dir).status == "done"
+    assert State.load(ch.state_dir).status == "completed"
     assert mq.read(tmp_path) == []
 
 

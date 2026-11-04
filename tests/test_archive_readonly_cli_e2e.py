@@ -119,7 +119,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path
     _write_quest(repo, LIVE, title="Live Quest", marker=LIVE_MARK,
                  spec=f"# spec\n\n{SPEC_MARK} body\n")
     archived = _write_quest(repo, ARCH, title="Archived Quest", marker=ARCH_MARK,
-                            status="merged")
+                            status="completed")
     archive.archive_quest(
         repo, ARCH, events_path=archived / "events.jsonl",
         quest_json_path=archived / "quest.json",

@@ -23,7 +23,7 @@ _EVENTS = json.dumps({
     "payload": {"step": "spec"}}) + "\n"
 
 
-def _archive_merged(control: Path, quest_id: str, *,
+def _archive_completed(control: Path, quest_id: str, *,
                     merge_commit: str = "c0ffee") -> None:
     events = control / f"{quest_id}.jsonl"
     events.write_text(_EVENTS)
@@ -34,7 +34,7 @@ def _archive_merged(control: Path, quest_id: str, *,
         "materialized": True}))
     state_json = control / f"{quest_id}.state.json"
     state_json.write_text(json.dumps({
-        "id": quest_id, "status": "merged", "step": None,
+        "id": quest_id, "status": "completed", "step": None,
         "merge_commit": merge_commit}))
     archive.archive_quest(
         control, quest_id, events_path=events,
@@ -51,7 +51,7 @@ def _raise_data_floor(control: Path) -> int:
 
 def _live_quest_with_archived_dep(control: Path) -> Quest:
     _seed_control(control)
-    _archive_merged(control, ARCH)
+    _archive_completed(control, ARCH)
     quest = Quest.create(control, title="Live Thing", quest_id=LIVE,
                          base_branch="main", depends_on=[ARCH])
     _raise_data_floor(control)
@@ -97,7 +97,7 @@ def test_settled_outcome_returns_its_absent_record_outcome(tmp_path: Path) -> No
     from imp.cli.session_run import SettledOutcome, resolve_settled_outcome
 
     _seed_control(tmp_path)
-    _archive_merged(tmp_path, ARCH)
+    _archive_completed(tmp_path, ARCH)
     quest = Quest.create_draft(tmp_path, title="Live Thing", quest_id=LIVE,
                                base_branch="main")
     (quest.state_dir / "state.json").unlink()
@@ -116,7 +116,7 @@ def test_merged_after_returns_its_fail_safe_false(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     landed_after = _branch_with_commit(tmp_path, "later")
     base = worktree.head_of(tmp_path, "main")
-    _archive_merged(tmp_path, ARCH, merge_commit=landed_after)
+    _archive_completed(tmp_path, ARCH, merge_commit=landed_after)
     assert _merged_after(tmp_path, ARCH, base) is True     # guard: readable == True
 
     _raise_data_floor(tmp_path)

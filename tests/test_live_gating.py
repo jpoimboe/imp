@@ -663,7 +663,7 @@ def _archived_quest_dir(tmp_path, quest_id, events_text):
     (src / "events.jsonl").write_text(events_text)
     (src / "quest.json").write_text(_json.dumps(
         {"id": quest_id, "title": "t", "base_branch": "main"}))
-    (src / "state.json").write_text(_json.dumps({"id": quest_id, "status": "done"}))
+    (src / "state.json").write_text(_json.dumps({"id": quest_id, "status": "completed"}))
     archive.archive_quest(
         control, quest_id, events_path=src / "events.jsonl",
         quest_json_path=src / "quest.json", state_json_path=src / "state.json")

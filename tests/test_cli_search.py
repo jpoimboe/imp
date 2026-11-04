@@ -64,7 +64,7 @@ def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
     _archive_conv(tmp_path, "darkid", "Dark mode", "2026-06-10T00:00:00+00:00",
                   "a dark note")
     hits = _search_archived(tmp_path, "dark",
-                            {"merged", "abandoned", "archived"}, None)
+                            {"completed", "abandoned", "archived"}, None)
     assert len(hits) == 1
     assert hits[0].last_activity == "2026-06-10T00:00:00+00:00"
 
@@ -97,12 +97,12 @@ def test_search_active_hit_carries_last_activity(tmp_path: Path) -> None:
 
 
 def _ns(query: str, *, active: bool = False, backlog: bool = False,
-        archived: bool = False, merged: bool = False, abandoned: bool = False,
+        archived: bool = False, completed: bool = False, abandoned: bool = False,
         merged_after: str | None = None,
         list: bool = False, no_pager: bool = True) -> argparse.Namespace:
     return argparse.Namespace(
         query=query, active=active, backlog=backlog, archived=archived,
-        merged=merged, abandoned=abandoned,
+        completed=completed, abandoned=abandoned,
         merged_after=merged_after, list=list, no_pager=no_pager)
 
 
@@ -228,9 +228,9 @@ def test_cmd_search_composes_two_zone_flags(tmp_path: Path, capsys) -> None:
 
 
 def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged")
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
     _archive(tmp_path, "beta", "Dark login flow", status="abandoned")
-    rc = _cmd_search(_ns("dark", merged=True, list=True), tmp_path)
+    rc = _cmd_search(_ns("dark", completed=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
     assert "alpha" in out and "· history ·" in out    # history zone tag from _search_list_line
@@ -239,7 +239,7 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
 
 def test_cmd_search_archived_filters_to_archived(tmp_path: Path, capsys) -> None:
     _archive(tmp_path, "shlv", "Dark shelved chat", status="archived")
-    _archive(tmp_path, "done", "Dark merged work", status="merged")
+    _archive(tmp_path, "done", "Dark merged work", status="completed")
     rc = _cmd_search(_ns("dark", archived=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -247,9 +247,9 @@ def test_cmd_search_archived_filters_to_archived(tmp_path: Path, capsys) -> None
     assert "· history ·" in out
 
 
-def test_cmd_search_merged_after_alone_enables_merged(tmp_path: Path, capsys) -> None:
-    # No guard, no exit: --merged-after self-enables the merged disposition.
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged")
+def test_cmd_search_merged_after_alone_enables_completed(tmp_path: Path, capsys) -> None:
+    # No guard, no exit: --merged-after self-enables the completed disposition.
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
     rc = _cmd_search(_ns("dark", merged_after="deadbeef", list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -260,7 +260,7 @@ def test_cmd_search_merged_after_alone_enables_merged(tmp_path: Path, capsys) ->
 def test_cmd_search_merged_after_returns_completed_hit_when_resolvable(
         tmp_path: Path, capsys) -> None:
     sha_a, sha_b = _init_git_commits(tmp_path)
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged",
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed",
              merge_commit=sha_b)
     rc = _cmd_search(_ns("dark", merged_after=sha_a, list=True), tmp_path)
     out = capsys.readouterr().out
@@ -268,29 +268,60 @@ def test_cmd_search_merged_after_returns_completed_hit_when_resolvable(
     assert "alpha" in out            # merged-after self-enabled merged; hit kept
 
 
+def test_cmd_search_completed_selects_merged_and_unmerged_completions(
+        tmp_path: Path, capsys) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Dark live", quest_id="darklive", base_branch="main")
+    Quest.create_draft(tmp_path, title="Dark backlog", quest_id="darkbk",
+                       base_branch="main", origin="idea", seed_opening="Dark backlog")
+    _archive(tmp_path, "cmpmrg", "Dark merged", status="completed", merge_commit="c0ffee")
+    _archive(tmp_path, "cmpnom", "Dark unmerged", status="completed")
+    _archive(tmp_path, "abnd", "Dark dropped", status="abandoned")
+    _archive(tmp_path, "shlv", "Dark parked", status="archived")
+    rc = _cmd_search(_ns("dark", completed=True, list=True), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "cmpmrg" in out and "cmpnom" in out
+    for other in ("darklive", "darkbk", "abnd", "shlv"):
+        assert other not in out, other
+
+
+def test_cmd_search_merged_after_excludes_a_no_merge_completion(
+        tmp_path: Path, capsys) -> None:
+    sha_a, sha_b = _init_git_commits(tmp_path)
+    _archive(tmp_path, "alpha", "Dark merged", status="completed", merge_commit=sha_b)
+    _archive(tmp_path, "beta", "Dark unmerged", status="completed")
+    _archive(tmp_path, "gamma", "Dark dropped", status="abandoned")
+    rc = _cmd_search(_ns("dark", merged_after=sha_a, list=True), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "alpha" in out
+    assert "beta" not in out and "gamma" not in out
+
+
 def test_search_parser_accepts_merged_abandoned_archived_and_merged_after() -> None:
     ns = _build_parser().parse_args(
-        ["search", "dark", "--merged", "--abandoned", "--archived",
+        ["search", "dark", "--completed", "--abandoned", "--archived",
          "--merged-after", "abc123"])
-    assert ns.merged is True and ns.abandoned is True and ns.archived is True
+    assert ns.completed is True and ns.abandoned is True and ns.archived is True
     assert ns.merged_after == "abc123"
-    assert not hasattr(ns, "completed")
+    assert not hasattr(ns, "merged")
 
 
 def test_search_parser_defaults_flags_false_merged_after_none() -> None:
     ns = _build_parser().parse_args(["search", "dark"])
-    assert ns.merged is False and ns.abandoned is False and ns.archived is False
+    assert ns.completed is False and ns.abandoned is False and ns.archived is False
     assert ns.merged_after is None
 
 
-def test_search_help_mentions_merged_and_merged_after(capsys) -> None:
+def test_search_help_mentions_completed_and_merged_after(capsys) -> None:
     with pytest.raises(SystemExit):
         _build_parser().parse_args(["search", "--help"])
     out = capsys.readouterr().out
     out_flat = " ".join(out.split())
-    assert "Search merged quests." in out
-    assert "implies --merged" in out_flat
-    assert "--merged scopes to merged quests" in out_flat
+    assert "Search completed quests." in out
+    assert "implies --completed" in out_flat
+    assert "--completed scopes to completed quests" in out_flat
 
 
 def test_cmd_search_count_line_leads_plural(tmp_path: Path, capsys) -> None:
@@ -339,8 +370,8 @@ def test_cmd_search_archived_shows_last_activity_age(tmp_path: Path, capsys) -> 
     assert re.search(r"· history · \d", out)
 
 
-def test_cmd_search_default_includes_done_quest(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "dn1", "Dark done work", status="done")
+def test_cmd_search_default_includes_no_merge_completion(tmp_path: Path, capsys) -> None:
+    _archive(tmp_path, "dn1", "Dark done work", status="completed")
     rc = _cmd_search(_ns("Dark done"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -377,7 +408,7 @@ def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
 
 _OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
 _BRIEF = "Brief foo.py one\n\nmore body"
-_ALL_ARCHIVED = {"merged", "done", "abandoned", "archived"}
+_ALL_ARCHIVED = {"completed", "abandoned", "archived"}
 
 
 def _intent_event(text: str) -> dict[str, object]:

@@ -28,7 +28,7 @@ class _QuotaStore:
     """The subject's events from the fixture; neighbours from `inner`."""
 
     def __init__(self, events: list[dict[str, Any]], inner: Any = None,
-                 status: str = "merged") -> None:
+                 status: str = "completed") -> None:
         self._events = events
         self._inner = inner
         self._status = status
@@ -353,7 +353,7 @@ async def test_local_and_proxied_neighbours_render_the_same_bytes(
         view = m._attribute_quota(store, SUBJECT_ID, events, rows)
         assert not isinstance(view, int)
         header = SummaryHeader(workflow="default", quest_id=SUBJECT_ID,
-                               status="merged",
+                               status="completed",
                                total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))
         return render_summary(rows, header=header, color=False, width=100,

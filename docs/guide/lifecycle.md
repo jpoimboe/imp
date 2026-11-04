@@ -15,7 +15,7 @@ prompts, partials, scripts, and skills that drove it.
 
 ## Statuses
 
-A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, `merged`,
+A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, `completed`,
 `archived`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
 at-rest status plus two runtime facts — whether a live process holds the quest's
 lock, and a durable **halt-condition** recorded on `state.json`:
@@ -24,7 +24,10 @@ lock, and a durable **halt-condition** recorded on `state.json`:
 - `waiting` — a live process is parked at a human input gate (halt-condition
   `waiting`).
 - `error` — a not-live failure halt (stored `error`).
-- `merged` — merged into its base branch (stored `merged`).
+- `completed` — finished its workflow (stored `completed`): merged into its base
+  branch, or — for a workflow with no merge step — its commits left on `imp/<id>`.
+  `imp show` gives the merge commit when there is one.
+- `abandoned` — closed for good; searchable, not resumable (stored `abandoned`).
 - `archived` — an archived, resumable conversation (stored `archived`).
 - `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
 - `paused` — not live, a clean stop (a yield or interrupt).
@@ -46,7 +49,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
-- **history** — finished (`merged`/`done`/`abandoned`) and archived conversations,
+- **history** — finished (`completed`/`abandoned`) and archived conversations,
   reachable by search.
 
 ## Materialize / go-live
@@ -98,7 +101,7 @@ A script can tell from imp's exit code alone how a run ended:
 
 | Code | Meaning |
 |---|---|
-| 0 | Finished: merged or done, or the command succeeded |
+| 0 | Finished: completed, or the command succeeded |
 | 1 | The run stopped on a failure (error pause, merge blocked, crash) |
 | 2 | Usage error: bad arguments, no such quest |
 | 3 | The session failed to start |

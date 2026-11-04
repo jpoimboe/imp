@@ -18,7 +18,7 @@ _SCHEMA = (
     " quest_id TEXT, depends_on_id TEXT)",
 )
 
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 9
 
 
 def _commit(conn: sqlite3.Connection) -> None:

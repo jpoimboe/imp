@@ -45,7 +45,7 @@ def _seed_marker_phase(control: Path, slug: str) -> None:
         }) + "\n")
 
 
-def _complete_and_archive(control: Path, slug: str, status: str = "merged") -> None:
+def _complete_and_archive(control: Path, slug: str, status: str = "completed") -> None:
     """Flip the Quest to <status>, archive its runtime snapshot, then remove the
     worktree — the exact post-merge state imp log/status/show read from."""
     ch = Quest.load(control, slug)
@@ -139,9 +139,9 @@ def test_status_shows_merged_section_from_archive(
     # in-flight slug appears under in-flight; merged slug under completed.
     assert "live-one" in out
     assert "gone-one" in out
-    # The merged Quest shows its title + merged disposition, not blank columns.
+    # The merged Quest shows its title + completed status, not blank columns.
     assert "Gone One" in out
-    assert "merged" in out
+    assert "completed" in out
 
 
 def test_status_inflight_takes_precedence_over_archive(
@@ -178,9 +178,9 @@ def test_sort_rows_newest_first() -> None:
     import imp.cli.main as m
     # (id, status, step, last_iso, title, created_at)
     rows = [
-        ("old", "merged", "-", "2024-01-01T00:00:00+00:00", "Old", "2024-01-01T00:00:00+00:00"),
-        ("new", "merged", "-", "2026-01-01T00:00:00+00:00", "New", "2026-01-01T00:00:00+00:00"),
-        ("mid", "merged", "-", "2025-01-01T00:00:00+00:00", "Mid", "2025-01-01T00:00:00+00:00"),
+        ("old", "completed", "-", "2024-01-01T00:00:00+00:00", "Old", "2024-01-01T00:00:00+00:00"),
+        ("new", "completed", "-", "2026-01-01T00:00:00+00:00", "New", "2026-01-01T00:00:00+00:00"),
+        ("mid", "completed", "-", "2025-01-01T00:00:00+00:00", "Mid", "2025-01-01T00:00:00+00:00"),
     ]
     assert [r[0] for r in m._sort_rows_newest_first(rows)] == ["new", "mid", "old"]
 
@@ -269,7 +269,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     assert rc == 0
     out = capsys.readouterr().out
     assert "\x1b[" not in out
-    assert "merged" in out
+    assert "completed" in out
 
 
 def test_status_all_history_merged_not_dim(
@@ -292,9 +292,9 @@ def test_status_all_history_merged_not_dim(
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
-    row = next(ln for ln in out.splitlines() if "merged" in ln)
+    row = next(ln for ln in out.splitlines() if "gone" in ln)
     assert not row.startswith("\x1b[2m")
-    assert "merged" in row
+    assert "completed" in row
 
 
 def test_overview_default_shows_merged_disposition(
@@ -302,7 +302,7 @@ def test_overview_default_shows_merged_disposition(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Default overview: completed changes appear under `completed:` with
-    disposition `merged` (not the raw `completed`); abandoned are excluded."""
+    status `completed` (not the retired `merged`); abandoned are excluded."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -324,8 +324,8 @@ def test_overview_default_shows_merged_disposition(
     assert "live" in out
     assert "completed:" in out
     assert "history:" not in out
-    assert any(ln.startswith("done") and "merged" in ln for ln in quest_rows)
-    assert not any("completed" in ln for ln in quest_rows)
+    assert any(ln.startswith("done") and "completed" in ln for ln in quest_rows)
+    assert not any("merged" in ln for ln in quest_rows)
     assert "dead" not in out           # abandoned excluded by default
     assert "abandoned" not in out
 
@@ -353,7 +353,7 @@ def test_overview_all_shows_history_label_and_abandoned(
     out = capsys.readouterr().out
     assert "history:" in out
     assert "merged:" not in out
-    assert "done" in out and "merged" in out
+    assert "done" in out and "completed" in out
     assert "dead" in out and "abandoned" in out
 
 
@@ -445,7 +445,7 @@ def test_overview_only_history_not_reported_empty(
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
     assert out != "No quests yet — start one with imp new\n"
-    assert "done" in out and "merged" in out
+    assert "done" in out and "completed" in out
 
 
 def test_status_all_history_abandoned_not_dim(
@@ -600,7 +600,7 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         "id": "logtest", "title": "Log Test", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "logtest", "status": "merged", "step": None}))
+    sj.write_text(json.dumps({"id": "logtest", "status": "completed", "step": None}))
     archive.archive_quest(
         tmp_path, "logtest", events_path=events,
         quest_json_path=cj, state_json_path=sj)
@@ -718,7 +718,7 @@ def test_overview_lists_done_quest_in_history(tmp_path: Path, monkeypatch) -> No
     import imp.cli.main as m
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Light change", quest_id="lightid", base_branch="main")
-    _complete_and_archive(tmp_path, "lightid", status="done")
+    _complete_and_archive(tmp_path, "lightid", status="completed")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
     buf = io.StringIO()
@@ -726,7 +726,7 @@ def test_overview_lists_done_quest_in_history(tmp_path: Path, monkeypatch) -> No
         rc = main(["list"])                 # bare list -> default overview history block
     out = buf.getvalue()
     assert rc == 0
-    assert "lightid" in out and "done" in out
+    assert "lightid" in out and "completed" in out
 
 
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
@@ -744,7 +744,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
         "id": "arch01", "title": "Archived One", "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "arch01", "status": "merged", "step": None}))
+    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
     archive.archive_quest(
         tmp_path, "arch01", events_path=events,
         quest_json_path=cj, state_json_path=sj)
@@ -758,10 +758,10 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     assert "Archived One" in out
 
 
-def test_resolve_dependencies_marks_archived_done_dep_satisfied(tmp_path: Path) -> None:
+def test_resolve_dependencies_marks_archived_completed_dep_satisfied(tmp_path: Path) -> None:
     from imp.engine.quest_refs import resolve_dependencies
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Dep", quest_id="depid", base_branch="main")
-    _complete_and_archive(tmp_path, "depid", status="done")
+    _complete_and_archive(tmp_path, "depid")
     deps = resolve_dependencies(tmp_path, ["depid"])
     assert deps == [{"id": "depid", "title": "Dep", "merged": True}]

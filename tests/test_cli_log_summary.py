@@ -171,12 +171,12 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(s, "_load_events_for_id", lambda control, c: events)
     monkeypatch.setattr(
         s, "_row_for_id",
-        lambda control, c: (cid, "merged", "merge", "2026-01-01T00:00:10+00:00",
+        lambda control, c: (cid, "completed", "merge", "2026-01-01T00:00:10+00:00",
                             cid, "2026-01-01T00:00:00+00:00", None, None))
     rc = main(["log", "-s", cid])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "merged" in out
+    assert "completed" in out
     assert "  merge-to-base   10s" in out
 
 
@@ -205,7 +205,7 @@ def _merged_open_quest(tmp_path, monkeypatch, cid="openq"):
     monkeypatch.setattr(s, "_load_events_for_id", lambda control, c: _INTERRUPTED_EVENTS)
     monkeypatch.setattr(
         s, "_row_for_id",
-        lambda control, c: (cid, "merged", "implement", "2026-01-01T00:10:05+00:00",
+        lambda control, c: (cid, "completed", "implement", "2026-01-01T00:10:05+00:00",
                             cid, "2026-01-01T00:00:00+00:00", None, None))
     return cid
 
@@ -222,7 +222,7 @@ def test_summary_terminal_marks_inferred_spans_and_interrupted_tail(
         "  code-review  interrupted   —    —     —",
     ]) in out
     # The finished status word appears once, on the header line — never in a duration cell.
-    assert sum("merged" in ln for ln in out.splitlines()) == 1
+    assert sum("completed" in ln for ln in out.splitlines()) == 1
 
 
 @pytest.mark.parametrize("flag,cells", [

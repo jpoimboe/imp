@@ -103,12 +103,22 @@ def test_architecture_documents_the_minimal_workflow() -> None:
     assert "in-place" not in low_section
 
 
-def test_architecture_documents_the_done_terminal_status() -> None:
+def test_architecture_documents_the_completed_terminal_status() -> None:
     text = ARCH.read_text()
-    assert "terminal status" in text
-    assert "`done`" in text
-    # a no-merge completion is archived, not merged
-    assert "archived" in text.lower()
+    flat = " ".join(text.split())
+    assert ("A no-merge completion (e.g. the `minimal` workflow) reaches the terminal "
+            "status `completed` and is archived the same way — searchable, with its "
+            "home cleaned up — rather than merged into a base.") in flat
+    assert ("It completes with the terminal status **`completed`** and is archived "
+            "like any completed quest — searchable, home cleaned up — with its "
+            "worktree removed and the `imp/<id>` branch kept, holding the commits "
+            "(it has no `merge_commit`).") in flat
+    assert "terminal status `done`" not in flat
+    assert "**`done`**" not in flat
+    assert "display it as `done`" not in flat
+    # the mermaid merge-outcome nodes label the default workflow, not a status
+    assert "done([merged])" in text
+    assert "|MERGED|" in text
 
 
 def test_architecture_documents_the_shared_partials_overlay() -> None:
@@ -258,7 +268,7 @@ def test_operator_notes_document_archive_version_skew() -> None:
             "the index schema version") in section
     # the index-visible rule carries its worked example
     assert "the status it rewrites is the index's `status` column" in section
-    assert "`index._SCHEMA_VERSION` went 7 → 8" in section
+    assert "`index._SCHEMA_VERSION` went 8 → 9" in section
 
 
 def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
@@ -281,27 +291,31 @@ def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
             "already made") in section
     assert "The fix is to update every imp that writes here" not in section
     assert "Writes are deliberately unguarded" not in section
-    # one migration now ships, and it heals exactly the 14 -> 15 step
+    # one migration now ships, and it heals exactly the 15 -> 16 step
     assert "No blob migration ships in the tree" not in section
     assert "One blob migration ships in the tree" in section
-    assert "a marker reading 14 is upgraded to 15 in place" in section
+    assert "a marker reading 15 is upgraded to 16 in place" in section
     assert "`check_data_floor` runs the upgrade" in section
     assert ("the heal at the top of `ensure_current` runs it for the index-only "
             "readers") in section
-    assert "renames the retired stored status `shelved` to `archived`" in section
-    # the retired 13 -> 14 commits backfill leaves no narrative behind
+    assert "renames the stored statuses `merged` and `done` to `completed`" in section
+    # live homes the hop cannot reach are healed by the sweep
+    assert "is healed and archived by the stranded-home sweep" in section
+    # the retired 14 -> 15 and 13 -> 14 hops leave no narrative behind
+    assert "14 → 15" not in section
+    assert "shelved" not in section
     assert "13 → 14" not in section
     assert "`commits` list" not in section
     # permanence still holds for every other below-floor version
-    assert ("for records written below any version but 14 the stranding is "
+    assert ("for records written below any version but 15 the stranding is "
             "permanent") in section
     # the constraint a future _DATA_VERSION bump has to honour names both hooks
     assert ("ship the migration and hang it off both hooks — `check_data_floor` "
             "for blob-backed access, and the heal at the top of `ensure_current` "
             "for index-only readers") in section
     assert "Hooking `ensure_current` instead never runs at all" not in section
-    # the one v14 archive the migration cannot heal, and its remedy
-    assert ("a v14 archive on a read-only archive root is refused rather than "
+    # the one v15 archive the migration cannot heal, and its remedy
+    assert ("a v15 archive on a read-only archive root is refused rather than "
             "healed") in section
     assert "make the archive root writable" in section
     assert "an archive below the blob floor is never reindexed" in section
@@ -328,6 +342,8 @@ def test_operator_notes_skew_defers_filing_an_already_merged_run() -> None:
     assert "except below the blob floor" in section
     assert "Only the home reap is deferred" in section
     assert "still pauses the run" in section
+    assert "imp keeps the `completed` status, exits 0" in section
+    assert "(or `done`)" not in section
 
 
 def test_operator_notes_skew_scope_excludes_a_live_quest() -> None:

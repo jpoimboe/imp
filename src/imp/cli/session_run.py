@@ -72,10 +72,11 @@ class SettledOutcome:
 
     status: str | None
     events: list[dict[str, Any]]
+    merge_commit: str | None = None
 
     @property
     def completed(self) -> bool:
-        return self.status in ("merged", "done")
+        return self.status == "completed"
 
 
 def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
@@ -91,11 +92,14 @@ def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
         try:
             raw = archive_read.read_events(quest.control_root, quest.id)
             status = archive_read.status_of(quest.control_root, quest.id)
+            merge_commit = archive_read.merge_commit_of(quest.control_root, quest.id)
         except ArchiveMismatch:
             return SettledOutcome(status=None, events=[])
         return SettledOutcome(
-            status=status, events=_parse_jsonl(raw) if raw is not None else [])
-    return SettledOutcome(status=state.status, events=list(quest.event_log().read()))
+            status=status, events=_parse_jsonl(raw) if raw is not None else [],
+            merge_commit=merge_commit)
+    return SettledOutcome(status=state.status, events=list(quest.event_log().read()),
+                          merge_commit=state.merge_commit)
 
 
 def _closing_block(
@@ -163,7 +167,7 @@ def _closing_block(
     outcome = resolve_settled_outcome(quest)
     settled_intent = _resolve_intent(outcome.events)
     if outcome.completed:
-        merged = outcome.status == "merged"
+        merged = outcome.merge_commit is not None
         _emit_completed(
             quest,
             merged_base=quest.base_branch if merged else None,

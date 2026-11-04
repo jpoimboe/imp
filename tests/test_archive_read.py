@@ -44,9 +44,9 @@ def _archive(control: Path, cid: str, status: str) -> bytes:
 
 def test_read_state_and_quest_json_reconstruct_from_record(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    _archive(tmp_path, "alpha", "merged")
+    _archive(tmp_path, "alpha", "completed")
     st = json.loads(read_state_json(tmp_path, "alpha"))
-    assert st["status"] == "merged"
+    assert st["status"] == "completed"
     assert st["merge_commit"] == "c0ffee"
     cj = json.loads(read_quest_json(tmp_path, "alpha"))
     assert cj["title"] == "Alpha"
@@ -57,11 +57,11 @@ def test_read_state_and_quest_json_reconstruct_from_record(tmp_path: Path) -> No
 
 def test_completed_rows_single_query_carries_last_activity(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    _archive(tmp_path, "alpha", "merged")
+    _archive(tmp_path, "alpha", "completed")
     _archive(tmp_path, "zeta", "abandoned")
     rows = {r[0]: r for r in completed_rows(tmp_path)}
     # Row shape: (id, status, step, last_activity, title, created_at).
-    assert rows["alpha"][1] == "merged"
+    assert rows["alpha"][1] == "completed"
     assert rows["zeta"][1] == "abandoned"
     assert rows["alpha"][2] == "-"                       # step None -> "-"
     assert rows["alpha"][3] == "2026-06-01T00:00:09+00:00"  # MAX(events.ts)
@@ -78,8 +78,8 @@ def _git_init(root: Path) -> None:
 
 def test_status_of_returns_status_from_record(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    _archive(tmp_path, "alpha", "merged")
-    assert status_of(tmp_path, "alpha") == "merged"
+    _archive(tmp_path, "alpha", "completed")
+    assert status_of(tmp_path, "alpha") == "completed"
 
 
 def test_status_of_returns_none_when_not_archived(tmp_path: Path) -> None:
@@ -121,7 +121,7 @@ def test_read_quest_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
     legacy_rec = {
         "id": "old", "title": "Old", "base": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
-        "final_state": {"id": "old", "status": "merged"},
+        "final_state": {"id": "old", "status": "completed"},
         "events_hash": "abc",
     }
     record.write_record(records_root(tmp_path), legacy_rec)
@@ -218,7 +218,7 @@ def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
 
 def test_merge_commit_of_reads_recorded_sha(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    _archive(tmp_path, "alpha", "merged")
+    _archive(tmp_path, "alpha", "completed")
     assert merge_commit_of(tmp_path, "alpha") == "c0ffee"
 
 
@@ -233,7 +233,7 @@ def test_merge_commit_of_none_when_absent(tmp_path: Path) -> None:
         "id": "beta", "title": "Beta", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "beta-state.json"
-    state_json.write_text(json.dumps({"id": "beta", "status": "merged", "step": None}))
+    state_json.write_text(json.dumps({"id": "beta", "status": "completed", "step": None}))
     archive.archive_quest(
         tmp_path, "beta", events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

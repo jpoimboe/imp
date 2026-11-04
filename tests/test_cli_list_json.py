@@ -71,7 +71,7 @@ def _archive_timestampless(control: Path, cid: str) -> None:
         "created_at": "", "depends_on": [], "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
+        "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(control, cid, events_path=events,
                           quest_json_path=quest_json, state_json_path=state_json)
 
@@ -83,7 +83,7 @@ def test_board_json_orders_the_three_zones_and_tags_each(tmp_path: Path) -> None
     Quest.create_draft(tmp_path, title="Add OAuth", quest_id="idea03",
                        base_branch="main", origin="idea",
                        seed_opening="Add OAuth\nwire it up")
-    _archive_status(tmp_path, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd05", "completed", last_ts="2026-06-10T00:00:00+00:00")
     data = m._board_json(tmp_path, dispositions=set(m._DEFAULT_LIST_DISPOSITIONS),
                          cutoff=None)
     assert [(e["id"], e["zone"]) for e in data] == [
@@ -155,13 +155,13 @@ def test_board_json_backlog_entry_reports_provenance_and_readiness(
 def test_board_json_archive_entry_omits_step_and_nulls_empty_timestamps(
         tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd05", "completed", last_ts="2026-06-10T00:00:00+00:00")
     _archive_timestampless(tmp_path, "nots01")
     by_id = {e["id"]: e
-             for e in m._board_json(tmp_path, dispositions={"merged"}, cutoff=None)}
+             for e in m._board_json(tmp_path, dispositions={"completed"}, cutoff=None)}
     assert by_id["mrgd05"] == {
         "id": "mrgd05", "zone": "history", "title": "Mrgd05", "intent": None,
-        "status": "merged", "created": "2026-06-02T00:00:00+00:00",
+        "status": "completed", "created": "2026-06-02T00:00:00+00:00",
         "last_activity": "2026-06-10T00:00:00+00:00"}
     assert by_id["nots01"]["created"] is None
     assert by_id["nots01"]["last_activity"] is None
@@ -190,7 +190,7 @@ def _seed_board(control: Path) -> None:
     Quest.create_draft(control, title="Add OAuth", quest_id="idea03",
                        base_branch="main", origin="idea",
                        seed_opening="Add OAuth\nwire it up")
-    _archive_status(control, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(control, "mrgd05", "completed", last_ts="2026-06-10T00:00:00+00:00")
     _archive_status(control, "abnd06", "abandoned", last_ts="2026-06-09T00:00:00+00:00")
     _archive_status(control, "shlv07", "archived", last_ts="2026-06-08T00:00:00+00:00")
 
@@ -283,7 +283,7 @@ def test_list_json_emits_an_empty_array_for_an_empty_board(
 def test_list_json_emits_an_empty_array_when_no_row_matches(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
-    _archive_status(tmp_path, "mrgd05", "merged", last_ts="2026-06-10T00:00:00+00:00")
+    _archive_status(tmp_path, "mrgd05", "completed", last_ts="2026-06-10T00:00:00+00:00")
     assert _run(tmp_path, monkeypatch, ["list", "--json", "--abandoned"]) == "[]\n"
     assert _run(tmp_path, monkeypatch, ["list", "--abandoned"]) == \
         m._NO_FILTER_MATCH_MESSAGE + "\n"
