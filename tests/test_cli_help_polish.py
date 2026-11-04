@@ -80,6 +80,6 @@ def test_show_documents_the_verify_artifact() -> None:
         "Print a quest's detail card, or name an artifact to print just that: "
         "spec for the spec, verify for the last failing test-gate run. Reads "
         "the live quest files while a quest is in flight and falls back to the "
-        "archive once it is merged."
+        "archive once it is finished."
     )
     assert "{spec,verify}" in sp.format_help()

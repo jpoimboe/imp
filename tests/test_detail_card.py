@@ -540,6 +540,7 @@ def test_quest_json_status_is_completed_for_merged_quest(tmp_path: Path) -> None
     data = main._quest_json(tmp_path, "2026-06-20-mgj01")
     assert data is not None
     assert data["status"] == "completed"
+    assert data["merge_commit"] == "deadbeefcafe"
 
 
 def test_quest_json_status_is_completed_for_unmerged_quest(tmp_path: Path) -> None:
@@ -555,6 +556,8 @@ def test_quest_json_status_is_completed_for_unmerged_quest(tmp_path: Path) -> No
     data = main._quest_json(tmp_path, "2026-06-20-cmj01")
     assert data is not None
     assert data["status"] == "completed"
+    assert "merge_commit" in data
+    assert data["merge_commit"] is None
 
 
 def test_quest_card_shows_completed_for_archived_merged_quest(tmp_path: Path) -> None:
@@ -596,6 +599,33 @@ def test_quest_card_shows_completed_for_archived_no_merge_quest(tmp_path: Path) 
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "completed" in status_line
     assert "merged" not in status_line and "done" not in status_line
+
+
+def test_quest_json_carries_merge_commit_for_archived_quests(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    for qid, merge_commit in (("2026-06-20-ajm01", "beefcafe1234"),
+                              ("2026-06-20-ajn01", None)):
+        events = tmp_path / f"{qid}.jsonl"
+        events.write_text("")
+        quest_json = tmp_path / f"{qid}.quest.json"
+        quest_json.write_text(json.dumps({
+            "id": qid, "title": "Archived", "base_branch": "main",
+            "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+        state: dict[str, object] = {"id": qid, "status": "completed", "step": None}
+        if merge_commit is not None:
+            state["merge_commit"] = merge_commit
+        state_json = tmp_path / f"{qid}.state.json"
+        state_json.write_text(json.dumps(state))
+        archive.archive_quest(
+            tmp_path, qid, events_path=events,
+            quest_json_path=quest_json, state_json_path=state_json)
+    merged = main._quest_json(tmp_path, "2026-06-20-ajm01")
+    unmerged = main._quest_json(tmp_path, "2026-06-20-ajn01")
+    assert merged is not None and unmerged is not None
+    assert merged["merge_commit"] == "beefcafe1234"
+    assert "merge_commit" in unmerged
+    assert unmerged["merge_commit"] is None
+    assert '"merge_commit": null' in json.dumps(unmerged)
 
 
 def test_quest_json_omits_seed_opening_for_an_unstarted_draft(tmp_path: Path) -> None:

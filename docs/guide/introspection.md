@@ -88,7 +88,8 @@ the charge (its share of the weekly quota window, or the dollar cost) — then a
 `ledger:` section holding the full per-step table. A quest that has not run a
 step yet shows none of the three, and neither does one still in the backlog.
 A quest that completed with a recorded merge SHA also shows a `merge_commit:`
-line beneath `base_branch:`. A quest halted as paused or error shows a
+line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
+when the quest has none). A quest halted as paused or error shows a
 `reason:` line beneath `status:` naming why it stopped; `--json` carries the
 raw token as `pause_reason`. A running quest shows a `vars:` line of its
 effective workflow variables; one still in the backlog shows the overrides it

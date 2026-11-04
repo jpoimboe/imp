@@ -2124,6 +2124,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "created": card.created or None,
         "last_activity": card.last or None,
         "base_branch": card.base_branch,
+        "merge_commit": card.merge_commit,
         "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
@@ -4625,7 +4626,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Print a quest's detail card, or name an artifact to print just "
             "that: spec for the spec, verify for the last failing test-gate "
             "run. Reads the live quest files while a quest is in flight and "
-            "falls back to the archive once it is merged."),
+            "falls back to the archive once it is finished."),
     )
     p_show.add_argument(
         "token", nargs="?", default=None,
