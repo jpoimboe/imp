@@ -197,8 +197,9 @@ def _index_is_complete(control_root: Path) -> bool:
 
 
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
-_DATA_VERSION = 15
-_UPGRADABLE_FROM = 14   # the one stored version this install heals in place
+_DATA_VERSION = 16
+_UPGRADABLE_FROM = 15   # the one stored version this install heals in place
+_RETIRED_FINISHED = ("merged", "done")
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -221,22 +222,26 @@ def _write_data_version(control_root: Path, version: int) -> None:
         data_version_path(control_root), str(version).encode("ascii"))
 
 
-def _rename_live_status(state_json: Path) -> None:
+def heal_live_status(state_json: Path) -> bytes | None:
+    """Durably rewrite a retired `merged`/`done` status to `completed`; the new
+    bytes, or None when nothing changed. Retired with the 15 -> 16 hop at the next bump."""
     try:
         state = json.loads(state_json.read_bytes())
     except (OSError, ValueError):
-        return
-    if state.get("status") != "shelved":
-        return
-    state["status"] = "archived"
-    durable.durable_replace_bytes(
-        state_json, json.dumps(state, indent=2, sort_keys=True).encode("utf-8"))
+        return None
+    if state.get("status") not in _RETIRED_FINISHED:
+        return None
+    state["status"] = "completed"
+    healed = json.dumps(state, indent=2, sort_keys=True).encode("utf-8")
+    durable.durable_replace_bytes(state_json, healed)
+    return healed
 
 
 def _upgrade_to_current(control_root: Path) -> None:
-    """One-shot 14 -> 15: rename the stored status `shelved` to `archived` in every
-    record and live home, rebuild the index so its status column matches, then stamp
-    the marker. Status lives only in the record, so no blob is rewritten."""
+    """One-shot 15 -> 16: collapse the stored statuses `merged` and `done` into
+    `completed` in every record and live home, rebuild the index so its status
+    column matches, then stamp the marker. Status lives only in the record, so no
+    blob is rewritten."""
     root = archive_root(control_root)
     if root.exists() and not os.access(root, os.W_OK):
         return
@@ -246,13 +251,13 @@ def _upgrade_to_current(control_root: Path) -> None:
         records_dir = records_root(control_root)
         for cid in record.list_record_ids(records_dir):
             rec = record.read_record(records_dir, cid)
-            if rec is None or rec["final_state"].get("status") != "shelved":
+            if rec is None or rec["final_state"].get("status") not in _RETIRED_FINISHED:
                 continue
-            rec["final_state"]["status"] = "archived"
+            rec["final_state"]["status"] = "completed"
             record.write_record(records_dir, rec)
         homes = project_state_dir(control_root) / "quests"
         for qid in live_quest_ids(control_root):
-            _rename_live_status(homes / qid / "state" / "state.json")
+            heal_live_status(homes / qid / "state" / "state.json")
         rebuild_index(control_root)
         _write_data_version(control_root, _DATA_VERSION)
 
