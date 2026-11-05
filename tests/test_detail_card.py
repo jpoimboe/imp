@@ -176,7 +176,7 @@ def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-src01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
-    # The event log's phase_label ("EVENT PHASE") must NOT be the card's source.
+    # The event log's phase_label ("EVENT PHASE") belongs to the ledger, not the step: line.
     (cdir / "events.jsonl").write_text(json.dumps({
         "type": "step_started", "agent_id": None,
         "timestamp": "2026-06-20T11:00:01+00:00",
@@ -185,9 +185,10 @@ def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     State(id="2026-06-20-src01", status="paused", step="spec-writer",
           step_label="writing spec", phase_label="state phase",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW, color=False))
-    assert "state phase · writing spec" in card    # sourced from persisted field
-    assert "EVENT PHASE" not in card               # not the event-log scan
+    card = main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW, color=False)
+    step_line = next(ln for ln in card if ln.startswith("step:"))
+    assert "state phase · writing spec" in step_line   # sourced from persisted field
+    assert "EVENT PHASE" not in step_line              # not the event-log scan
 
 
 def test_latest_phase_label_helper_removed() -> None:

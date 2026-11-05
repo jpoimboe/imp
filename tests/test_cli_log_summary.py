@@ -54,9 +54,9 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     assert f"default  ·  {slug}  ·  paused\n" in out   # identity only
     assert "·  4m 45s" not in out                       # the total moved out
     assert "                 time  in  out  cost\n" in out
-    assert "spec\n" in out
+    assert "spec phase\n" in out
     assert "  spec-writer  1m 30s" in out
-    assert "plan\n" in out
+    assert "plan phase\n" in out
     assert "  plan-writer  3m 10s" in out
     assert "\n  total        4m 45s" in out
 
