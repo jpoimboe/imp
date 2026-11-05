@@ -354,6 +354,12 @@ def _split_phase_label(label: str | None) -> tuple[str | None, str | None]:
     return head, (tail or None)
 
 
+@dataclass(frozen=True)
+class HeldRoute:
+    target_step: str
+    source_text: str | None  # None: the source is hidden or unmatched
+
+
 @dataclass
 class ResetWait:
     verb: str             # a wait verb from _RETRY_VERB (any of the five)
@@ -653,6 +659,10 @@ class NarrativeBuilder:
         self._auth_mode_by_provider: dict[str, str] = {}
         self._quota_by_provider: dict[str, QuotaReading] = {}
         self._last_step_provider: str | None = None
+        # The step the latest step_completed closed, until the next step_started.
+        self._last_completed: StepNode | None = None
+        # A backward route; its target's label and visibility arrive on step_started.
+        self._held_route: HeldRoute | None = None
 
     # -- public API -----------------------------------------------------------
     @property
@@ -1492,10 +1502,32 @@ def _append_resume_header(step: StepNode, route_label: str | None) -> None:
             model=step.model, route_label=route_label))
 
 
+def _route_line(held: HeldRoute, p: dict[str, Any]) -> str | None:
+    target_visible = bool(p.get("show_label", True))
+    if held.source_text is None and target_visible:
+        return None  # the target's own line says it
+    target = p.get("label") or (p.get("step") if target_visible else None)
+    if target is None:
+        return None
+    return f"↩ {target}" if held.source_text is None else f"↩ {held.source_text} → {target}"
+
+
+def _flush_held_route(self: NarrativeBuilder, p: dict[str, Any]) -> None:
+    held, self._held_route = self._held_route, None
+    # A different step means the run did not take the route (a crash re-runs the source).
+    if held is None or held.target_step != p.get("step"):
+        return
+    text = _route_line(held, p)
+    if text is not None:
+        self._append(LiteralTextNode(text=text, color_role="lifecycle"))
+
+
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._cut_off.clear()
     self._flush_pending_rename()
     self._flush_burst()
+    _flush_held_route(self, p)
+    self._last_completed = None
     # Consumed HERE, not at the _resuming capture below: the internal-retry branch
     # returns early and must still see it.
     pause, self._pending_pause = self._pending_pause, None
@@ -1629,6 +1661,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     self._finalize_direct_descendant_subtrees(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
+    self._last_completed = node
     if node is not None:
         # Un-hold any trailing held narration — agent_result won't fire for
         # steps that end without a complete_step call.
@@ -1662,17 +1695,11 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 
 def _h_step_transition(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # Backward transition (engine-declared): the source step was already popped,
-    # so _append lands the marker in the open phase (or root) — the bounce point.
-    self._flush_pending_rename()
-    self._flush_burst()
-    frm = p.get("from_step", "?")
-    to = p.get("target_step", "?")
-    reason = p.get("reason")
-    text = f"↩ {frm} → {to}"
-    if reason:
-        text += f"  ({reason})"
-    self._append(LiteralTextNode(text=text, color_role="lifecycle"))
+    source = self._last_completed
+    source_text = None
+    if source is not None and source.show_label and source.name == p.get("from_step"):
+        source_text = source.label or source.name
+    self._held_route = HeldRoute(target_step=p.get("target_step", "?"), source_text=source_text)
 
 
 NarrativeBuilder._HANDLERS["step_transition"] = _h_step_transition

@@ -301,7 +301,7 @@ spec phase · reviewing spec · claude-opus-5-5
 
 spec phase · reviewing spec · complete · 2 major, 1 minor · 4m 54s
 
-↩ spec-reviewer → spec-finalizer  (Here's review feedback to address:)
+↩ reviewing spec → addressing spec review feedback
 
 spec phase · addressing spec review feedback · claude-opus-5-5
 
@@ -649,8 +649,6 @@ implementation phase · plan 1/2 · task 1/1 · claude-opus-5-5
 implementation phase · plan 1/2 · task 1/1 · complete · 4m 58s
 
 implementation phase · plan 1/2 · running tests · complete · 1m 11s
-
-↩ check-next-plan → plan-writer
 
 implementation phase · plan 1/2 complete · 6m 9s
 

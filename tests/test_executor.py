@@ -4612,9 +4612,9 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
 @pytest.mark.bare_sandbox
 async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> None:
     """A gate whose `else` resumes an earlier step emits exactly one
-    `step_transition` event naming source, target, the backward flag, and a
-    reason summarized from the gate feedback — and it is logged after the gate's
-    own step_completed (renders at the bounce point, not the bottom)."""
+    `step_transition` event carrying exactly source, target and the backward
+    flag, logged after the gate's own step_completed. The resumed step still
+    receives the gate's feedback."""
     import subprocess
 
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -4648,9 +4648,12 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
+    feedback: list[str | None] = []
+
     class _Runner:
         async def run(self, invocation: AgentInvocation):
             _persist_initial(invocation)
+            feedback.append(invocation.retry_feedback)
             yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
@@ -4672,11 +4675,12 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     events = list(quest.event_log().read())
     trans = [e for e in events if e["type"] == "step_transition"]
     assert len(trans) == 1
-    p = trans[0]["payload"]
-    assert p["from_step"] == "gate"
-    assert p["target_step"] == "lead"
-    assert p["backward"] is True
-    assert p["reason"] is not None and "gate" in p["reason"].lower()
+    assert trans[0]["payload"] == {
+        "from_step": "gate", "target_step": "lead", "backward": True}
+
+    assert len(feedback) == 2
+    assert feedback[0] is None
+    assert feedback[1] is not None and "50 coverage issues" in feedback[1]
 
     types = [e["type"] for e in events]
     ti = types.index("step_transition")
@@ -4975,6 +4979,64 @@ async def test_route_label_seeds_step_label_on_continue(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.step == "check"
     assert state.step_label == "fixing test failures"   # route_label wins over "second gate"
+
+
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_bounce_through_shipped_route_label_reaches_every_surface(tmp_path: Path) -> None:
+    """A shipped route's label reaches `imp list`, the status bar and Telegram's divider."""
+    from imp.assets import bundled_workflow_dir
+    from imp.cli.narrative import NarrativeBuilder
+    from imp.engine.loader import load_workflow
+    from imp.engine.types import Goto
+    from imp.remote.drivers.telegram import step_divider
+
+    shipped = load_workflow(bundled_workflow_dir("default"))
+    gate = next(s for s in shipped.flat_steps() if s.name == "converge-verify")
+    route = next(r for r in gate.rules
+                 if isinstance(r.action, Goto) and r.action.target == "deferred-sweep")
+    label = json.dumps(route.label)
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "lead.md").write_text(
+        "---\nname: lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars:\n  bounced: {type: bool, default: false}\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n  - name: work\n    steps:\n"
+        "      - name: lead\n        file: agents/lead.md\n        tier: low\n"
+        "        rules:\n"
+        "          - {if: {bounced: true}, pause: true}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n        command: 'exit 1'\n"
+        "        rules:\n"
+        f"          - {{else: true, set: {{bounced: true}}, resume: lead, label: {label}}}\n"
+    )
+    _write_fake_config(tmp_path)
+    assert _git(tmp_path, "init").returncode == 0
+    quest = _make_quest(tmp_path)
+    _register_fake({"status": "Success"})
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.PAUSED
+
+    state = State.load(quest.state_dir)
+    assert (state.step, state.step_label) == ("lead", "triaging slow test failures")
+
+    events = list(quest.event_log().read())
+    bounce = next(i for i, e in enumerate(events) if e["type"] == "step_transition")
+    started = next(e for e in events[bounce:] if e["type"] == "step_started")
+    assert started["payload"]["step"] == "lead"
+    builder = NarrativeBuilder()
+    for event in events[:events.index(started) + 1]:
+        builder.add(event)
+    activity = builder.current_activity()
+    assert activity is not None
+    assert activity.verb == "triaging slow test failures"
+    assert step_divider(started) == "— triaging slow test failures —"
 
 
 @pytest.mark.anyio
