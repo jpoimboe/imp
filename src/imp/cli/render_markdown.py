@@ -219,10 +219,14 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.PhaseNode):
-        yield _heading(level, esc(node.label or node.name))
+        yield _heading(level, esc(node.label or f"{node.name} phase"))
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.StepNode):
+        others = [c for c in node.children if not isinstance(c, nv.BreadcrumbLine)]
+        if rt.frame_suppressed(node) and not any(
+                _walk_children(others, full=full, cats=cats, level=level + 1, esc=esc)):
+            return
         resume = " (resume)" if node.resumed else ""
         yield _heading(level, esc(rt._step_header_label(node) + resume))
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
@@ -455,10 +459,12 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
     ]
     cells = [total_last]
     grouped: list[tuple[str, list[str]]] = []
+    cur_phase: str | None = None
     for row in summary:
-        if not grouped or grouped[-1][0] != row.phase:
-            grouped.append((row.phase, []))
-        step = esc(row.step).replace("|", "\\|")
+        if row.phase != cur_phase:
+            cur_phase = row.phase
+            grouped.append((row.phase_text, []))
+        step = esc(row.step_text).replace("|", "\\|")
         last = _last_cell(row.totals, row.subtree_units, column)
         cells.append(last)
         grouped[-1][1].append(
@@ -471,8 +477,8 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
                 f" | {_md_cells(sub.usage, sub_last)} |")
-    for phase, rows in grouped:
-        blocks.append("\n".join([_heading(2, esc(phase)),
+    for phase_text, rows in grouped:
+        blocks.append("\n".join([_heading(2, esc(phase_text)),
                                  table_header, _MD_RULE, *rows]))
     total_rows = [
         f"| total | {_dur_text(work)} | {_md_cells(total, total_last)} |"]

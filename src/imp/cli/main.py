@@ -1826,7 +1826,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             continue
         print(quest_row.format_quest_line(
             quest_id=card.quest_id, title=card.title, status=card.status,
-            step=card.step, step_label=card.step_label, last_iso=card.last,
+            step=card.step, step_label=card.step_label,
+            phase_label=card.phase_label, last_iso=card.last,
             now=now, color=color, name_width=name_w,
             intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
             file=sys.stderr)
@@ -2614,6 +2615,20 @@ def _log_show_set(full: bool, show: list[str], hide: list[str]) -> frozenset[str
     return frozenset((base | set(show)) - set(hide))
 
 
+def _reject_unknown_step(
+    steps: set[str], indexed: list[tuple[int, dict[str, Any]]], quest_id: str,
+) -> bool:
+    """Report one requested step this quest never ran, listing the ids it did."""
+    from imp.engine import events_index as ei
+    known = [s.name for s in ei.step_windows(indexed)]
+    missing = sorted(steps - set(known))
+    if not missing:
+        return False
+    listing = f"; steps: {', '.join(known)}" if known else ""
+    _emit_cli_error(f"no step {missing[0]!r} in {quest_id}{listing}")
+    return True
+
+
 def _select_log_events(
     args: argparse.Namespace, quest_id: str, events: list[dict[str, Any]],
 ) -> list[dict[str, Any]] | int:
@@ -2638,12 +2653,8 @@ def _select_log_events(
     except ei.RangeSpecError as exc:
         _emit_cli_error(f"{exc}")
         return 2
-    if steps is not None:
-        known = {s.name for s in ei.step_windows(indexed)}
-        missing = sorted(steps - known)
-        if missing:
-            _emit_cli_error(f"no step {missing[0]!r} in {quest_id}")
-            return 2
+    if steps is not None and _reject_unknown_step(steps, indexed, quest_id):
+        return 2
     selected = ei.select_event_lines(
         indexed, agents=agents, ranges=intervals or None,
         step_names=steps, limit=args.limit, handle_map=handle_map)
@@ -4170,12 +4181,8 @@ def _cmd_events(args: argparse.Namespace) -> int:
         _emit_cli_error(f"{exc}")
         return 2
 
-    if steps is not None:
-        known = {s.name for s in ei.step_windows(indexed)}
-        missing = sorted(steps - known)
-        if missing:
-            _emit_cli_error(f"no step {missing[0]!r} in {quest_id}")
-            return 2
+    if steps is not None and _reject_unknown_step(steps, indexed, quest_id):
+        return 2
 
     leaf = bool(types or subtypes or agents or intervals or args.all
                 or args.limit is not None)

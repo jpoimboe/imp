@@ -389,6 +389,21 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     return sorted(added)
 
 
+def _fill_missing_labels(
+    quest: Quest, state: State, workflow: Workflow, log: EventLog,
+) -> bool:
+    """Fill labels a parked quest lacks from its workflow; True if either changed."""
+    step = next((s for s in workflow.flat_steps() if s.name == state.step), None)
+    if step is None:
+        return False
+    before = (state.step_label, state.phase_label)
+    if state.step_label is None:
+        state.step_label = state.route_label or render_label(step.label, quest, log, state)
+    if state.phase_label is None:
+        state.phase_label = render_label(step.phase_label, quest, log, state)
+    return (state.step_label, state.phase_label) != before
+
+
 def _wipe_step_scratch(quest: Quest) -> None:
     """Empty Quest.tmp_dir IN PLACE; called only on a genuine step advance. The
     sandbox binds this dir, and a bind resolves the inode it saw when the namespace
@@ -543,6 +558,8 @@ async def run_quest(
         if backfilled:
             state.save(quest.state_dir)
             _emit(log, "vars_backfilled", {"names": backfilled}, agent_id=None)
+        if _fill_missing_labels(quest, state, workflow, log):
+            state.save(quest.state_dir)
         sandbox_policy = _build_sandbox_policy(quest, config, log)
         policy_root = quest.project_root
 

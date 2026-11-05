@@ -37,7 +37,7 @@ Only `running` and `waiting` are derived and never stored; every other word is
 stored verbatim and shown as-is (only `merge_blocked` renders with a space).
 There is no `draft` status word: an
 un-materialized quest shows its real derived status (`new`/`paused`), with its
-`(threshold)` step marking that it is still being scoped.
+`(scoping phase · chatting)` label marking that it is still being scoped.
 
 ## Zones: active list, backlog, history
 

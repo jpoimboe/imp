@@ -89,6 +89,16 @@ class StepRow:
     usage: RowUsage = field(default_factory=RowUsage)
     subagents: list[SubagentRow] = field(default_factory=list)
     units: Units = NO_UNITS
+    label: str | None = None
+    phase_label: str | None = None
+
+    @property
+    def step_text(self) -> str:
+        return self.label or self.step
+
+    @property
+    def phase_text(self) -> str:
+        return self.phase_label or f"{self.phase} phase"
 
     @property
     def key(self) -> str:
@@ -214,14 +224,19 @@ def build_summary(events: Iterable[dict[str, Any]],
             # Resume re-entry: same step still open — fold into existing occurrence.
             if (open_row is not None and open_row.end_ts is None
                     and open_row.step == step and open_row.phase == phase):
+                open_row.label = open_row.label or p.get("label")
                 continue
             if open_row is not None and open_row.end_ts is None:
                 _contain_subs(open_row, ts)
                 if ts is not None:
                     open_row.end_ts = ts
                     open_row.end_inferred = True
-            open_row = StepRow(phase=phase, step=step, start_ts=ts)
+            open_row = StepRow(phase=phase, step=step, start_ts=ts,
+                               label=p.get("label"), phase_label=p.get("phase_label"))
             rows.append(open_row)
+        elif etype == "step_label_updated":
+            if open_row is not None and open_row.end_ts is None:
+                open_row.label = p.get("label")
         elif etype == "step_completed":
             if open_row is not None and open_row.end_ts is None:
                 open_row.end_ts = ts
@@ -448,7 +463,7 @@ def _column_widths(summary: list[StepRow], open_label: str,
                    total_last: str,
                    column: QuotaColumn | None) -> tuple[int, int, int, int, int]:
     """Widths measured across step rows, subagent rows, the totals row, and title labels."""
-    names = [len(r.step) for r in summary]
+    names = [len(r.step_text) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
     names.append(len(_TOTAL_LABEL))
     names += [len(p) + 2 for p, _ in (column.breakdown if column else ())]
@@ -484,7 +499,7 @@ def _step_line(row: StepRow, *, last: str, hue: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
-    name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
+    name = pal.ansi(f"{row.step_text:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
     return f"  {name}  {dur}  {cells}"
@@ -564,7 +579,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.phase != cur_phase:
             cur_phase = row.phase
             hues, next_hue = {}, 0
-            lines.append(pal.ansi(row.phase, *pal.NODE_COLORS["phase"], enabled=color))
+            lines.append(pal.ansi(row.phase_text, *pal.NODE_COLORS["phase"], enabled=color))
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1

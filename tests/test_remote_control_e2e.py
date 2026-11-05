@@ -54,7 +54,7 @@ async def test_e2e_chat_commands_round_trip(
         created.append(prompt)
         return "n3wq1d"
     listed = [QuestInfo(id="q1w2e3", title="Listed",
-                         status="running", step="plan")]
+                         status="running", label="plan")]
     spath = socket_path(tmp_path)
     shutdown = anyio.Event()
 

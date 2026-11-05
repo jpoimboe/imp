@@ -120,7 +120,7 @@ def test_help_text_no_longer_mentions_save() -> None:
 
 
 def test_listresult_defaults_resident_to_empty_frozenset() -> None:
-    result = ListResult([QuestInfo(id="a", title="A", status="running", step="plan")])
+    result = ListResult([QuestInfo(id="a", title="A", status="running", label="plan")])
     assert result.resident == frozenset()
 
 

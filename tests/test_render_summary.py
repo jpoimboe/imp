@@ -158,11 +158,13 @@ def test_audit_error_does_not_mark_errored():
     assert rows[-1].errored is False
 
 
-def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
+def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False,
+         label=None, phase_label=None):
     start = "2026-01-01T00:00:00+00:00"
     end = None if open_ else f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
     return StepRow(phase=phase, step=step, start_ts=start, end_ts=end,
-                   wait_seconds=wait, errored=errored)
+                   wait_seconds=wait, errored=errored,
+                   label=label, phase_label=phase_label)
 
 
 _HDR = SummaryHeader(workflow="feature", quest_id="abc",
@@ -175,7 +177,7 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     assert lines == [
         "feature  ·  abc  ·  completed",
         "                 time  in  out  cost",
-        "plan",
+        "plan phase",
         "  plan-writer  1m 30s   —    —     —",
         "",
         "  total        39m 2s   —    —     —",
@@ -192,10 +194,10 @@ def test_plain_multi_step_shows_column_padding():
     assert lines == [
         "feature  ·  abc  ·  completed",
         "                 time  in  out  cost",
-        "plan",
+        "plan phase",
         "  plan-writer  1m 30s   —    —     —",
         "  plan-review   2m 0s   —    —     —",
-        "implement",
+        "implement phase",
         "  verify          30s   —    —     —",
         "",
         "  total        39m 2s   —    —     —",
@@ -1707,12 +1709,12 @@ def test_the_reference_after_state_renders_verbatim():
     assert render_summary(rows, header=hdr, color=False, width=80) == [
         "default  ·  zita45  ·  completed",
         "                                       time      in    out    cost",
-        "scoping",
+        "scoping phase",
         "  threshold                          12m 0s  163.0k   3.0k  $0.27*",
-        "build",
+        "build phase",
         "  coder                              36m 0s    3.7M  64.0k  $6.16*",
         "    ↳ explorer (exploring codebase)   7m 0s  350.0k   4.0k  $0.40*",
-        "integration",
+        "integration phase",
         "  integrate                           2m 0s       —      —       —",
         "",
         "  total                              52m 0s    3.9M  67.0k  $6.43*",
@@ -1813,3 +1815,117 @@ def test_suppressing_the_header_line_drops_exactly_that_line(color: bool) -> Non
     assert not any("feature" in ln or "completed" in ln for ln in bare)
     assert "cost" in bare[0]          # the dim title row is now first
     assert bare[-1].startswith("  total")
+
+
+def _started_labeled(step: str, phase: str, ts: str, label: str | None,
+                     phase_label: str | None = None) -> dict:
+    event = _started(step, phase, ts)
+    event["payload"]["label"] = label
+    if phase_label is not None:
+        event["payload"]["phase_label"] = phase_label
+    return event
+
+
+def _label_pushed(label: str, ts: str) -> dict:
+    return {"type": "step_label_updated", "timestamp": ts, "agent_id": "lead",
+            "payload": {"label": label}}
+
+
+def test_row_reads_its_labels_from_the_started_payload():
+    row = build_summary([
+        _started_labeled("threshold", "threshold", "2026-01-01T00:00:00+00:00",
+                         "chatting", "scoping phase"),
+    ])[0]
+    assert (row.step_text, row.phase_text) == ("chatting", "scoping phase")
+    assert (row.step, row.phase) == ("threshold", "threshold")
+
+
+def test_unlabeled_row_shows_its_raw_id_and_the_phase_fallback():
+    row = build_summary([
+        _started_labeled("threshold", "threshold", "2026-01-01T00:00:00+00:00", None),
+    ])[0]
+    assert (row.step_text, row.phase_text) == ("threshold", "threshold phase")
+
+
+def test_label_push_moves_the_open_row_to_the_last_task_reached():
+    rows = build_summary([
+        _started_labeled("task-lead", "implement", "2026-01-01T00:00:00+00:00", "task 1/3"),
+        _label_pushed("task 2/3", "2026-01-01T00:01:00+00:00"),
+        _label_pushed("task 3/3", "2026-01-01T00:02:00+00:00"),
+        _completed("task-lead", "2026-01-01T00:03:00+00:00"),
+    ])
+    assert [r.step_text for r in rows] == ["task 3/3"]
+
+
+def test_label_push_with_no_open_row_changes_nothing():
+    rows = build_summary([
+        _label_pushed("before any step", "2026-01-01T00:00:00+00:00"),
+        _started_labeled("task-lead", "implement", "2026-01-01T00:00:01+00:00", "task 1/1"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+        _label_pushed("after the step", "2026-01-01T00:01:01+00:00"),
+    ])
+    assert [r.step_text for r in rows] == ["task 1/1"]
+
+
+def test_resume_reentry_keeps_the_rows_label():
+    rows = build_summary([
+        _started_labeled("task-lead", "implement", "2026-01-01T00:00:00+00:00", "task 1/2"),
+        _label_pushed("task 2/2", "2026-01-01T00:01:00+00:00"),
+        _started_labeled("task-lead", "implement", "2026-01-01T00:02:00+00:00", "task 1/2"),
+    ])
+    assert [r.step_text for r in rows] == ["task 2/2"]
+
+
+def test_resume_reentry_fills_only_an_empty_step_label():
+    rows = build_summary([
+        _started_labeled("threshold", "threshold", "2026-01-01T00:00:00+00:00", None),
+        _started_labeled("threshold", "threshold", "2026-01-01T00:01:00+00:00",
+                         "chatting", "scoping phase"),
+    ])
+    assert [(r.step_text, r.phase_text) for r in rows] == [("chatting", "threshold phase")]
+
+
+def test_row_key_ignores_the_label():
+    ts = "2026-01-01T00:00:00+00:00"
+    plain = build_summary([_started("task-lead", "implement", ts)])[0]
+    labeled = build_summary([
+        _started_labeled("task-lead", "implement", ts, "task 1/2", "implementation phase"),
+        _label_pushed("task 2/2", "2026-01-01T00:01:00+00:00"),
+    ])[0]
+    assert labeled.key == plain.key == f"step:implement/task-lead@{ts}"
+
+
+def test_numeric_columns_stay_aligned_with_the_longest_label():
+    rows = [_row("spec", "spec-finalizer", 90, label="addressing spec review feedback"),
+            _row("spec", "verify", 30)]
+    assert render_summary(rows, header=_HDR, color=False, width=80) == [
+        "feature  ·  abc  ·  completed",
+        "                                     time  in  out  cost",
+        "spec phase",
+        "  addressing spec review feedback  1m 30s   —    —     —",
+        "  verify                              30s   —    —     —",
+        "",
+        "  total                            39m 2s   —    —     —",
+    ]
+
+
+def test_rows_sharing_a_raw_phase_stay_one_group_under_the_first_heading():
+    rows = [_row("plan", "plan-writer", 90, phase_label="planning phase · plan 1/3"),
+            _row("plan", "plan-review", 30, phase_label="planning phase · plan 2/3")]
+    lines = render_summary(rows, header=_HDR, color=False, width=80)
+    assert "planning phase · plan 1/3" in lines
+    assert not any("plan 2/3" in ln for ln in lines)
+
+
+def test_two_visits_to_one_raw_step_share_a_hue_whatever_their_labels():
+    rows = [_row("spec", "spec-finalizer", 10, label="writing spec"),
+            _row("spec", "spec-reviewer", 20, label="reviewing spec"),
+            _row("spec", "spec-finalizer", 30, label="addressing feedback")]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+
+    def line(text: str) -> str:
+        return next(ln for ln in out if text in ln)
+
+    assert "\x1b[34m" in line("writing spec")          # 1st hue: step-blue
+    assert "\x1b[35m" in line("reviewing spec")        # 2nd hue: magenta
+    assert "\x1b[34m" in line("addressing feedback")   # the raw step's hue again

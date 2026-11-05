@@ -88,6 +88,16 @@ def test_line_selection(
     assert _route_lines(events) == ([expected] if expected else [])
 
 
+def test_hidden_unlabelled_target_adds_no_output() -> None:
+    head = [*_ran_source(), _transition()]
+    target = [
+        _started(TGT, show_label=False, kind="script"),
+        _ev("step_completed", step=TGT, kind="script",
+            action={"verb": "continue"}, var_mutations={}),
+    ]
+    assert _lines([*head, *target]) == _lines(head)
+
+
 def test_source_without_a_label_shows_its_step_name() -> None:
     events = [*_ran_source(label=None), _transition(), _started(TGT, label=TGT_LABEL)]
     assert _route_lines(events) == [f"↩ {SRC} → {TGT_LABEL}"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -334,3 +335,189 @@ def test_a_quota_attribution_failure_prints_no_card(
     assert captured.out == ""
     assert ("cannot reach the quest store for quota attribution "
             "(quota_neighbours): neighbour scan exploded") in captured.err
+
+
+def _at(seconds: int) -> str:
+    return (datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)).isoformat()
+
+
+def _visit(start: int, secs: int, step: str, phase: str, label: str | None,
+           phase_label: str | None, *inner: dict[str, object],
+           ) -> list[dict[str, object]]:
+    payload: dict[str, object] = {"step": step, "phase": phase, "label": label}
+    if phase_label is not None:
+        payload["phase_label"] = phase_label
+    return [
+        {"type": "step_started", "timestamp": _at(start), "agent_id": None,
+         "payload": payload},
+        *inner,
+        {"type": "step_completed", "timestamp": _at(start + secs), "agent_id": None,
+         "payload": {"step": step, "action": {"verb": "continue"}}},
+    ]
+
+
+_SCOPING = "scoping phase"
+_SPEC = "spec phase"
+_PLAN = "planning phase · plan 1/3"
+_IMPLEMENT = "implementation phase · plan 1/3"
+
+_LABELED_EVENTS: list[dict[str, object]] = [
+    *_visit(0, 354, "threshold", "threshold", "chatting", _SCOPING,
+            {"type": "tool_call", "id": "ev1", "timestamp": _at(60), "agent_id": "a1",
+             "payload": {"name": "sub_agent", "id": "b1", "id_ns": "block",
+                         "label": "exploring codebase",
+                         "input": {"subagent_name": "explorer"}}},
+            {"type": "tool_result", "timestamp": _at(157), "agent_id": "a1",
+             "payload": {"id": "b1", "id_ns": "block"}}),
+    *_visit(354, 0, "scope-code-check", "threshold", "checking for stray commits", _SCOPING),
+    *_visit(354, 53, "spec-finalizer", "spec", "writing spec", _SPEC),
+    *_visit(407, 0, "spec-verify-commit", "spec", "checking spec commit", _SPEC),
+    *_visit(407, 331, "spec-reviewer", "spec", "reviewing spec", _SPEC),
+    *_visit(738, 113, "spec-finalizer", "spec", "addressing spec review feedback", _SPEC),
+    *_visit(851, 1550, "plan-writer", "plan", "writing plan", _PLAN),
+    *_visit(2401, 1091, "task-lead", "implement", "task 1/2", _IMPLEMENT,
+            {"type": "step_label_updated", "timestamp": _at(2700), "agent_id": "a2",
+             "payload": {"label": "task 2/2"}}),
+    *_visit(3492, 0, "verify", "implement", "running tests", _IMPLEMENT),
+    *_visit(3492, 38, "task-lead", "implement", "fixing test failures", _IMPLEMENT),
+]
+
+_LABELED_LEDGER = [
+    "                                        time  in  out  cost",
+    "scoping phase",
+    "  chatting                            5m 54s   —    —     —",
+    "    ↳ explorer (exploring codebase)   1m 37s   —    —     —",
+    "  checking for stray commits              0s   —    —     —",
+    "spec phase",
+    "  writing spec                           53s   —    —     —",
+    "  checking spec commit                    0s   —    —     —",
+    "  reviewing spec                      5m 31s   —    —     —",
+    "  addressing spec review feedback     1m 53s   —    —     —",
+    "planning phase · plan 1/3",
+    "  writing plan                       25m 50s   —    —     —",
+    "implementation phase · plan 1/3",
+    "  task 2/2                           18m 11s   —    —     —",
+    "  running tests                           0s   —    —     —",
+    "  fixing test failures                   38s   —    —     —",
+    "",
+    "  total                              58m 50s   —    —     —",
+]
+
+_PRE_UPGRADE_EVENTS: list[dict[str, object]] = [
+    *_visit(0, 60, "threshold", "threshold", None, None),
+    *_visit(60, 0, "scope-code-check", "threshold", None, None),
+]
+
+_RESUMED_CONVERSATION_EVENTS: list[dict[str, object]] = [
+    {"type": "step_started", "timestamp": _at(0), "agent_id": None,
+     "payload": {"step": "threshold", "phase": "threshold", "label": None}},
+    *_visit(30, 30, "threshold", "threshold", "chatting", _SCOPING),
+]
+
+
+def test_show_and_log_summary_render_the_labeled_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    slug = _setup(tmp_path, monkeypatch, _LABELED_EVENTS)
+    assert main(["log", "-s", slug, "--no-pager"]) == 0
+    log = _out(capsys)
+    assert main(["show", slug, "--no-pager"]) == 0
+    card = _out(capsys)
+    assert log[1:1 + len(_LABELED_LEDGER)] == _LABELED_LEDGER
+    start = card.index("ledger:") + 1
+    assert card[start:start + len(_LABELED_LEDGER)] == _LABELED_LEDGER
+
+
+def test_a_pre_upgrade_log_shows_raw_ids_under_the_phase_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    slug = _setup(tmp_path, monkeypatch, _PRE_UPGRADE_EVENTS)
+    assert main(["log", "-s", slug, "--no-pager"]) == 0
+    assert _out(capsys)[1:5] == [
+        "                     time  in  out  cost",
+        "threshold phase",
+        "  threshold         1m 0s   —    —     —",
+        "  scope-code-check     0s   —    —     —",
+    ]
+
+
+def test_a_conversation_resumed_after_the_upgrade_stays_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    slug = _setup(tmp_path, monkeypatch, _RESUMED_CONVERSATION_EVENTS)
+    assert main(["log", "-s", slug, "--no-pager"]) == 0
+    assert _out(capsys)[2:4] == [
+        "threshold phase",
+        "  chatting  1m 0s   —    —     —",
+    ]
+
+
+def _export(slug: str, flag: str, capsys: pytest.CaptureFixture[str]) -> str:
+    assert main(["log", "-s", slug, flag]) == 0
+    return capsys.readouterr().out
+
+
+def test_summary_markdown_carries_the_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _LABELED_EVENTS), "--md=-", capsys)
+    headings = [ln for ln in out.splitlines() if ln.startswith("## ")]
+    assert headings == ["## scoping phase", "## spec phase",
+                        "## planning phase · plan 1/3",
+                        "## implementation phase · plan 1/3"]
+    for cell in ("| chatting | 5m 54s |",
+                 "| ↳ explorer (exploring codebase) | 1m 37s |",
+                 "| checking for stray commits | 0s |",
+                 "| addressing spec review feedback | 1m 53s |",
+                 "| task 2/2 | 18m 11s |",
+                 "| fixing test failures | 38s |"):
+        assert cell in out
+    for raw in ("| threshold |", "| spec-finalizer |", "| task-lead |", "| task 1/2 |"):
+        assert raw not in out
+
+
+def test_summary_html_carries_the_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _LABELED_EVENTS), "--html=-", capsys)
+    for fragment in ("<h2>scoping phase</h2>", "<h2>planning phase · plan 1/3</h2>",
+                     "<td>chatting</td>", "<td>checking for stray commits</td>",
+                     "<td>addressing spec review feedback</td>", "<td>task 2/2</td>"):
+        assert fragment in out
+    for raw in ("<td>threshold</td>", "<td>spec-finalizer</td>", "<td>task-lead</td>"):
+        assert raw not in out
+
+
+def test_summary_markdown_of_a_pre_upgrade_log_shows_raw_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _PRE_UPGRADE_EVENTS), "--md=-", capsys)
+    assert "## threshold phase\n" in out
+    assert "| threshold | 1m 0s |" in out
+    assert "| scope-code-check | 0s |" in out
+
+
+def test_summary_html_of_a_pre_upgrade_log_shows_raw_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _PRE_UPGRADE_EVENTS), "--html=-", capsys)
+    assert "<h2>threshold phase</h2>" in out
+    assert "<td>threshold</td>" in out
+    assert "<td>scope-code-check</td>" in out
+
+
+def test_summary_export_of_a_resumed_conversation_stays_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _RESUMED_CONVERSATION_EVENTS),
+                  "--md=-", capsys)
+    assert "## threshold phase\n" in out
+    assert "| chatting | 1m 0s |" in out

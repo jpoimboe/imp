@@ -81,7 +81,7 @@ def test_select_log_events_unknown_step_returns_2(
 ) -> None:
     rc = _select_log_events(_ns(step=["ghost"]), "abc", _EVENTS)
     assert rc == 2
-    assert "no step 'ghost' in abc" in capsys.readouterr().err
+    assert capsys.readouterr().err == "imp: no step 'ghost' in abc; steps: spec, plan\n"
 
 
 def test_select_log_events_bad_range_returns_2(

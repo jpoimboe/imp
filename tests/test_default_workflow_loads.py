@@ -133,10 +133,20 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
         assert "{{ artifacts" not in body, md.name
 
 
-def test_every_shown_step_has_its_label() -> None:
-    wf = _wf()
-    by = {s.name: s for s in wf.flat_steps()}
+def test_every_step_has_its_label() -> None:
     expected = {
+        "threshold": "chatting",
+        "scope-code-check": "checking for stray commits",
+        "spec-written": "checking for the spec",
+        "spec-verify-commit": "checking spec commit",
+        "plan-verify-commit": "checking plan commit",
+        "check-next-plan": "choosing next plan",
+        "deferred-check": "checking deferred tasks",
+        "integrate-rebase": "rebasing onto base",
+        "validate-memory": "checking memory files",
+        "check-cleared": "checking test clearance",
+        "cleanup-merge": "cleaning up commits",
+        "assert-stamped": "checking commits",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",
@@ -157,14 +167,7 @@ def test_every_shown_step_has_its_label() -> None:
         "integration-reviewer": "reviewing merge",
         "merge-to-base": "merging",
     }
-    for name, label in expected.items():
-        assert by[name].label == label, name
-    # Quiet plumbing steps stay label-free.
-    for name in ("threshold", "spec-verify-commit", "plan-verify-commit",
-                 "cleanup-merge", "check-next-plan",
-                 "deferred-check",
-                 "assert-stamped", "integrate-rebase", "check-cleared"):
-        assert by[name].label is None, name
+    assert {s.name: s.label for s in _wf().flat_steps()} == expected
 
 
 def test_route_labels_assigned() -> None:
@@ -205,7 +208,7 @@ def test_rotate_phrase_opt_in_on_task_lead_and_threshold_defaults() -> None:
 
 def test_phase_labels_assigned() -> None:
     by = {p.name: p for p in _wf().phases}
-    assert by["threshold"].label is None
+    assert by["threshold"].label == "scoping phase"
     assert by["spec"].label == "spec phase"
     assert by["plan"].label == (
         "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"

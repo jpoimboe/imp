@@ -49,7 +49,7 @@ def test_create_returns_the_new_quest_id() -> None:
 
 
 def test_list_returns_the_enumerated_changes() -> None:
-    infos = [QuestInfo(id="a", title="A", status="running", step="plan")]
+    infos = [QuestInfo(id="a", title="A", status="running", label="plan")]
     plane = _plane(delivered=[], created=[], infos=infos)
     assert plane.list_quests() == infos
 

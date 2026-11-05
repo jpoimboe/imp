@@ -26,6 +26,22 @@ def test_minimal_loads_with_the_four_named_steps() -> None:
     assert wf.name == "minimal"
 
 
+def test_minimal_workflow_labels() -> None:
+    wf = _wf()
+    assert {s.name: s.label for s in wf.flat_steps()} == {
+        "front-door": "chatting",
+        "implement": "building the change",
+        "review": "reviewing the change",
+        "finalize": "finalizing",
+    }
+    assert {p.name: p.label for p in wf.phases} == {
+        "front-door": "scoping phase",
+        "implement": "implementation phase",
+        "review": "review phase",
+        "finalize": "finalize phase",
+    }
+
+
 def test_minimal_declares_no_workflow_vars() -> None:
     # base_head is removed; the minimal workflow declares no vars.
     assert _wf().vars.types() == {}

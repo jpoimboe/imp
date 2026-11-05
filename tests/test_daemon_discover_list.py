@@ -4,11 +4,13 @@ from pathlib import Path
 
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.remote.daemon.commands import ListResult
 from imp.remote.daemon.discover import QuestInfo, list_quests
+from imp.remote.daemon.telegram_adapter import render_response
 from tests.conftest import _seed_control
 
 
-def test_list_quests_reports_id_title_status_step(tmp_path: Path) -> None:
+def test_list_quests_reports_id_title_status_label(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Add dark mode", quest_id="alpha", base_branch="main")
     infos = {c.id: c for c in list_quests(tmp_path)}
@@ -17,7 +19,7 @@ def test_list_quests_reports_id_title_status_step(tmp_path: Path) -> None:
     assert isinstance(info, QuestInfo)
     assert info.title == "Add dark mode"
     assert info.status == "new"          # Quest.create seeds status="new"
-    assert info.step == "s"              # the seed workflow's single step name
+    assert info.label == "s"             # the seed workflow's unlabeled step, by id
 
 
 def test_list_quests_reflects_a_paused_status(tmp_path: Path) -> None:
@@ -48,3 +50,46 @@ def test_list_quests_excludes_terminal_changes(tmp_path: Path) -> None:
         st.save(ch.state_dir)
     ids = {c.id for c in list_quests(tmp_path)}
     assert ids == {live.id}   # only the in-flight (new) Quest survives the filter
+
+
+def _list_line(tmp_path: Path) -> tuple[QuestInfo, str]:
+    infos = list_quests(tmp_path)
+    assert len(infos) == 1
+    rendered = render_response(ListResult(infos, frozenset({infos[0].id})))
+    return infos[0], rendered.splitlines()[1]
+
+
+def test_list_line_shows_phase_and_step_labels(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Alpha", quest_id="alpha", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.step_label = "chatting"
+    st.phase_label = "scoping phase"
+    st.save(ch.state_dir)
+    info, line = _list_line(tmp_path)
+    assert info.label == "scoping phase · chatting"
+    assert line == "@alpha  Alpha — paused · scoping phase · chatting"
+
+
+def test_list_line_shows_raw_id_for_unlabeled_step(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Alpha", quest_id="alpha", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    info, line = _list_line(tmp_path)
+    assert info.label == "s"
+    assert line == "@alpha  Alpha — paused · s"
+
+
+def test_list_line_is_bare_status_for_stepless_row(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Alpha", quest_id="alpha", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.step = None
+    st.save(ch.state_dir)
+    info, line = _list_line(tmp_path)
+    assert info.label is None
+    assert line == "@alpha  Alpha — paused"

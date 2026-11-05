@@ -424,8 +424,9 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ('- `imp log <id>` — the human "read the story" narrative, tool bursts '
             "folded; `--step <name>` scopes it to one step, `-s` swaps the story "
-            "for the per-step ledger `imp show` also carries, and owns its "
-            "windowing and `--md`/`--html` export.") in flat
+            "for the per-step ledger `imp show` also carries (rows show labels, "
+            "`--step` takes ids), and owns its windowing and `--md`/`--html` "
+            "export.") in flat
     assert ("- `imp events <id>` — the agent-facing digest, where event content "
             "actually lives: bare prints an index (steps, subagents, types); add a "
             "leaf selector (`--limit N`, `--type`, `--agent <handle>`, a range, "
@@ -437,6 +438,13 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     # the digest bullet still leads the events-search bullet that refines it
     assert (flat.index("the agent-facing digest")
             < flat.index("imp events search <query>"))
+
+
+def test_introspection_says_ledger_rows_show_labels_and_step_filters_take_ids() -> None:
+    flat = " ".join(_introspection_doc().split())
+    assert "Rows and phase headings show the workflow's friendly labels" in flat
+    assert ("`--step` and `imp events` take step ids, which a bare "
+            "`imp events <id>` lists.") in flat
 
 
 def test_introspection_documents_the_summary_ledger_and_its_quota_column() -> None:

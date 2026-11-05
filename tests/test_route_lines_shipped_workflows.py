@@ -126,6 +126,8 @@ def _route_lines(events: list[dict[str, Any]]) -> list[str]:
          "↩ undoing code committed during scoping"),
         ("default", "spec-written", "threshold", 0,
          "↩ writing the missing spec"),
+        ("default", "autosquash-resolve-merge", "cleanup-merge", 0,
+         "↩ resolving merge fixups → cleaning up commits"),
     ],
 )
 def test_shipped_route_renders_its_line(
@@ -164,10 +166,16 @@ def test_check_cleared_bounce_shows_only_the_gate_completion_line(quest: Quest) 
     assert completed[-1] == "integration phase · re-running tests · complete · 5s"
 
 
-def test_hidden_unlabelled_target_adds_no_line(quest: Quest) -> None:
-    head = _source_events("default", "autosquash-resolve-merge", "cleanup-merge", quest)
-    events = _bounce("default", "autosquash-resolve-merge", "cleanup-merge", quest)
-    assert _lines([*events, _script_completed("cleanup-merge")]) == _lines(head)
+def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) -> None:
+    source = _step("default", "integrate-rebase")
+    rule = _route_rule("default", "integrate-rebase", "validate-memory")
+    assert _lines([
+        _started(source, quest),
+        _ev("step_completed", _END, step=source.name, kind=source.kind,
+            action=_action_payload(rule.action), var_mutations={}, label=rule.label),
+        _started(_step("default", "validate-memory"), quest, rule.label),
+        _script_completed("validate-memory"),
+    ]) == ["── integration phase ───"]
 
 
 @pytest.mark.parametrize(

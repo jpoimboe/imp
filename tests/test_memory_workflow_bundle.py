@@ -17,6 +17,17 @@ def test_memory_workflow_step_sequence() -> None:
         "memory-editor", "validate-memory", "wait-for-head", "merge-to-base"]
 
 
+def test_memory_workflow_labels() -> None:
+    wf = _wf()
+    assert {s.name: s.label for s in wf.flat_steps()} == {
+        "memory-editor": "editing memory",
+        "validate-memory": "checking memory files",
+        "wait-for-head": "waiting in merge queue",
+        "merge-to-base": "merging",
+    }
+    assert [p.label for p in wf.phases] == [None]
+
+
 def test_memory_merge_step_is_engine_native() -> None:
     by = {s.name: s for s in _wf().flat_steps()}
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
