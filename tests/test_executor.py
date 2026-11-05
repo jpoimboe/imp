@@ -4612,9 +4612,9 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
 @pytest.mark.bare_sandbox
 async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> None:
     """A gate whose `else` resumes an earlier step emits exactly one
-    `step_transition` event naming source, target, the backward flag, and a
-    reason summarized from the gate feedback — and it is logged after the gate's
-    own step_completed (renders at the bounce point, not the bottom)."""
+    `step_transition` event carrying exactly source, target and the backward
+    flag, logged after the gate's own step_completed. The resumed step still
+    receives the gate's feedback."""
     import subprocess
 
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -4648,9 +4648,12 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
+    feedback: list[str | None] = []
+
     class _Runner:
         async def run(self, invocation: AgentInvocation):
             _persist_initial(invocation)
+            feedback.append(invocation.retry_feedback)
             yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
@@ -4672,11 +4675,12 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     events = list(quest.event_log().read())
     trans = [e for e in events if e["type"] == "step_transition"]
     assert len(trans) == 1
-    p = trans[0]["payload"]
-    assert p["from_step"] == "gate"
-    assert p["target_step"] == "lead"
-    assert p["backward"] is True
-    assert p["reason"] is not None and "gate" in p["reason"].lower()
+    assert trans[0]["payload"] == {
+        "from_step": "gate", "target_step": "lead", "backward": True}
+
+    assert len(feedback) == 2
+    assert feedback[0] is None
+    assert feedback[1] is not None and "50 coverage issues" in feedback[1]
 
     types = [e["type"] for e in events]
     ti = types.index("step_transition")
