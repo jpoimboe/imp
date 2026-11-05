@@ -1826,7 +1826,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             continue
         print(quest_row.format_quest_line(
             quest_id=card.quest_id, title=card.title, status=card.status,
-            step=card.step, step_label=card.step_label, last_iso=card.last,
+            step=card.step, step_label=card.step_label,
+            phase_label=card.phase_label, last_iso=card.last,
             now=now, color=color, name_width=name_w,
             intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
             file=sys.stderr)
