@@ -219,7 +219,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.PhaseNode):
-        yield _heading(level, esc(node.label or node.name))
+        yield _heading(level, esc(node.label or f"{node.name} phase"))
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.StepNode):

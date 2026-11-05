@@ -84,7 +84,7 @@ def test_heading_spine_workflow_phase_step() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ])
     assert "# add auth" in out          # WorkflowNode → level-1 heading
-    assert "## design" in out           # PhaseNode → level-2 heading
+    assert "## design phase\n" in out   # PhaseNode → level-2 heading
     assert "### spec" in out            # StepNode → level-3 heading
 
 
