@@ -223,6 +223,10 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
         return
     if isinstance(node, nv.StepNode):
+        others = [c for c in node.children if not isinstance(c, nv.BreadcrumbLine)]
+        if rt.frame_suppressed(node) and not any(
+                _walk_children(others, full=full, cats=cats, level=level + 1, esc=esc)):
+            return
         resume = " (resume)" if node.resumed else ""
         yield _heading(level, esc(rt._step_header_label(node) + resume))
         yield from _walk_children(node.children, full=full, cats=cats, level=level + 1, esc=esc)
