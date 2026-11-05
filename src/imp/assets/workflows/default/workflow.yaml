@@ -41,11 +41,13 @@ phases:
   # review, but spec-written still gates and announces the drafted spec; full
   # enters spec-finalizer for adopt-with-light-review.
   - name: threshold
+    label: "scoping phase"
     show_label: false
     steps:
       - name: threshold
         file: agents/threshold.md
         tier: high
+        label: chatting
         interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: scope-code-check}
@@ -53,6 +55,7 @@ phases:
 
       - name: scope-code-check
         show_label: false
+        label: checking for stray commits
         command: ./scripts/scope-code-check.sh
         # The express exit-0 goto hops to spec-written bare; the full exit-0 goto forwards
         # its configured `feedback:` (the hand-off opener) to spec-finalizer. The dirty
@@ -68,6 +71,7 @@ phases:
       # resume carries no feedback:, so the engine delivers the script's stderr to threshold.
       - name: spec-written
         show_label: false
+        label: checking for the spec
         show_output: true
         command: ./scripts/spec-written.sh
         rules:
@@ -89,6 +93,7 @@ phases:
       # branches routing (the script seeds {} in $IMP_OUTPUT) instead of pausing.
       - name: spec-verify-commit
         show_label: false
+        label: checking spec commit
         command: ./scripts/spec-commit-verify.sh
         output:
           plan_total: {type: int, required: false}
@@ -121,6 +126,7 @@ phases:
 
       - name: plan-verify-commit
         show_label: false
+        label: checking plan commit
         command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial quest: skip plan review entirely
@@ -180,6 +186,7 @@ phases:
       #  - the last outline plan was implemented -> the once-only gap-check (enter converge).
       - name: check-next-plan
         show_label: false
+        label: choosing next plan
         rules:
           - {if: {coverage_settled: true}, goto: quest-review}
           - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, progress: true, label: "writing plan"}
@@ -223,6 +230,7 @@ phases:
       # rule names deferred-sweep directly, so slow-gate triage jumps this guard.
       - name: deferred-check
         show_label: false
+        label: checking deferred tasks
         command: ./scripts/deferred-check.sh
         rules:
           - {if: {exit: 1}, goto: converge-verify}
@@ -263,6 +271,7 @@ phases:
 
       - name: integrate-rebase
         show_label: false
+        label: rebasing onto base
         command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
@@ -284,6 +293,7 @@ phases:
       # workflow defs. Byte-identical command to the memory workflow's gate.
       - name: validate-memory
         show_label: false
+        label: checking memory files
         command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
         max_loops: 6
         rules:
@@ -317,6 +327,7 @@ phases:
       # backward goto is counted against THIS step, so the inherited max_loops bounds it.
       - name: check-cleared
         show_label: false
+        label: checking test clearance
         command: ./scripts/check-cleared.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 0}, continue: true}
@@ -342,6 +353,7 @@ phases:
 
       - name: cleanup-merge
         show_label: false
+        label: cleaning up commits
         command: ./scripts/cleanup.sh
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
@@ -360,6 +372,7 @@ phases:
 
       - name: assert-stamped
         show_label: false
+        label: checking commits
         command: ./scripts/assert-stamped.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 0}, continue: true}

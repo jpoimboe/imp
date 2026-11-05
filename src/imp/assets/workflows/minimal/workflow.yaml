@@ -20,11 +20,13 @@ phases:
   # on go-live, forks an isolated worktree on imp/<id> (via create_and_enter_worktree)
   # and writes the FINAL spec, then routes into the build in that worktree.
   - name: front-door
+    label: "scoping phase"
     show_label: false
     steps:
       - name: front-door
         file: agents/front-door.md
         tier: high
+        label: chatting
         interactive: true
         rules:
           - {if: {status: Error}, pause: true}

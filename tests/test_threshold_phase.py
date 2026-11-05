@@ -33,7 +33,8 @@ def test_threshold_is_first_phase_with_show_label_false() -> None:
     assert step.name == "threshold"
     assert step.kind == "agent"
     assert step.show_label is False           # inherits the phase's show_label:false default
-    assert step.label is None  # label removed; reveal-on-error falls back to raw step name
+    assert step.label == "chatting"
+    assert step.phase_label == "scoping phase"
 
 
 def test_threshold_express_routes_to_scope_gate_and_sets_fast_path() -> None:
