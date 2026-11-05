@@ -8,11 +8,12 @@ scripted reply tokens; the numbered-options convention only for a genuine fixed 
 
 **Yielding mechanics.** End your turn with your question to yield to the human — the
 bare turn-end **is** the yield, and the reply returns as your next message. The human
-reads only your prose, so the prose must carry the actual question; never announce a
-question you then leave unasked ("I'll get your call on this," then a silent close).
-Loop as many rounds as needed. In a headless run, a bare turn-end with no human attached
-pauses the run on your last text — so yield this way only when a human is genuinely
-needed.
+reads only the text you emit — never your reasoning or tool calls — so a question you
+only reasoned through was never asked. Emit the actual question as text before yielding;
+never announce one you leave unasked ("I'll get your call on this," then a silent close)
+or point at one you never emitted ("the question above"). Loop as many rounds as needed.
+In a headless run, a bare turn-end with no human attached pauses the run on your last
+text — so yield this way only when a human is genuinely needed.
 
 **One question at a time; one closing summary.** Never stack questions in one message;
 emit a single closing summary, with no near-duplicate restatements of the same
