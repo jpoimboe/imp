@@ -145,6 +145,10 @@ card, with its total row restated as a one-line `run:` field high up — so
 `imp log <id> -s` is where the windowing and export flags live rather than
 where the numbers live.
 
+Rows and phase headings show the workflow's friendly labels (`chatting` under
+`scoping phase`), and a step with no label shows its id. `--step` and
+`imp events` take step ids, which a bare `imp events <id>` lists.
+
 On a subscription run that right-most column is `weekly`: the share of the
 account's weekly quota window this quest consumed, attributed to *this* quest
 rather than reported as raw gauge movement. imp divides the window's measured

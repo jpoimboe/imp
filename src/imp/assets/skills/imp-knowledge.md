@@ -79,8 +79,8 @@ bookkeeping. Ask the CLI instead:
   backlog, and history quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;
   `--step <name>` scopes it to one step, `-s` swaps the story for the per-step
-  ledger `imp show` also carries, and owns its windowing and `--md`/`--html`
-  export.
+  ledger `imp show` also carries (rows show labels, `--step` takes ids), and owns
+  its windowing and `--md`/`--html` export.
 - `imp events <id>` — the agent-facing digest, where event content actually
   lives: bare prints an index (steps, subagents, types); add a leaf selector
   (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact
