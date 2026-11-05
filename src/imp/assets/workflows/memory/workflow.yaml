@@ -35,7 +35,7 @@ phases:
         max_loops: 6
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: memory-editor}
+          - {else: true, resume: memory-editor, label: "fixing memory files"}
 
       - name: wait-for-head
         acquire: merge-lane

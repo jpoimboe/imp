@@ -4982,6 +4982,64 @@ async def test_route_label_seeds_step_label_on_continue(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_bounce_through_shipped_route_label_reaches_every_surface(tmp_path: Path) -> None:
+    """A shipped route's label reaches `imp list`, the status bar and Telegram's divider."""
+    from imp.assets import bundled_workflow_dir
+    from imp.cli.narrative import NarrativeBuilder
+    from imp.engine.loader import load_workflow
+    from imp.engine.types import Goto
+    from imp.remote.drivers.telegram import step_divider
+
+    shipped = load_workflow(bundled_workflow_dir("default"))
+    gate = next(s for s in shipped.flat_steps() if s.name == "converge-verify")
+    route = next(r for r in gate.rules
+                 if isinstance(r.action, Goto) and r.action.target == "deferred-sweep")
+    label = json.dumps(route.label)
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "lead.md").write_text(
+        "---\nname: lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars:\n  bounced: {type: bool, default: false}\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n  - name: work\n    steps:\n"
+        "      - name: lead\n        file: agents/lead.md\n        tier: low\n"
+        "        rules:\n"
+        "          - {if: {bounced: true}, pause: true}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n        command: 'exit 1'\n"
+        "        rules:\n"
+        f"          - {{else: true, set: {{bounced: true}}, resume: lead, label: {label}}}\n"
+    )
+    _write_fake_config(tmp_path)
+    assert _git(tmp_path, "init").returncode == 0
+    quest = _make_quest(tmp_path)
+    _register_fake({"status": "Success"})
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.PAUSED
+
+    state = State.load(quest.state_dir)
+    assert (state.step, state.step_label) == ("lead", "triaging slow test failures")
+
+    events = list(quest.event_log().read())
+    bounce = next(i for i, e in enumerate(events) if e["type"] == "step_transition")
+    started = next(e for e in events[bounce:] if e["type"] == "step_started")
+    assert started["payload"]["step"] == "lead"
+    builder = NarrativeBuilder()
+    for event in events[:events.index(started) + 1]:
+        builder.add(event)
+    activity = builder.current_activity()
+    assert activity is not None
+    assert activity.verb == "triaging slow test failures"
+    assert step_divider(started) == "— triaging slow test failures —"
+
+
+@pytest.mark.anyio
 async def test_route_label_seeds_step_label_on_goto(tmp_path: Path) -> None:
     """A labeled goto rule seeds state.step_label from route_label, not from the
     target step's own label.  If `state.route_label or` were removed from the Goto

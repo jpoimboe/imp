@@ -183,7 +183,7 @@ def test_merge_to_base_recovery_rules_and_cap() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.release is None
     assert m.action.feedback is not None and "uncommitted" in m.action.feedback
-    assert m.rule.label == "recovering merge"
+    assert m.rule.label == "committing leftover changes"
 
     m = evaluate_rules(rules, vars={}, output={"merge": "CONFLICT"})
     assert isinstance(m.action, Goto) and m.action.target == "integrate-rebase"

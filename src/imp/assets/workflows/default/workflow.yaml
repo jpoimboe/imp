@@ -94,7 +94,7 @@ phases:
           plan_total: {type: int, required: false}
         rules:
           - {if: {exit: 0}, set: {plan_total: output.plan_total}, continue: true}
-          - {else: true, resume: spec-finalizer}
+          - {else: true, resume: spec-finalizer, label: "fixing the spec file"}
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
@@ -125,7 +125,7 @@ phases:
         rules:
           - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial quest: skip plan review entirely
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: plan-writer}
+          - {else: true, resume: plan-writer, label: "writing the missing plan"}
 
       - name: plan-reviewer
         file: agents/plan-reviewer.md
@@ -199,7 +199,7 @@ phases:
         tier: high
         label: checking plan coverage
         rules:
-          - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
+          - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan for coverage gaps", feedback: "More plans are needed for this spec. Coverage assessment:"}
           - {else: true, set: {coverage_settled: true}, goto: quest-review}
 
       # The single quest-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
@@ -248,7 +248,7 @@ phases:
         rules:
           - {if: {exit: 0}, goto: wait-for-head}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: deferred-sweep, feedback: "The slow verify gate (converge-verify) failed. Triage fix-vs-tolerate:"}
+          - {else: true, resume: deferred-sweep, label: "triaging slow test failures", feedback: "The slow verify gate (converge-verify) failed. Triage fix-vs-tolerate:"}
 
   # ── integrate: the FIFO merge queue (base lock from wait-for-head). Rebase, slow
   # re-verify only when the base moved, review the integration, then the human gate.
@@ -288,7 +288,7 @@ phases:
         max_loops: 6
         rules:
           - {if: {exit: 0}, goto: integration-verify}
-          - {else: true, resume: reconciler,
+          - {else: true, resume: reconciler, label: "fixing memory files",
              feedback: "The imp/memory/ tree is invalid against the rebased workflows. Fix the memory file paths:"}
 
       - name: integration-verify
@@ -320,7 +320,7 @@ phases:
         command: ./scripts/check-cleared.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 0}, continue: true}
-          - {if: {exit: 3}, goto: integration-verify}
+          - {if: {exit: 3}, goto: integration-verify, label: "re-running tests"}
           - {else: true, pause: true}
 
       - name: summarizer
@@ -372,7 +372,7 @@ phases:
         rules:
           - {if: {merge: MERGED},   continue: true}
           - {if: {merge: DIRTY},    goto: reconciler,
-             label: "recovering merge",
+             label: "committing leftover changes",
              feedback: "The merge couldn't proceed because the quest worktree still had uncommitted changes. Commit your resolution; integration will retry."}
           - {if: {merge: CONFLICT}, goto: integrate-rebase, label: "retrying integration"}
           - {if: {merge: REFUSED},  pause: true}
