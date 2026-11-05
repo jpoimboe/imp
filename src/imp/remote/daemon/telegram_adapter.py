@@ -132,8 +132,8 @@ def render_response(
         lines = [header]
         for c in visible:
             mark = "● " if c.id in subscribed else ""
-            lines.append(
-                f"{mark}@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}")
+            status = c.status if c.label is None else f"{c.status} · {c.label}"
+            lines.append(f"{mark}@{handle_for(c.id)}  {c.title} — {status}")
         return "\n".join(lines)
     return response.text
 

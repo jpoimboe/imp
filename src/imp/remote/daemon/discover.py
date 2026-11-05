@@ -26,7 +26,7 @@ class QuestInfo:
     id: str
     title: str
     status: str
-    step: str
+    label: str | None
 
 
 def list_quests(control_root: Path) -> list[QuestInfo]:
@@ -37,6 +37,7 @@ def list_quests(control_root: Path) -> list[QuestInfo]:
     the daemon polls this, so reading the archive to enumerate them is pure cost.
     `running` and `waiting` are derived at display time, not persisted."""
     from imp.cli.main import _live_quest_ids
+    from imp.cli.quest_row import compose_status_label
     from imp.cli.store import _INFLIGHT, _row_for_id
     out: list[QuestInfo] = []
     for quest_id in _live_quest_ids(control_root):
@@ -52,10 +53,12 @@ def list_quests(control_root: Path) -> list[QuestInfo]:
             continue
         if row is None:
             continue
-        quest_id_, status_, step_, _last, title_, _created, _step_label, _phase_label = row[:8]
+        quest_id_, status_, step_, _last, title_, _created, step_label, phase_label = row[:8]
         if status_ not in _INFLIGHT:
             continue
-        out.append(QuestInfo(id=quest_id_, title=title_, status=status_, step=step_))
+        out.append(QuestInfo(
+            id=quest_id_, title=title_, status=status_,
+            label=compose_status_label(step_, step_label, phase_label)))
     return out
 
 

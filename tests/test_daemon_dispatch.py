@@ -119,7 +119,7 @@ async def test_a_failed_create_notices_the_reason_instead_of_claiming_a_spawn() 
 
 @pytest.mark.anyio
 async def test_listquests_calls_list_and_enqueues_a_listresult() -> None:
-    rows = [QuestInfo(id="aaaaaa", title="T", status="running", step="plan")]
+    rows = [QuestInfo(id="aaaaaa", title="T", status="running", label="plan")]
     control = FakeControl(quests=rows, resident=frozenset({"aaaaaa"}))
     responses: queue.Queue = queue.Queue()
     await _handle_command(ListQuests(), control, responses)
@@ -367,8 +367,8 @@ async def test_alerts_bare_reports_on_state() -> None:
 @pytest.mark.anyio
 async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     rows = [
-        QuestInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
-        QuestInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
+        QuestInfo(id="aaaaaa", title="Alpha", status="paused", label="plan"),
+        QuestInfo(id="cccccc", title="Gamma", status="merge_blocked", label="finalize"),
     ]
     control = FakeControl(quests=rows)
     responses: queue.Queue = queue.Queue()
@@ -382,7 +382,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
 
 @pytest.mark.anyio
 async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> None:
-    rows = [QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
+    rows = [QuestInfo(id="bbbbbb", title="Beta", status="running", label="implement")]
     control = FakeControl(quests=rows)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), control, responses, AlertAll())
