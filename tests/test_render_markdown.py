@@ -1395,3 +1395,57 @@ def test_md_verb_push_keeps_the_entry_heading() -> None:
     ])
     assert "### writing plan" in _headings(md)
     assert "### addressing plan review feedback" not in _headings(md)
+
+
+def test_summary_rows_sharing_a_raw_phase_stay_one_section_under_the_first_heading() -> None:
+    def row(step: str, phase_label: str) -> StepRow:
+        return StepRow(phase="plan", step=step, phase_label=phase_label,
+                       start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")
+
+    header = SummaryHeader(workflow="imp", quest_id="c",
+                           status="completed", total_seconds=20.0)
+    out = render_summary_markdown(
+        [row("plan-writer", "planning phase · plan 1/3"),
+         row("plan-review", "planning phase · plan 2/3")], header=header)
+    assert "## planning phase · plan 1/3" in out
+    assert "plan 2/3" not in out
+    assert "| plan-writer |" in out and "| plan-review |" in out
+
+
+def test_summary_step_cell_escapes_a_pipe_in_a_label() -> None:
+    header = SummaryHeader(workflow="imp", quest_id="c",
+                           status="completed", total_seconds=20.0)
+    out = render_summary_markdown(
+        [StepRow(phase="p", step="s", label="a|b",
+                 start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")],
+        header=header)
+    assert "| a\\|b | 10s |" in out
+
+
+def test_summary_export_escapes_html_in_labels() -> None:
+    header = SummaryHeader(workflow="imp", quest_id="c",
+                           status="completed", total_seconds=10.0)
+    out = render_summary_markdown(
+        [StepRow(phase="p", step="s", label="<b>x</b>", phase_label="<i>y</i>",
+                 start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")],
+        header=header)
+    assert "## &lt;i&gt;y&lt;/i&gt;\n" in out
+    assert "| &lt;b&gt;x&lt;/b&gt; | 10s |" in out
+
+
+def test_summary_raw_phase_recurring_later_starts_a_new_section_with_its_own_heading() -> None:
+    def row(phase: str, phase_label: str) -> StepRow:
+        return StepRow(phase=phase, step="s", phase_label=phase_label,
+                       start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")
+
+    header = SummaryHeader(workflow="imp", quest_id="c",
+                           status="completed", total_seconds=30.0)
+    out = render_summary_markdown(
+        [row("plan", "planning phase · plan 1/2"),
+         row("implement", "implementation phase · plan 1/2"),
+         row("plan", "planning phase · plan 2/2")], header=header)
+    assert [ln for ln in out.splitlines() if ln.startswith("## ")] == [
+        "## planning phase · plan 1/2",
+        "## implementation phase · plan 1/2",
+        "## planning phase · plan 2/2",
+    ]

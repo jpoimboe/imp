@@ -453,3 +453,71 @@ def test_a_conversation_resumed_after_the_upgrade_stays_split(
         "threshold phase",
         "  chatting  1m 0s   —    —     —",
     ]
+
+
+def _export(slug: str, flag: str, capsys: pytest.CaptureFixture[str]) -> str:
+    assert main(["log", "-s", slug, flag]) == 0
+    return capsys.readouterr().out
+
+
+def test_summary_markdown_carries_the_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _LABELED_EVENTS), "--md=-", capsys)
+    headings = [ln for ln in out.splitlines() if ln.startswith("## ")]
+    assert headings == ["## scoping phase", "## spec phase",
+                        "## planning phase · plan 1/3",
+                        "## implementation phase · plan 1/3"]
+    for cell in ("| chatting | 5m 54s |",
+                 "| ↳ explorer (exploring codebase) | 1m 37s |",
+                 "| checking for stray commits | 0s |",
+                 "| addressing spec review feedback | 1m 53s |",
+                 "| task 2/2 | 18m 11s |",
+                 "| fixing test failures | 38s |"):
+        assert cell in out
+    for raw in ("| threshold |", "| spec-finalizer |", "| task-lead |", "| task 1/2 |"):
+        assert raw not in out
+
+
+def test_summary_html_carries_the_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _LABELED_EVENTS), "--html=-", capsys)
+    for fragment in ("<h2>scoping phase</h2>", "<h2>planning phase · plan 1/3</h2>",
+                     "<td>chatting</td>", "<td>checking for stray commits</td>",
+                     "<td>addressing spec review feedback</td>", "<td>task 2/2</td>"):
+        assert fragment in out
+    for raw in ("<td>threshold</td>", "<td>spec-finalizer</td>", "<td>task-lead</td>"):
+        assert raw not in out
+
+
+def test_summary_markdown_of_a_pre_upgrade_log_shows_raw_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _PRE_UPGRADE_EVENTS), "--md=-", capsys)
+    assert "## threshold phase\n" in out
+    assert "| threshold | 1m 0s |" in out
+    assert "| scope-code-check | 0s |" in out
+
+
+def test_summary_html_of_a_pre_upgrade_log_shows_raw_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _PRE_UPGRADE_EVENTS), "--html=-", capsys)
+    assert "<h2>threshold phase</h2>" in out
+    assert "<td>threshold</td>" in out
+    assert "<td>scope-code-check</td>" in out
+
+
+def test_summary_export_of_a_resumed_conversation_stays_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _export(_setup(tmp_path, monkeypatch, _RESUMED_CONVERSATION_EVENTS),
+                  "--md=-", capsys)
+    assert "## threshold phase\n" in out
+    assert "| chatting | 1m 0s |" in out
