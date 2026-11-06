@@ -164,6 +164,7 @@ class _CapturingPrompt:
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         self._sink["bottom_toolbar"] = kwargs.get("bottom_toolbar")
         self._sink["width"] = kwargs.get("width")
+        self._sink["hint"] = kwargs.get("hint")
         return "go"
 
 
@@ -188,6 +189,21 @@ async def test_inert_ask_line_passes_identity_toolbar(
     assert expected is not None
     assert sink["bottom_toolbar"] == expected
     assert sink["width"] == 80
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_keeps_default_hint(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    sink: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kwargs: _CapturingPrompt(sink, **kwargs))
+
+    await m._inert_ask_line(ch)
+
+    assert sink["hint"] == "type a message, or /help"
 
 
 @pytest.mark.anyio

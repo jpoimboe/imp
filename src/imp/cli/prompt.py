@@ -26,6 +26,10 @@ from typing import Any
 
 EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
 DEFAULT_HINT = "type a message, or /help"
+OPENING_HINTS = {
+    "new": "describe what you want built, or /help",
+    "chat": "ask anything, or /help",
+}
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,

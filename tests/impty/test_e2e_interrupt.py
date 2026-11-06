@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.prompt import DEFAULT_HINT
+from imp.cli.prompt import OPENING_HINTS
 from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests._live import _await_change_dir
@@ -174,7 +174,7 @@ def _wait_for_opening_prompt(s: TerminalSession) -> str:
     while True:
         rows = s.lines()
         header = _RUN_HEADER_RE.search("\n".join(rows))
-        if header and any(r.startswith("> ") and DEFAULT_HINT in r for r in rows):
+        if header and any(r.startswith("> ") and OPENING_HINTS["new"] in r for r in rows):
             return header.group(1)
         remaining = deadline - time.monotonic()
         assert remaining > 0, "opening prompt never drawn:\n" + "\n".join(rows)

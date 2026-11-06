@@ -38,7 +38,7 @@ from imp.cli.help_format import (
     ImpTopLevelHelpFormatter,
 )
 from imp.cli.palette import ansi, should_use_color
-from imp.cli.prompt import DEFAULT_HINT, Prompt
+from imp.cli.prompt import DEFAULT_HINT, OPENING_HINTS, Prompt
 from imp.paths import project_state_dir
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
@@ -840,7 +840,7 @@ async def _read_opening_message(
     prompt = make()
     reply = await _read_intent_line(
         prompt, quest, color=color, width=width, model_sink=model_sink,
-        sandbox_sink=sandbox_sink)
+        sandbox_sink=sandbox_sink, hint=OPENING_HINTS[leave_mode])
     return _normalize_opening_reply(reply)
 
 
@@ -886,7 +886,8 @@ async def _run_cleared_session(
                 reply = await _read_intent_line(
                     prompt, quest, color=color, width=_term_width(),
                     model_sink=cleared_model_sink,
-                    sandbox_sink=cleared_sandbox_sink)
+                    sandbox_sink=cleared_sandbox_sink,
+                    hint=OPENING_HINTS[leave_mode])
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
