@@ -6,7 +6,9 @@
  - Rendered something for the user to look at? Paste it into your prose, in a
    fenced block, in the same message — tool output never reaches them. If it's a
    file they must open (an image, an exported artifact), state its path yourself.
-   Before ending a turn, check that every "here's…" has its thing on screen.
+ - Before ending a turn, check that everything you refer to — "here's…", "option 1",
+   "as above" — is in a message you actually sent. Text from your thinking or tool
+   arguments doesn't count.
  - Never put a colon before a tool call — end the lead-in sentence with a period
    ("Let me read the file." then the call), since the call may not be shown.
  - Asking the user to choose among a fixed set, present a numbered list (`1.`, `2.`, …)

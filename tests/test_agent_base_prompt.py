@@ -18,8 +18,12 @@ _CODING_STANCE = Path("src/imp/assets/partials/coding-stance.md")
 _RENDER_BULLET = (
     "- Rendered something for the user to look at? Paste it into your prose, in a "
     "fenced block, in the same message — tool output never reaches them. If it's a "
-    "file they must open (an image, an exported artifact), state its path yourself. "
-    "Before ending a turn, check that every \"here's…\" has its thing on screen."
+    "file they must open (an image, an exported artifact), state its path yourself."
+)
+_REFERENCES_BULLET = (
+    "- Before ending a turn, check that everything you refer to — \"here's…\", "
+    "\"option 1\", \"as above\" — is in a message you actually sent. Text from your "
+    "thinking or tool arguments doesn't count."
 )
 
 
@@ -177,6 +181,14 @@ def test_user_facing_note_demands_the_render_land_in_the_message() -> None:
     # Still the third bullet of Tone and style, ahead of the colon/lead-in rule.
     assert flat.index("- Reference code as file_path:line_number") < flat.index(_RENDER_BULLET)
     assert flat.index(_RENDER_BULLET) < flat.index("- Never put a colon before a tool call")
+
+
+def test_user_facing_note_checks_references_before_ending_a_turn() -> None:
+    flat = " ".join(_USER_FACING_NOTE.split())
+    assert _REFERENCES_BULLET in flat
+    assert flat.index(_RENDER_BULLET) < flat.index(_REFERENCES_BULLET)
+    assert flat.index(_REFERENCES_BULLET) < flat.index(
+        "- Never put a colon before a tool call")
 
 
 def test_core_tail_does_not_contain_users_see_only() -> None:

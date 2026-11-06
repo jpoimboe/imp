@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """rename_quest tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
-tool call and returns the quest id so the agent writes the spec at the
-quest-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
-gitignored quest.json, touches no git. Top-level only — raises for subagents
+tool call and returns the quest id so the agent can write the spec at the
+quest-home's artifacts/spec/<id>.md. Content-only: rewrites the gitignored
+quest.json, touches no git. Top-level only — raises for subagents
 (no quest_state)."""
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ from imp.engine.state import JsonlEventLog
         "A title is a short human-readable phrase — a few words with spaces, "
         "sentence case, like a PR title — not a branch-name slug (no kebab-case "
         "hyphens). Applies immediately and returns this quest's id; use that id "
-        "to write and commit the spec at the quest-home's artifacts/spec/<id>.md "
-        "this same turn."
+        "when you write the spec at the quest-home's artifacts/spec/<id>.md."
     ),
 )
 def rename_quest(ctx: Any, name: str) -> str:
