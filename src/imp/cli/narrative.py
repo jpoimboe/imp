@@ -2625,7 +2625,8 @@ def _h_output_validation_nudge(
     reason = str(p.get("message", "output validation"))
     attempt = p.get("attempt", "?")
     self._append(ErrorNode(
-        message=f"malformed complete_step, nudged (attempt {attempt}): {reason}",
+        message=("agent's step result was invalid, asked it to try again "
+                 f"(attempt {attempt}): {reason}"),
         is_warning=True))
 
 

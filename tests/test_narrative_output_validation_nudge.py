@@ -22,3 +22,15 @@ def test_output_validation_nudge_renders_as_warning_not_error() -> None:
     assert "warning:" in out
     assert "missing required field 'blocking'" in out
     assert "error:" not in out
+
+
+def test_output_validation_nudge_wording() -> None:
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "output_validation_nudge",
+         "payload": {"message": "missing required field 'blocking'",
+                     "attempt": 2}},
+    ])
+    lines = list(render_tree(tree, full=False, color=False, width=200))
+    assert ("warning: agent's step result was invalid, asked it to try again "
+            "(attempt 2): missing required field 'blocking'") in lines
