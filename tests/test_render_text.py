@@ -3578,26 +3578,20 @@ def test_restore_bare_sgr_in_spans_leaves_every_ineligible_span_byte_for_byte() 
 
 
 def test_lift_colored_spans_swaps_the_sample_for_a_width_faithful_run() -> None:
-    text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.", True)
+    text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.")
     assert text == "The gauge reads `" + rt._SPAN_UNIT * 3 + "` amber."
     assert lifted == [(rt._SPAN_UNIT * 3, "\x1b[1;33m78%\x1b[0m\x1b[0m")]
-
-
-def test_lift_colored_spans_strips_the_codes_with_color_off() -> None:
-    text, lifted = rt._lift_colored_spans("g `[1;33m78%[0m` a", False)
-    assert text == "g `" + rt._SPAN_UNIT * 3 + "` a"
-    assert lifted == [(rt._SPAN_UNIT * 3, "78%")]      # no ESC, no bare residue
 
 
 def test_lift_colored_spans_is_skipped_when_content_carries_the_sentinel() -> None:
     # An order-based splice cannot tell a content-origin run from ours, so the whole
     # render gives up the lift rather than risk a wrong-but-intact match.
     src = "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here."
-    assert rt._lift_colored_spans(src, True) == (src, [])
+    assert rt._lift_colored_spans(src) == (src, [])
 
 
 def test_lift_colored_spans_records_multiple_samples_in_source_order() -> None:
-    text, lifted = rt._lift_colored_spans("A `[31mone[0m` and B `[32mtwo[0m` end.", True)
+    text, lifted = rt._lift_colored_spans("A `[31mone[0m` and B `[32mtwo[0m` end.")
     assert text == ("A `" + rt._SPAN_UNIT * 3 + "` and B `"
                     + rt._SPAN_UNIT * 3 + "` end.")
     assert [s for _, s in lifted] == ["\x1b[31mone\x1b[0m\x1b[0m",
@@ -3610,10 +3604,10 @@ def test_lift_colored_spans_skips_a_sample_carrying_a_fence_slot_unit() -> None:
     # lifted sample would be invisible to it, and the spliced sample would FORGE a fence
     # slot key. Leaving such a span alone keeps every U+FFFF in view of `_slot_prefix`.
     src = "a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b"
-    assert rt._lift_colored_spans(src, True) == (src, [])
+    assert rt._lift_colored_spans(src) == (src, [])
     # Per-span, not per-render: a clean span beside it still lifts.
     text, lifted = rt._lift_colored_spans(
-        "a `[31m" + rt._SLOT_UNIT + "[0m` and b `[32mok[0m` c", True)
+        "a `[31m" + rt._SLOT_UNIT + "[0m` and b `[32mok[0m` c")
     assert [s for _, s in lifted] == ["\x1b[32mok\x1b[0m\x1b[0m"]
     assert rt._SLOT_UNIT in text        # left in place, so `_slot_prefix` still sees it
 
@@ -3681,6 +3675,13 @@ def test_color_off_wrapping_is_byte_identical_to_the_codes_removed() -> None:
                                     40, False))
 
 
+def test_color_off_wrapping_stays_identical_to_the_codes_removed_for_any_sample() -> None:
+    for src in ("The state `[1;33mWARN: high[0m` matters a lot here and wraps somewhere later.",
+                "x `[1;33m" + "W" * 60 + "[0m` y"):
+        assert (rt._markdown_to_ansi(src, 30, False)
+                == rt._markdown_to_ansi(src.replace("[1;33m", "").replace("[0m", ""), 30, False))
+
+
 def test_a_sample_with_a_space_is_never_split_across_lines() -> None:
     # A placeholder run offers rich no internal break opportunity, so a colored sample
     # is kept whole rather than wrapped mid-sequence.
@@ -3700,6 +3701,31 @@ def test_color_off_renders_the_visible_sample_with_no_escape() -> None:
     out = rt._markdown_to_ansi("The gauge reads `[1;33m78%[0m` amber.", 40, False)
     assert "78%" in out
     assert "\x1b" not in out and "1;33" not in out
+
+
+def test_color_off_strips_a_sample_too_wide_for_the_line() -> None:
+    # 58 cells at width 58: the delimiters alone push the unbreakable token over.
+    for n, width in ((60, 40), (58, 58)):
+        out = rt._markdown_to_ansi("x `[1;33m" + "W" * n + "[0m` y", width, False)
+        assert "[1;33m" not in out and "[0m" not in out
+        assert "W" * n in "".join(ln.strip() for ln in out.split("\n"))
+
+
+def test_color_off_strips_codes_when_content_carries_a_sentinel() -> None:
+    span_unit = rt._markdown_to_ansi(
+        "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here.", 44, False)
+    assert "`78%`" in span_unit and rt._SPAN_UNIT in span_unit
+    slot_unit = rt._markdown_to_ansi("a `[31m" + rt._SLOT_UNIT + "x[0m` b", 44, False)
+    assert "[31m" not in slot_unit and "[0m" not in slot_unit
+    assert rt._SLOT_UNIT in slot_unit
+
+
+def test_color_off_slot_unit_in_a_span_never_forges_a_fence_slot_key() -> None:
+    src = ("a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b\n\n"
+           "```\n[32mmock[0m\n```\n")
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, False)
+    assert out.count("mock") == 1
+    assert rt._SLOT_UNIT in out and "[31m" not in out
 
 
 def test_an_oversize_sample_falls_back_to_a_literal_render() -> None:
@@ -3766,6 +3792,13 @@ def test_literal_text_node_span_is_not_armed_or_colored() -> None:
     # the fence lift stays inert here because `_caret_escape` leaves it no real ESC.
     assert "[1;33mmock[0m" in _visible(out)
     assert "\x1b[1;33m" not in out                  # nothing armed anywhere on this path
+
+
+def test_literal_text_node_span_stays_literal_with_color_off() -> None:
+    # Hook-script stdout keeps what it printed: the color-off strip is for armed prose only.
+    node = nv.LiteralTextNode(text="hook says `[1;33m78%[0m` here.")
+    out = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert "[1;33m78%[0m" in out
 
 
 def test_a_real_escape_inside_a_span_stays_caret_escaped() -> None:
