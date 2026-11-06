@@ -122,6 +122,9 @@ async def test_scripted_bare_turn_end_noop_without_continuation_fn(
 
     errs = [e for e in events if e["type"] == "error"]
     assert errs and errs[-1]["payload"]["category"] == "agent_output_missing"
+    assert errs[-1]["payload"]["kind"] == "no_complete_step"
+    assert errs[-1]["payload"]["message"] == (
+        "scripted runner exhausted script without complete_step")
     assert "awaiting_user_input" not in [e["type"] for e in log.read()]
 
 
