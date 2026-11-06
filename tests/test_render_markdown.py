@@ -32,7 +32,13 @@ from imp.cli.render_summary import (
     summary_total,
 )
 from imp.cli.render_text import LOG_CATEGORIES
-from tests._event_fixtures import ev, interrupted_task_lead_events, task_lead_started
+from tests._event_fixtures import (
+    INTERNAL_TOOLS,
+    ev,
+    interrupted_task_lead_events,
+    task_lead_started,
+    tool_burst_events,
+)
 
 _ALL_CATS = frozenset(LOG_CATEGORIES)
 
@@ -1449,3 +1455,70 @@ def test_summary_raw_phase_recurring_later_starts_a_new_section_with_its_own_hea
         "## implementation phase · plan 1/2",
         "## planning phase · plan 2/2",
     ]
+
+
+_FINDINGS_ARGS = {"status": "Success", "findings": "line one\nline two"}
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_lean_internal_only_burst_emits_nothing(name: str) -> None:
+    out = _md(tool_burst_events((name, {"status": "Success"})))
+    assert name not in out
+    assert "tools" not in out.splitlines()
+
+
+def test_lean_mixed_burst_recap_drops_internal_name() -> None:
+    out = _md(tool_burst_events(("bash", {}), ("write_file", {}), ("complete_step", {})))
+    assert "2 calls · bash · write_file" in out
+    assert "complete_step" not in out
+
+
+def test_full_internal_only_burst_heads_tools_and_keeps_arguments() -> None:
+    out = _md(tool_burst_events(("complete_step", _FINDINGS_ARGS)), full=True)
+    assert "**tools**" in out.splitlines()
+    assert _in_code_fence(out, "· complete_step")
+    assert _in_code_fence(out, "status=Success")
+    assert _in_code_fence(out, "findings=line one line two")
+
+
+def test_show_tools_internal_only_burst_folds_under_tools() -> None:
+    out = _md(tool_burst_events(("complete_step", _FINDINGS_ARGS)),
+              show=frozenset({"tools"}))
+    assert "<summary>tools</summary>" in out
+    assert _in_code_fence(out, "· complete_step")
+    assert _in_code_fence(out, "findings=line one line two")
+
+
+def test_show_tools_mixed_burst_summary_is_recap_over_every_call() -> None:
+    out = _md(tool_burst_events(("bash", {}), ("complete_step", _FINDINGS_ARGS)),
+              show=frozenset({"tools"}))
+    assert "<summary>1 call · bash</summary>" in out
+    assert _in_code_fence(out, "· bash")
+    assert _in_code_fence(out, "· complete_step")
+
+
+def test_full_mixed_burst_heading_is_recap_over_every_call() -> None:
+    out = _md(tool_burst_events(("rename_quest", {"name": "n"}), ("bash", {}),
+                                ("read_file", {}), ("complete_step", _FINDINGS_ARGS)),
+              full=True)
+    assert "**2 calls · bash · read_file**" in out.splitlines()
+    for name in ("rename_quest", "bash", "read_file", "complete_step"):
+        assert _in_code_fence(out, f"· {name}")
+
+
+def test_full_detailed_block_keeps_omit_set_out() -> None:
+    out = _md(tool_burst_events(("load_skill", {"name": "x"}), ("tool", {}),
+                                ("update_step_label", {"label": "l"}),
+                                ("complete_step", _FINDINGS_ARGS)),
+              full=True)
+    assert "**tools**" in out.splitlines()
+    assert _in_code_fence(out, "· complete_step")
+    assert not _in_code_fence(out, "· load_skill")
+    assert not _in_code_fence(out, "· update_step_label")
+    assert not _in_code_fence(out, "· tool")
+
+
+def test_full_omit_only_burst_emits_no_heading() -> None:
+    out = _md(tool_burst_events(("update_step_label", {"label": "l"})), full=True)
+    assert "**tools**" not in out
+    assert "update_step_label" not in out

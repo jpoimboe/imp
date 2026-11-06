@@ -7,7 +7,13 @@ import json
 import pytest
 
 from imp.cli import narrative as nv
-from tests._event_fixtures import TASK_LEAD_AID, agent_text, ev, task_lead_started
+from tests._event_fixtures import (
+    INTERNAL_TOOLS,
+    TASK_LEAD_AID,
+    agent_text,
+    ev,
+    task_lead_started,
+)
 
 
 def test_node_dataclasses_construct_and_default_collapsible() -> None:
@@ -1393,6 +1399,8 @@ def test_visible_calls_omit_set() -> None:
     ])
     assert [c.name for c in nv.visible_calls(burst)] == ["bash", "read_file"]
     assert frozenset({"load_skill", "tool", "update_step_label"}) == nv._OMIT
+    assert frozenset({"complete_step", "rename_quest", "create_and_enter_worktree",
+                      "save_and_exit"}) == nv._INTERNAL_TOOLS
     assert frozenset({"script", "branch", "merge_and_exit_worktree"}) == nv.CHROME_KINDS
 
 
@@ -3965,3 +3973,37 @@ def test_own_header_keeps_its_entry_label_across_on_stack_reentries() -> None:
         step = _only_step(tree)
         assert step.label == "task 2/2"
         assert rt.header_line(step, depth=0, color=False) == f"{_PHASE} · task 1/2 · m"
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_visible_calls_hides_internal_tool_recorded_calls_keeps_it(name: str) -> None:
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id="1", name="bash", input={}),
+        nv.ToolCall(call_id="2", name=name, input={}),
+        nv.ToolCall(call_id="3", name="load_skill", input={}),
+    ])
+    assert [c.name for c in nv.visible_calls(burst)] == ["bash"]
+    assert [c.name for c in nv.recorded_calls(burst)] == ["bash", name]
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_current_activity_skips_inflight_internal_tool(name: str) -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+             input={"command": "ls"}))
+    b.add(ev("t2", "tool_result", agent_id="a", id="c1", content="ok"))
+    b.add(ev("t3", "tool_call", agent_id="a", id="c2", name=name,
+             input={"status": "Success"}))
+    assert b.current_activity().detail == "1 call"
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_current_activity_internal_only_burst_has_no_call_detail(name: str) -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name=name,
+             input={"status": "Success"}))
+    act = b.current_activity()
+    assert act.detail is None
+    assert act.verb == "thinking"

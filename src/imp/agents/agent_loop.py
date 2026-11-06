@@ -201,7 +201,7 @@ async def run_agent_loop(
         yield {"type": "error", "payload": {
             "category": "agent_output_missing",
             "kind": "no_complete_step",
-            "message": "agent finished without calling complete_step",
+            "message": "agent finished without reporting a step result",
             "detail": {"last_agent_text": last_text[:500]},
         }}
         return

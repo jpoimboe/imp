@@ -23,7 +23,7 @@ seru99 · JSON output for imp list
 
   explorer · claude-sonnet-5-5 · 1m 11s
 
-  5 calls · bash · rename_quest · 3m 2s
+  4 calls · bash · 3m 2s
 
 • I'm calling this JSON output for imp list. Here's how the command works today:
 
@@ -174,12 +174,10 @@ seru99 · JSON output for imp list
 
 > ok
 
-  3 calls · create_and_enter_worktree · bash · write_file · 30s
+  2 calls · bash · write_file · 30s
 
 • I wrote the spec and set up a separate working copy for the build. The change
   now goes through the full design review, then planning, building and testing.
-
-  1 call · complete_step
 
 ── spec phase ───
 
@@ -187,7 +185,7 @@ spec phase · writing spec · claude-opus-5-5
 
 • Let me read the drafted spec.
 
-  3 calls · read_file · edit_file · complete_step · 23s
+  2 calls · read_file · edit_file · 23s
 
 spec phase · writing spec · complete · 25s
 
@@ -275,8 +273,6 @@ spec phase · reviewing spec · claude-opus-5-5
 
   The spec goes on to planning, with the minor note passed along.
 
-  1 call · complete_step
-
 spec phase · reviewing spec · complete · 1 minor · 3m 49s
 
 spec phase complete · 4m 15s
@@ -316,7 +312,7 @@ planning phase · plan 1/1 · writing plan · claude-opus-5-5
 • Line 96 is a docstring over the 100-column limit; I'll shorten it, and the
   _json_ids helper line is borderline, so I'll wrap that too.
 
-  2 calls · edit_file · complete_step · 12s
+  1 call · edit_file · 12s
 
 planning phase · plan 1/1 · writing plan · complete · 5m 10s
 
@@ -397,8 +393,6 @@ planning phase · plan 1/1 · reviewing plan · claude-opus-5-5
   module, and the small JSON-printing helper always returns 0.
 
   The plan now moves on to implementation.
-
-  1 call · complete_step
 
 planning phase · plan 1/1 · reviewing plan · complete · clean · 4m 9s
 
@@ -481,7 +475,7 @@ implementation phase · plan 1/1 · task 4/4 · claude-opus-5-5
 • All four tasks are committed, the tree is clean, and the focused tests pass
   (172 passed). Collapsing the progress notes.
 
-  2 calls · write_file · complete_step · 3s
+  1 call · write_file · 3s
 
 implementation phase · plan 1/1 · task 4/4 · complete · 7m 59s
 
@@ -499,7 +493,7 @@ convergence phase · checking plan coverage · claude-opus-5-5
 
 • Now I'll check the committed code against each acceptance criterion.
 
-  4 calls · bash · complete_step · 17s
+  3 calls · bash · 17s
 
 convergence phase · checking plan coverage · complete · 27s
 
@@ -552,8 +546,6 @@ convergence phase · reviewing entire diff · claude-opus-5-5
 
   Next, the change goes on to the remaining pre-merge steps.
 
-  1 call · complete_step
-
 convergence phase · reviewing entire diff · complete · 2m 38s
 
 convergence phase · sweeping deferred tasks · claude-opus-5-5
@@ -564,7 +556,7 @@ convergence phase · sweeping deferred tasks · claude-opus-5-5
 
   coder · claude-sonnet-5-5 · 7s
 
-  4 calls · bash · complete_step · 35s
+  3 calls · bash · 35s
 
 convergence phase · sweeping deferred tasks · complete · 40s
 
@@ -578,7 +570,7 @@ integration phase · waiting in merge queue · complete
 
 integration phase · summarizing quest · claude-sonnet-5-5
 
-  3 calls · bash · complete_step · 5s
+  2 calls · bash · 5s
 
 integration phase · summarizing quest · complete · 6s
 
@@ -586,7 +578,7 @@ integration phase · finalizing · claude-opus-5-5
 
 • I'll gather the summary, spec, progress, and deferred items for this quest.
 
-  2 calls · bash · complete_step · 6s
+  1 call · bash · 6s
 
 integration phase · finalizing · complete · 11s
 

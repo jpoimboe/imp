@@ -226,7 +226,7 @@ def test_one_category_both_drops_and_releases_by_whether_the_error_carries_the_t
     carried = _step(
         _msg("a1", PROSE, tagged=True),
         _ev("e1", "error", agent_id=AID, category="agent_output_missing",
-            kind="no_complete_step", message="agent finished without calling complete_step",
+            kind="no_complete_step", message="agent finished without reporting a step result",
             detail={"last_agent_text": PROSE}))
     bare = _step(
         _msg("a1", PROSE, tagged=True),

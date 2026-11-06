@@ -6,6 +6,8 @@ import re as _re
 import unittest.mock
 from pathlib import Path
 
+import pytest
+
 from imp.agents.transcript import ContinuationNote, deliver_continuation_reply
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
@@ -13,6 +15,7 @@ from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
 from tests._event_fixtures import (
+    INTERNAL_TOOLS,
     agent_text,
     assert_spec_marker_scrollback,
     ev,
@@ -2704,10 +2707,10 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
     assert call.result is None            # genuinely dangling (no phantom result)
     assert bursts[0].end_ts is None       # missing result never advanced the clock
 
-    # Lean render: closed terminal with step elapsed; the result-less call is still recapped.
+    # Lean render: closed terminal with step elapsed; the internal tool gets no recap.
     lean = "\n".join(_lines(events, full=False))
     assert "coder · complete · 4s" in lean
-    assert "1 call · complete_step" in lean
+    assert "complete_step" not in lean
 
     # --full render: the call shows under the tools fold; same closed terminal with elapsed.
     full = "\n".join(_lines(events, full=True))
@@ -4205,3 +4208,55 @@ def test_reopen_restart_reseeds_the_own_header() -> None:
         "", "── implementation phase · plan 1/1 ───", "",
         "implementation phase · plan 1/1 · task 2/2 (resume) · m", "",
         "• again"]
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_burst_summary_drops_internal_tool_and_keeps_duration(name: str) -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="1", name="write_file", input={}),
+               nv.ToolCall(call_id="2", name=name, input={}),
+               nv.ToolCall(call_id="3", name="bash", input={})],
+        span_start_ts="2026-06-03T00:00:00+00:00",
+        span_end_ts="2026-06-03T00:00:25+00:00",
+    )
+    assert rt._burst_summary(burst) == "2 calls · write_file · bash · 25s"
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_burst_summary_internal_only_burst_is_none(name: str) -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="1", name=name, input={})],
+        span_start_ts="2026-06-03T00:00:00+00:00",
+        span_end_ts="2026-06-03T00:00:10+00:00",
+    )
+    assert rt._burst_summary(burst) is None
+
+
+def test_burst_summary_counts_work_tools_and_not_the_omit_set() -> None:
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id=str(i), name=name, input={})
+        for i, name in enumerate(("bash_output", "bash_kill", "load_skill", "tool",
+                                  "update_step_label"))
+    ])
+    assert rt._burst_summary(burst) == "2 calls · bash_output · bash_kill"
+
+
+def test_terminal_tools_views_keep_complete_step_lines() -> None:
+    events = [
+        _ev("1", "step_started", step="rev", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("2", "tool_call", agent_id="step:review/rev", id="b1", name="complete_step",
+            input={"status": "Success", "findings": "line one\nline two"}),
+        _ev("3", "tool_result", agent_id="step:review/rev", id="b1", content="ok",
+            error=False),
+        _ev("4", "agent_result", agent_id="step:review/rev", status="Success",
+            findings="line one\nline two"),
+        _ev("5", "step_completed", step="rev", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    shown = "\n".join(render_tree(nv.build_tree(events), show=frozenset({"tools"}),
+                                  color=False, width=80))
+    assert "· complete_step  status=Success" in full
+    assert "▾ complete_step" in full
+    assert "· complete_step  status=Success" in shown

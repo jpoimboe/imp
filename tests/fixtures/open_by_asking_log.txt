@@ -58,7 +58,7 @@ spec-writer · opus
 
 • Naming this `add-version-flag`.
 
-  4 calls · rename_change · write_file · bash · complete_step · 25s
+  3 calls · rename_change · write_file · bash · 25s
 
 • Spec written and committed as `imp/specs/2026-06-06-add-version-flag.md`. It
   captures the top-level `--version`/`-V` flag, version resolution via
@@ -106,8 +106,6 @@ spec-reviewer · opus
   over-engineering (the `PackageNotFoundError` fallback is a justified
   robustness requirement, not smuggled scope).
 
-  1 call · complete_step · 10s
-
 • Spec review complete. The `add-version-flag` spec is approved (non-blocking).
 
   Every factual claim it makes about the existing codebase checked out against
@@ -138,7 +136,7 @@ spec-writer · opus
 • I'll integrate the reviewer's nit by adding a call-time resolution note to the
   decisions summary.
 
-  3 calls · edit_file · bash · complete_step · 11s
+  2 calls · edit_file · bash · 11s
 
 • Polish pass complete. Integrated the reviewer's advisory nit — added a
   "Resolve the version at call time" decision so the helper calls
@@ -161,7 +159,7 @@ plan-writer · opus
 • Now I have a clear picture. No prior plan files exist, so I'll author plan 1
   fresh. Let me write the plan.
 
-  3 calls · write_file · bash · complete_step · 53s
+  2 calls · write_file · bash · 53s
 
 • Plan 1 authored and committed. It delivers the `--version` / `-V` flag in two
   atomic tasks:
@@ -222,8 +220,6 @@ plan-review · opus
 
   Recording findings.
 
-  1 call · complete_step · 14s
-
 • Plan review complete. The plan is approved (non-blocking).
 
   I verified every load-bearing claim against the actual source — the `main.py`
@@ -259,8 +255,6 @@ plan-writer · opus
 • Integrated the Minor finding — added an explicit mypy `--strict` type-check
   step to both tasks (and updated Self-Review §5), then folded the edit into the
   plan commit via fixup.
-
-  1 call · complete_step · 3s
 
 • Final advisory polish pass complete. The plan was already approved (`blocking:
   False`); I integrated the single actionable Minor finding by adding an
@@ -346,8 +340,6 @@ task-lead · sonnet
 • All 5 tests pass. Both plan tasks are committed and verified. The plan is
   fully implemented.
 
-  1 call · complete_step · 4s
-
 task-lead · complete · 9m 36s
 
 commit-check · complete
@@ -372,8 +364,6 @@ plan-cycle-check · sonnet
   the success path (`--version`, `-V`) and the `PackageNotFoundError` fallback,
   and `pyproject.toml` is untouched. The spec scope is fully covered by plan-1.
 
-  1 call · complete_step · 3s
-
 plan-cycle-check · complete · 41s
 
 implement phase complete · 10m 17s
@@ -386,7 +376,7 @@ stamp-trailers · complete
 
 code-reviewer · gpt-5.5
 
-  13 calls · read_file · glob · bash · grep +1 · 44s
+  12 calls · read_file · glob · bash · grep · 44s
 
 code-reviewer · complete · 59s
 
@@ -403,8 +393,6 @@ summarizer · opus
   4 calls · bash · 13s
 
 • Everything verifies. Let me complete.
-
-  1 call · complete_step · 17s
 
 • Summary recorded. The change `2026-06-06-add-version-flag` is complete: both
   planned tasks landed cleanly on HEAD, the `--version`/`-V` flag works
@@ -470,8 +458,6 @@ final-review · sonnet
   feedback?
 
 > Merge it. The two items are non-blocking nits and the change is clean.
-
-  1 call · complete_step · 6s
 
 • Merged! The `2026-06-06-add-version-flag` change is done. 🎉
 

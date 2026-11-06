@@ -15,6 +15,7 @@ from imp.cli.render_html import (
 )
 from imp.cli.render_markdown import render_markdown, render_summary_markdown
 from imp.cli.render_summary import StepRow, SummaryHeader
+from tests._event_fixtures import tool_burst_events
 
 
 def test_github_markdown_css_asset_is_bundled() -> None:
@@ -528,3 +529,35 @@ def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
     for doc in (md, out):
         assert "<summary>· `&lt;x&gt;` · m</summary>" in doc
         assert "&amp;" not in doc
+
+
+def _html_for_complete_step(*, full: bool = False, show: frozenset[str] | None = None) -> str:
+    events = tool_burst_events(
+        ("complete_step", {"status": "Success", "findings": "line one\nline two"}))
+    return render_html(render_markdown(nv.build_tree(events), full=full, show=show))
+
+
+def test_html_lean_internal_only_burst_emits_nothing() -> None:
+    out = _html_for_complete_step()
+    assert "complete_step" not in out
+    assert "<p>tools</p>" not in out
+
+
+def test_html_full_internal_only_burst_keeps_arguments_under_tools() -> None:
+    out = _html_for_complete_step(full=True)
+    assert "<strong>tools</strong>" in out
+    assert "· complete_step" in out
+    assert "findings=line one line two" in out
+
+
+def test_html_show_tools_internal_only_burst_folds_under_tools() -> None:
+    out = _html_for_complete_step(show=frozenset({"tools"}))
+    assert "<summary>tools</summary>" in out
+    assert "findings=line one line two" in out
+
+
+def test_html_full_mixed_burst_heading_is_recap_over_every_call() -> None:
+    events = tool_burst_events(("bash", {}), ("read_file", {}), ("complete_step", {}))
+    out = render_html(render_markdown(nv.build_tree(events), full=True))
+    assert "<strong>2 calls · bash · read_file</strong>" in out
+    assert "· complete_step" in out

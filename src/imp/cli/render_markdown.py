@@ -265,15 +265,16 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
             yield _details("thinking", esc(content), full=full, esc=esc)
         return
     if isinstance(node, nv.ToolBurstFold):
-        calls = nv.visible_calls(node)
+        recap = rt._burst_summary(node)
+        if "tools" not in cats:
+            if recap:
+                yield esc(recap)
+            return
+        calls = nv.recorded_calls(node)
         if not calls:
             return
-        recap = rt._burst_summary(node) or "tools"
-        if "tools" not in cats:
-            yield esc(recap)
-            return
         inner = "\n\n".join(_fence(_tool_call_text(c)) for c in calls)
-        yield _details(recap, inner, full=full, esc=esc)
+        yield _details(recap or "tools", inner, full=full, esc=esc)
         return
     if isinstance(node, nv.StepContextNode):
         if "prompts" not in cats:

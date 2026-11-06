@@ -14,6 +14,8 @@ from imp.agents.loop_items import (
     Warning,
 )
 from imp.agents.runner import ToolResultBlock
+from imp.cli.narrative import build_tree
+from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
 
 
@@ -146,6 +148,10 @@ async def test_no_complete_step_error():
     assert evs[-1]["payload"]["category"] == "agent_output_missing"
     assert evs[-1]["payload"]["kind"] == "no_complete_step"
     assert evs[-1]["payload"]["detail"]["last_agent_text"] == "I'm stuck"
+    tree = build_tree([{"id": "e1", "parent_id": None, "agent_id": None, **evs[-1]}])
+    lines = list(render_tree(tree, full=False, color=False, width=200))
+    assert ("error: [agent_output_missing] agent finished without reporting "
+            "a step result") in lines
 
 
 @pytest.mark.anyio
