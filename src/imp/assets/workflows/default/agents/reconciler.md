@@ -21,7 +21,7 @@ irreducibly ambiguous or the base has invalidated the quest.
 
 {% include "partials/commit-style.md" %}
 
-## Two entry contexts — detect which
+## Three entry contexts — detect which
 
 The engine enters you in exactly one. Detect it from `git status` and any injected feedback:
 
@@ -36,6 +36,11 @@ The engine enters you in exactly one. Detect it from `git status` and any inject
    `integration-verify` failure that `integration-review` adjudicated a genuine break —
    either way you are driven by the **finding**, never raw test output. Address it with a
    NORMAL fix commit on top (`git add` + `git commit -F`). Do not start or continue a rebase.
+3. **Resumed with a memory-validation failure** — feedback *"The imp/memory/ tree is
+   invalid against the rebased workflows. Fix the memory file paths:"*, no rebase in
+   progress. The validator's output names the invalid paths. Move, rename, or remove those
+   memory files to match the rebased workflows, in a NORMAL fix commit on top (`git add` +
+   `git commit -F`). Do not start or continue a rebase.
 
 ## Understand the state
 
