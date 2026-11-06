@@ -1031,6 +1031,56 @@ def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
     assert "\x1b[36m" in joined             # still cyan foreground
 
 
+def _color_off_prose(md: str) -> str:
+    return "\n".join(rt._render_markdown_block(rt._caret_escape_prose(md), 60, 0, False))
+
+
+def test_inline_code_color_off_keeps_backticks() -> None:
+    assert "Try `inline code` here." in _color_off_prose("Try `inline code` here.")
+
+
+def test_inline_code_color_off_keeps_a_double_backtick_run() -> None:
+    assert "``a `b` c``" in _color_off_prose("``a `b` c``")
+
+
+def test_inline_code_color_off_pads_content_edged_with_a_backtick() -> None:
+    assert "`` `x` ``" in _color_off_prose("`` `x` ``")
+    assert "`` `x ``" in _color_off_prose("`` `x ``")
+    assert "`` x` ``" in _color_off_prose("`` x` ``")
+
+
+def test_inline_code_color_off_keeps_backticks_in_table_heading_and_link() -> None:
+    assert "`cell`" in _color_off_prose("| A |\n|---|\n| `cell` |")
+    assert "Head `h` x" in _color_off_prose("# Head `h` x")
+    assert "see `lnk` now" in _color_off_prose("see [`lnk`](https://example.com) now")
+
+
+def test_inline_code_color_off_leaves_code_block_bodies_undelimited() -> None:
+    fenced = _color_off_prose("```\nfence body\n```")
+    assert "fence body" in fenced and "`" not in fenced
+    indented = _color_off_prose("para\n\n    indented body\n")
+    assert "indented body" in indented and "`" not in indented
+
+
+def test_inline_code_color_off_splices_a_colored_sample_inside_the_backticks() -> None:
+    out = _color_off_prose("g `[1;33m78%[0m` a")
+    assert "g `78%` a" in out
+    assert "\x1b" not in out
+    assert "[1;33m" not in out
+    assert rt._SPAN_UNIT not in out
+
+
+def test_inline_code_color_on_has_no_backticks() -> None:
+    out = _visible("\n".join(rt._render_markdown_block("Try `inline code` here.", 40, 0, True)))
+    assert "inline code" in out
+    assert "`" not in out
+
+
+def test_inline_code_color_off_question_block_keeps_backticks() -> None:
+    lines = rt.render_question_block("Try `inline code` here.", 60, 0, False)
+    assert "Try `inline code` here." in "\n".join(lines)
+
+
 def test_markdown_headers_are_cyan_bold_not_magenta() -> None:
     # rich's defaults paint headers magenta (h2 underline / h3 bold). We recolor
     # every level to the same cyan as inline `code`, keeping bold but dropping
@@ -3528,26 +3578,20 @@ def test_restore_bare_sgr_in_spans_leaves_every_ineligible_span_byte_for_byte() 
 
 
 def test_lift_colored_spans_swaps_the_sample_for_a_width_faithful_run() -> None:
-    text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.", True)
+    text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.")
     assert text == "The gauge reads `" + rt._SPAN_UNIT * 3 + "` amber."
     assert lifted == [(rt._SPAN_UNIT * 3, "\x1b[1;33m78%\x1b[0m\x1b[0m")]
-
-
-def test_lift_colored_spans_strips_the_codes_with_color_off() -> None:
-    text, lifted = rt._lift_colored_spans("g `[1;33m78%[0m` a", False)
-    assert text == "g `" + rt._SPAN_UNIT * 3 + "` a"
-    assert lifted == [(rt._SPAN_UNIT * 3, "78%")]      # no ESC, no bare residue
 
 
 def test_lift_colored_spans_is_skipped_when_content_carries_the_sentinel() -> None:
     # An order-based splice cannot tell a content-origin run from ours, so the whole
     # render gives up the lift rather than risk a wrong-but-intact match.
     src = "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here."
-    assert rt._lift_colored_spans(src, True) == (src, [])
+    assert rt._lift_colored_spans(src) == (src, [])
 
 
 def test_lift_colored_spans_records_multiple_samples_in_source_order() -> None:
-    text, lifted = rt._lift_colored_spans("A `[31mone[0m` and B `[32mtwo[0m` end.", True)
+    text, lifted = rt._lift_colored_spans("A `[31mone[0m` and B `[32mtwo[0m` end.")
     assert text == ("A `" + rt._SPAN_UNIT * 3 + "` and B `"
                     + rt._SPAN_UNIT * 3 + "` end.")
     assert [s for _, s in lifted] == ["\x1b[31mone\x1b[0m\x1b[0m",
@@ -3560,10 +3604,10 @@ def test_lift_colored_spans_skips_a_sample_carrying_a_fence_slot_unit() -> None:
     # lifted sample would be invisible to it, and the spliced sample would FORGE a fence
     # slot key. Leaving such a span alone keeps every U+FFFF in view of `_slot_prefix`.
     src = "a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b"
-    assert rt._lift_colored_spans(src, True) == (src, [])
+    assert rt._lift_colored_spans(src) == (src, [])
     # Per-span, not per-render: a clean span beside it still lifts.
     text, lifted = rt._lift_colored_spans(
-        "a `[31m" + rt._SLOT_UNIT + "[0m` and b `[32mok[0m` c", True)
+        "a `[31m" + rt._SLOT_UNIT + "[0m` and b `[32mok[0m` c")
     assert [s for _, s in lifted] == ["\x1b[32mok\x1b[0m\x1b[0m"]
     assert rt._SLOT_UNIT in text        # left in place, so `_slot_prefix` still sees it
 
@@ -3631,6 +3675,13 @@ def test_color_off_wrapping_is_byte_identical_to_the_codes_removed() -> None:
                                     40, False))
 
 
+def test_color_off_wrapping_stays_identical_to_the_codes_removed_for_any_sample() -> None:
+    for src in ("The state `[1;33mWARN: high[0m` matters a lot here and wraps somewhere later.",
+                "x `[1;33m" + "W" * 60 + "[0m` y"):
+        assert (rt._markdown_to_ansi(src, 30, False)
+                == rt._markdown_to_ansi(src.replace("[1;33m", "").replace("[0m", ""), 30, False))
+
+
 def test_a_sample_with_a_space_is_never_split_across_lines() -> None:
     # A placeholder run offers rich no internal break opportunity, so a colored sample
     # is kept whole rather than wrapped mid-sequence.
@@ -3650,6 +3701,31 @@ def test_color_off_renders_the_visible_sample_with_no_escape() -> None:
     out = rt._markdown_to_ansi("The gauge reads `[1;33m78%[0m` amber.", 40, False)
     assert "78%" in out
     assert "\x1b" not in out and "1;33" not in out
+
+
+def test_color_off_strips_a_sample_too_wide_for_the_line() -> None:
+    # 58 cells at width 58: the delimiters alone push the unbreakable token over.
+    for n, width in ((60, 40), (58, 58)):
+        out = rt._markdown_to_ansi("x `[1;33m" + "W" * n + "[0m` y", width, False)
+        assert "[1;33m" not in out and "[0m" not in out
+        assert "W" * n in "".join(ln.strip() for ln in out.split("\n"))
+
+
+def test_color_off_strips_codes_when_content_carries_a_sentinel() -> None:
+    span_unit = rt._markdown_to_ansi(
+        "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here.", 44, False)
+    assert "`78%`" in span_unit and rt._SPAN_UNIT in span_unit
+    slot_unit = rt._markdown_to_ansi("a `[31m" + rt._SLOT_UNIT + "x[0m` b", 44, False)
+    assert "[31m" not in slot_unit and "[0m" not in slot_unit
+    assert rt._SLOT_UNIT in slot_unit
+
+
+def test_color_off_slot_unit_in_a_span_never_forges_a_fence_slot_key() -> None:
+    src = ("a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b\n\n"
+           "```\n[32mmock[0m\n```\n")
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, False)
+    assert out.count("mock") == 1
+    assert rt._SLOT_UNIT in out and "[31m" not in out
 
 
 def test_an_oversize_sample_falls_back_to_a_literal_render() -> None:
@@ -3716,6 +3792,13 @@ def test_literal_text_node_span_is_not_armed_or_colored() -> None:
     # the fence lift stays inert here because `_caret_escape` leaves it no real ESC.
     assert "[1;33mmock[0m" in _visible(out)
     assert "\x1b[1;33m" not in out                  # nothing armed anywhere on this path
+
+
+def test_literal_text_node_span_stays_literal_with_color_off() -> None:
+    # Hook-script stdout keeps what it printed: the color-off strip is for armed prose only.
+    node = nv.LiteralTextNode(text="hook says `[1;33m78%[0m` here.")
+    out = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert "[1;33m78%[0m" in out
 
 
 def test_a_real_escape_inside_a_span_stays_caret_escaped() -> None:

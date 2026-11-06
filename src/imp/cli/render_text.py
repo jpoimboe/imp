@@ -480,33 +480,37 @@ def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
     return out
 
 
+def _sub_span_sgr(text: str, repl: str) -> str:
+    lines = text.split("\n")
+    for span in reversed(_colored_span_ranges(lines)):
+        ln = lines[span.line]
+        lines[span.line] = (
+            ln[:span.start]
+            + _BARE_SGR_RE.sub(repl, ln[span.start:span.end])
+            + ln[span.end:])
+    return "\n".join(lines)
+
+
 def _restore_bare_sgr_in_spans(text: str) -> str:
     """Give a model-typed `[1;33m` its ESC byte back inside an eligible inline code span,
     so the export's SGR strip removes it instead of shipping it as literal text. The
     screen path arms spans inside `_lift_colored_spans` instead — arming them this early
     would defuse them before the lift runs. Same eligibility helper as the lift, so an
     ineligible span exports as the literal text the screen shows."""
-    lines = text.split("\n")
-    for span in reversed(_colored_span_ranges(lines)):
-        ln = lines[span.line]
-        lines[span.line] = (
-            ln[:span.start]
-            + _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), ln[span.start:span.end])
-            + ln[span.end:])
-    return "\n".join(lines)
+    return _sub_span_sgr(text, "\x1b\\g<0>")
 
 
-def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, str]]]:
+def _lift_colored_spans(text: str) -> tuple[str, list[tuple[str, str]]]:
     """Swap the colored tail of every eligible inline code span for a run of `_SPAN_UNIT`
     exactly as wide as the sample's visible cells, so rich lays the paragraph out as if
     the codes were not there. Returns the rewritten text plus the (run, sample) pairs to
     splice back, in source order. Arming happens HERE, not in the shared escape helper:
     a bare code armed before `_caret_escape_prose` comes back as `^[[1;33m`, which the
     lookbehinds refuse to re-arm. Each spliced sample ends with a reset, matching the
-    fence path; with color off the codes are stripped instead. Only lines are rewritten,
-    never line COUNT, so the later fence scan sees exactly the same fences.
-    Input must arrive caret-escaped: a raw C0 byte in a sample measures narrower here
-    than the caret notation it is re-emitted as, overflowing the placeholder run."""
+    fence path. Only lines are rewritten, never line COUNT, so the later fence scan sees
+    exactly the same fences. Input must arrive caret-escaped: a raw C0 byte in a sample
+    measures narrower here than the caret notation it is re-emitted as, overflowing the
+    placeholder run."""
     if _SPAN_UNIT in text:
         return text, []
     lines = text.split("\n")
@@ -521,8 +525,7 @@ def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, st
             continue
         armed = _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), sample)
         run = _SPAN_UNIT * _span_cells(sample)
-        lifted.append((run, _sgr_survives(armed) + "\x1b[0m" if color
-                       else _caret_escape(_strip_sgr(armed))))
+        lifted.append((run, _sgr_survives(armed) + "\x1b[0m"))
         lines[span.line] = ln[:span.start] + run + ln[span.end:]
     lifted.reverse()
     return "\n".join(lines), lifted
@@ -549,6 +552,12 @@ def _splice_lifted_spans(rendered: str, lifted: list[tuple[str, str]]) -> str | 
     return "".join(out)
 
 
+def _delimited_code(content: str, delimiter: str) -> str:
+    # A backtick at the content's edge would otherwise merge with the delimiter run.
+    pad = " " if content.startswith("`") or content.endswith("`") else ""
+    return f"{delimiter}{pad}{content}{pad}{delimiter}"
+
+
 def _render_with_rich(text: str, width: int, color: bool, display_width: int) -> str:
     import io
 
@@ -562,6 +571,8 @@ def _render_with_rich(text: str, width: int, color: bool, display_width: int) ->
             for child in token.children:
                 if child.type == "softbreak":
                     child.type = "hardbreak"
+                elif child.type == "code_inline" and not color:
+                    child.content = _delimited_code(child.content, child.markup)
     no_bg = _no_bg_code_block_cls()
     md.elements["fence"] = no_bg
     md.elements["code_block"] = no_bg
@@ -581,9 +592,12 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
     defeats the span lift the render is discarded and redone with the lift off, so output
     carrying an unspliced placeholder is never emitted. `arm_spans` follows the caller's
     choice of escape function — prose-escaped text gets fence AND span color, absolutely
-    escaped text (hook-script stdout) gets neither."""
-    if arm_spans:
-        span_text, samples = _lift_colored_spans(text, color)
+    escaped text (hook-script stdout) gets neither. With color off the codes are stripped
+    before rich, so no placeholder exists for rich to defeat."""
+    if arm_spans and not color:
+        text = _sub_span_sgr(text, "")
+    elif arm_spans:
+        span_text, samples = _lift_colored_spans(text)
         if samples:
             fence_text, fences = _lift_colored_fences(span_text, color)
             spliced = _splice_lifted_spans(
