@@ -762,7 +762,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.StepHeaderNode,
                              nv.BreadcrumbLine, nv.ErrorNode, nv.PauseNode,
-                             nv.RenameNode))
+                             nv.ResumeMarkerNode, nv.RenameNode))
         or (isinstance(node, nv.ToolBurstFold) and node.calls)
         or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode,
                                         nv.EngineMessageNode)))
@@ -781,8 +781,8 @@ def spaces_before(node: Any) -> bool:
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
         or isinstance(node, (nv.PhaseNode, nv.StepHeaderNode, nv.ErrorNode, nv.PauseNode,
-                             nv.RenameNode, nv.MergedNode, nv.WarningsSummaryNode,
-                             nv.CompletedNode))
+                             nv.ResumeMarkerNode, nv.RenameNode, nv.MergedNode,
+                             nv.WarningsSummaryNode, nv.CompletedNode))
     )
 
 
@@ -1226,6 +1226,11 @@ def _render(node: Any, *, depth: int, full: bool = False,
         text = f"paused — {copy}" if copy else f"paused ({node.reason})"
         yield from _hang_wrap(text, glyph, width, depth, color,
                               *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        return
+
+    if isinstance(node, nv.ResumeMarkerNode):
+        yield _line(nv.resume_marker_text(node), depth, color,
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.RenameNode):

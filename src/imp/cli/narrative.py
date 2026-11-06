@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from imp.engine.feedback import truncate_detail
+from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
 if TYPE_CHECKING:
     from imp.providers.quota import QuotaReading
@@ -50,6 +51,9 @@ _OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
 # Human interrupt/leave reasons: like the silent yield, they append no PauseNode.
 _HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
     {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit", "pause"})
+
+# Pauses that get no resume marker: not an absence, or the key was not recorded.
+_NO_MARKER_REASONS: frozenset[str] = SIDE_EFFECT_REASONS | {"interrupt", "awaiting_turn"}
 
 
 def _agent_message_is_turn_end(payload: dict[str, Any]) -> bool:
@@ -369,6 +373,12 @@ class HeldRoute:
     source_text: str | None  # None: the source is hidden or unmatched
 
 
+@dataclass(frozen=True)
+class OpenPause:
+    timestamp: str | None
+    reason: str | None  # interrupt_reason or reason: the leave key relabels a pause
+
+
 @dataclass
 class ResetWait:
     verb: str             # a wait verb from _RETRY_VERB (any of the five)
@@ -441,6 +451,13 @@ class PauseNode:
     view agree. For an error-driven pause the underlying failure already appears as
     its own `error:` event just above this line."""
     reason: str
+    collapsible = False
+
+
+@dataclass(frozen=True)
+class ResumeMarkerNode:
+    """The run stopped and was picked back up `gap_s` whole seconds later."""
+    gap_s: int
     collapsible = False
 
 
@@ -677,6 +694,8 @@ class NarrativeBuilder:
         self._resuming = False
         # Last unconsumed workflow_paused: attached clients never see workflow_resumed.
         self._pending_pause: Literal["solicit", "halt"] | None = None
+        # The pause a resume marker measures from; a step boundary closes it.
+        self._open_pause: OpenPause | None = None
         # Armed by an engine_message completion nudge; the next prose agent_message
         # consumes it and drops a bare WAITING protocol reply (pure plumbing).
         # Survives non-prose events.
@@ -1562,6 +1581,7 @@ def _flush_held_route(self: NarrativeBuilder, p: dict[str, Any]) -> None:
 
 
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._open_pause = None
     self._cut_off.clear()
     self._flush_pending_rename()
     self._flush_burst()
@@ -1695,6 +1715,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._open_pause = None
     self._flush_pending_rename()
     self._flush_burst()
     self._finalize_direct_descendant_subtrees(event.get("timestamp"))
@@ -1755,6 +1776,8 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     # Above the `if reason:` gate and its early returns: those suppress a redundant
     # rendered pause line, they do not mean the run did not pause.
     self._pending_pause = "solicit" if p.get("reason") == "awaiting_user" else "halt"
+    self._open_pause = OpenPause(event.get("timestamp"),
+                                 p.get("interrupt_reason") or p.get("reason"))
     self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "paused"
@@ -1776,6 +1799,19 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         self._pause_outcome_shown = True
 
 
+def _place_resume_marker(self: NarrativeBuilder, marker: ResumeMarkerNode) -> None:
+    held = self._step_stack[-1] if self._step_stack else None
+    if held is None or not deferred_leaf(held):
+        self._append(marker)
+        return
+    # Inside a held step the marker would expand the step, or vanish with a hidden one.
+    parent = self._step_stack[-2] if len(self._step_stack) > 1 else self._current_phase
+    assert parent is not None
+    # By identity: StepNode equality compares fields.
+    index = next(i for i, c in enumerate(parent.children) if c is held)
+    parent.children.insert(index, marker)
+
+
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "running"
@@ -1783,6 +1819,12 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     self._resuming = True                # open the re-entry window
     self._warnings_flushed = False       # let the next terminal flush a fresh summary
     self._pause_outcome_shown = False    # a resumed run is no longer a reasoned pause
+    opened, self._open_pause = self._open_pause, None
+    if opened is None or p.get("in_process") or opened.reason in _NO_MARKER_REASONS:
+        return
+    gap = elapsed_seconds(opened.timestamp, event.get("timestamp"))
+    if gap is not None and gap >= 1:
+        _place_resume_marker(self, ResumeMarkerNode(gap_s=int(gap)))
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
@@ -2571,6 +2613,13 @@ def _fmt_hm(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def resume_marker_text(node: ResumeMarkerNode) -> str:
+    gap = node.gap_s
+    duration = (f"{gap}s" if gap < 60
+                else _fmt_hm(gap).removesuffix(" 0m").removesuffix(" 0h"))
+    return f"paused · resumed {duration} later"
+
+
 _RETRY_VERB: dict[str, str] = {
     "rate_limit": "waiting for limit reset",
     "auth": "waiting for re-authentication",
@@ -2813,6 +2862,8 @@ def structural_repr(node: Any) -> Any:
                 "is_warning": node.is_warning, "detail": node.detail}
     if isinstance(node, PauseNode):
         return {"t": t, "reason": node.reason}
+    if isinstance(node, ResumeMarkerNode):
+        return {"t": t, "gap_s": node.gap_s}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):
