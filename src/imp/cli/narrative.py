@@ -213,6 +213,7 @@ class UserMessageNode:
 class EngineMessageNode:
     text: str
     subtype: str            # system_prompt | agent_prompt | continuation | completion
+                            # | undelivered_message
     collapsible = False
 
 
@@ -2120,6 +2121,10 @@ def _rotate_status_phrase(self: NarrativeBuilder) -> None:
         self._step_stack[-1].rotated_phrase = _draw_status_phrase()
 
 
+_UNDELIVERED_MESSAGE_WARNING = (
+    "agent's message may not have reached you, asked it to send it again")
+
+
 def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._cut_off.clear()
     subtype = str(p.get("subtype") or "")
@@ -2138,6 +2143,9 @@ def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         self._span_start_ts = event.get("timestamp")
         self._stretch_start_ts = event.get("timestamp")
         self._stretch_backoff_base = self.backoff_wait_seconds(None)
+    if subtype == "undelivered_message":
+        self._warnings.append(_UNDELIVERED_MESSAGE_WARNING)
+        self._append(ErrorNode(message=_UNDELIVERED_MESSAGE_WARNING, is_warning=True))
     self._append(EngineMessageNode(text=_user_message_text(p), subtype=subtype))
 
 

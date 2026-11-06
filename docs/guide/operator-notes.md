@@ -115,6 +115,10 @@ pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
   tending — the next daemon started in that home deletes any whose owning process
   is gone, and reaping the quest home takes the rest.
 
+## "agent's message may not have reached you"
+
+Some models occasionally return a message as hidden thinking instead of visible text. When an agent stops to wait for you right after that happens, and its final reply is only a short line, imp assumes a question was lost: it shows this warning and asks the agent to send the message again before giving you the prompt. A false alarm costs one extra turn.
+
 ## Archive version skew
 
 An imp older than the archive on disk refuses only the reads that touch the floor
