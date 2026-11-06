@@ -85,7 +85,8 @@ def _fake_intent_line(*, model: str, reply: str):
     """Stand-in for _read_intent_line: populates the passed model_sink and returns
     the reply, mirroring the new signature."""
 
-    async def _f(prompt, quest, *, color, width, model_sink=None, sandbox_sink=None):
+    async def _f(prompt, quest, *, color, width, model_sink=None, sandbox_sink=None,
+                 hint=None):
         if model_sink is not None:
             model_sink["model"] = model
         return reply
@@ -436,7 +437,7 @@ async def test_cleared_session_threads_sandbox_sink(tmp_path, monkeypatch) -> No
     captured: dict[str, object] = {}
 
     async def _fake_intent(prompt, quest, *, color, width,
-                           model_sink=None, sandbox_sink=None):
+                           model_sink=None, sandbox_sink=None, hint=None):
         captured["sandbox_sink"] = sandbox_sink
         return "brainstorm"
 
@@ -564,7 +565,7 @@ async def test_cleared_session_threads_opening_unsandboxed_to_run(
     monkeypatch.chdir(tmp_path)
 
     async def _fake_intent(prompt, quest, *, color, width,
-                           model_sink=None, sandbox_sink=None):
+                           model_sink=None, sandbox_sink=None, hint=None):
         if sandbox_sink is not None:
             sandbox_sink["unsandboxed"] = True   # a typed /sandbox off
         return "brainstorm"
@@ -592,3 +593,80 @@ async def test_cleared_session_threads_opening_unsandboxed_to_run(
     rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
     assert rc == 0
     assert captured["opening_unsandboxed"] is True
+
+
+class _HintRecordingPrompt:
+    """Answers queued lines from ask_async, recording each read's placeholder."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = list(lines)
+        self.hints: list[str | None] = []
+
+    async def ask_async(self, *a: object, hint: str | None = None, **k: object) -> str:
+        self.hints.append(hint)
+        return self._lines.pop(0)
+
+
+_MODE_HINTS = [
+    ("new", "describe what you want built, or /help"),
+    ("chat", "ask anything, or /help"),
+]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("leave_mode", "expected"), _MODE_HINTS)
+async def test_read_opening_message_hint_follows_mode(
+    tmp_path, leave_mode: str, expected: str,
+) -> None:
+    prompt = _HintRecordingPrompt(["add oauth"])
+
+    reply = await main._read_opening_message(
+        _fake_quest(tmp_path), leave_mode=leave_mode, banner_shown=False,
+        color=False, width=80, editing_mode="emacs", _prompt_factory=lambda: prompt)
+
+    assert reply == "add oauth"
+    assert prompt.hints == [expected]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("leave_mode", "expected"), _MODE_HINTS)
+async def test_opening_reprompt_keeps_mode_hint(
+    tmp_path, monkeypatch, leave_mode: str, expected: str,
+) -> None:
+    import imp.cli.slash as slash
+
+    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
+    prompt = _HintRecordingPrompt(
+        ["/help", "/model anthropic:claude-fable-5", "add oauth"])
+
+    reply = await main._read_opening_message(
+        _fake_quest(tmp_path), leave_mode=leave_mode, banner_shown=False,
+        color=False, width=80, editing_mode="emacs", _prompt_factory=lambda: prompt)
+
+    assert reply == "add oauth"
+    assert prompt.hints == [expected] * 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("leave_mode", "expected"), _MODE_HINTS)
+async def test_run_cleared_session_hint_follows_mode(
+    tmp_path, monkeypatch, leave_mode: str, expected: str,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    prompt = _HintRecordingPrompt(["brainstorm"])
+    monkeypatch.setattr(main, "Prompt", lambda *a, **k: prompt)
+    monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    async def _fake_rsc(quest, **kw):
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
+
+    rc = await main._run_cleared_session(
+        tmp_path, "main", leave_state={}, leave_mode=leave_mode)
+
+    assert rc == 0
+    assert prompt.hints == [expected]
