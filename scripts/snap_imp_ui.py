@@ -22,6 +22,7 @@ Scenes:
   stream-live  Replay the committed demo journal (docs/examples/seru99.jsonl.gz)
            on a real pty with the live status bar drawn, then snapshot the
            screen. Deterministic: clocks, spinner and width are all pinned.
+           --project NAME puts a repo name on the status row (default: none).
   prompt   The real interactive input field (prompt_toolkit), driven on a pty.
            --type TEXT pre-fills the field before the snapshot.
 
@@ -99,13 +100,14 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
 
 
 def snap_stream_live(out: Path, *, limit: int, cols: int, rows: int,
-                     theme: str = "dark") -> None:
+                     theme: str = "dark", project: str = "") -> None:
     """Drive the stream-live scene on a REAL pty and paint the resulting screen:
     the only path that captures the live status bar, which needs a tty to draw."""
     from impty.session import TerminalSession
 
     argv = [sys.executable, str(_HERE / "capture_imp_ui.py"), "stream-live",
-            "--limit", str(limit), "--width", str(cols), "--theme", theme]
+            "--limit", str(limit), "--width", str(cols), "--theme", theme,
+            "--project", project]
     sess = TerminalSession(argv, cols=cols, rows=rows)
     try:
         code = sess.run_to_completion(hard=120)
@@ -147,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cols", type=int, default=None)
     ap.add_argument("--rows", type=int, default=None,
                     help="stream auto-fits; stream-live default 22; prompt default 16")
+    ap.add_argument("--project", default="",
+                    help="stream-live: repo name on the status row")
     ap.add_argument("--theme", choices=("dark", "light", "ansi"), default="dark",
                     help="color theme to emit (light previews on a near-white surface)")
     ap.add_argument("--open", dest="open_it", action="store_true", help="xdg-open the PNG")
@@ -163,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
         snap_stream_live(out, limit=a.limit or cap.HERO_LIMIT,
                          cols=a.cols or cap.HERO_WIDTH, rows=a.rows or HERO_ROWS,
-                         theme=a.theme)
+                         theme=a.theme, project=a.project)
     else:
         snap_prompt(out, type_text=a.type_text, cols=a.cols or 100,
                     rows=a.rows or 16, theme=a.theme)
