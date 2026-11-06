@@ -92,8 +92,6 @@ vida80 · Fix Codex re-prompt crash
 
 • Set name to "Fix Codex re-prompt crash"
 
-  1 call · rename_quest
-
   spiker · claude-opus-5-5 · 8m 11s
 
   explorer · claude-sonnet-5-5 · 1m 4s
@@ -225,7 +223,7 @@ vida80 · Fix Codex re-prompt crash
 
 > ok
 
-  4 calls · create_and_enter_worktree · bash · write_file · complete_step · 26s
+  2 calls · bash · write_file · 26s
 
 ── spec phase ───
 
@@ -233,7 +231,7 @@ spec phase · writing spec · claude-opus-5-5
 
 • I'll read the draft spec to adopt and normalize it.
 
-  4 calls · read_file · bash · write_file · complete_step · 23s
+  3 calls · read_file · bash · write_file · 23s
 
 spec phase · writing spec · complete · 26s
 
@@ -297,8 +295,6 @@ spec phase · reviewing spec · claude-opus-5-5
   _error_node detail order, the test helpers the new test relies on, and that no
   guard test forbids any of the changes.
 
-  1 call · complete_step
-
 spec phase · reviewing spec · complete · 2 major, 1 minor · 4m 54s
 
 ↩ reviewing spec → addressing spec review feedback
@@ -316,7 +312,7 @@ spec phase · addressing spec review feedback · claude-opus-5-5
 • I'll scan the provider runner tests for other exact detail == asserts on
   unknown events.
 
-  4 calls · bash · read_file · edit_file · complete_step · 21s
+  3 calls · bash · read_file · edit_file · 21s
 
 spec phase · addressing spec review feedback · complete · 47s
 
@@ -401,8 +397,6 @@ spec phase · reviewing spec · claude-opus-5-5
 
   Planning can start next.
 
-  1 call · complete_step
-
 spec phase · reviewing spec · complete · round 2 · 3 minor · 4m 51s
 
 spec phase complete · 10m 59s
@@ -486,8 +480,6 @@ planning phase · plan 1/2 · writing plan · claude-opus-5-5
   be escaped the same way as the other error detail.
 
   Next, plan 1 goes to plan review.
-
-  1 call · complete_step
 
 planning phase · plan 1/2 · writing plan · complete · 4m 10s
 
@@ -599,8 +591,6 @@ planning phase · plan 1/2 · reviewing plan · claude-opus-5-5
   Nit (not counted): the comment above _FAKE_CODEX is two lines, and the
   project's comment convention allows at most one short line.
 
-  1 call · complete_step
-
 planning phase · plan 1/2 · reviewing plan · complete · clean · 3m 12s
 
 planning phase · plan 1/2 · finalizing plan
@@ -644,7 +634,7 @@ implementation phase · plan 1/2 · task 1/1 · claude-opus-5-5
   doesn't need another review. I'll confirm the commits and a clean tree, then
   record the plan as done.
 
-  4 calls · bash · write_file · complete_step · 16s
+  3 calls · bash · write_file · 16s
 
 implementation phase · plan 1/2 · task 1/1 · complete · 4m 58s
 
@@ -688,7 +678,7 @@ planning phase · plan 2/2 · writing plan · claude-opus-5-5
 • I have what I need; writing plan 2 now. It covers recording the traceback on
   unknown provider errors and showing it only under --full.
 
-  4 calls · write_file · bash · edit_file · complete_step · 26s
+  3 calls · write_file · bash · edit_file · 26s
 
 planning phase · plan 2/2 · writing plan · complete · 3m 29s
 
@@ -744,8 +734,6 @@ planning phase · plan 2/2 · reviewing plan · claude-opus-5-5
 
   Nothing in the spec was left out of this plan, so there was nothing to add to
   the deferred-items list.
-
-  1 call · complete_step
 
 planning phase · plan 2/2 · reviewing plan · complete · 1 minor · 5m 32s
 
@@ -808,7 +796,7 @@ implementation phase · plan 2/2 · task 2/2 · claude-opus-5-5
 • The tree is clean and the focused tests for both tasks pass (599 tests). I'm
   updating the progress notes to mark the plan done.
 
-  4 calls · read_file · write_file · bash · complete_step · 11s
+  3 calls · read_file · write_file · bash · 11s
 
 implementation phase · plan 2/2 · task 2/2 · complete · 6m 19s
 
@@ -877,8 +865,6 @@ convergence phase · checking plan coverage · claude-opus-5-5
      builders or test fixtures, so the new key doesn't affect them.
 
   Coverage is complete; the next step is the once-only quest-wide review.
-
-  1 call · complete_step
 
 convergence phase · checking plan coverage · complete · 1m 28s
 
@@ -953,8 +939,6 @@ convergence phase · reviewing entire diff · claude-opus-5-5
   I found no Critical, Major or Minor issues, so I added nothing to the deferred
   list. The branch is ready for the final checks before merge.
 
-  1 call · complete_step
-
 convergence phase · reviewing entire diff · complete · 3m 23s
 
 convergence phase · running tests · complete · 2m 14s
@@ -967,7 +951,7 @@ integration phase · waiting in merge queue · complete
 
 integration phase · summarizing quest · claude-sonnet-5-5
 
-  3 calls · bash · complete_step · 6s
+  2 calls · bash · 6s
 
 integration phase · summarizing quest · complete · 6s
 
@@ -976,7 +960,7 @@ integration phase · finalizing · claude-opus-5-5
 • I'll read the summary, deferred items, and progress notes to decide the merge
   gate.
 
-  2 calls · bash · complete_step · 9s
+  1 call · bash · 9s
 
 integration phase · finalizing · complete · 13s
 
