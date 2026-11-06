@@ -11,6 +11,7 @@ from imp.assets import bundled_workflow_dir
 from imp.cli.narrative import NarrativeBuilder
 from imp.cli.render_text import render_tree
 from imp.engine.executor import _action_payload, _step_started_payload
+from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.types import Goto, Rule, Step, Workflow
@@ -178,6 +179,46 @@ def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) ->
     ]) == ["── integration phase ───"]
 
 
+def _merged_tree_gate_rule(exit_code: int) -> Rule:
+    rule = evaluate_rules(_step("default", "integration-verify").rules,
+                          vars={}, output={"exit": exit_code}).rule
+    assert rule is not None
+    return rule
+
+
+def _merged_tree_gate_lines(exit_code: int, quest: Quest) -> list[str]:
+    gate = _step("default", "integration-verify")
+    rule = _merged_tree_gate_rule(exit_code)
+    return _lines([
+        _started(gate, quest),
+        _ev("step_completed", _END, step=gate.name, kind=gate.kind,
+            action=_action_payload(rule.action), var_mutations={}, label=rule.label),
+        _started(_step("default", "integration-reviewer"), quest, rule.label),
+    ])
+
+
+def test_failed_merged_tree_gate_labels_the_reviewer_header_with_no_route_line(
+    quest: Quest,
+) -> None:
+    names = [s.name for s in _workflow("default").flat_steps()]
+    # The engine emits step_transition, hence ↩, only for a backward goto.
+    assert names.index("integration-verify") < names.index("integration-reviewer")
+    assert _merged_tree_gate_lines(1, quest) == [
+        "── integration phase ───",
+        "integration phase · running tests · complete · 5s",
+        f"integration phase · triaging slow test failures on the merged tree · {MODEL}",
+    ]
+
+
+def test_passing_merged_tree_gate_reaches_the_reviewer_unlabeled(quest: Quest) -> None:
+    assert _merged_tree_gate_rule(0).label is None
+    assert _merged_tree_gate_lines(0, quest) == [
+        "── integration phase ───",
+        "integration phase · running tests · complete · 5s",
+        f"integration phase · reviewing merge · {MODEL}",
+    ]
+
+
 @pytest.mark.parametrize(
     ("workflow", "source", "target", "label"),
     [
@@ -185,6 +226,8 @@ def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) ->
         ("default", "plan-verify-commit", "plan-writer", "writing the missing plan"),
         ("default", "gap-check", "plan-writer", "writing plan for coverage gaps"),
         ("default", "converge-verify", "deferred-sweep", "triaging slow test failures"),
+        ("default", "integration-verify", "integration-reviewer",
+         "triaging slow test failures on the merged tree"),
         ("default", "validate-memory", "reconciler", "fixing memory files"),
         ("default", "check-cleared", "integration-verify", "re-running tests"),
         ("default", "merge-to-base", "reconciler", "committing leftover changes"),

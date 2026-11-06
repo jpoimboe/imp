@@ -309,7 +309,7 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, goto: integration-reviewer, feedback: "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"}
+          - {else: true, goto: integration-reviewer, label: "triaging slow test failures on the merged tree", feedback: "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"}
 
       - name: integration-reviewer
         file: agents/integration-review.md
