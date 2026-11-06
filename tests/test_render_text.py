@@ -4260,3 +4260,124 @@ def test_terminal_tools_views_keep_complete_step_lines() -> None:
     assert "· complete_step  status=Success" in full
     assert "▾ complete_step" in full
     assert "· complete_step  status=Success" in shown
+
+
+_MD_TABLE = "| a | b |\n|---|---|\n| c | d |"
+_MD_SAMPLE = (
+    "# one\n\n## two\n\n### three\n\n#### four\n\n##### five\n\n###### six\n\n"
+    "Prose with `code`, a [site](https://example.com) and <kbd>K</kbd>.\n\n"
+    "1. first\n2. second\n\n- bullet\n\n"
+    f"{_MD_TABLE}\n\n> quoted\n\n---\n\n"
+    "```python\n# note\ndef f():\n    return 1\n```\n\n```\nplain\n```\n")
+_SGR_PARAMS_RE = _re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def _md_under(theme: str, text: str, *, width: int = 80, color: bool = True) -> str:
+    pal.set_theme(theme)
+    try:
+        return rt._markdown_to_ansi(text, width, color, display_width=24)
+    finally:
+        pal.set_theme("ansi")
+
+
+def _named_color_codes(ansi: str) -> list[int]:
+    named: list[int] = []
+    for match in _SGR_PARAMS_RE.finditer(ansi):
+        params = [int(p or 0) for p in match.group(1).split(";")]
+        i = 0
+        while i < len(params):
+            if params[i] in (38, 48):
+                i += 5 if params[i + 1] == 2 else 3
+                continue
+            if params[i] in (*range(30, 38), *range(90, 98),
+                             *range(40, 48), *range(100, 108)):
+                named.append(params[i])
+            i += 1
+    return named
+
+
+def test_named_color_codes_skips_truecolor_operands() -> None:
+    assert _named_color_codes(
+        "\x1b[36m\x1b[1;97;49m\x1b[100m\x1b[4;38;2;30;68;126m\x1b[48;2;97;40;100m"
+    ) == [36, 97, 100]
+
+
+def test_light_markdown_emits_each_palette_escape() -> None:
+    for source, escape in (
+        ("`code`", "\x1b[38;2;42;115;112mcode\x1b[0m"),
+        ("# one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("## one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("### one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("#### one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("##### one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("###### one", "\x1b[1;38;2;42;115;112mone\x1b[0m"),
+        ("1. first", "\x1b[38;2;42;115;112m 1 \x1b[0m"),
+        (_MD_TABLE, "\x1b[38;2;42;115;112ma\x1b[0m"),
+        (_MD_TABLE, "\x1b[38;2;42;115;112m ──── \x1b[0m"),
+        ("[site](https://example.com)", "\x1b[4;38;2;30;68;126msite\x1b[0m"),
+        ("> quoted", "\x1b[38;2;122;73;150mquoted\x1b[0m"),
+        ("press <kbd>K</kbd> now", "\x1b[1;38;2;154;106;42mK\x1b[0m"),
+        ("---", "\x1b[38;2;102;106;102m" + "─" * 24 + "\x1b[0m"),
+    ):
+        assert escape in _md_under("light", source), source
+
+
+def test_light_markdown_emits_no_named_colors() -> None:
+    out = _md_under("light", _MD_SAMPLE)
+    assert _named_color_codes(out) == []
+    assert "38;2;169;13;145" in out       # xcode keyword
+    assert "38;2;23;117;0" in out         # xcode comment
+    assert "97;49" not in out             # monokai's near-invisible plain text
+
+
+_MD_DIFF = "```diff\n@@ -1 +1 @@\n context\n-removed\n+added\n```\n"
+
+
+def test_light_diff_fence_colors_from_the_palette() -> None:
+    out = _md_under("light", _MD_DIFF)
+    assert "\x1b[38;2;168;59;56;49m-removed\x1b[0m" in out
+    assert "\x1b[38;2;85;111;34;49m+added\x1b[0m" in out
+    assert "\x1b[38;2;102;106;102;49m@@ -1 +1 @@\x1b[0m" in out
+    assert _named_color_codes(out) == []
+
+
+def test_dark_and_ansi_diff_fences_keep_monokai() -> None:
+    for theme in ("dark", "ansi"):
+        out = _md_under(theme, _MD_DIFF)
+        assert "\x1b[91;49m-removed\x1b[0m" in out
+        assert "\x1b[92;49m+added\x1b[0m" in out
+
+
+def test_dark_and_ansi_markdown_keep_the_16_color_look() -> None:
+    for theme in ("dark", "ansi"):
+        out = _md_under(theme, _MD_SAMPLE)
+        assert "\x1b[36mcode\x1b[0m" in out
+        assert "\x1b[1;36mone\x1b[0m" in out
+        assert "\x1b[90m" + "─" * 24 + "\x1b[0m" in out
+        assert "\x1b[97;49mplain\x1b[0m" in out
+        assert "38;2" not in out
+
+
+def test_rule_color_follows_the_theme_at_one_width() -> None:
+    for theme, escape in (("light", "\x1b[38;2;102;106;102m"), ("ansi", "\x1b[90m"),
+                          ("light", "\x1b[38;2;102;106;102m")):
+        assert escape + "─" * 24 in _md_under(theme, "---")
+
+
+def test_light_markdown_color_off_has_no_escapes() -> None:
+    assert "\x1b" not in _md_under("light", _MD_SAMPLE, color=False)
+
+
+def test_light_markdown_keeps_model_typed_sgr_verbatim() -> None:
+    span = _md_under("light", "Shows `[1;33m78%[0m` now.")
+    assert "\x1b[1;33m78%\x1b[0m" in span
+    fence = _md_under("light", rt._caret_escape_prose("Look:\n\n```\n[1;33mwarn[0m\n```\n"))
+    assert "\x1b[1;33mwarn\x1b[0m" in fence
+
+
+def test_light_markdown_wraps_where_ansi_does() -> None:
+    para = ("Wrap this paragraph with `inline code`, **bold words** and enough "
+            "ordinary text that it spans several lines.")
+    light = _visible(_md_under("light", para, width=30))
+    assert light == _visible(_md_under("ansi", para, width=30))
+    assert light.count("\n") >= 3

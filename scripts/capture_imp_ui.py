@@ -24,6 +24,7 @@ Scenes that wait for input (prompt) block until driven; replay scenes print and
 exit. `--color/--no-color` toggles ANSI (default: on). `stream-live` replays
 docs/examples/seru99.jsonl.gz on a tty with the status bar live, always in color
 (`--no-color` does not apply to it), and leaves the final footer on screen.
+`--project NAME` puts a repo name at the head of its status row (default: none).
 """
 
 from __future__ import annotations
@@ -143,7 +144,7 @@ def _pinned_status(stream: Any) -> Any:
 
 def replay_live(stream: Any, *, journal: Path = DEMO_JOURNAL,
                 limit: int = HERO_LIMIT, width: int = HERO_WIDTH,
-                theme: str = "dark") -> None:
+                theme: str = "dark", project: str = "") -> None:
     """Replay the first `limit` events to `stream` with LiveStatus active, so a
     tty keeps the transient footer on screen. Deterministic: see _pinned_clocks,
     _pinned_status, and the seeded status-phrase RNG."""
@@ -154,7 +155,7 @@ def replay_live(stream: Any, *, journal: Path = DEMO_JOURNAL,
     events = shift_to_instant(journal_events(journal, limit), _PINNED_INSTANT)
     with _pinned_clocks(_PINNED_INSTANT, width):
         driver = LiveDriver(stream=stream, color=True, width=width,
-                            status=_pinned_status(stream))
+                            status=_pinned_status(stream), project=project)
         for event in events:
             driver.on_event(event)
 
@@ -198,10 +199,11 @@ def scene_stream(*, color: bool, width: int, limit: int | None,
 
 
 def scene_stream_live(*, journal: Path, limit: int, width: int,
-                      theme: str) -> None:
+                      theme: str, project: str = "") -> None:
     """Replay a journal to REAL stdout, so a pty keeps the live status bar on
     screen — the frame the non-tty `stream` scene cannot produce."""
-    replay_live(sys.stdout, journal=journal, limit=limit, width=width, theme=theme)
+    replay_live(sys.stdout, journal=journal, limit=limit, width=width, theme=theme,
+                project=project)
     sys.stdout.flush()
 
 
@@ -256,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="stream: first N events")
     ap.add_argument("--journal", type=Path, default=DEMO_JOURNAL,
                     help="stream-live: journal to replay")
+    ap.add_argument("--project", default="",
+                    help="stream-live: repo name on the status row")
     ap.add_argument("--width", type=int, default=None, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
     ap.add_argument("--theme", choices=("dark", "light", "ansi"), default="dark",
@@ -280,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.scene == "stream-live":
         scene_stream_live(journal=a.journal,
                           limit=a.limit if a.limit is not None else HERO_LIMIT,
-                          width=a.width or HERO_WIDTH, theme=a.theme)
+                          width=a.width or HERO_WIDTH, theme=a.theme,
+                          project=a.project)
     elif a.scene == "prompt":
         scene_prompt(color=a.color, theme=a.theme)
     elif a.scene == "splash":

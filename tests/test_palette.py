@@ -326,3 +326,24 @@ def test_quota_bands_are_evaluated_on_the_displayed_percent() -> None:
     assert pal.quota_pct(49.5) == 50
     assert pal.quota_pct(84.5) == 85
     assert pal.quota_hue(pal.quota_pct(49.5)) == "wordmark"
+
+
+def _wcag_contrast(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    def luminance(rgb: tuple[int, int, int]) -> float:
+        r, g, b = (c / 255 for c in rgb)
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+               for c in (r, g, b)]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_wcag_contrast_black_on_white_is_21() -> None:
+    assert _wcag_contrast((0, 0, 0), (255, 255, 255)) == pytest.approx(21)
+
+
+def test_light_gray_is_readable_on_surface_and_status_bar() -> None:
+    gray = pal._LIGHT_RGB["gray"]
+    assert gray == (0x66, 0x6A, 0x66)
+    assert _wcag_contrast(gray, pal.surface("light")[0]) >= 4.5
+    assert _wcag_contrast(gray, pal._TOOLBAR_BG_RGB["light"]) >= 4.5

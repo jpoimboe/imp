@@ -17,10 +17,13 @@ import json
 import re
 import textwrap
 from collections.abc import Iterable, Iterator
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
+
+if TYPE_CHECKING:
+    from rich.syntax import SyntaxTheme
 
 _INDENT = "  "          # two spaces per tree level
 _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUTES
@@ -317,7 +320,7 @@ def _commit_lines(commits: list[dict[str, str]], depth: int, color: bool,
 
 
 @functools.cache
-def _no_bg_code_block_cls() -> type:
+def _no_bg_code_block_cls(code_theme: str | SyntaxTheme) -> type:
     """A `CodeBlock` element that renders fenced code with NO background fill.
 
     rich's default paints the monokai background across the full block width, so
@@ -332,7 +335,7 @@ def _no_bg_code_block_cls() -> type:
         def __rich_console__(self, console, options):  # type: ignore[no-untyped-def]
             code = str(self.text).rstrip()
             yield from console.render(
-                Syntax(code, self.lexer_name, theme=self.theme, word_wrap=True,
+                Syntax(code, self.lexer_name, theme=code_theme, word_wrap=True,
                        padding=0, background_color="default"), options)
 
     return _NoBgCodeBlock
@@ -347,7 +350,8 @@ def _capped_hr_cls(display_width: int) -> type:
     class _CappedHR(HorizontalRule):
         def __rich_console__(self, console, options):  # type: ignore[no-untyped-def]
             rule_width = min(display_width, options.max_width)
-            yield Text("─" * max(1, rule_width), style="bright_black")
+            # A style name: this class is cached across themes, so the console resolves it.
+            yield Text("─" * max(1, rule_width), style="markdown.hr")
 
     return _CappedHR
 
@@ -355,11 +359,52 @@ def _capped_hr_cls(display_width: int) -> type:
 # Headers match inline `code`: rich's defaults give them underlined magenta (h2)
 # / bold magenta (h3) etc.; we recolor every level to the same cyan, keeping
 # bold (no underline) so headers stay emphasized but in imp's accent rather than
-# rich's magenta.
+# rich's magenta. This 16-color cyan serves dark and `ansi`; the light theme draws
+# from the palette instead (`_MD_LIGHT_THEME`).
 _MD_THEME = {
     "markdown.code": "cyan",
     **{f"markdown.h{n}": "bold cyan" for n in range(1, 8)},
+    "markdown.hr": "bright_black",
 }
+
+_LIGHT_HEX = {name: "#{:02x}{:02x}{:02x}".format(*rgb)
+              for name, rgb in pal.theme_rgb("light").items()}
+_MD_LIGHT_THEME = {
+    "markdown.code": _LIGHT_HEX["cyan"],
+    **{f"markdown.h{n}": f"bold {_LIGHT_HEX['cyan']}" for n in range(1, 8)},
+    "markdown.item.number": _LIGHT_HEX["cyan"],
+    "markdown.table.border": _LIGHT_HEX["cyan"],
+    "markdown.table.header": f"not bold {_LIGHT_HEX['cyan']}",
+    "markdown.link_url": f"underline {_LIGHT_HEX['blue']}",
+    "markdown.block_quote": _LIGHT_HEX["magenta"],
+    "markdown.kbd": f"bold {_LIGHT_HEX['yellow']}",
+    "markdown.hr": _LIGHT_HEX["gray"],
+}
+
+
+class _MdLook(NamedTuple):
+    color_system: Literal["standard", "truecolor"]
+    styles: dict[str, str]
+    code_theme: str | SyntaxTheme
+
+
+_MD_LOOK_16 = _MdLook("standard", _MD_THEME, "monokai")
+
+
+@functools.cache
+def _md_look_light() -> _MdLook:
+    from pygments.styles.xcode import XcodeStyle  # type: ignore[import-untyped]
+    from pygments.token import Generic  # type: ignore[import-untyped]
+    from rich.syntax import PygmentsSyntaxTheme
+
+    # xcode styles no Generic tokens, so its diff fences would be all one color.
+    class _LightCodeStyle(XcodeStyle):  # type: ignore[misc]
+        styles: ClassVar[dict[Any, str]] = {**XcodeStyle.styles,
+                                            Generic.Inserted: _LIGHT_HEX["green"],
+                                            Generic.Deleted: _LIGHT_HEX["red"],
+                                            Generic.Subheading: _LIGHT_HEX["gray"]}
+
+    return _MdLook("truecolor", _MD_LIGHT_THEME, PygmentsSyntaxTheme(_LightCodeStyle))
 
 
 # A permanent Unicode noncharacter: no font maps it and it is invalid in
@@ -564,6 +609,7 @@ def _render_with_rich(text: str, width: int, color: bool, display_width: int) ->
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.theme import Theme
+    look = _md_look_light() if pal.active_theme() == "light" else _MD_LOOK_16
     buf = io.StringIO()
     md = Markdown(text)
     for token in md.parsed:
@@ -573,14 +619,14 @@ def _render_with_rich(text: str, width: int, color: bool, display_width: int) ->
                     child.type = "hardbreak"
                 elif child.type == "code_inline" and not color:
                     child.content = _delimited_code(child.content, child.markup)
-    no_bg = _no_bg_code_block_cls()
+    no_bg = _no_bg_code_block_cls(look.code_theme)
     md.elements["fence"] = no_bg
     md.elements["code_block"] = no_bg
     md.elements["hr"] = _capped_hr_cls(display_width)
     Console(file=buf, width=width, no_color=not color,
-            color_system="standard" if color else None,
+            color_system=look.color_system if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
-            theme=Theme(_MD_THEME)).print(md)
+            theme=Theme(look.styles)).print(md)
     return buf.getvalue()
 
 
@@ -619,9 +665,10 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     cut; content rich won't reflow (code fences, tables) is allowed to overflow.
 
     Theme override: rich's default `markdown.code` is bold+cyan+black-bg. We
-    drop the bold and dark bg by setting it to plain `cyan` so inline `code`
-    sits calmly in the prose. Headers are recolored to the same cyan, and
-    fenced blocks render with no background fill — see `_markdown_to_ansi`."""
+    drop the bold and dark bg so inline `code` sits calmly in the prose: plain
+    `cyan` under dark and `ansi`, while the light theme draws it and the other
+    Markdown colors from the palette instead. Headers share the inline-code color,
+    and fenced blocks render with no background fill — see `_markdown_to_ansi`."""
     # An agent turn is marked with a leading bold "• " bullet and hang-indented:
     # the bullet sits at the base column and every wrapped/continuation line aligns
     # 2 cols in, under the first word. (A bold dot — heavier than the small
