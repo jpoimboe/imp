@@ -9,9 +9,11 @@ import pytest
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
+from imp.cli import render_markdown as rm
 from imp.cli import render_text as rt
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
+from imp.cli.render_html import render_html
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import agent_text, ev
 
@@ -471,3 +473,19 @@ def test_replay_suppressed_driver_keeps_a_script_steps_later_output() -> None:
     assert MARKER not in shown
     assert shown == _replayed(_script_run(show_output=True, after=("out after",),
                                           resumed={"in_process": True}))
+
+
+# AC12(a), (b)
+def test_markdown_and_html_carry_the_marker() -> None:
+    md = rm.render_markdown(nv.build_tree(_agent_run()), full=False)
+    assert f"**{MARKER_2M}**" in md.splitlines()
+    assert f"<strong>{MARKER_2M}</strong>" in render_html(md)
+
+
+# AC12(c)
+@pytest.mark.parametrize("start", [{}, {"show_label": False}], ids=["visible", "hidden"])
+def test_markdown_keeps_a_held_script_steps_marker(start: dict[str, Any]) -> None:
+    events = _script_run(**start)
+    md = rm.render_markdown(nv.build_tree(events), full=False)
+    assert f"**{MARKER_2M}**" in md.splitlines()
+    assert MARKER_2M in _log(events)
