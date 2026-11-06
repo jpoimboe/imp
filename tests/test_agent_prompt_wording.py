@@ -6,6 +6,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
+from imp.engine.types import Goto
 
 
 def _agent_prompt(name: str) -> str:
@@ -923,3 +924,29 @@ def test_plan_reviewer_green_bullet_includes_guard_tests() -> None:
         "usages: a prescribed test or edit a guard would fail is the same **Major**. "
         "## Backstop: record an unrecorded scope-out"
     ) in body
+
+
+def _gate_failure_feedback(gate: str, target: str) -> str:
+    wf = load_workflow(bundled_workflow_dir("default"))
+    step = next(s for s in wf.flat_steps() if s.name == gate)
+    action = next(r.action for r in step.rules if r.condition is None)
+    assert isinstance(action, Goto)
+    assert action.target == target
+    assert action.feedback is not None
+    return " ".join(action.feedback.split())
+
+
+def test_integration_verify_failure_feedback_selects_adjudicate_mode() -> None:
+    feedback = _gate_failure_feedback("integration-verify", "integration-reviewer")
+    assert feedback in _normalized_prompt("integration-review")
+
+
+def test_converge_verify_failure_feedback_carries_the_token_deferred_sweep_quotes() -> None:
+    feedback = _gate_failure_feedback("converge-verify", "deferred-sweep")
+    assert "(converge-verify)" in feedback
+    assert "(converge-verify)" in _normalized_prompt("deferred-sweep")
+
+
+def test_validate_memory_failure_feedback_names_a_reconciler_entry_context() -> None:
+    feedback = _gate_failure_feedback("validate-memory", "reconciler")
+    assert feedback in _normalized_prompt("reconciler")

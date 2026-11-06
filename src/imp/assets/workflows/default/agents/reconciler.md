@@ -21,7 +21,7 @@ irreducibly ambiguous or the base has invalidated the quest.
 
 {% include "partials/commit-style.md" %}
 
-## Two entry contexts — detect which
+## Three entry contexts — detect which
 
 The engine enters you in exactly one. Detect it from `git status` and any injected feedback:
 
@@ -36,6 +36,11 @@ The engine enters you in exactly one. Detect it from `git status` and any inject
    `integration-verify` failure that `integration-review` adjudicated a genuine break —
    either way you are driven by the **finding**, never raw test output. Address it with a
    NORMAL fix commit on top (`git add` + `git commit -F`). Do not start or continue a rebase.
+3. **Resumed with a memory-validation failure** — feedback *"The imp/memory/ tree is
+   invalid against the rebased workflows. Fix the memory file paths:"*, no rebase in
+   progress. The validator's output names the invalid paths. Move, rename, or remove those
+   memory files to match the rebased workflows, in a NORMAL fix commit on top (`git add` +
+   `git commit -F`). Do not start or continue a rebase.
 
 ## Understand the state
 
@@ -66,7 +71,8 @@ yourself, without a confirmation prompt:
 
 **Verify with focused tests only.** After any reconciliation fix, run the *narrowest*
 tests covering the reconciled and base-broken code with the project's own test tooling, to
-catch mistakes early. `integration-verify` runs the combined checks as the very next step.
+catch mistakes early. `validate-memory` and then `integration-verify`, which runs the
+combined checks, are the very next steps.
 
 Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
 base — the quest's diff is always carried forward on the rebased history.
@@ -113,7 +119,7 @@ Drive to a clean state, then verify it:
 
 End with `complete_step`:
 - `stuck: false` — you reconciled in-loop; the head stays held and the quest proceeds to
-  integration-verify.
+  validate-memory, then integration-verify.
 - `stuck: true` — pause for a human. Fire this ONLY for an irreducible ambiguity (a
   reconciliation that could go two materially different ways with no basis in the spec to
   pick) or a suspected invalidation (base has superseded the quest and it should be

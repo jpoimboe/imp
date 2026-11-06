@@ -59,10 +59,13 @@ def truncate_detail(text: str, limit: int = _TRUNCATE_LIMIT) -> str:
 
 def format_script_feedback(
     command: str, exit_code: int, stdout: Any, stderr: Any,
+    *, feedback: str | None = None,
 ) -> str:
     body = truncate_detail(f"{_coerce(stdout)}{_coerce(stderr)}")
     detail = f"Gate `{command}` failed (exit {exit_code})\n{body}"
-    return _WRAPPER.format(detail=detail)
+    if feedback is None:
+        return _WRAPPER.format(detail=detail)
+    return f"{feedback}\n{detail}"
 
 
 def format_clean_tree_feedback(paths: str) -> str:

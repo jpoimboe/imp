@@ -1,5 +1,10 @@
 from pathlib import Path
 
+from imp.agents.prompts import build_context, render_prompt
+from imp.assets import bundled_workflow_dir
+from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
+
 WF = Path("src/imp/assets/workflows/default")
 
 
@@ -28,7 +33,32 @@ def test_reconciler_body_is_human_free_and_defines_contexts() -> None:
 def test_reconciler_is_finding_driven_not_raw_test_output() -> None:
     body = (WF / "agents" / "reconciler.md").read_text()
     low = body.lower()
-    # Collapsed to two entry contexts: an integration-verify failure arrives only as a finding.
-    assert "two entry contexts" in low
-    assert "three entry contexts" not in low
+    # Context 2 stays finding-driven: an integration-verify failure arrives only as a finding.
+    assert "three entry contexts" in low
+    assert "two entry contexts" not in low
     assert "never raw test output" in low
+
+
+_MEMORY_CONTEXT = """\
+3. **Resumed with a memory-validation failure** — feedback *"The imp/memory/ tree is
+   invalid against the rebased workflows. Fix the memory file paths:"*, no rebase in
+   progress. The validator's output names the invalid paths. Move, rename, or remove those
+   memory files to match the rebased workflows, in a NORMAL fix commit on top (`git add` +
+   `git commit -F`). Do not start or continue a rebase.
+"""
+
+
+def test_reconciler_renders_the_memory_validation_context(tmp_path: Path) -> None:
+    wf = bundled_workflow_dir("default")
+    out = render_prompt(
+        load_workflow(wf).agents["reconciler"].prompt_template_source,
+        build_context(
+            quest_title="t", event_log=JsonlEventLog(tmp_path / "events.jsonl"),
+            quest_id="abc", quest_home=".imp/quests/abc",
+            vars={"integration_fork": "FORK"},
+        ),
+        workflow_dir=wf,
+    )
+    assert "## Three entry contexts — detect which" in out
+    assert _MEMORY_CONTEXT in out
+    assert "Two entry contexts" not in out
