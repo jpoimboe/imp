@@ -384,6 +384,30 @@ def _block_to_dict(b: Any) -> dict[str, Any]:
     return {"type": str(bt)}
 
 
+@dataclass(frozen=True)
+class ResponseShape:
+    """What one model response held, summed over all of its agent_message events."""
+    thinking_blocks: int
+    has_text: bool
+
+
+@dataclass(frozen=True)
+class _TurnResponses:
+    before: ResponseShape | None
+    last: ResponseShape
+    last_message_id: str | None
+
+
+def _response_shape(raw: Any) -> ResponseShape:
+    # Replay feeds this every raw a journal ever recorded, so no shape may raise.
+    content = raw.get("content") if isinstance(raw, dict) else None
+    blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+    return ResponseShape(
+        thinking_blocks=sum(b.get("type") == "thinking" for b in blocks),
+        has_text=any(b.get("type") == "text" and str(b.get("text") or "").strip()
+                     for b in blocks))
+
+
 @runtime_checkable
 class EventLog(Protocol):
     """Audit log. Callers never pass parent_id; the writer computes it from an
@@ -442,6 +466,7 @@ class EventLog(Protocol):
                              reading: QuotaReading) -> None: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
     def tail(self, n: int) -> list[dict[str, Any]]: ...
+    def response_before_last(self, agent_id: str | None) -> ResponseShape | None: ...
     def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
         context_tokens: int | None = None, context_window: int | None = None,
@@ -458,6 +483,7 @@ class _BaseEventLog:
         self._last: dict[str, str] = {}   # agent_id → last event id (non-None only)
         self._seen_stderr_warnings: set[str] = set()
         self._last_quota: dict[str, tuple[tuple[Any, Any, Any], ...]] = {}
+        self._turn_responses: dict[str, _TurnResponses] = {}
         self._rebuild_from_history()
 
     def _rebuild_from_history(self) -> None:
@@ -467,12 +493,35 @@ class _BaseEventLog:
             if aid is not None and isinstance(eid, str):
                 self._last[aid] = eid
             payload = e.get("payload")
+            if isinstance(aid, str):
+                self._track_response(aid, e.get("type"), payload)
             if e.get("type") == "runner_warning" and isinstance(payload, dict):
                 message = payload.get("message")
                 if isinstance(message, str):
                     self._seen_stderr_warnings.add(message)
             if e.get("type") == "quota_reading" and isinstance(payload, dict):
                 self._last_quota[str(payload.get("provider"))] = _quota_key(payload)
+
+    def _track_response(self, agent_id: str, event_type: Any, payload: Any) -> None:
+        if event_type in ("user_message", "engine_message"):
+            self._turn_responses.pop(agent_id, None)
+        elif event_type == "agent_message" and isinstance(payload, dict):
+            shape = _response_shape(payload.get("raw"))
+            message_id = payload.get("message_id")
+            turn = self._turn_responses.get(agent_id)
+            if turn is None:
+                self._turn_responses[agent_id] = _TurnResponses(None, shape, message_id)
+            elif message_id is not None and message_id == turn.last_message_id:
+                merged = ResponseShape(turn.last.thinking_blocks + shape.thinking_blocks,
+                                       turn.last.has_text or shape.has_text)
+                self._turn_responses[agent_id] = _TurnResponses(turn.before, merged, message_id)
+            else:
+                self._turn_responses[agent_id] = _TurnResponses(turn.last, shape, message_id)
+
+    def response_before_last(self, agent_id: str | None) -> ResponseShape | None:
+        """The agent's response before its latest, when both are in one turn; reads no log."""
+        turn = self._turn_responses.get(agent_id) if agent_id is not None else None
+        return turn.before if turn is not None else None
 
     # --- core emit -----------------------------------------------------------
 
@@ -504,6 +553,7 @@ class _BaseEventLog:
         self._persist(record)
         if agent_id is not None:
             self._last[agent_id] = new_id
+            self._track_response(agent_id, type, payload)
         if self._on_event is not None:
             self._on_event(record)
 
