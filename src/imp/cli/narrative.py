@@ -548,6 +548,36 @@ class NarrativeTree:
     root: WorkflowNode
 
 
+def step_hidden(node: StepNode) -> bool:
+    """The step's frame (header + breadcrumb) is opted out."""
+    return not node.show_label
+
+
+def step_no_body(node: StepNode) -> bool:
+    """The step has no visible body on the happy path: a non-agent step (agents
+    always render prose) that is not surfacing its stdout via show_output."""
+    return node.kind != "agent" and not node.show_output
+
+
+def step_has_body(node: StepNode) -> bool:
+    """True once the step has recorded any child other than its trailing completion
+    breadcrumb — prose, surfaced script output, a lane-wait node, an error, a
+    subagent fold, a tool burst. A step whose only child is a breadcrumb (or which
+    has no children) has emitted no body."""
+    return any(not isinstance(c, BreadcrumbLine) for c in node.children)
+
+
+def deferred_leaf(node: StepNode) -> bool:
+    """A step the renderers hold as a single atomic leaf (blocked until close, then
+    rendered in one shot by `_render`) rather than a streamed container. Two cases:
+    a HIDDEN chrome step is always a leaf, body-INSENSITIVE (reveal-on-pause parity);
+    a VISIBLE body-capable-of-being-empty step is held until it gains a body or
+    completes empty (then collapses to one line). `step_no_body` is the outer gate,
+    so agents and show_output steps are never held; the live driver calls this
+    unchanged, so it flows through both paths."""
+    return step_no_body(node) and (step_hidden(node) or not step_has_body(node))
+
+
 # ── builder ──────────────────────────────────────────────────────────────────
 from collections.abc import Iterable  # noqa: E402  (kept near builder for clarity)
 

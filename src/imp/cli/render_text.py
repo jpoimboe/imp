@@ -721,36 +721,6 @@ def quiet_step_is_silent(node: nv.StepNode) -> bool:
     return verb in (None, "continue", "goto")
 
 
-def step_hidden(node: nv.StepNode) -> bool:
-    """The step's frame (header + breadcrumb) is opted out."""
-    return not node.show_label
-
-
-def step_no_body(node: nv.StepNode) -> bool:
-    """The step has no visible body on the happy path: a non-agent step (agents
-    always render prose) that is not surfacing its stdout via show_output."""
-    return node.kind != "agent" and not node.show_output
-
-
-def step_has_body(node: nv.StepNode) -> bool:
-    """True once the step has recorded any child other than its trailing completion
-    breadcrumb — prose, surfaced script output, a lane-wait node, an error, a
-    subagent fold, a tool burst. A step whose only child is a breadcrumb (or which
-    has no children) has emitted no body."""
-    return any(not isinstance(c, nv.BreadcrumbLine) for c in node.children)
-
-
-def deferred_leaf(node: nv.StepNode) -> bool:
-    """A step the renderers hold as a single atomic leaf (blocked until close, then
-    rendered in one shot by `_render`) rather than a streamed container. Two cases:
-    a HIDDEN chrome step is always a leaf, body-INSENSITIVE (reveal-on-pause parity);
-    a VISIBLE body-capable-of-being-empty step is held until it gains a body or
-    completes empty (then collapses to one line). `step_no_body` is the outer gate,
-    so agents and show_output steps are never held; the live driver calls this
-    unchanged, so it flows through both paths."""
-    return step_no_body(node) and (step_hidden(node) or not step_has_body(node))
-
-
 def frame_suppressed(node: Any) -> bool:
     """The node's frame (header + breadcrumb) is hidden. A show_label:false phase
     suppresses unconditionally; a show_label:false step suppresses only on a linear
@@ -758,7 +728,7 @@ def frame_suppressed(node: Any) -> bool:
     if isinstance(node, nv.PhaseNode):
         return not node.show_label
     if isinstance(node, nv.StepNode):
-        return step_hidden(node) and quiet_step_is_silent(node)
+        return nv.step_hidden(node) and quiet_step_is_silent(node)
     return False
 
 
@@ -1086,8 +1056,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
         return
 
     if isinstance(node, nv.StepNode):
-        if deferred_leaf(node) and quiet_step_is_silent(node):
-            if step_hidden(node):
+        if nv.deferred_leaf(node) and quiet_step_is_silent(node):
+            if nv.step_hidden(node):
                 return                       # hidden chrome: silent on a linear outcome
             if node.closed:
                 yield collapsed_step_line(node, depth=depth, color=color,
