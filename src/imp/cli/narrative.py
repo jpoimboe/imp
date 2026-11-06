@@ -1663,7 +1663,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.lane_wait_label = None
                 existing.lane_wait = False
                 existing.lane_wait_start_ts = None
-                existing.children.clear()
+                existing.children[:] = [c for c in existing.children
+                                        if isinstance(c, ResumeMarkerNode)]
                 existing.kind = kind
                 existing.model = p.get("model")
                 existing.provider = p.get("provider")

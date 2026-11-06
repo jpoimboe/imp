@@ -408,3 +408,66 @@ def test_held_step_marker_goes_ahead_of_it_in_its_parent_step() -> None:
     assert outer.children[1].name == "B"
     lines = _log(events)
     assert lines.index("step A") < lines.index(MARKER_2M) < lines.index("step B")
+
+
+def _replayed(events: Events) -> str:
+    # The daemon writes workflow_resumed to disk before the client's replay reads it.
+    cut = max(i for i, e in enumerate(events) if e["type"] == "workflow_resumed") + 1
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    for e in events[:cut]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    for e in events[cut:]:
+        drv.on_event(e)
+    drv.finish()
+    return out.getvalue()
+
+
+# AC9(a), (b)
+def test_restart_keeps_the_marker_and_wipes_the_partial_transcript() -> None:
+    lines = [ln for ln in _log(_agent_run(restarted=True)) if ln]
+    assert "• before" not in lines
+    header = next(i for i, ln in enumerate(lines) if "(resume)" in ln)
+    assert header < lines.index(MARKER_2M) < lines.index("• after")
+
+
+# AC9(c)
+def test_restart_accumulates_markers_in_order() -> None:
+    cycle = [ev("10", "workflow_paused", **CTRL_D, timestamp=_at(1000)),
+             ev("11", "workflow_resumed", timestamp=_at(1045)),
+             ev("12", "step_started", **AGENT, resumed=True, restarted=True,
+                timestamp=_at(1045))]
+    events = _agent_run(restarted=True)
+    assert _markers([*events[:-1], *cycle, events[-1]]) == [
+        MARKER_2M, "paused · resumed 45s later"]
+
+
+# AC10(b): pins today's restart output, which diverges from batch by design.
+def test_live_restart_prints_one_marker_and_is_otherwise_unchanged() -> None:
+    live = _live(_agent_run(restarted=True, gap=120))
+    baseline = _live(_agent_run(restarted=True, gap=0.5))
+    assert live.count(MARKER_2M) == 1
+    assert [ln for ln in live if ln and ln != MARKER_2M] == [ln for ln in baseline if ln]
+
+
+# AC11
+@pytest.mark.parametrize("make", [
+    _agent_run,
+    _script_run,
+    lambda **kw: _script_run(show_label=False, **kw),
+], ids=["agent", "visible-script", "hidden-script"])
+def test_replay_suppressed_driver_prints_no_marker_and_an_unchanged_body(make: Any) -> None:
+    shown = _replayed(make())
+    assert MARKER not in shown
+    assert shown == _replayed(make(resumed={"in_process": True}))
+
+
+# AC11(b): the two script shapes above replay to nothing, so pin one with a body.
+def test_replay_suppressed_driver_keeps_a_script_steps_later_output() -> None:
+    shown = _replayed(_script_run(show_output=True, after=("out after",)))
+    assert "out after" in shown
+    assert MARKER not in shown
+    assert shown == _replayed(_script_run(show_output=True, after=("out after",),
+                                          resumed={"in_process": True}))
