@@ -13,6 +13,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import re
 
 import pytest
 
@@ -124,3 +125,17 @@ def test_fixture_event_types_are_registered_handlers() -> None:
     handler_keys = set(nv.NarrativeBuilder._HANDLERS)
     unregistered = fixture_types - handler_keys
     assert not unregistered, _HANDLER_DRIFT + ", ".join(sorted(unregistered))
+
+
+_HIDDEN_RECAP = re.compile(
+    r"\d+ calls? · .*\b(complete_step|rename_quest|create_and_enter_worktree|save_and_exit)\b")
+
+
+def test_recorded_log_hides_internal_tools_without_migration() -> None:
+    events = _events()
+    assert any(e.get("type") == "tool_call"
+               and (e.get("payload") or {}).get("name") == "complete_step"
+               for e in events)
+    assert not _HIDDEN_RECAP.search(_log_body(events))
+    assert not _HIDDEN_RECAP.search(_live_body(events))
+    assert "· complete_step" in _log_body(events, frozenset({"tools"}))

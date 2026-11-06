@@ -142,3 +142,18 @@ def assert_spec_marker_scrollback(lines: list[str]) -> None:
     assert not any("spec-written" in ln for ln in lines), lines
     assert lines[i + 1] == "", lines
     assert lines[i + 2] == "── planning phase · plan 1/1 ───", lines
+
+
+INTERNAL_TOOLS = ("complete_step", "rename_quest", "create_and_enter_worktree", "save_and_exit")
+
+
+def tool_burst_events(*calls: tuple[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """One open agent step holding a single burst of finished (name, input) calls."""
+    events = [ev("s1", "step_started", step="s", kind="agent", phase="p",
+                 model="m", provider="anthropic")]
+    for i, (name, args) in enumerate(calls):
+        events.append(ev(f"c{i}", "tool_call", agent_id="step:p/s", id=f"b{i}",
+                         name=name, input=args))
+        events.append(ev(f"r{i}", "tool_result", agent_id="step:p/s", id=f"b{i}",
+                         content="ok", error=False))
+    return events

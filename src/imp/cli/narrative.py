@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 # keep clean.
 _OMIT: frozenset[str] = frozenset({"load_skill", "tool", "update_step_label"})
 
+# Plumbing: hidden from the recap and live status, still listed in detailed views.
+_INTERNAL_TOOLS: frozenset[str] = frozenset(
+    {"complete_step", "rename_quest", "create_and_enter_worktree", "save_and_exit"})
+
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge_and_exit_worktree"})
 
@@ -236,10 +240,15 @@ class ToolBurstFold:
     collapsible = True
 
 
-def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
-    """Burst calls minus the _OMIT names — the shared basis for the lean recap
-    (render_text) and the live status count/named-call (current_activity)."""
+def recorded_calls(burst: ToolBurstFold) -> list[ToolCall]:
+    """Burst calls minus _OMIT: internal tools stay, exports show a step's result nowhere else."""
     return [c for c in burst.calls if c.name not in _OMIT]
+
+
+def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
+    """Recorded calls minus the internal tools — the shared basis for the lean recap
+    (render_text) and the live status count/named-call (current_activity)."""
+    return [c for c in recorded_calls(burst) if c.name not in _INTERNAL_TOOLS]
 
 
 def display_tool_name(name: str) -> str:

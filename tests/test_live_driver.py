@@ -7,6 +7,8 @@ import io
 import json
 import re
 
+import pytest
+
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
@@ -15,6 +17,7 @@ from imp.cli.render_text import LOG_CATEGORIES, render_tree
 from imp.cli.signals import InterruptCoordinator
 from tests._event_fixtures import (
     _TTY,
+    INTERNAL_TOOLS,
     TASK_LEAD_AID,
     _two_phase_events,
     agent_text,
@@ -4174,3 +4177,34 @@ def test_handoff_note_absent_from_live_scrollback() -> None:
     assert not any(body[i].strip() == "" and body[i + 1].strip() == ""
                    for i in range(len(body) - 1))
     assert body == _render_body(events)                   # live/log parity
+
+
+def _step_closed_by(name: str) -> list[dict]:
+    def step(n: str, text: str, *closing: dict) -> list[dict]:
+        return [
+            ev(f"{n}1", "step_started", step=n, kind="agent", phase="design",
+               model="m", provider="anthropic"),
+            ev(f"{n}2", "agent_message", agent_id="a", usage={},
+               raw={"content": [{"type": "text", "text": text}]}),
+            *closing,
+            ev(f"{n}9", "step_completed", step=n, kind="agent",
+               action={"verb": "continue"}, var_mutations={}),
+        ]
+    return [
+        *step("spec", "final prose",
+              ev("c1", "tool_call", agent_id="a", id="b1", name=name,
+                 input={"status": "Success"}),
+              ev("c2", "tool_result", agent_id="a", id="b1", content="ok")),
+        *step("plan", "next prose"),
+    ]
+
+
+@pytest.mark.parametrize("name", INTERNAL_TOOLS)
+def test_internal_only_last_burst_prints_nothing_and_keeps_one_blank(name: str) -> None:
+    events = _step_closed_by(name)
+    live = _cats_body(events, frozenset())
+    assert live == _render_body(events)
+    assert not any(name in ln or " call" in ln for ln in live)
+    i = next(n for n, ln in enumerate(live) if "final prose" in ln)
+    assert live[i + 1] == ""
+    assert live[i + 2] != ""
