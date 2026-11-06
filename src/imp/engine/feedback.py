@@ -29,6 +29,14 @@ COMPLETION_NUDGE = (
     "anything you have already said."
 )
 
+# Turn-end resend when a question may have come back as hidden thinking instead of text.
+UNDELIVERED_MESSAGE_NUDGE = (
+    "Your previous message may not have reached the user: the response before your "
+    "last reply contained no visible text. If it held anything they need, such as a "
+    "question or options, send it again now in full, as plain text with no tool "
+    "calls. Otherwise, repeat what you need from them in one line."
+)
+
 
 def apply_completion_backstop(feedback: str | None, *, has_schema: bool) -> str | None:
     """Append the backstop when feedback is truthy and has_schema, else return it unchanged."""

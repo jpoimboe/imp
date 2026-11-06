@@ -17,8 +17,11 @@ if TYPE_CHECKING:
     from imp.agents.transcript import SolicitReply
 
 from imp.agents.runner import Message, TextBlock
-from imp.engine.feedback import COMPLETION_NUDGE
+from imp.engine.feedback import COMPLETION_NUDGE, UNDELIVERED_MESSAGE_NUDGE
 from imp.engine.types import OutputSchema
+
+_LOST_MESSAGE_STUB_MAX_CHARS = 300
+_LOST_MESSAGE_MIN_THINKING_BLOCKS = 2
 
 
 def completion_instruction(schema: OutputSchema) -> str:
@@ -158,12 +161,18 @@ def build_continuation_fn(
       1. A pending interject (a line the human typed mid-run) satisfies the
          yield — return it as the next user message (and clears the one-shot
          nudge bit so a later yield gets its own nudge).
-      2. One-shot disambiguation nudge (schema-bearing, non-interactive-flag agents
+      2. One-shot resend (interactive-flag agents only): a short reply right after a
+         response of two or more thinking blocks and no text means a question may
+         have come back as hidden thinking, so emit an
+         `engine_message`/`undelivered_message` event and return
+         UNDELIVERED_MESSAGE_NUDGE as the next user message. Fires at most once per
+         yield; the yield then carries the resend.
+      3. One-shot disambiguation nudge (schema-bearing, non-interactive-flag agents
          only): the FIRST bare turn-end of a yield returns COMPLETION_NUDGE as
          the next user message — asking the agent to call complete_step or reply
          WAITING — and emits an `engine_message`/`completion` event. Fires at most once per
          yield; behavior keys only on whether the next turn calls complete_step.
-      3. Already nudged, or nudge not applicable (interactive steps, or schema-less
+      4. Already nudged, or nudge not applicable (interactive steps, or schema-less
          agents — a true subagent's bare turn-end is its deliverable and never
          reaches this handler): today's yield behavior, carrying the stashed pre-nudge
          text so the human sees the original question, not the post-nudge reply:
@@ -193,13 +202,20 @@ def build_continuation_fn(
                              payload={"steer_hint": "", "last_agent_message": last_text,
                                       "interrupt": False})
 
-    def _emit_nudge() -> None:
+    def _emit_nudge(text: str, subtype: str) -> None:
         if event_log is not None:
             event_log.append_engine_message(
                 agent_id=agent_id,
-                message=Message(role="user",
-                                content=(TextBlock(text=COMPLETION_NUDGE),)),
-                subtype="completion")
+                message=Message(role="user", content=(TextBlock(text=text),)),
+                subtype=subtype)
+
+    def _message_looks_lost(last_text: str) -> bool:
+        if event_log is None or len(last_text.strip()) > _LOST_MESSAGE_STUB_MAX_CHARS:
+            return False
+        before = event_log.response_before_last(agent_id)
+        return (before is not None and not before.has_text
+                and before.thinking_blocks >= _LOST_MESSAGE_MIN_THINKING_BLOCKS
+                and not event_log.resend_outstanding(agent_id))
 
     nudged = False
     pre_nudge_text = ""
@@ -211,6 +227,9 @@ def build_continuation_fn(
             if pending is not None:
                 nudged = False
                 return pending, True
+        if interactive and _message_looks_lost(last_text):
+            _emit_nudge(UNDELIVERED_MESSAGE_NUDGE, "undelivered_message")
+            return UNDELIVERED_MESSAGE_NUDGE, False
         # One-shot disambiguation nudge: a schema-bearing, non-interactive-flag agent's
         # bare turn-end is indistinguishable from a forgotten complete_step, so
         # ask ONCE (WAITING or complete_step). Behavior keys only on whether the
@@ -219,7 +238,7 @@ def build_continuation_fn(
         if has_schema and not interactive and not nudged:
             nudged = True
             pre_nudge_text = last_text
-            _emit_nudge()
+            _emit_nudge(COMPLETION_NUDGE, "completion")
             return COMPLETION_NUDGE, False
         # Already nudged (or nudge not applicable): today's behavior. When we
         # nudged, the human/park must see the ORIGINAL question, not the

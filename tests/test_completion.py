@@ -89,6 +89,9 @@ class _RecordingLog:
         self.events.append(ev)
         return ev
 
+    def response_before_last(self, agent_id: str | None) -> None:
+        return None
+
 
 @pytest.fixture
 def anyio_backend() -> str:

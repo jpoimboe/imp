@@ -467,6 +467,7 @@ class EventLog(Protocol):
     def read(self) -> Iterator[dict[str, Any]]: ...
     def tail(self, n: int) -> list[dict[str, Any]]: ...
     def response_before_last(self, agent_id: str | None) -> ResponseShape | None: ...
+    def resend_outstanding(self, agent_id: str | None) -> bool: ...
     def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
         context_tokens: int | None = None, context_window: int | None = None,
@@ -484,6 +485,7 @@ class _BaseEventLog:
         self._seen_stderr_warnings: set[str] = set()
         self._last_quota: dict[str, tuple[tuple[Any, Any, Any], ...]] = {}
         self._turn_responses: dict[str, _TurnResponses] = {}
+        self._resend_outstanding: set[str] = set()
         self._rebuild_from_history()
 
     def _rebuild_from_history(self) -> None:
@@ -505,6 +507,13 @@ class _BaseEventLog:
     def _track_response(self, agent_id: str, event_type: Any, payload: Any) -> None:
         if event_type in ("user_message", "engine_message"):
             self._turn_responses.pop(agent_id, None)
+            subtype = payload.get("subtype") if isinstance(payload, dict) else None
+            if subtype == "undelivered_message":
+                self._resend_outstanding.add(agent_id)
+            elif subtype != "continuation":
+                self._resend_outstanding.discard(agent_id)
+        elif event_type == "awaiting_user_input":
+            self._resend_outstanding.discard(agent_id)
         elif event_type == "agent_message" and isinstance(payload, dict):
             shape = _response_shape(payload.get("raw"))
             message_id = payload.get("message_id")
@@ -522,6 +531,10 @@ class _BaseEventLog:
         """The agent's response before its latest, when both are in one turn; reads no log."""
         turn = self._turn_responses.get(agent_id) if agent_id is not None else None
         return turn.before if turn is not None else None
+
+    def resend_outstanding(self, agent_id: str | None) -> bool:
+        """Whether a correction went to this agent and it has not yielded or heard a user since."""
+        return agent_id is not None and agent_id in self._resend_outstanding
 
     # --- core emit -----------------------------------------------------------
 

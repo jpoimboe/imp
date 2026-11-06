@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -175,3 +176,64 @@ def test_reopening_a_log_keeps_agents_apart(tmp_path: Path) -> None:
     reopened = JsonlEventLog(path)
     assert reopened.response_before_last(AGENT) == LOST
     assert reopened.response_before_last(SUBAGENT) is None
+
+
+def _correct(log: EventLog, agent_id: str = AGENT) -> None:
+    log.append_engine_message(agent_id=agent_id, message=SAY, subtype="undelivered_message")
+
+
+def test_no_resend_is_outstanding_initially(log: EventLog) -> None:
+    assert not log.resend_outstanding(AGENT)
+    assert not log.resend_outstanding(None)
+
+
+def test_a_correction_leaves_a_resend_outstanding_through_its_continuation(log: EventLog) -> None:
+    _correct(log)
+    assert log.resend_outstanding(AGENT)
+    log.append_engine_message(agent_id=AGENT, message=SAY, subtype="continuation")
+    assert log.resend_outstanding(AGENT)
+    assert not log.resend_outstanding(None)
+
+
+def _user(subtype: str) -> Callable[[EventLog], None]:
+    return lambda log: log.append_user_message(agent_id=AGENT, message=SAY, subtype=subtype)
+
+
+def _gate(log: EventLog) -> None:
+    log.append(agent_id=AGENT, type="awaiting_user_input",
+               payload={"steer_hint": "", "last_agent_message": "q", "interrupt": False})
+
+
+def _agent_prompt(log: EventLog) -> None:
+    log.append_engine_message(agent_id=AGENT, message=SAY, subtype="agent_prompt")
+
+
+CLEARERS = [_user("reply"), _user("interject"), _gate, _agent_prompt]
+
+
+@pytest.mark.parametrize("clear", CLEARERS)
+def test_a_yield_or_a_message_to_the_agent_clears_the_resend(
+        log: EventLog, clear: Callable[[EventLog], None]) -> None:
+    _correct(log)
+    clear(log)
+    assert not log.resend_outstanding(AGENT)
+
+
+def test_another_agents_events_neither_set_nor_clear_the_resend(log: EventLog) -> None:
+    _correct(log, SUBAGENT)
+    assert not log.resend_outstanding(AGENT)
+    _correct(log)
+    log.append_user_message(agent_id=SUBAGENT, message=SAY, subtype="reply")
+    assert log.resend_outstanding(AGENT)
+    assert not log.resend_outstanding(SUBAGENT)
+
+
+@pytest.mark.parametrize("clear", [None, *CLEARERS])
+def test_reopening_a_log_restores_the_resend_state(
+        tmp_path: Path, clear: Callable[[EventLog], None] | None) -> None:
+    path = tmp_path / "events.jsonl"
+    writer = JsonlEventLog(path)
+    _correct(writer)
+    if clear is not None:
+        clear(writer)
+    assert JsonlEventLog(path).resend_outstanding(AGENT) is (clear is None)
