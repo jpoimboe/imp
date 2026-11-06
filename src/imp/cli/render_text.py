@@ -36,6 +36,7 @@ _ENGINE_LABELS = {
     "agent_prompt": "agent prompt:",
     "continuation": "continuation:",
     "completion": "completion nudge:",
+    "undelivered_message": "undelivered message nudge:",
 }
 
 # Plain-speak copy for pause reasons that need more than the verbatim token.

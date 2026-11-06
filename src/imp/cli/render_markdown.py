@@ -39,6 +39,7 @@ _ENGINE_MD_LABELS = {
     "agent_prompt": "agent prompt",
     "continuation": "continuation",
     "completion": "completion nudge",
+    "undelivered_message": "undelivered message nudge",
 }
 
 

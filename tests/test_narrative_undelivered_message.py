@@ -111,3 +111,21 @@ def test_other_subtypes_add_no_warning(subtype: str) -> None:
     events = [STEP, _reply("a", STUB), _engine("b", subtype), _reply("c", RESEND), MERGED]
     assert not any("warning" in line for line in _log(events))
     assert "warning" not in _md(events)
+
+
+@pytest.mark.parametrize("view", [{"full": True}, {"show": frozenset({"prompts"})}])
+def test_text_views_label_the_correction(view: dict[str, Any]) -> None:
+    lines = _log(FIRING, **view)
+    assert lines.count("undelivered message nudge:") == 1
+    assert lines[lines.index("undelivered message nudge:") + 1] == f"  {CORRECTION}"
+    assert "undelivered_message:" not in lines
+    assert lines.index(WARNING_LINE) < lines.index("undelivered message nudge:")
+
+
+def test_markdown_folds_the_labeled_correction_when_prompts_shown() -> None:
+    out = _md(FIRING, show=frozenset({"prompts"}))
+    assert f"<summary>undelivered message nudge</summary>\n\n```\n{CORRECTION}\n```" in out
+
+
+def test_markdown_full_inlines_the_labeled_correction() -> None:
+    assert f"**undelivered message nudge**\n\n```\n{CORRECTION}\n```" in _md(FIRING, full=True)
