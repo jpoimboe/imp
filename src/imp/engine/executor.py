@@ -1368,12 +1368,13 @@ async def _route_script(
     action, _, muts = _finish(log, step, quest, match, state)
     feedback = None
     if isinstance(action, Goto):
-        # exit-0: forward configured feedback (or None); non-zero: synthesize failure diagnostics.
+        # exit-0: forward configured feedback (or None); non-zero: add failure diagnostics to it.
         if out["exit"] == 0:
             feedback = action.feedback
         else:
             feedback = format_script_feedback(
-                command, out["exit"], out["stdout"], out["stderr"])
+                command, out["exit"], out["stdout"], out["stderr"],
+                feedback=action.feedback)
     elif isinstance(action, Pause):
         # Script pauses (e.g. integrate-rebase exit 3/4/5,
         # cleanup-merge/assert-stamped) otherwise lose their stderr — the pause verb

@@ -278,7 +278,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
 
 
 def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
-    """Non-zero exit Goto carries retry feedback: 'not accepted' and 'failed (exit N)'."""
+    """A non-zero exit with no configured feedback delivers the 'not accepted' retry text."""
     import types
 
     import anyio
@@ -305,9 +305,11 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
-        assert feedback is not None
-        assert "failed (exit 3)" in feedback
-        assert "not accepted" in feedback
+        assert feedback == (
+            "Your previous attempt completed but was not accepted. "
+            "Gate `echo boom; exit 3` failed (exit 3)\n"
+            "boom"
+        )
 
     anyio.run(main)
 
@@ -347,11 +349,13 @@ def test_route_script_goto_exit0_forwards_configured_feedback(tmp_path) -> None:
     anyio.run(main)
 
 
-def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) -> None:
-    """On a non-zero exit the synthesized script output is delivered even when the matched
-    rule carries a configured feedback: — the failure diagnostics that the converge-verify
-    and integration-verify triage agents reason over (and are forbidden to re-run) must
-    never be replaced by the static preamble."""
+@pytest.mark.parametrize("resume", [False, True])
+def test_route_script_nonzero_composes_configured_feedback_with_diagnostics(
+    tmp_path, resume: bool,
+) -> None:
+    """On a non-zero exit the configured feedback: leads and the gate's diagnostics follow —
+    the converge-verify and integration-verify triage agents key on the wording and reason
+    over the output they are forbidden to re-run, so both must arrive."""
     import types
 
     import anyio
@@ -369,7 +373,7 @@ def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) 
     preamble = "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"
     step = Step(
         name="integration-verify", phase="p", kind="script",
-        rules=(_rule(None, Goto("integration-reviewer", feedback=preamble)),),
+        rules=(_rule(None, Goto("integration-reviewer", feedback=preamble, resume=resume)),),
         on_max_retries=Pause(), max_loops=10, source=loc(),
         command="echo boom; exit 1",
     )
@@ -379,10 +383,13 @@ def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) 
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
-        assert feedback is not None
-        assert "boom" in feedback            # actual failure output delivered
-        assert "failed (exit 1)" in feedback
-        assert feedback != preamble          # NOT replaced by the configured preamble
+        assert feedback == (
+            "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:\n"
+            "Gate `echo boom; exit 1` failed (exit 1)\n"
+            "boom"
+        )
+        assert "not accepted" not in feedback
+        assert "Your previous attempt" not in feedback
 
     anyio.run(main)
 

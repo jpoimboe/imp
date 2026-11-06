@@ -36,6 +36,26 @@ def test_script_feedback_coerces_bytes() -> None:
     assert "raw" in out             # undecodable bytes replaced, not crashed
 
 
+def test_script_feedback_composes_configured_feedback() -> None:
+    out = format_script_feedback("cmd", 2, "out\n", "err\n", feedback="Authored wording:")
+    assert out == "Authored wording:\nGate `cmd` failed (exit 2)\nout\nerr\n"
+
+
+def test_script_feedback_without_configured_feedback_keeps_wrapper() -> None:
+    out = format_script_feedback("cmd", 2, "out\n", "err\n")
+    assert out == f"{_WRAPPER_HEAD} Gate `cmd` failed (exit 2)\nout\nerr\n"
+
+
+def test_script_feedback_with_configured_feedback_truncates_head_and_tail() -> None:
+    body = "\n".join(f"line {i}" for i in range(2000))  # well over 4000 chars
+    out = format_script_feedback("cmd", 1, body, "", feedback="Authored wording:")
+    assert out.startswith("Authored wording:\nGate `cmd` failed (exit 1)\nline 0\n")
+    assert out.endswith("line 1999")
+    assert "lines truncated …]" in out
+    assert "line 1000\n" not in out
+    assert len(out) < len(body)
+
+
 def test_render_output_fields_is_plain_no_editorial() -> None:
     out = render_output_fields({"status": "Reject", "reason": "missing tests"})
     assert "status: Reject" in out
