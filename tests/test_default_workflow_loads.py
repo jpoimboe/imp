@@ -135,7 +135,7 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
 
 def test_every_step_has_its_label() -> None:
     expected = {
-        "threshold": "chatting",
+        "threshold": None,
         "scope-code-check": "checking for stray commits",
         "spec-written": "checking for the spec",
         "spec-verify-commit": "checking spec commit",
@@ -208,7 +208,7 @@ def test_rotate_phrase_opt_in_on_task_lead_and_threshold_defaults() -> None:
 
 def test_phase_labels_assigned() -> None:
     by = {p.name: p for p in _wf().phases}
-    assert by["threshold"].label == "scoping phase"
+    assert by["threshold"].label is None
     assert by["spec"].label == "spec phase"
     assert by["plan"].label == (
         "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
