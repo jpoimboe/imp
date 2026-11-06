@@ -122,6 +122,8 @@ the Telegram relay — with no renderer to re-arm anything, it strips *all* term
 escapes at the outbound seam (`render_text.strip_terminal_escapes`), bare spellings
 and cursor moves included.
 
+Color-off output keeps inline code's source backticks, since color is otherwise its only marker.
+
 ## See also
 
 - `internals/architecture.md` — the engine and renderer these surfaces are built on.

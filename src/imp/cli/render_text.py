@@ -549,6 +549,12 @@ def _splice_lifted_spans(rendered: str, lifted: list[tuple[str, str]]) -> str | 
     return "".join(out)
 
 
+def _delimited_code(content: str, delimiter: str) -> str:
+    # A backtick at the content's edge would otherwise merge with the delimiter run.
+    pad = " " if content.startswith("`") or content.endswith("`") else ""
+    return f"{delimiter}{pad}{content}{pad}{delimiter}"
+
+
 def _render_with_rich(text: str, width: int, color: bool, display_width: int) -> str:
     import io
 
@@ -562,6 +568,8 @@ def _render_with_rich(text: str, width: int, color: bool, display_width: int) ->
             for child in token.children:
                 if child.type == "softbreak":
                     child.type = "hardbreak"
+                elif child.type == "code_inline" and not color:
+                    child.content = _delimited_code(child.content, child.markup)
     no_bg = _no_bg_code_block_cls()
     md.elements["fence"] = no_bg
     md.elements["code_block"] = no_bg

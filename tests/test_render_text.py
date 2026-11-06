@@ -1031,6 +1031,56 @@ def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
     assert "\x1b[36m" in joined             # still cyan foreground
 
 
+def _color_off_prose(md: str) -> str:
+    return "\n".join(rt._render_markdown_block(rt._caret_escape_prose(md), 60, 0, False))
+
+
+def test_inline_code_color_off_keeps_backticks() -> None:
+    assert "Try `inline code` here." in _color_off_prose("Try `inline code` here.")
+
+
+def test_inline_code_color_off_keeps_a_double_backtick_run() -> None:
+    assert "``a `b` c``" in _color_off_prose("``a `b` c``")
+
+
+def test_inline_code_color_off_pads_content_edged_with_a_backtick() -> None:
+    assert "`` `x` ``" in _color_off_prose("`` `x` ``")
+    assert "`` `x ``" in _color_off_prose("`` `x ``")
+    assert "`` x` ``" in _color_off_prose("`` x` ``")
+
+
+def test_inline_code_color_off_keeps_backticks_in_table_heading_and_link() -> None:
+    assert "`cell`" in _color_off_prose("| A |\n|---|\n| `cell` |")
+    assert "Head `h` x" in _color_off_prose("# Head `h` x")
+    assert "see `lnk` now" in _color_off_prose("see [`lnk`](https://example.com) now")
+
+
+def test_inline_code_color_off_leaves_code_block_bodies_undelimited() -> None:
+    fenced = _color_off_prose("```\nfence body\n```")
+    assert "fence body" in fenced and "`" not in fenced
+    indented = _color_off_prose("para\n\n    indented body\n")
+    assert "indented body" in indented and "`" not in indented
+
+
+def test_inline_code_color_off_splices_a_colored_sample_inside_the_backticks() -> None:
+    out = _color_off_prose("g `[1;33m78%[0m` a")
+    assert "g `78%` a" in out
+    assert "\x1b" not in out
+    assert "[1;33m" not in out
+    assert rt._SPAN_UNIT not in out
+
+
+def test_inline_code_color_on_has_no_backticks() -> None:
+    out = _visible("\n".join(rt._render_markdown_block("Try `inline code` here.", 40, 0, True)))
+    assert "inline code" in out
+    assert "`" not in out
+
+
+def test_inline_code_color_off_question_block_keeps_backticks() -> None:
+    lines = rt.render_question_block("Try `inline code` here.", 60, 0, False)
+    assert "Try `inline code` here." in "\n".join(lines)
+
+
 def test_markdown_headers_are_cyan_bold_not_magenta() -> None:
     # rich's defaults paint headers magenta (h2 underline / h3 bold). We recolor
     # every level to the same cyan as inline `code`, keeping bold but dropping
