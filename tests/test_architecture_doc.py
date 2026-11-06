@@ -215,6 +215,23 @@ def test_operator_notes_document_dead_provider_login_recovery() -> None:
     assert "bills the OpenAI API, not your ChatGPT subscription" in section
 
 
+def test_operator_notes_explain_the_undelivered_message_warning() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    # Ahead of the archive-skew heading: the tests below slice on it and assert
+    # phrases are ABSENT from the remainder.
+    assert (
+        '## "agent\'s message may not have reached you"\n'
+        "\n"
+        "Some models occasionally return a message as hidden thinking instead of visible "
+        "text. When an agent stops to wait for you right after that happens, and its final "
+        "reply is only a short line, imp assumes a question was lost: it shows this warning "
+        "and asks the agent to send the message again before giving you the prompt. A false "
+        "alarm costs one extra turn.\n"
+        "\n"
+        "## Archive version skew\n"
+    ) in text
+
+
 def test_operator_notes_document_the_per_run_source_snapshot() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     # Ahead of the archive-skew heading: the tests below slice on it and assert
