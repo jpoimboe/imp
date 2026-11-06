@@ -342,6 +342,9 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
     if isinstance(node, nv.PauseNode):
         yield f"**paused ({esc(node.reason)})**"
         return
+    if isinstance(node, nv.ResumeMarkerNode):
+        yield f"**{nv.resume_marker_text(node)}**"
+        return
     if isinstance(node, nv.RenameNode):
         yield 'Set name to "' + esc(node.name) + '"'
         return

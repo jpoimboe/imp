@@ -1,13 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from imp.cli import narrative as nv
-from imp.cli.render_text import (
-    deferred_leaf,
-    frame_suppressed,
-    render_tree,
-    step_hidden,
-    step_no_body,
-)
+from imp.cli.narrative import deferred_leaf, step_hidden, step_no_body
+from imp.cli.render_text import frame_suppressed, render_tree
 from tests._event_fixtures import ev
 
 
@@ -200,3 +198,11 @@ def test_visible_phase_keeps_lead_in_blank_below_header() -> None:
     rule = body.index("── design phase ───")
     assert body[rule + 1] == ""            # lead-in blank below the phase rule
     assert "drafting" in body[rule + 2]    # step header follows that single blank
+
+
+def test_importing_narrative_alone_loads_no_other_cli_module() -> None:
+    code = ("import sys, imp.cli.narrative; "
+            "print(sorted(m for m in sys.modules if m.startswith('imp.cli')))")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            check=True)
+    assert result.stdout.strip() == "['imp.cli', 'imp.cli.narrative']"

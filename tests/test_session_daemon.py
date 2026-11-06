@@ -3020,3 +3020,67 @@ async def test_interrupt_leave_at_hold_prompt_keeps_prompt_interrupted_target(
     # The park precedes the leave gesture, so it truthfully records the ctrl-c.
     assert [p["payload"] for p in paused] == [
         {"reason": "interrupt", "interrupt_reason": "ctrl-c"}]
+
+
+@pytest.mark.anyio
+async def test_attached_reply_at_hold_prompt_marks_the_resume_in_process(
+    tmp_path: Path,
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-rzp")
+    sock = str(session_socket_path(quest.id))
+    calls = {"n": 0}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            result: dict[str, Any] = {}
+
+            async def _serve() -> None:
+                result["r"] = await serve_quest_session(
+                    quest, run_fn=fake_run, hibernate=False)
+
+            tg.start_soon(_serve)
+            await _wait_for_socket(sock)
+            received: list[dict[str, Any]] = []
+            client = SessionClient(sock, quest.id, quest.title, on_event=received.append)
+            await client.connect()
+            tg.start_soon(client.receive_events)
+            await wait_until(
+                lambda: any(e.get("type") == "awaiting_user_input" for e in received))
+            await client.send_input("go left")
+            await wait_until(lambda: "r" in result)
+            await client.aclose()
+            tg.cancel_scope.cancel()
+
+    assert [e["payload"] for e in _events(quest) if e["type"] == "workflow_resumed"] == [
+        {"in_process": True}]
+
+
+@pytest.mark.anyio
+async def test_resume_start_writes_an_empty_resume_payload(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        await serve_quest_session(quest, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert [e["payload"] for e in _events(quest) if e["type"] == "workflow_resumed"] == [{}]

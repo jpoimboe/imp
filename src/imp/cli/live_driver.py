@@ -374,7 +374,7 @@ def _is_container(node: Any) -> bool:
     # children and renders as a single deferred leaf (its routing arrow, or
     # nothing), mirroring render_text's deferred_leaf branch so live == imp log.
     if isinstance(node, nv.StepNode):
-        return not rt.deferred_leaf(node)
+        return not nv.deferred_leaf(node)
     return isinstance(node, nv.PhaseNode)
 
 
@@ -747,7 +747,7 @@ class LiveDriver:
             self._prev_prose = self._emitted_any
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
-        if isinstance(node, nv.StepNode) and rt.deferred_leaf(node):
+        if isinstance(node, nv.StepNode) and nv.deferred_leaf(node):
             return node.closed
         if isinstance(node, nv.SubagentFold):
             # A subagent is a LEAF (Part D): final once it stops running, so the

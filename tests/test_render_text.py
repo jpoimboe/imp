@@ -453,30 +453,30 @@ def test_open_chrome_step_shows_header_then_collapses_on_complete() -> None:
 
 def test_step_has_body_ignores_only_the_trailing_breadcrumb() -> None:
     node = nv.StepNode(name="s", kind="script")
-    assert rt.step_has_body(node) is False
+    assert nv.step_has_body(node) is False
     node.children.append(nv.BreadcrumbLine(step_name="s", elapsed_s=0.0,
                                            action={"verb": "continue"}))
-    assert rt.step_has_body(node) is False           # a breadcrumb is not a body
+    assert nv.step_has_body(node) is False           # a breadcrumb is not a body
     node.children.append(nv.LiteralTextNode(text="hi"))
-    assert rt.step_has_body(node) is True
+    assert nv.step_has_body(node) is True
 
 
 def test_deferred_leaf_holds_empty_script_not_bodied_or_agent() -> None:
     empty = nv.StepNode(name="verify", kind="script", show_label=True)
-    assert rt.deferred_leaf(empty) is True            # body-less script → collapsible
+    assert nv.deferred_leaf(empty) is True            # body-less script → collapsible
     empty.children.append(nv.LiteralTextNode(text="surfaced output"))
-    assert rt.deferred_leaf(empty) is False           # a real body → not collapsed
+    assert nv.deferred_leaf(empty) is False           # a real body → not collapsed
     agent = nv.StepNode(name="spec", kind="agent", show_label=True)
-    assert rt.deferred_leaf(agent) is False           # agents always emit a body
+    assert nv.deferred_leaf(agent) is False           # agents always emit a body
 
 
 def test_deferred_leaf_keeps_hidden_body_emitting_step_atomic() -> None:
     # A HIDDEN step that emits an error body must STAY a leaf (body-insensitive) so
     # the live driver renders it atomically at close — reveal-on-pause == imp log.
     node = nv.StepNode(name="merge-guard", kind="script", show_label=False)
-    assert rt.deferred_leaf(node) is True
+    assert nv.deferred_leaf(node) is True
     node.children.append(nv.ErrorNode(message="boom", category="script"))
-    assert rt.deferred_leaf(node) is True             # error body does NOT unhold it
+    assert nv.deferred_leaf(node) is True             # error body does NOT unhold it
 
 
 def test_collapsed_step_line_two_tone_label_and_gray_tail() -> None:
