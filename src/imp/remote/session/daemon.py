@@ -80,9 +80,10 @@ def _trailing_is_workflow_resumed(log: EventLog) -> bool:
     return bool(entries) and entries[-1].get("type") == "workflow_resumed"
 
 
-def _append_workflow_resumed(log: EventLog) -> None:
+def _append_workflow_resumed(log: EventLog, *, in_process: bool = False) -> None:
     if not _trailing_is_workflow_resumed(log):
-        log.append(agent_id=None, type="workflow_resumed", payload={})
+        log.append(agent_id=None, type="workflow_resumed",
+                   payload={"in_process": True} if in_process else {})
 
 
 def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
@@ -291,7 +292,7 @@ async def serve_quest_session(
                                   "payload": {"stdout": _SCRIPT_REDIRECT_REFUSED}})
                         continue
                     coordinator.enqueue_interject(reply)
-            _append_workflow_resumed(quest.event_log())
+            _append_workflow_resumed(quest.event_log(), in_process=True)
             result = await run_fn(
                 quest,
                 on_event=on_event,
