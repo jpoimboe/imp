@@ -3614,7 +3614,7 @@ def _history_by_disposition(control: Path, *, dispositions: set[str],
 
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                    history: list[_Row], *, intents: dict[str, str | None],
-                   history_label: str, now: datetime,
+                   history_label: str, inflight_notice: bool, now: datetime,
                    color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
 
@@ -3635,6 +3635,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
     lines = [quest_row.header_line(color=color, name_width=name_width,
                                    status_width=status_width)]
+    if inflight_notice and not inflight:
+        lines.append(pal.ansi("no active quests", "dim", enabled=color))
     for r in inflight:
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3670,8 +3672,8 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label=label, now=now,
-                          color=color)
+                          intents=rows.display_intents, history_label=label,
+                          inflight_notice=True, now=now, color=color)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
@@ -3734,8 +3736,9 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label="history:", now=now,
-                          color=color)
+                          intents=rows.display_intents, history_label="history:",
+                          inflight_notice="active" in dispositions and cutoff is None,
+                          now=now, color=color)
 
 
 def _board_entry_json(r: _Row, *, zone: Zone,

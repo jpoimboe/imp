@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
+from imp.cli import palette as pal
 from imp.cli.main import _build_parser, _cmd_list, _selected_list_dispositions, main
 from imp.engine import archive
 from imp.engine.quest import Quest
@@ -377,3 +378,74 @@ def test_retired_merged_flag_is_rejected(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         _build_parser().parse_args(argv)
     assert exc.value.code == 2
+
+
+def _seed_backlog_and_history(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="Idea", quest_id="bklgid", base_branch="main",
+                       origin="idea", seed_opening="Idea")
+    _archive_status(tmp_path, "cmpmrg", "completed")
+
+
+@pytest.mark.parametrize(("argv", "history_label"), [
+    (["list"], "completed:"),
+    (["list", "-a"], "history:"),
+])
+def test_list_with_no_inflight_rows_says_so_under_the_header(
+        tmp_path, monkeypatch, argv, history_label) -> None:
+    _seed_backlog_and_history(tmp_path)
+    lines = _run_list(tmp_path, monkeypatch, argv).splitlines()
+    assert lines[1:4] == ["no active quests", "", "backlog:"]
+    assert history_label in lines
+
+
+def test_no_active_notice_precedes_the_history_label_when_backlog_is_empty(
+        tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "cmpmrg", "completed")
+    lines = _run_list(tmp_path, monkeypatch, ["list"]).splitlines()
+    assert lines[1:4] == ["no active quests", "", "completed:"]
+
+
+def test_no_active_notice_is_dim_under_color(tmp_path: Path) -> None:
+    _seed_backlog_and_history(tmp_path)
+    lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=True)
+    assert lines[1] == pal.ansi("no active quests", "dim", enabled=True)
+    assert lines[1] != "no active quests"
+
+
+def test_list_with_a_live_quest_has_no_notice(tmp_path, monkeypatch) -> None:
+    _seed_backlog_and_history(tmp_path)
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
+    out = _run_list(tmp_path, monkeypatch, ["list"])
+    assert "liveid" in out
+    assert "no active quests" not in out
+
+
+def test_active_filter_with_other_zone_rows_shows_the_notice(tmp_path, monkeypatch) -> None:
+    _seed_backlog_and_history(tmp_path)
+    lines = _run_list(tmp_path, monkeypatch, ["list", "--active", "--backlog"]).splitlines()
+    assert lines[1:4] == ["no active quests", "", "backlog:"]
+
+
+def test_filter_without_active_never_shows_the_notice(tmp_path, monkeypatch) -> None:
+    _seed_backlog_and_history(tmp_path)
+    _archive_status(tmp_path, "abnd", "abandoned")
+    out = _run_list(tmp_path, monkeypatch, ["list", "--abandoned"])
+    assert "abnd" in out
+    assert "no active quests" not in out
+
+
+def test_active_filter_with_nothing_to_show_prints_only_the_sentinel(
+        tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "cmpmrg", "completed")
+    out = _run_list(tmp_path, monkeypatch, ["list", "--active"])
+    assert out.strip() == "No quests match that filter."
+
+
+def test_since_cutoff_suppresses_the_notice(tmp_path, monkeypatch) -> None:
+    _seed_backlog_and_history(tmp_path)
+    out = _run_list(tmp_path, monkeypatch, ["list", "--since", "today"])
+    assert "bklgid" in out
+    assert "no active quests" not in out
