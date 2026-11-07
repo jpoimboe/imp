@@ -21,6 +21,9 @@ from tests.impty.e2e_support import (
     can_pty,
 )
 from tests.impty.test_e2e_leave_exit_codes import (
+    _BUSY_TURNS,
+    _CHAT_TURNS,
+    _QUESTION_TURNS,
     _assert_closing_layout,
     _assert_ctrl_d_block,
     _assert_pause_block,
@@ -29,7 +32,6 @@ from tests.impty.test_e2e_leave_exit_codes import (
     _env,
 )
 from tests.impty.test_e2e_relay_hibernation_gate import (
-    _ATTACH_POLL,
     _seed_scripted_gate_project,
 )
 
@@ -37,29 +39,6 @@ pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 _SIGNALS = [(signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP"), (signal.SIGQUIT, "SIGQUIT")]
 _PLACEHOLDER = "type a message, or /help"
-
-_QUESTION_TURNS: list[dict[str, Any]] = [
-    {"text": "setting up", "tools": [
-        {"name": "create_and_enter_worktree", "input": {}},
-        {"name": "bash", "input": {"command": _ATTACH_POLL}},
-    ]},
-    {"text": "waiting for you"},
-]
-_CHAT_TURNS: list[dict[str, Any]] = [
-    {"text": "setting up", "tools": [{"name": "bash", "input": {"command": _ATTACH_POLL}}]},
-    {"text": "waiting for you"},
-]
-_BUSY_TURNS: list[dict[str, Any]] = [
-    {"text": "working", "tools": [
-        {"name": "create_and_enter_worktree", "input": {}},
-        # Attached, then busy once: the marker proves the step is mid-run.
-        {"name": "bash", "input": {
-            "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
-                       ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
-    ]},
-    {"text": "the next turn ran"},
-]
-
 
 def _session(tmp_path: Path, turns: list[dict[str, Any]], title: str, cols: int = 80,
              ) -> TerminalSession:
