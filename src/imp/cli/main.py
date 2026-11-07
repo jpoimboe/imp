@@ -2219,8 +2219,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                     cutoff=None), indent=2).splitlines(),
                 no_pager=args.no_pager)
             return 0
-        lines = _overview_lines(control, show_all=args.all, now=now, color=color,
-                                name_cap=quest_row.NAME_CAP)
+        lines = _overview_lines(control, show_all=args.all, now=now, color=color)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     try:
@@ -3606,7 +3605,7 @@ def _history_by_disposition(control: Path, *, dispositions: set[str],
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                    history: list[_Row], *, intents: dict[str, str | None],
                    history_label: str, now: datetime,
-                   color: bool, name_cap: int | None) -> list[str]:
+                   color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
 
     def _name_text(r: _Row) -> str:
@@ -3622,7 +3621,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     for r in history:
         specs.append((r[1], None, _name_text(r)))
 
-    status_width, name_width = quest_row.overview_widths(specs, name_cap=name_cap)
+    status_width, name_width = quest_row.overview_widths(specs)
 
     lines = [quest_row.header_line(color=color, name_width=name_width,
                                    status_width=status_width)]
@@ -3653,7 +3652,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
-                    color: bool, name_cap: int | None = None) -> list[str]:
+                    color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
                           cutoff=None)
@@ -3662,7 +3661,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
                           intents=rows.display_intents, history_label=label, now=now,
-                          color=color, name_cap=name_cap)
+                          color=color)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
@@ -3726,7 +3725,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
                           intents=rows.display_intents, history_label="history:", now=now,
-                          color=color, name_cap=quest_row.NAME_CAP)
+                          color=color)
 
 
 def _board_entry_json(r: _Row, *, zone: Zone,
