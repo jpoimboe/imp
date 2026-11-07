@@ -92,15 +92,15 @@ def test_match_rows_empty_when_token_matches_nothing(tmp_path: Path) -> None:
 def test_above_the_data_floor_reports_the_unreadable_archived_candidate(
     tmp_path: Path,
 ) -> None:
-    """Floor skew ahead: the live row is still returned AND the archived
-    candidate is named with the floor text that blocked it."""
+    """Floor skew ahead: a token matching no live quest returns no rows and names
+    the archived candidate with the floor text that blocked it."""
     _live_and_shelved(tmp_path)
     ahead = archive._DATA_VERSION + 1
     archive.data_version_path(tmp_path).write_text(str(ahead))
 
-    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo7")
 
-    assert {r[0] for r in rows} == {"lodo40"}
+    assert rows == []
     assert unreadable == m._UnreadableMatches(
         ids=("lodo77",), reason=_data_reason(ahead))
 
@@ -112,8 +112,8 @@ def test_below_the_data_floor_reports_the_unreadable_archived_candidate(
     below = BELOW_DATA_FLOOR
     archive._write_data_version(tmp_path, below)
 
-    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo7")
 
-    assert {r[0] for r in rows} == {"lodo40"}
+    assert rows == []
     assert unreadable == m._UnreadableMatches(
         ids=("lodo77",), reason=_data_reason(below))

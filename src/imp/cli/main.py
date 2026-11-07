@@ -2917,11 +2917,13 @@ def _sort_rows_started_first(rows: list[_Row]) -> list[_Row]:
     return sorted(rows, key=lambda r: (r[8] or r[5], r[5], r[0]))
 
 
+def _resumable_among(active: list[_Row], backlog: list[_Row]) -> list[_Row]:
+    return _sort_rows_newest_first([r for r in active if r[1] in RESUMABLE] + backlog)
+
+
 def _resumable_rows(control: Path) -> list[_Row]:
     from imp.cli.store import _backlog_rows, _status_rows
-    rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
-    rows += _backlog_rows(control)
-    return _sort_rows_newest_first(rows)
+    return _resumable_among(_status_rows(control), _backlog_rows(control))
 
 
 def _abandon_rows(control: Path) -> list[_Row]:
@@ -2944,10 +2946,10 @@ def _suppressed_archived_ids(control: Path, token: str) -> list[str]:
     Record enumeration and record reads are ungated by both archive floors, and
     the quest-home test is the one `_row_for_id` branches on — so an id here is
     genuinely unrenderable while a floor is skewed, and one with a live home is
-    never suppressed (it subsumes the live-row exclusion: every live row comes
-    from `scan_homes`, which needs a readable `quest.json`). The degraded path
-    enumerates records rather than the index: an archive below the blob floor is
-    never reindexed, so the record files are the honest source."""
+    never suppressed, so a finished quest's leftover home still resolves by its
+    full id. The degraded path enumerates records rather than the index: an archive
+    below the blob floor is never reindexed, so the record files are the honest
+    source."""
     from imp.cli.store import _quest_home
     from imp.engine.archive import record, records_root
     root = records_root(control)
@@ -2967,15 +2969,19 @@ def _resumable_matches(
     """Rows for resumable quests whose id contains `token`, plus whatever this
     install could not read.
 
-    Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
-    records — an archived id whose archive record reads `resumable=True` (a
-    "archived" conversation whose live home was deleted). A live row wins when an id
-    appears in both. Archived completed/abandoned (non-resumable) ids are never
-    matches, so a terminal id sharing a stem never joins the menu.
-    An archived candidate this install cannot read is NOT omitted: it is reported
-    to the caller in the second element, which is None only when nothing was
-    suppressed."""
-    from imp.cli.store import _row_for_id
+    Live first: a token in the id of any active-board quest (`_status_rows`,
+    `_backlog_rows`) returns only the matching resumable rows — empty when no match
+    is resumable (e.g. running) — and skips the archive search and floor checks, so
+    version skew cannot change the outcome. A finished quest's leftover home is not
+    on the board and shadows nothing.
+
+    Any other token spans archived-but-resumable records — an archived id whose
+    archive record reads `resumable=True` (a "archived" conversation whose live home
+    was deleted). Archived completed/abandoned (non-resumable) ids are never matches,
+    so a terminal id sharing a stem never joins the menu. An archived candidate this
+    install cannot read is NOT omitted: it is reported to the caller in the second
+    element, which is None only when nothing was suppressed."""
+    from imp.cli.store import _backlog_rows, _row_for_id, _status_rows, make_store
     from imp.engine.archive import (
         check_index_floor,
         record,
@@ -2985,19 +2991,23 @@ def _resumable_matches(
     from imp.engine.archive import read as archive_read
     from imp.engine.errors import ArchiveMismatch
 
-    rows = [r for r in _resumable_rows(control) if token in r[0]]
-    live = {r[0] for r in rows}
+    scanned = make_store(control).scan_homes()
+    active = _status_rows(control, scanned)
+    backlog = _backlog_rows(control, scanned)
+    if any(token in r[0] for r in active + backlog):
+        return [r for r in _resumable_among(active, backlog) if token in r[0]], None
     try:
         require_current(control)
         check_index_floor(control)
     except ArchiveMismatch as skew:
         skewed = _suppressed_archived_ids(control, token)
-        return rows, (_UnreadableMatches(tuple(sorted(skewed)), str(skew))
-                      if skewed else None)
+        return [], (_UnreadableMatches(tuple(sorted(skewed)), str(skew))
+                    if skewed else None)
+    rows: list[_Row] = []
     raced: list[str] = []
     reason: str | None = None
     for cid in archive_read.archived_ids(control):
-        if token not in cid or cid in live:
+        if token not in cid:
             continue
         rec = record.read_record(records_root(control), cid)
         if rec is None or not rec.get("resumable"):
