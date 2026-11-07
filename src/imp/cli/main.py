@@ -3766,6 +3766,26 @@ def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]
     return args.active, args.backlog, args.history
 
 
+def _widening_flags(zone_flags: list[tuple[str, bool]],
+                    filter_flags: list[tuple[str, bool]]) -> list[str]:
+    """Passed flags a miss could drop to widen; zone flags omitted when all are passed."""
+    zones = [flag for flag, on in zone_flags if on]
+    if len(zones) == len(zone_flags):
+        zones = []
+    return zones + [flag for flag, on in filter_flags if on]
+
+
+def _search_miss_lines(query: str, drop: list[str], *, suggest_events: bool) -> list[str]:
+    if drop:
+        hint = f"Try another term, or drop {' '.join(drop)} to widen the search."
+    elif suggest_events:
+        hint = "Try another term, or `imp events search` to include tool calls and results."
+    else:
+        hint = "Try another term."
+    return [f'No quests match "{query}".',
+            pal.ansi(hint, "dim", enabled=should_use_color(sys.stdout))]
+
+
 def _matched_events(
     events: list[dict[str, Any]], query: str, *,
     types: set[str] | None, agents: set[str] | None,
@@ -3973,7 +3993,12 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
                         statuses=frozenset(statuses), merged_after=args.merged_after)
     hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
-        _emit_human([f"No quests match {args.query!r}."])
+        zone_flags = [("--active", args.active), ("--backlog", args.backlog),
+                      ("--completed", args.completed), ("--abandoned", args.abandoned),
+                      ("--archived", args.archived)]
+        drop = _widening_flags(zone_flags, [("--merged-after", args.merged_after is not None)])
+        narrowed = any(on for _, on in zone_flags) or args.merged_after is not None
+        _emit_human(_search_miss_lines(args.query, drop, suggest_events=not narrowed))
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
@@ -4066,7 +4091,11 @@ def _cmd_events_search(
         if args.json:
             _page_or_print(["[]"], no_pager=args.no_pager)
         else:
-            _emit_human([f'0 matches for "{args.query}"'])
+            drop = _widening_flags(
+                [("--active", args.active), ("--backlog", args.backlog),
+                 ("--history", args.history)],
+                [("--type", bool(args.type)), ("--agent", bool(args.agent))])
+            _emit_human(_search_miss_lines(args.query, drop, suggest_events=False))
         return 0
     color = should_use_color(sys.stdout)
     zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}

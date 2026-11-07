@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from imp.cli import palette as pal
 from imp.cli.main import _build_parser, _cmd_search, _command_names
 from imp.create import create_draft_quest
 from imp.engine import archive
@@ -139,11 +140,38 @@ def test_cmd_search_prints_matching_archived_change(tmp_path: Path, capsys) -> N
     assert "· history ·" in out                       # zone label, not status
 
 
-def test_cmd_search_no_match_prints_notice(tmp_path: Path, capsys) -> None:
-    rc = _cmd_search(_ns("nope"), tmp_path)
-    out = capsys.readouterr().out
+_EVENTS_HINT = "Try another term, or `imp events search` to include tool calls and results."
+_ALL_ZONES = dict(active=True, backlog=True, completed=True, abandoned=True, archived=True)
+
+
+@pytest.mark.parametrize(("flags", "hint"), [
+    ({}, _EVENTS_HINT),
+    ({"list": True}, _EVENTS_HINT),
+    ({"backlog": True}, "Try another term, or drop --backlog to widen the search."),
+    ({"active": True, "merged_after": "abc123"},
+     "Try another term, or drop --active --merged-after to widen the search."),
+    ({"completed": True, "archived": True},
+     "Try another term, or drop --completed --archived to widen the search."),
+    (_ALL_ZONES, "Try another term."),
+    ({**_ALL_ZONES, "merged_after": "abc123"},
+     "Try another term, or drop --merged-after to widen the search."),
+])
+def test_cmd_search_no_match_headline_and_hint(
+        tmp_path: Path, capsys, monkeypatch, flags: dict, hint: str) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    rc = _cmd_search(_ns("zzzqqq", **flags), tmp_path)
     assert rc == 0
-    assert "No quests match" in out
+    assert capsys.readouterr().out == f'No quests match "zzzqqq".\n{hint}\n'
+
+
+def test_cmd_search_no_match_dims_only_the_hint(tmp_path: Path, capsys, monkeypatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _cmd_search(_ns("zzzqqq"), tmp_path)
+    assert capsys.readouterr().out.splitlines() == [
+        'No quests match "zzzqqq".',
+        pal.ansi(_EVENTS_HINT, "dim", enabled=True),
+    ]
 
 
 def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) -> None:
