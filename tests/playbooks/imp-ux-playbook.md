@@ -148,20 +148,23 @@ to score).
 - **Every subcommand** the live `imp --help` lists, **plus each `imp <cmd> -h`** — alignment,
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at
   (snapshot list — the live `--help` wins; flag drift):
-  - `imp init` — first-run bootstrap. A clone of an already-init'd imp repo (or a machine
-    that already has `~/.imp/config.yaml`) short-circuits to "already set up"; to see
-    the real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME`
-    pointed at an empty dir. The **confirmation screen** (detected settings, `enter` to accept)
-    and **provider multi-select** are interactive — theme is
-    **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
-  - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
+  - `imp init` — first-run bootstrap. A repo with `imp/config.yaml` already committed (such as a
+    clone of an already-init'd imp repo) short-circuits to "Project already initialized"; a
+    machine whose `~/.imp/config.yaml` already lists providers skips only the picker. To see the
+    real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME` pointed at an
+    empty dir. The **provider multi-select** comes first, then the **confirmation screen**
+    (detected settings, `enter` to accept) — both interactive; theme is **auto-detected
+    silently** (no prompt; under a non-truecolor pty it picks `ansi`).
+  - `imp new -h` — the flag surface (`--title`, `--backlog`, `--background`, `--depends-on`,
     `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
     `--provider`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
+  - `imp resume -h` — the flag surface; the resume itself is driven in the walk spine (step 4)
+    and the picker under Inline pickers.
   - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
-    titles? Then `imp show <id>` (detail card) and the artifact view `imp show <id> spec`
-    (`spec` is the only artifact resource — a bare name like `status` errors), plus
-    `imp list -a`.
+    titles? Then `imp show <id>` (detail card) and the artifact views `imp show <id> spec`
+    and `imp show <id> verify` (the last failing test-gate run). `spec` and `verify` are the
+    only artifact resources — a bare name like `status` errors. Also `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,
@@ -172,6 +175,7 @@ to score).
   - `imp edit <id> --title "…"` — is the confirmation clear about what changed?
   - `imp remote-control -h` — purpose clear from help alone? (The full chat UX has its own
     playbook — don't drive the daemon here.)
+  - `imp help` and `imp help <command>` — do they match `imp --help` and `imp <command> -h`?
   - any command not listed here — cover it too; flag if its UX lags **and flag this list as
     stale in your report**.
 - **The pager** — `imp log` / `imp list` page through `less` on a tty: a long narrative holds
