@@ -1,8 +1,8 @@
 """Token resolution reaches a live quest without the archive.
 
-Live homes match first and an unambiguous live hit short-circuits, so an archive
-this install cannot read never blinds id resolution; a token that genuinely needs
-the archive still raises."""
+Live homes match first and any live hit short-circuits, so an archive this install
+cannot read never blinds id resolution; a token that genuinely needs the archive
+still raises."""
 from __future__ import annotations
 
 import json

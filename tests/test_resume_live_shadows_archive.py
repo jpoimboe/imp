@@ -18,6 +18,7 @@ from imp.engine.archive import archive_quest, record, records_root
 from imp.engine.archive import index as archive_index
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
+from imp.remote.daemon import spawn
 from tests.conftest import BELOW_DATA_FLOOR, _seed_control
 
 LIVE = "lodo40"
@@ -263,3 +264,70 @@ def test_resumable_matches_scans_live_homes_once(
     m._resumable_matches(tmp_path, token)
 
     assert scans["n"] == 1
+
+
+def _two_live_and_one_archived(control: Path) -> None:
+    _seed_control(control)
+    _live(control, LIVE)
+    _live(control, LIVE_TWO)
+    _shelve(control)
+
+
+def test_match_quest_ids_returns_only_the_live_hits(tmp_path: Path) -> None:
+    _two_live_and_one_archived(tmp_path)
+
+    assert sorted(m._match_quest_ids(tmp_path, "lodo")) == [LIVE, LIVE_TWO]
+
+
+def test_match_quest_ids_reaches_an_archived_id_only_with_no_live_hit(tmp_path: Path) -> None:
+    _two_live_and_one_archived(tmp_path)
+
+    assert m._match_quest_ids(tmp_path, "lodo7") == [SHELVED]
+    assert m._match_quest_ids(tmp_path, SHELVED) == [SHELVED]
+
+
+def test_resolve_id_lists_only_the_live_candidates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _two_live_and_one_archived(tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        m._resolve_id(tmp_path, "lodo")
+
+    err = capsys.readouterr().err
+    assert exc.value.code == 2
+    assert "'lodo' is ambiguous; candidates:" in err
+    assert LIVE in err and LIVE_TWO in err
+    assert SHELVED not in err
+
+
+def test_remote_resume_names_only_the_live_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(spawn, "_spawn_detached", lambda argv, env, cwd: spawned.append(argv))
+    _two_live_and_one_archived(tmp_path)
+
+    msg = spawn.resume_quest(tmp_path, "lodo")
+
+    assert msg.startswith("'lodo' is ambiguous: ")
+    assert LIVE in msg and LIVE_TWO in msg
+    assert SHELVED not in msg
+    assert spawned == []
+
+
+def test_two_running_matches_list_only_the_live_candidates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    _running(tmp_path, LIVE)
+    _running(tmp_path, LIVE_TWO)
+    _shelve(tmp_path)
+
+    rc = _resolve(tmp_path, "lodo")
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "'lodo' is ambiguous; candidates:" in err
+    assert LIVE in err and LIVE_TWO in err
+    assert SHELVED not in err

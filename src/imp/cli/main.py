@@ -1764,14 +1764,14 @@ def _with_archived_ids(control: Path, live: list[str]) -> list[str]:
 def _match_quest_ids(control: Path, token: str) -> list[str]:
     """Quest ids containing token, the one matching seam every command shares.
 
-    Live homes match first and an unambiguous live hit returns without touching the
-    archive, so a live quest resolves whatever state the archive is in. Zero or
-    several live hits fall through to the merged live+archived space — reusing the
-    live list already scanned — which still raises honestly when the token genuinely
-    needs the archive."""
+    Live homes match first and any live hit returns without touching the archive, so
+    a live quest resolves whatever state the archive is in and archived ids sharing
+    its stem are not candidates. Zero live hits fall through to the merged
+    live+archived space — reusing the live list already scanned — which still raises
+    honestly when the token genuinely needs the archive."""
     live = _live_quest_ids(control)
     hits = [cid for cid in live if token in cid]
-    if len(hits) == 1:
+    if hits:
         return hits
     return [cid for cid in _with_archived_ids(control, live) if token in cid]
 
