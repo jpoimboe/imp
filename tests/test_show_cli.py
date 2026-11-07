@@ -9,6 +9,7 @@ import shutil
 import time
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -826,25 +827,224 @@ def test_show_card_renders_effective_vars_sorted_by_name(
 
     out = _run(monkeypatch, tmp_path, "show", quest_id)
 
-    # _display_width() falls back to 80 under the captured stdout, and the line is
-    # 54 columns, so the clip leaves it whole.
     line = next(ln for ln in out.splitlines() if ln.startswith("vars:"))
     assert line.split(maxsplit=1)[1] == "jurisdiction=eu, retries=5, strict=true"
 
 
-def test_show_card_clips_a_vars_line_wider_than_the_terminal(
+def _vars_rows(out: str) -> list[str]:
+    """The `vars:` line plus its indented continuation lines."""
+    lines = out.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("vars:"))
+    end = start + 1
+    while end < len(lines) and lines[end].startswith(" "):
+        end += 1
+    return lines[start:end]
+
+
+def test_show_card_wraps_the_vars_row_at_entry_boundaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A workflow declaring many vars must not blow the card open across three
-    # wrapped lines; the vars line clips like the step line does.
+    # 40 columns leaves 25 for values: entries fill greedily, a line that
+    # continues ends in a comma, and nothing is clipped.
     quest_id = _quest_with_vars(tmp_path)
-    monkeypatch.setattr("imp.cli.main._display_width", lambda: 40)
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: 40)
 
     out = _run(monkeypatch, tmp_path, "show", quest_id)
 
-    line = next(ln for ln in out.splitlines() if ln.startswith("vars:"))
-    assert len(line) <= 40
-    assert line.endswith("…")
+    assert _vars_rows(out) == [
+        "vars:          jurisdiction=eu,",
+        "               retries=5, strict=true",
+    ]
+    assert "…" not in out
+
+
+def test_show_backlog_card_wraps_the_vars_row_under_its_value_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="varbkw", base_branch="main",
+        origin="backlog", seed_opening="Queued", defer_seed=True,
+        vars={"retries": 5, "strict": True})
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: 30)
+
+    out = _run(monkeypatch, tmp_path, "show", "varbkw")
+
+    assert _vars_rows(out) == [
+        "vars:       retries=5,",
+        "            strict=true",
+    ]
+
+
+def test_show_card_keeps_an_entry_wider_than_the_row_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Wide", quest_id="varwide", base_branch="main",
+        vars={"jurisdiction": "a" * 20, "retries": 5, "strict": True})
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: 30)
+
+    out = _run(monkeypatch, tmp_path, "show", "varwide")
+
+    assert _vars_rows(out) == [
+        "vars:          jurisdiction=" + "a" * 20 + ",",
+        "               retries=5,",
+        "               strict=true",
+    ]
+
+
+@pytest.mark.parametrize(("cols", "expected"), [
+    (40, ["vars:          jurisdiction=e,", "               retries=5, strict=false"]),
+    (41, ["vars:          jurisdiction=e, retries=5,", "               strict=false"]),
+])
+def test_show_card_counts_the_trailing_comma_when_wrapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    cols: int, expected: list[str],
+) -> None:
+    # `jurisdiction=e, retries=5` is 25 columns; a non-last entry also needs its comma.
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Edge", quest_id="varedge", base_branch="main",
+        vars={"jurisdiction": "e", "retries": 5})
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: cols)
+
+    out = _run(monkeypatch, tmp_path, "show", "varedge")
+
+    assert _vars_rows(out) == expected
+
+
+def test_show_card_indents_vars_continuations_without_color_codes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    from imp.cli.main import _card_field
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    quest_id = _quest_with_vars(tmp_path)
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: 40)
+
+    out = _run(monkeypatch, tmp_path, "show", quest_id)
+
+    lines = out.splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.startswith(pal.ansi("vars:", "dim")))
+    assert lines[first] == _card_field("vars:", "jurisdiction=eu,", 15, color=True)
+    assert lines[first + 1] == "               retries=5, strict=true"
+
+
+def test_show_card_prints_the_vars_row_on_one_line_when_piped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Captured stdout is not a tty and $COLUMNS is unset: `imp show x | grep vars:`
+    # must return every short var, even past 80 columns.
+    monkeypatch.delenv("COLUMNS", raising=False)
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Piped", quest_id="varpipe", base_branch="main",
+        vars={"jurisdiction": "x" * 70, "retries": 5, "strict": True})
+
+    out = _run(monkeypatch, tmp_path, "show", "varpipe")
+
+    assert _vars_rows(out) == [
+        "vars:          jurisdiction=" + "x" * 70 + ", retries=5, strict=true",
+    ]
+
+
+def _card_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_ledger: bool = False,
+    **changes: Any,
+) -> list[str]:
+    """A rendered quest card with `changes` applied to its QuestCard."""
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _CardLedger, _quest_card
+    from imp.cli.store import make_store
+    monkeypatch.setattr("imp.cli.main._term_width", lambda: 500)
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Long", quest_id="lng01", base_branch="main")
+    qc = make_store(tmp_path).quest_card("lng01")
+    assert qc is not None
+    ledger = _CardLedger(run="1m", body=["LEDGER ROW"]) if with_ledger else None
+    return _quest_card(replace(qc, **changes), now=datetime.now(UTC), color=False,
+                       ledger=ledger)
+
+
+def test_show_card_moves_a_multiline_var_into_its_own_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Notes", quest_id="varml", base_branch="main",
+        vars={"jurisdiction": "para one\n\npara two", "retries": 5})
+
+    out = _run(monkeypatch, tmp_path, "show", "varml")
+
+    lines = out.splitlines()
+    assert _vars_rows(out) == ["vars:          retries=5, strict=false"]
+    i = lines.index("vars.jurisdiction:")
+    assert lines[i - 1:i + 4] == ["", "vars.jurisdiction:", "para one", "", "para two"]
+    assert json.loads(_run(monkeypatch, tmp_path, "show", "varml", "--json"))[
+        "vars"]["jurisdiction"] == "para one\n\npara two"
+
+
+def test_show_card_places_var_blocks_between_summary_and_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Multi-line and >80-char values both leave the row; blocks sort by name.
+    lines = _card_lines(
+        tmp_path, monkeypatch, with_ledger=True, summary=b"Shipped.\n",
+        vars={"notes": "para one\n\npara two\n", "retries": 5, "zeta": "y" * 81})
+
+    assert next(ln for ln in lines if ln.startswith("vars:")) == "vars:          retries=5"
+    assert lines[lines.index("summary:"):] == [
+        "summary:", "Shipped.",
+        "", "vars.notes:", "para one", "", "para two",
+        "", "vars.zeta:", "y" * 81,
+        "", "ledger:", "LEDGER ROW",
+    ]
+
+
+def test_show_card_keeps_short_and_empty_values_on_the_vars_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Exactly 80 characters is still short; an empty value stays inline.
+    lines = _card_lines(
+        tmp_path, monkeypatch,
+        vars={"edge": "e" * 80, "plan_review_notes": "", "retries": 5})
+
+    assert next(ln for ln in lines if ln.startswith("vars:")) == (
+        "vars:          edge=" + "e" * 80 + ", plan_review_notes=, retries=5")
+    assert not any(ln.startswith("vars.") for ln in lines)
+
+
+def test_show_card_omits_the_vars_row_when_every_var_is_long(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = _card_lines(tmp_path, monkeypatch, vars={"notes": "a\nb"})
+
+    assert not any(ln.startswith("vars:") for ln in lines)
+    i = lines.index("vars.notes:")
+    assert lines[i - 1:i + 3] == ["", "vars.notes:", "a", "b"]
+
+
+def test_show_backlog_card_puts_var_blocks_after_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="varbkl", base_branch="main",
+        origin="backlog", seed_opening="Queued\n\nDo the thing.", defer_seed=True,
+        vars={"jurisdiction": "para one\n\npara two", "retries": 5})
+
+    out = _run(monkeypatch, tmp_path, "show", "varbkl")
+
+    lines = out.splitlines()
+    assert _vars_rows(out) == ["vars:       retries=5"]
+    i = lines.index("vars.jurisdiction:")
+    assert lines.index("intent:") < i
+    assert lines[i - 1:i + 4] == ["", "vars.jurisdiction:", "para one", "", "para two"]
 
 
 def test_show_backlog_card_renders_the_supplied_overrides(

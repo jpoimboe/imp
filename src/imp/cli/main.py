@@ -1920,8 +1920,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     if meta.get("depends_on"):
         lines.append(_card_field("depends_on:", ", ".join(meta["depends_on"]),
                                  12, color=color))
-    if meta.get("vars"):
-        lines.append(_vars_line(meta["vars"], 12, color=color))
+    quest_vars: dict[str, object] = meta.get("vars", {})
+    lines.extend(_vars_row(quest_vars, 12, color=color))
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
@@ -1930,6 +1930,7 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
         lines.append("")
         lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
+    lines.extend(_vars_blocks(quest_vars, color=color))
     return lines
 
 
@@ -1938,12 +1939,42 @@ def _var_value(value: object) -> str:
     return str(value).lower() if isinstance(value, bool) else str(value)
 
 
-def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
-    """The `vars:` card row, clipped like `step:` — a workflow declaring ten vars
-    would otherwise wrap the card across three lines."""
-    body = ", ".join(f"{name}={_var_value(values[name])}" for name in sorted(values))
-    return pal.clip_display(
-        _card_field("vars:", body, width, color=color), _display_width())
+_LONG_VAR_CHARS = 80
+
+
+def _is_long_var(text: str) -> bool:
+    return "\n" in text or len(text) > _LONG_VAR_CHARS
+
+
+def _vars_row(values: dict[str, object], width: int, *, color: bool) -> list[str]:
+    """The `vars:` rows for short vars: entries wrapped whole at `, `, never clipped."""
+    texts = {name: _var_value(values[name]) for name in sorted(values)}
+    entries = [f"{name}={text}" for name, text in texts.items() if not _is_long_var(text)]
+    avail = _term_width() - width
+    rows: list[str] = []
+    for i, entry in enumerate(entries):
+        joined = f"{rows[-1]}, {entry}" if rows else entry
+        trailing_comma = 1 if i < len(entries) - 1 else 0
+        if rows and pal.display_width(joined) + trailing_comma <= avail:
+            rows[-1] = joined
+        else:
+            rows.append(entry)
+    if not rows:
+        return []
+    rows = [row + "," for row in rows[:-1]] + rows[-1:]
+    return [_card_field("vars:", rows[0], width, color=color),
+            *(" " * width + row for row in rows[1:])]
+
+
+def _vars_blocks(values: dict[str, object], *, color: bool) -> list[str]:
+    """Each long var as its own dim `vars.<name>:` section, value verbatim."""
+    lines: list[str] = []
+    for name in sorted(values):
+        text = _var_value(values[name])
+        if _is_long_var(text):
+            lines += ["", pal.ansi(f"vars.{name}:", "dim", enabled=color),
+                      *text.rstrip("\n").split("\n")]
+    return lines
 
 
 # Short card phrasing for the halt reasons a bare token does not explain; the long
@@ -2073,8 +2104,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
             f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
             for d in card.depends_on)
         lines.append(_card_field("depends_on:", deps, 15, color=color))
-    if card.vars:
-        lines.append(_vars_line(card.vars, 15, color=color))
+    lines.extend(_vars_row(card.vars, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.intent:
@@ -2086,6 +2116,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
         lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
+    lines.extend(_vars_blocks(card.vars, color=color))
     if ledger is not None:
         lines.append("")
         lines.append(pal.ansi("ledger:", "dim", enabled=color))
