@@ -145,8 +145,8 @@ card, with its total row restated as a one-line `run:` field high up — so
 `imp log <id> -s` is where the windowing and export flags live rather than
 where the numbers live.
 
-Rows and phase headings show the workflow's friendly labels (`chatting` under
-`scoping phase`), and a step with no label shows its id. `--step` and
+Rows and phase headings show the workflow's friendly labels (`finalizing spec`
+under `spec phase`), and a step with no label shows its id. `--step` and
 `imp events` take step ids, which a bare `imp events <id>` lists.
 
 On a subscription run that right-most column is `weekly`: the share of the

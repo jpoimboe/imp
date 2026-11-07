@@ -41,13 +41,11 @@ phases:
   # review, but spec-written still gates and announces the drafted spec; full
   # enters spec-finalizer for adopt-with-light-review.
   - name: threshold
-    label: "scoping phase"
     show_label: false
     steps:
       - name: threshold
         file: agents/threshold.md
         tier: high
-        label: chatting
         interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: scope-code-check}

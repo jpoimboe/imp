@@ -29,13 +29,13 @@ def test_minimal_loads_with_the_four_named_steps() -> None:
 def test_minimal_workflow_labels() -> None:
     wf = _wf()
     assert {s.name: s.label for s in wf.flat_steps()} == {
-        "front-door": "chatting",
+        "front-door": None,
         "implement": "building the change",
         "review": "reviewing the change",
         "finalize": "finalizing",
     }
     assert {p.name: p.label for p in wf.phases} == {
-        "front-door": "scoping phase",
+        "front-door": None,
         "implement": "implementation phase",
         "review": "review phase",
         "finalize": "finalize phase",
