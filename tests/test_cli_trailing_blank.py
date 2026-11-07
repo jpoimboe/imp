@@ -179,26 +179,6 @@ def test_list_has_no_trailing_blank_when_piped(
     assert not out.endswith("\n\n")      # piped output unchanged: no added blank
 
 
-def test_status_ends_with_one_trailing_blank_on_tty(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import argparse
-
-    import imp.cli.main as m
-    from imp.engine.quest import Quest
-    from tests.conftest import _seed_control
-
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setenv("NO_COLOR", "1")
-    rc = m._cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert out.endswith("\n\n")
-    assert not out.endswith("\n\n\n")
-
-
 def test_overview_ends_with_one_trailing_blank_on_tty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -287,22 +267,6 @@ def test_cmd_list_no_quests_precondition_trailing_blank_on_tty(
     monkeypatch.setattr(m, "_control_root", _raise)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     rc = m._cmd_list(argparse.Namespace(json=False))
-    assert rc == 0
-    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
-
-
-def test_cmd_status_precondition_trailing_blank_on_tty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import argparse
-
-    import imp.cli.main as m
-    from imp.engine import worktree
-
-    def _raise(): raise worktree.PreconditionError()
-    monkeypatch.setattr(m, "_control_root", _raise)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._cmd_status(argparse.Namespace(all=False))
     assert rc == 0
     assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
 

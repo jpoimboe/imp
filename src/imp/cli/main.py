@@ -3767,19 +3767,6 @@ def _board_json(control: Path, *, dispositions: set[str],
     return entries
 
 
-def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
-    from imp.engine import worktree
-    try:
-        control = _control if _control is not None else _control_root()
-    except worktree.PreconditionError:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
-    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
-                            color=should_use_color(sys.stdout))
-    _emit_human(lines)
-    return 0
-
-
 _SEARCH_ZONES: tuple[Zone, ...] = ("active", "backlog", "history")
 
 
