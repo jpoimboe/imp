@@ -13,13 +13,14 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools import Tool
-from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+from imp.agents.transcript import COMPLETE_STEP_BATCHED, RESUME_CONTINUE_NUDGE
 from imp.engine.reincarnation import handoff_instruction, handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude import (
     ClaudeAgentRunner,
+    ClaudeSession,
     _InFlightOutcome,
     _wrap_one,
     correction_increment,
@@ -970,6 +971,57 @@ async def test_stream_usage_below_the_handoff_limit_does_not_request_handoff(
     assert holder.get("requested") == [False]
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_result" for e in events)
+
+
+class _VerdictsAtQueryClient(_RecordingClient):
+    async def query(self, prompt: Any) -> None:
+        self._holder.setdefault("verdicts_at_query", []).append(
+            self._holder["runner"]._state.complete_verdicts.qsize())
+        await super().query(prompt)
+
+
+@pytest.mark.anyio
+async def test_complete_step_after_a_crossing_fragment_is_rejected(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    holder: dict[str, Any] = {}
+    scripted = [
+        message_start("m1", {"input_tokens": 150_000,
+                             "cache_read_input_tokens": 10_000}),
+        assistant(tool_use("u1", "write_file", {"path": "scratch", "content": "x"}),
+                  message_id="m1"),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1"),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name=_MODEL,
+        client_factory=lambda opts: _VerdictsAtQueryClient(
+            opts, scripted_messages=scripted, holder=holder))
+    holder["runner"] = runner
+    real_is_terminal = ClaudeSession._is_terminal
+
+    async def spy(self: ClaudeSession, raw: Any) -> bool:
+        if type(raw).__name__ == "ResultMessage":
+            holder.setdefault("complete_requested", []).append(self.runner._complete_requested)
+        return await real_is_terminal(self, raw)
+
+    monkeypatch.setattr(ClaudeSession, "_is_terminal", spy)
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert holder.get("requested") == [True]
+    assert holder["complete_requested"] == [False, False]
+    assert runner._state.complete_step_args == {}
+    assert len([e for e in events if e["type"] == "handoff"]) == 1
+    rejections = [e["payload"] for e in log.read() if e["type"] == "tool_result"
+                  and e["payload"]["id"] == "c1"]
+    assert [(p["content"], p["error"]) for p in rejections] == [
+        (COMPLETE_STEP_BATCHED, True)]
+    assert holder["verdicts_at_query"] == [0, 0]
 
 
 def _steer_script() -> tuple[list[Any], list[Any]]:
