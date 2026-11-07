@@ -359,6 +359,36 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("selected", [(True, False), (True, True), (False, False)],
+                         ids=["headless", "auto-headless", "interactive"])
+async def test_new_seeds_a_blank_tail(stub_new, monkeypatch, selected) -> None:
+    m = stub_new
+    monkeypatch.setattr(m, "_select_headless", lambda args: selected)
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
+
+    driver_kwargs: dict[str, object] = {}
+
+    def _driver(**kwargs: object) -> SimpleNamespace:
+        driver_kwargs.update(kwargs)
+        return SimpleNamespace()
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _driver)
+
+    args = _new_args()
+    args.opening = "do the thing"
+    assert await m._async_cmd_new(args, leave_mode="new") == 0
+    assert driver_kwargs["preceded_by_blank"] is True
+
+
+@pytest.mark.anyio
 async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
     m = stub_new
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))

@@ -268,19 +268,16 @@ _ERROR_LABELS: dict[str, str] = {
     "crash": "crash",
 }
 
-# Deliberate-leave trigger -> its banner display form. Internal reason
-# strings stay lowercase; only the banner display is transformed.
-_LEAVE_DISPLAY: dict[str, str] = {
+# Pause trigger -> its banner display form. Internal reason strings stay
+# lowercase; only the banner display is transformed.
+_PAUSE_QUALIFIER: dict[str, str] = {
     "ctrl-d": "Ctrl-D",
     "sigterm": "SIGTERM",
     "sighup": "SIGHUP",
     "sigquit": "SIGQUIT",
     "pause": "/pause",
+    "max_loops": "loop limit",
 }
-# The single keystroke leave; signals and the typed /pause (already echoed) get no caret shadow.
-_LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
-# Adds the machine-triggered loop ceiling; _LEAVE_DISPLAY stays leave-only for its second consumer.
-_PAUSE_QUALIFIER: dict[str, str] = {**_LEAVE_DISPLAY, "max_loops": "loop limit"}
 
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
@@ -415,12 +412,7 @@ def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
 
 def _emit_leave_pause(quest: Quest, trigger: str, *,
                       intent: str | None = None) -> None:
-    """A deliberate leave's own block: the keystroke's caret shadow — never a signal's,
-    since nothing was typed — then the trigger-qualified pause block."""
-    if trigger in _LEAVE_KEYSTROKES:
-        color = should_use_color(sys.stdout)
-        print(pal.caret(enabled=color)
-              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
+    """A deliberate leave's own block: the trigger-qualified pause block."""
     _emit_paused_summary(quest, info=_PauseInfo(trigger, None), intent=intent)
 
 
@@ -907,7 +899,9 @@ async def _run_cleared_session(
             stream=watched, color=color, width=_term_width,
             display_width=_display_width, status=status,
             quest_id=quest.id, title=quest.title,
-            project=quest.control_root.name)
+            project=quest.control_root.name, preceded_by_blank=True)
+        if quest.seed_opening:
+            driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1087,7 +1081,7 @@ async def _run_fresh_session(
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=not auto_headless)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1102,7 +1096,7 @@ async def _run_fresh_session(
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1351,7 +1345,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
@@ -1371,7 +1365,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()

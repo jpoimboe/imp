@@ -81,17 +81,13 @@ class LiveStatus:
         self._erase()
         self._show_cursor()
 
-    def end_run(self) -> None:
-        """Terminal teardown: erase the footer and clear the compose fn like
-        reset(), but when a footer with its own leading blank was visible, descend
-        one line past that blank so it survives as the single separator before the
-        caller's printed exit block. A non-TTY or already-hidden status writes
-        nothing, keeping the live/log scrollback parity intact."""
-        descend = self._enabled and self._visible and self._owns_lead_blank
+    def end_run(self, *, need_blank: bool) -> None:
+        """Terminal teardown: erase the footer, parking the cursor on the row just below
+        the last committed row, and leave one blank there when the tail isn't one."""
         self._erase()
         self._show_cursor()
         self._compose = None
-        if descend:
+        if self._enabled and need_blank:
             self._stream.write("\n")
             self._stream.flush()
 

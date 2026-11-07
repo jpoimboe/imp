@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,6 +34,28 @@ from tests.impty.test_e2e_relay_hibernation_gate import (
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
+
+_QUESTION_TURNS: list[dict[str, Any]] = [
+    {"text": "setting up", "tools": [
+        {"name": "create_and_enter_worktree", "input": {}},
+        {"name": "bash", "input": {"command": _ATTACH_POLL}},
+    ]},
+    {"text": "waiting for you"},
+]
+_CHAT_TURNS: list[dict[str, Any]] = [
+    {"text": "setting up", "tools": [{"name": "bash", "input": {"command": _ATTACH_POLL}}]},
+    {"text": "waiting for you"},
+]
+_BUSY_TURNS: list[dict[str, Any]] = [
+    {"text": "working", "tools": [
+        {"name": "create_and_enter_worktree", "input": {}},
+        # Attached, then busy once: the marker proves the step is mid-run.
+        {"name": "bash", "input": {
+            "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
+                       ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
+    ]},
+    {"text": "the next turn ran"},
+]
 
 
 def _env(script_path: Path) -> dict[str, str]:
@@ -71,14 +94,33 @@ def _events(quest_dir: Path) -> list[dict]:
     return [json.loads(ln) for ln in (quest_dir / "events.jsonl").read_text().splitlines()]
 
 
+def _assert_closing_layout(rows: list[str], head: str) -> int:
+    """`head` sits under exactly one blank row; returns its index."""
+    screen = "\n".join(rows)
+    assert rows.count(head) == 1, screen
+    at = rows.index(head)
+    assert at >= 2, screen
+    assert rows[at - 1] == "", screen
+    assert rows[at - 2] != "", screen
+    return at
+
+
+def _assert_pause_block(s: TerminalSession, head: str, quest_id: str, title: str) -> int:
+    """The closing layout above `head`, then the identity and resume rows; returns its index."""
+    rows = s.lines()
+    at = _assert_closing_layout(rows, head)
+    assert rows[at + 1:at + 3] == [
+        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], "\n".join(rows)
+    return at
+
+
+def _assert_ctrl_d_block(s: TerminalSession, quest_id: str, title: str) -> int:
+    assert "> Ctrl-D" not in s.lines(), "\n".join(s.lines())
+    return _assert_pause_block(s, "paused · Ctrl-D", quest_id, title)
+
+
 def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
-    script = _seed_scripted_gate_project(tmp_path, turns=[
-        {"text": "setting up", "tools": [
-            {"name": "create_and_enter_worktree", "input": {}},
-            {"name": "bash", "input": {"command": _ATTACH_POLL}},
-        ]},
-        {"text": "waiting for you"},
-    ])
+    script = _seed_scripted_gate_project(tmp_path, turns=_QUESTION_TURNS)
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "ctrl-d-gate", "--title", "ctrl d gate"],
         cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
@@ -89,17 +131,11 @@ def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · Ctrl-D",))
+        _assert_ctrl_d_block(s, quest_dir.name, "ctrl d gate")
 
 
 def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> None:
-    script = _seed_scripted_gate_project(tmp_path, turns=[
-        {"text": "setting up", "tools": [
-            {"name": "create_and_enter_worktree", "input": {}},
-            {"name": "bash", "input": {"command": _ATTACH_POLL}},
-        ]},
-        {"text": "waiting for you"},
-    ])
+    script = _seed_scripted_gate_project(tmp_path, turns=_QUESTION_TURNS)
     env = _env(script)
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "pause-gate", "--title", "pause gate"],
@@ -111,8 +147,8 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · /pause",))
-        assert not any(ln.strip() == "> Ctrl-D" for ln in s.lines())
+        at = _assert_pause_block(s, "paused · /pause", quest_dir.name, "pause gate")
+        assert s.lines()[at - 2] == "> /pause", "\n".join(s.lines())
 
     paused = [e["payload"] for e in _events(quest_dir) if e["type"] == "workflow_paused"]
     assert paused[-1]["interrupt_reason"] == "pause"
@@ -144,12 +180,7 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
 def test_leave_command_in_chat_after_an_exchange_exits_130(
     tmp_path: Path, command: str, tail: str, resume_suffix: str,
 ) -> None:
-    script = _seed_scripted_gate_project(tmp_path, turns=[
-        {"text": "setting up", "tools": [
-            {"name": "bash", "input": {"command": _ATTACH_POLL}},
-        ]},
-        {"text": "waiting for you"},
-    ])
+    script = _seed_scripted_gate_project(tmp_path, turns=_CHAT_TURNS)
     with TerminalSession(
         [sys.executable, "-m", "imp", "chat", "hello there"],
         cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
@@ -166,16 +197,7 @@ def test_leave_command_in_chat_after_an_exchange_exits_130(
 
 @pytest.mark.parametrize("interrupt", ["cooperative", "hard_kill"])
 def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: str) -> None:
-    script = _seed_scripted_gate_project(tmp_path, interrupt=interrupt, turns=[
-        {"text": "working", "tools": [
-            {"name": "create_and_enter_worktree", "input": {}},
-            # Attached, then busy once: the marker proves the step is mid-run.
-            {"name": "bash", "input": {
-                "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
-                           ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
-        ]},
-        {"text": "the next turn ran"},
-    ])
+    script = _seed_scripted_gate_project(tmp_path, interrupt=interrupt, turns=_BUSY_TURNS)
     env = _env(script)
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "sigterm-mid-run",
@@ -214,14 +236,26 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: s
         assert not any("interrupted ·" in ln for ln in r.lines())
 
 
+def test_ctrl_d_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_BUSY_TURNS)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new", "ctrl-d-mid-run", "--title", "ctrl d mid run"],
+        cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
+    ) as s:
+        quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
+        assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), (
+            "the step never went busy\n" + "\n".join(s.lines()))
+        assert Quest.load(tmp_path, quest_dir.name).materialized
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(s.lines())
+        _assert_ctrl_d_block(s, quest_dir.name, "ctrl d mid run")
+
+
 def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> None:
     # No create_and_enter_worktree: the chat stays phase-0, so Ctrl-D archives it.
-    script = _seed_scripted_gate_project(tmp_path, turns=[
-        {"text": "setting up", "tools": [
-            {"name": "bash", "input": {"command": _ATTACH_POLL}},
-        ]},
-        {"text": "waiting for you"},
-    ])
+    script = _seed_scripted_gate_project(tmp_path, turns=_CHAT_TURNS)
     with TerminalSession(
         [sys.executable, "-m", "imp", "chat", "hello there"],
         cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
@@ -234,4 +268,4 @@ def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> 
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("archived",))
+        _assert_closing_layout(s.lines(), f"{quest_dir.name} · hello there · archived")

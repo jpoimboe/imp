@@ -104,6 +104,43 @@ async def test_run_fresh_session_interactive_threads_create_mode(
     assert captured["leave_mode"] == create_mode
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(("auto_headless", "seed"), [(False, True), (True, False)],
+                         ids=["explicit", "auto"])
+async def test_run_fresh_session_headless_seeds_from_the_row_above_the_driver(
+    monkeypatch: pytest.MonkeyPatch, auto_headless: bool, seed: bool,
+) -> None:
+    driver_kwargs = _stub_ui(monkeypatch)
+    monkeypatch.setattr(m, "_select_headless", lambda _a: (True, auto_headless))
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    _capture_leave_mode(monkeypatch)
+    quest = SimpleNamespace(
+        id="x", title="t", create_mode="new", seed_opening=None,
+        control_root=Path("/checkouts/imp"))
+    assert await m._run_fresh_session(quest, args=argparse.Namespace()) == 0
+    assert driver_kwargs["preceded_by_blank"] is seed
+
+
+@pytest.mark.anyio
+async def test_run_fresh_session_interactive_seeds_a_blank_tail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    driver_kwargs = _stub_ui(monkeypatch)
+    monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+
+    async def _fake_loop(control: object, base: str, *, first: object) -> int:
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    _capture_leave_mode(monkeypatch)
+    quest = SimpleNamespace(
+        id="x", title="t", create_mode="new", base_branch="main",
+        control_root=tmp_path, seed_opening="an idea")
+    assert await m._run_fresh_session(quest, args=argparse.Namespace()) == 0
+    assert driver_kwargs["preceded_by_blank"] is True
+
+
 @pytest.mark.parametrize("create_mode", ["chat", "new"])
 def test_interactive_resume_threads_create_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, create_mode: str,

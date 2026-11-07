@@ -300,6 +300,10 @@ class _RecDriver:
 
     def __init__(self) -> None:
         self.events: list[str] = []
+        self.rows: list[str] = []
+
+    def commit_row(self, line: str) -> None:
+        self.rows.append(line)
 
     def prepare_for_prompt(self) -> None:
         self.events.append("prepare")
@@ -324,6 +328,34 @@ class _CountStatus:
         import contextlib as _cm
         self.suspend_calls += 1
         return _cm.nullcontext()
+
+
+def test_slash_output_goes_through_the_driver_with_a_blank_last(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.slash import ask_line_with_slash
+    driver = _RecDriver()
+
+    async def _run() -> str:
+        return await ask_line_with_slash(
+            _FakePrompt(["/help", "hi"]), _NullStatus(), _FakeQuest(tmp_path), driver=driver)
+
+    assert anyio.run(_run) == "hi"
+    assert any("Complete a /command" in row for row in driver.rows)
+    assert driver.rows[-1] == ""
+    assert capsys.readouterr().out == ""
+
+
+def test_slash_output_with_no_driver_prints(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.slash import ask_line_with_slash
+    line = anyio.run(
+        ask_line_with_slash, _FakePrompt(["/help", "hi"]), _NullStatus(), _FakeQuest(tmp_path))
+    assert line == "hi"
+    out = capsys.readouterr().out
+    assert "Complete a /command" in out
+    assert out.endswith("\n\n")
 
 
 def test_solicit_prepares_then_flushes_once(tmp_path: Path) -> None:
@@ -512,6 +544,8 @@ def test_ask_line_with_slash_pins_driver_toolbar_below_the_prompt(tmp_path: Path
     from imp.cli.slash import ask_line_with_slash
 
     class _FakeDriver:
+        def commit_row(self, _line: str) -> None: ...
+
         def prompt_indent(self) -> str:
             return ""
 
@@ -557,6 +591,8 @@ def test_ask_line_with_slash_forwards_toolbar_through_raced_path(tmp_path: Path)
             pass
 
     class _FakeDriver:
+        def commit_row(self, _line: str) -> None: ...
+
         def prompt_indent(self) -> str:
             return ""
 

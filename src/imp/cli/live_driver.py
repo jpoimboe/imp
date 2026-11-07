@@ -369,6 +369,11 @@ class _Cursor:
     emit_mark: int = 0  # driver emission count when this container opened
 
 
+def _is_blank_row(row: str) -> bool:
+    # Rendered rows can be ANSI-only or end in a newline; only the last line's text counts.
+    return not rt._strip_sgr(row.rpartition("\n")[2]).strip()
+
+
 def _is_container(node: Any) -> bool:
     # A deferred-leaf StepNode is NOT a streamed container: it has no narrative
     # children and renders as a single deferred leaf (its routing arrow, or
@@ -434,6 +439,7 @@ class LiveDriver:
         self._prompt_active = False        # defer _print_lines while a prompt owns the screen
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
+        self._tail_blank = preceded_by_blank   # the last committed row is blank
         self._startup_verb = startup_verb
         self._startup_start_iso: str | None = None   # block start for the startup block-age timer
         self._unsandboxed = False
@@ -552,14 +558,15 @@ class LiveDriver:
         self._refresh_status()
 
     def finish(self, *, exit_block: bool = True, interrupted: bool = False) -> None:
-        """Flush the block; exit_block descends past the owned blank (end_run) else resets."""
+        """Flush the block; exit_block leaves one blank above the caller's closing block
+        (end_run), else resets."""
         self._status.clear_stop_ack()      # the ack never outlives the run
         if interrupted:
             self._builder.mark_subagents_interrupted()
         self._builder.finalize()
         self._walk(force=True)
         if exit_block:
-            self._status.end_run()
+            self._status.end_run(need_blank=not self._tail_blank)
         else:
             self._status.reset()
 
@@ -853,6 +860,13 @@ class LiveDriver:
             self._stream.write(ln + "\n")
         self._stream.flush()
         self._prev_prose = prose
+        self._tail_blank = _is_blank_row(lines[-1])
+
+    def commit_row(self, line: str) -> None:
+        """Commit one row outside the narrative tree while a prompt turn owns the screen."""
+        self._stream.write(line + "\n")
+        self._stream.flush()
+        self._tail_blank = _is_blank_row(line)
 
     def _frontier_depth(self) -> int:
         """Depth at which the open frontier cursor renders its children — the depth
@@ -871,13 +885,14 @@ class LiveDriver:
         the prompt active so subsequent _print_lines are deferred (§5a). Self-hiding
         and idempotent."""
         self._status.hide()
-        if self._prev_prose:
+        if self._prev_prose and not (self._preceded_by_blank and not self._emitted_any):
             depth = self._frontier_depth()
             indent = rt._gutter_indent(depth, self._gutters(), self._color)
             self._stream.write(indent + "\n")
             self._stream.flush()
             self._prev_prose = False
             self._separator_emitted = True
+            self._tail_blank = True
         self._prompt_active = True
 
     def flush_deferred(self) -> None:

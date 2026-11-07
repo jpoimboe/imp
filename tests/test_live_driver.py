@@ -3809,22 +3809,207 @@ def test_finish_exit_block_false_resets_without_trailing_blank() -> None:
     assert status._compose is None         # compose cleared
 
 
-def test_finish_default_descends_past_owned_blank() -> None:
-    """finish() with default exit_block=True uses end_run(): descends past the owned blank."""
+def _closing_driver() -> tuple[LiveDriver, LiveStatus, _TTYPipe]:
     out = _TTYPipe()
     status = LiveStatus(out)
     status._width_fn = lambda: 80
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
-    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="spec",
-                    model="m", provider="anthropic"))
-    assert status._visible
-    out.truncate(0)
-    out.seek(0)
+    return LiveDriver(stream=out, color=False, width=80, status=status), status, out
+
+
+def _screen_rows(out: _TTYPipe) -> list[str]:
+    import pyte
+
+    from impty.screen import TerminalScreen
+    from impty.view import lines as screen_lines
+
+    screen = TerminalScreen(80, 16, history=200, ratio=0.5)
+    # A pty's ONLCR turns \n into \r\n; without it pyte keeps the column.
+    pyte.ByteStream(screen).feed(out.getvalue().replace("\n", "\r\n").encode())
+    return screen_lines(screen)
+
+
+def _rows_above_closing_block(out: _TTYPipe) -> list[str]:
+    """The two screen rows directly above a block the caller prints now."""
+    out.write("HEAD\n")
+    rows = _screen_rows(out)
+    at = rows.index("HEAD")
+    return rows[at - 2:at]
+
+
+def _set_footer(status: LiveStatus, state: str) -> None:
+    if state == "no_owned_blank":
+        status.skip_leading_blank()
+    status.update(lambda _f: ["activity", "", "position bar"])
+    if state == "hidden":
+        status.hide()
+
+
+@pytest.mark.parametrize("footer", ["owned_blank", "no_owned_blank", "hidden"])
+@pytest.mark.parametrize(("tail", "newlines"), [(["last row", ""], 0), (["last row"], 1)])
+def test_finish_leaves_one_blank_above_the_closing_block(
+    footer: str, tail: list[str], newlines: int,
+) -> None:
+    drv, status, out = _closing_driver()
+    for row in tail:
+        drv.commit_row(row)
+    _set_footer(status, footer)
+    before = out.tell()
     drv.finish()
-    v = out.getvalue()
-    assert v.endswith("\n")               # end_run(): descend past the owned blank
-    assert status._compose is None
+    assert out.getvalue()[before:].count("\n") == newlines
+    assert _rows_above_closing_block(out) == ["last row", ""]
+
+
+def test_finish_counts_the_flushed_open_burst_as_the_tail() -> None:
+    drv, status, out = _closing_driver()
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="s", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={"command": "sleep"}),
+    ]:
+        drv.on_event(e)
+    assert status._visible
+    drv.finish(interrupted=True)
+    above, blank = _rows_above_closing_block(out)
+    assert "1 call · bash" in above
+    assert blank == ""
+
+
+@pytest.mark.parametrize("node", [
+    nv.MergedNode(quest_id="q", base="main"), nv.CompletedNode(quest_id="q")],
+    ids=["merged", "completed"])
+def test_finish_counts_a_terminal_node_blank_as_the_tail(node: object) -> None:
+    drv, status, out = _closing_driver()
+    drv.commit_row("last row")
+    status.update(lambda _f: ["activity"])
+    drv._emit_leaf(node, 0)
+    drv.finish()
+    assert _rows_above_closing_block(out) == ["last row", ""]
+
+
+@pytest.mark.parametrize(("landing", "merged_base", "head"), [
+    (ev("6", "quest_merged", base="main", quest_id="2026-06-12-run-x"), "main",
+     "2026-06-12-run-x · (unnamed) · merged into main"),
+    (ev("6", "workflow_completed", quest_id="2026-06-12-run-x"), None,
+     "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x"),
+], ids=["merged", "completed"])
+def test_landing_block_has_one_blank_above_it(
+    landing: dict, merged_base: str | None, head: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import contextlib
+
+    from imp.cli import main
+
+    class _Quest:
+        id = "2026-06-12-run-x"
+        title = ""
+        base_branch = "main"
+        seed_opening = None
+
+    drv, _status, out = _closing_driver()
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="merging", kind="agent", phase="integration",
+           model="m", provider="anthropic"),
+        ev("4", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        ev("5", "step_completed", step="merging", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        landing,
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    monkeypatch.setenv("NO_COLOR", "1")
+    with contextlib.redirect_stdout(out):
+        main._emit_completed(_Quest(), merged_base=merged_base)
+    rows = _screen_rows(out)
+    at = rows.index(head)
+    assert rows[at - 1] == ""
+    assert rows[at - 2] != ""
+
+
+def test_finish_after_prose_at_a_prompt_keeps_the_separator_as_the_only_blank() -> None:
+    drv, status, out = _closing_driver()
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="s", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "a question for you"}]}, usage={}),
+        ev("4", "awaiting_user_input", agent_id="a", last_agent_message="a question for you"),
+    ]:
+        drv.on_event(e)
+    with status.suspend():
+        drv.prepare_for_prompt()
+        assert drv._separator_emitted
+        drv.flush_deferred()
+    before = out.tell()
+    drv.finish()
+    assert out.getvalue()[before:].count("\n") == 0
+    assert _rows_above_closing_block(out) == ["• a question for you", ""]
+
+
+@pytest.mark.parametrize("row", ["\x1b[2m\x1b[0m", "  \x1b[36m    \x1b[0m", "boom\n\x1b[0m"],
+                         ids=["ansi-only", "ansi-spaces", "ends-in-newline"])
+@pytest.mark.parametrize("write", ["emit", "commit"])
+def test_a_row_with_no_visible_text_on_its_last_line_counts_as_blank(
+    row: str, write: str,
+) -> None:
+    drv, _status, out = _closing_driver()
+    if write == "emit":
+        drv._emit_now(["text", row], prose=False, separator_indent="")
+    else:
+        drv.commit_row(row)
+    before = out.tell()
+    drv.finish()
+    assert out.getvalue()[before:].count("\n") == 0
+
+
+def test_a_row_with_visible_text_after_ansi_is_not_blank() -> None:
+    drv, _status, out = _closing_driver()
+    drv.commit_row("\x1b[2mtext\x1b[0m")
+    before = out.tell()
+    drv.finish()
+    assert out.getvalue()[before:].count("\n") == 1
+
+
+@pytest.mark.parametrize(("seed", "written"), [(False, "\n"), (True, "")])
+def test_finish_with_no_event_follows_the_blank_seed(seed: bool, written: str) -> None:
+    out = _TTYPipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     preceded_by_blank=seed)
+    drv.finish()
+    assert out.getvalue().replace("\x1b[?25h", "") == written
+
+
+@pytest.mark.parametrize("seed", [True, False])
+@pytest.mark.parametrize("rows", [[], ["last row"], ["last row", ""]],
+                         ids=["none", "not-blank", "blank"])
+def test_finish_off_a_terminal_writes_no_row(seed: bool, rows: list[str]) -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     preceded_by_blank=seed)
+    for row in rows:
+        drv.commit_row(row)
+    before = out.tell()
+    drv.finish()
+    assert out.getvalue()[before:] == ""
+
+
+def test_commit_row_writes_what_print_would(capsys: pytest.CaptureFixture[str]) -> None:
+    drv, out = _driver()
+    for row in ["> /help", "", "x\x1b[0m"]:
+        drv.commit_row(row)
+        print(row)
+    assert out.getvalue() == capsys.readouterr().out
+
+
+def test_commit_row_leaves_prose_spacing_alone() -> None:
+    drv, out = _driver()
+    drv._emit_now(["prose"], prose=True, separator_indent="")
+    drv.commit_row("hint")
+    drv._emit_now(["next"], prose=False, separator_indent="")
+    assert out.getvalue() == "prose\nhint\n\nnext\n"
 
 
 def test_resume_echo_keeps_blank_before_first_live_agent_prose() -> None:

@@ -12,6 +12,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from imp.cli import session_run
+from imp.cli.abandon_confirm import ask_keypress_confirm
 from imp.cli.session_run import make_interactive_confirm
 
 
@@ -54,6 +55,9 @@ class _Framing:
     def flush_deferred(self) -> None:
         self.events.append("flush")
 
+    def commit_row(self, line: str) -> None:
+        self.events.append(f"row {line}")
+
 
 def _confirm_for(f: _Framing) -> Any:
     return make_interactive_confirm(status=f, driver=f, coord=f)
@@ -70,7 +74,8 @@ async def test_confirm_hands_the_terminal_to_the_widget_and_back(
 ) -> None:
     f = _Framing()
 
-    async def _widget(question: str) -> bool:
+    async def _widget(question: str, output_fn: Any) -> bool:
+        assert output_fn == f.commit_row
         f.events.append(f"ask {question}")
         return answer
 
@@ -85,7 +90,7 @@ async def test_cancelled_confirm_still_hands_the_terminal_back(
 ) -> None:
     f = _Framing()
 
-    async def _widget(_question: str) -> bool:
+    async def _widget(_question: str, _output_fn: Any) -> bool:
         f.events.append("ask")
         await anyio.sleep_forever()
         return True   # unreachable: only cancellation ends it
@@ -110,6 +115,7 @@ async def test_confirm_flushes_tty_stdin_before_the_widget_reads(
         def fileno(self) -> int:
             return 0
 
+    f = _Framing()
     flushed: list[tuple[int, int]] = []
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         def _fake_tcflush(fd: int, queue: int) -> None:
@@ -119,9 +125,22 @@ async def test_confirm_flushes_tty_stdin_before_the_widget_reads(
         monkeypatch.setattr(sys, "stdin", _TtyStdin())
         monkeypatch.setattr(termios, "tcflush", _fake_tcflush)
         with anyio.fail_after(10):
-            assert await _confirm_for(_Framing())("Abandon x? [y/N] ") is True
+            assert await _confirm_for(f)("Abandon x? [y/N] ") is True
     assert flushed == [(0, termios.TCIFLUSH)]
-    assert capsys.readouterr().out == "Abandon x? [y/N] y\n"
+    assert "row Abandon x? [y/N] y" in f.events
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("key", "row"), [("y", "Q? y\n"), ("x", "Q? n\n")])
+async def test_keypress_confirm_with_no_driver_prints_its_row(
+    capsys: pytest.CaptureFixture[str], key: str, row: str,
+) -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text(key)
+        with anyio.fail_after(10):
+            assert await ask_keypress_confirm("Q? ") is (key == "y")
+    assert capsys.readouterr().out == row
 
 
 @pytest.mark.parametrize("client", ["run_terminal_client", "run_session_client"])
