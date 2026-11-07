@@ -433,6 +433,8 @@ async def ask_line_with_slash(
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
 
+    out: Callable[[str], None] = driver.commit_row if driver is not None else print
+
     def _toolbar() -> str | None:
         if driver is not None:
             static: str | None = driver.compose_toolbar_static()
@@ -449,12 +451,12 @@ async def ask_line_with_slash(
         else:
             current_unsandboxed = bool(getattr(driver, "unsandboxed", False))
         return handle_slash_line(
-            line, quest=quest, output_fn=print, color=color,
+            line, quest=quest, output_fn=out, color=color,
             unsandboxed=current_unsandboxed, pre_session=pre_session)
 
     result = await solicit_line(
         prompt, status, dispatch=_dispatch, toolbar_fn=_toolbar, coord=coord,
-        driver=driver, width=width, hint=hint, allow_empty=allow_empty)
+        driver=driver, width=width, hint=hint, allow_empty=allow_empty, output_fn=out)
     if isinstance(result, SkillRequest):
         return result
     assert isinstance(result, str)  # a user line or a literal command line

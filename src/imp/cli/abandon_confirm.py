@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from imp.engine import worktree
@@ -25,7 +26,9 @@ def abandon_question(quest_id: str, removed: str) -> str:
     return f"Abandon {quest_id}? This removes its {removed}. [y/N] "
 
 
-async def ask_keypress_confirm(question: str) -> bool:
+async def ask_keypress_confirm(
+    question: str, output_fn: Callable[[str], None] = print,
+) -> bool:
     """Single-keypress y/N: y or Y confirms, any other key declines."""
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
@@ -53,5 +56,5 @@ async def ask_keypress_confirm(question: str) -> bool:
         # Drop typed-ahead bytes so a stale key can't answer.
         termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
     confirmed: bool = await app.run_async(handle_sigint=False)
-    print(question + ("y" if confirmed else "n"))
+    output_fn(question + ("y" if confirmed else "n"))
     return confirmed

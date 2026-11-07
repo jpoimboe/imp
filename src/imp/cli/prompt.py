@@ -63,7 +63,8 @@ def _placeholder_text(*, color: bool, text: str = DEFAULT_HINT) -> str:
 def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
                    color: bool = False,
                    roster_models: Callable[[], list[str]] | None = None,
-                   empty_hint: str = EMPTY_PROMPT_HINT) -> Any:
+                   empty_hint: str = EMPTY_PROMPT_HINT,
+                   output_fn: Callable[[str], None] = print) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
     from prompt_toolkit.enums import EditingMode
@@ -98,7 +99,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             from prompt_toolkit.application import run_in_terminal
             # Fire-and-forget: run_in_terminal schedules via ensure_future; the
             # returned Future is intentionally not awaited from this sync handler.
-            run_in_terminal(lambda: print(empty_hint))
+            run_in_terminal(lambda: output_fn(empty_hint))
 
     @kb.add("c-m")
     def _(event: Any) -> None:
@@ -249,6 +250,7 @@ class Prompt:
         color: bool = False,
         quest: Any | None = None,
         empty_hint: str = EMPTY_PROMPT_HINT,
+        output_fn: Callable[[str], None] = print,
         _session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._color = color
@@ -261,7 +263,8 @@ class Prompt:
         self._session_factory = _session_factory or (
             lambda: _build_session(
                 skills_dir, editing_mode=editing_mode, color=color,
-                roster_models=roster_models, empty_hint=empty_hint))
+                roster_models=roster_models, empty_hint=empty_hint,
+                output_fn=output_fn))
         self._session = self._session_factory()
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:

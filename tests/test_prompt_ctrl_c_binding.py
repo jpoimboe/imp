@@ -114,6 +114,40 @@ async def test_ctrl_c_hint_defaults_to_the_run_paths_wording(
     assert "press ctrl-d to pause & exit" in capsys.readouterr().out
 
 
+@pytest.mark.anyio
+async def test_ctrl_c_hint_goes_through_the_sessions_output_fn(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "prompt_toolkit.application.run_in_terminal", lambda fn: fn())
+    rows: list[str] = []
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        session = _build_session(output_fn=rows.append)
+        pipe.send_text("\x03")
+        pipe.send_text("world\r")
+        assert await session.prompt_async("> ") == "world"
+    assert rows == ["press ctrl-d to pause & exit"]
+    assert capsys.readouterr().out == ""
+
+
+def test_prompt_threads_its_output_fn_into_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import prompt as prompt_mod
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(skills_dir=None, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    def _output(_line: str) -> None: ...
+
+    monkeypatch.setattr(prompt_mod, "_build_session", _fake_build)
+    Prompt(output_fn=_output)
+    assert captured["output_fn"] is _output
+
+
 def test_prompt_threads_its_empty_hint_into_the_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

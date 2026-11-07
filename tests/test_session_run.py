@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,10 @@ async def _no_confirm(question: str) -> bool:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+class _CommitRowDriver:
+    def commit_row(self, _line: str) -> None: ...
 
 
 def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
@@ -454,7 +459,7 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
 
     coord = InterruptCoordinator()
     status = object()
-    driver = object()
+    driver = _CommitRowDriver()
     solicit = make_interactive_solicit(
         quest, status=status, driver=driver, coord=coord)
 
@@ -491,19 +496,23 @@ def test_make_interactive_solicit_seeds_prompt_history_from_record(
                  "content": [{"type": "text", "text": "engine nudge"}]})
 
     seeded: dict[str, list[str]] = {}
+    prompt_kwargs: dict[str, object] = {}
 
     class _RecordingPrompt:
-        def __init__(self, **_kw: object) -> None: ...
+        def __init__(self, **kw: object) -> None:
+            prompt_kwargs.update(kw)
         def seed_history(self, lines: list[str]) -> None:
             seeded["lines"] = lines
 
     monkeypatch.setattr("imp.cli.session_run.Prompt", _RecordingPrompt)
 
     coord = InterruptCoordinator()
+    driver = _CommitRowDriver()
     make_interactive_solicit(
-        quest, status=object(), driver=object(), coord=coord)
+        quest, status=object(), driver=driver, coord=coord)
 
     assert seeded["lines"] == ["the seed goal", "a human reply"]
+    assert prompt_kwargs["output_fn"] == driver.commit_row
 
 
 @pytest.mark.anyio
@@ -1766,6 +1775,40 @@ async def test_ctrl_d_leave_still_renders_its_pause_block(
     assert rc == 130
     # The WHOLE buffer, not a prefix: AC 5 asks for byte-identical leave rendering.
     assert out == (
+        "paused · Ctrl-D\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
+
+
+@pytest.mark.anyio
+async def test_ctrl_d_leave_off_a_terminal_writes_only_the_pause_block_below_the_last_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-07-04-leave-piped")
+    leaving = _leaving("ctrl-d")
+
+    async def _leaving_through_teardown(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
+        result = await leaving(**kwargs)
+        kwargs["driver"].finish(interrupted=True)
+        return result
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _leaving_through_teardown)
+    driver = LiveDriver(stream=sys.stdout, color=False, width=80, status=LiveStatus(sys.stdout))
+    driver.commit_row("last row")
+
+    rc = await session_run.run_session_client(
+        quest, driver=driver, coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    assert rc == 130
+    assert capsys.readouterr().out == (
+        "last row\n"
         "paused · Ctrl-D\n"
         f"{quest.id} · T\n"
         f"resume: imp resume {quest.id}\n"
