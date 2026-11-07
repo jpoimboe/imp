@@ -366,7 +366,32 @@ async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> No
         ui.get_attrs_for_style_str(f"class:bottom-toolbar {style}").reverse is False
         for style, _text, *_ in frags
     )
-    assert "style" in captured                            # secondary noreverse class guard
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("toolbar", [None, "status"], ids=["no-toolbar", "toolbar"])
+async def test_ask_async_passes_the_prompt_style_on_every_call(toolbar: str | None) -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(bottom_toolbar=toolbar)
+    style = captured["style"]
+    from prompt_toolkit.styles import Style
+    assert isinstance(style, Style)
+    assert dict(style.style_rules) == {
+        "bottom-toolbar": "noreverse",
+        "completion-menu": "bg:default fg:default",
+        "completion-menu.completion.current": "bg:default fg:default reverse",
+        "completion-menu.meta.completion": "bg:default fg:default dim",
+        "completion-menu.meta.completion.current": "bg:default fg:default nodim reverse",
+        "scrollbar.background": "bg:default",
+        "scrollbar.button": "bg:default fg:default dim reverse",
+    }
 
 
 @pytest.mark.anyio

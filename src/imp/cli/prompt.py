@@ -30,6 +30,17 @@ OPENING_HINTS = {
     "new": "describe what you want built, or /help",
     "chat": "ask anything, or /help",
 }
+# `default` wins the attribute merge and emits no colour code, so the terminal's colours show.
+_PROMPT_STYLE = {
+    "bottom-toolbar": "noreverse",
+    "completion-menu": "bg:default fg:default",
+    "completion-menu.completion.current": "bg:default fg:default reverse",
+    "completion-menu.meta.completion": "bg:default fg:default dim",
+    # nodim: dotted classes inherit, so .current would pick up dim from meta.completion.
+    "completion-menu.meta.completion.current": "bg:default fg:default nodim reverse",
+    "scrollbar.background": "bg:default",
+    "scrollbar.button": "bg:default fg:default dim reverse",
+}
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,
@@ -290,6 +301,7 @@ class Prompt:
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
         solicit_line becomes a harmless defensive no-op (kept)."""
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+        from prompt_toolkit.styles import Style
 
         from imp.cli import palette as pal
 
@@ -306,7 +318,6 @@ class Prompt:
                             else _placeholder_text(color=False, text=ph_text))
         extra: dict[str, Any] = {}
         if bottom_toolbar is not None:
-            from prompt_toolkit.styles import Style
             spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
             # Inline fragment-level noreverse beats the default reverse-video
             # bottom-toolbar class regardless of class-merge precedence.
@@ -314,7 +325,6 @@ class Prompt:
                 extra["bottom_toolbar"] = to_formatted_text(ANSI(spaced), style="noreverse")
             else:
                 extra["bottom_toolbar"] = spaced
-            extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         stdin = sys.stdin
         if stdin.isatty():
             # Drop typed-ahead kernel-buffered bytes so they don't auto-submit into this prompt.
@@ -326,6 +336,7 @@ class Prompt:
                 termios.tcflush(stdin.fileno(), termios.TCIFLUSH)
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
+            style=Style.from_dict(_PROMPT_STYLE),
             prompt_continuation=lambda _w, _l, _s: cont, **extra)
         return str(result) if result is not None else ""
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 from imp.cli.prompt import DEFAULT_HINT
 from impty import TerminalSession
+from impty.journal import Journal
 from tests.impty.e2e_support import can_pty, clean_env
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
@@ -21,15 +23,15 @@ from imp.cli import palette as pal
 from imp.cli.prompt import Prompt, _build_session
 
 async def _main() -> None:
-    skills_dir, mode, question, pad = sys.argv[1:5]
-    pal.set_theme("dark")
+    skills_dir, mode, question, pad, theme, toolbar = sys.argv[1:7]
+    pal.set_theme(theme)
     for i in range(int(pad)):
         print(f"pad{i}")
     prompt = Prompt(color=True, _session_factory=lambda: _build_session(
         skills_dir, editing_mode=mode, color=True,
         roster_models=lambda: ["claude-opus-5", "claude-sonnet-5"]))
     while True:
-        line = await prompt.ask_async(question=question, bottom_toolbar="status toolbar")
+        line = await prompt.ask_async(question=question, bottom_toolbar=toolbar or None)
         print(f"GOT: {line!r}")
 
 asyncio.run(_main())
@@ -44,6 +46,8 @@ _SKILLS = {
 _S_MENU = ["skills", "sandbox", "sa-bar", "sa-foo"]
 _TOOLBAR = "status toolbar"
 _IDLE_PROMPT = f"> {DEFAULT_HINT}"
+_BAR_DESCRIPTION = "Bar the sa subsystem"
+_SGR = re.compile(rb"\x1b\[([0-9;]*)m")
 
 
 def _screen(session: TerminalSession) -> list[str]:
@@ -99,12 +103,14 @@ def skills_dir(tmp_path: Path) -> Path:
 
 @contextlib.contextmanager
 def _pty(
-    skills_dir: Path, *, rows: int = 24, mode: str = "emacs", question: str = "", pad: int = 0
+    skills_dir: Path, *, rows: int = 24, mode: str = "emacs", question: str = "", pad: int = 0,
+    theme: str = "dark", toolbar: str = _TOOLBAR, journal: Journal | None = None,
 ) -> Iterator[TerminalSession]:
     env = clean_env(PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
-    argv = [sys.executable, "-c", _PROGRAM, str(skills_dir), mode, question, str(pad)]
-    with TerminalSession(argv, env=env, cols=80, rows=rows) as session:
-        _wait_row(session, _TOOLBAR)
+    argv = [sys.executable, "-c", _PROGRAM, str(skills_dir), mode, question, str(pad),
+            theme, toolbar]
+    with TerminalSession(argv, env=env, cols=80, rows=rows, journal=journal) as session:
+        _wait_row(session, toolbar or _IDLE_PROMPT)
         yield session
 
 
@@ -305,3 +311,50 @@ def test_menu_stays_below_the_caret_under_a_tall_question(skills_dir: Path) -> N
         session.send("\x07")
         restored = _wait_row(session, "q8")
     assert restored[:10] == [*question, "", "> /"]
+
+
+def _backgrounds(session: TerminalSession, rows: range) -> set[str]:
+    return {session.cell(x, y).bg for y in rows for x in range(session.cols)}
+
+
+def _reverse_by_glyph(session: TerminalSession, y: int) -> set[bool]:
+    row = _screen(session)[y]
+    glyphs = range(len(row) - len(row.lstrip()), len(row.rstrip()))
+    return {session.cell(x, y).reverse for x in glyphs}
+
+
+def _sgr_before(raw: bytes, text: str) -> list[str]:
+    """The parameters of the last SGR sequence before the last `text` in `raw`."""
+    return _SGR.findall(raw, 0, raw.rindex(text.encode()))[-1].decode().split(";")
+
+
+@pytest.mark.parametrize("toolbar", [_TOOLBAR, ""], ids=["toolbar", "no-toolbar"])
+@pytest.mark.parametrize("theme", ["dark", "light", "ansi"])
+def test_menu_uses_the_terminals_own_colours(
+    skills_dir: Path, tmp_path: Path, theme: str, toolbar: str
+) -> None:
+    raw = tmp_path / "pty-0.raw"
+    with _pty(skills_dir, theme=theme, toolbar=toolbar, journal=Journal(tmp_path, 0)) as session:
+        session.send("/sa-\t")
+        _wait_text(session, _BAR_DESCRIPTION)
+        assert _backgrounds(session, range(1, 3)) == {"default"}
+        assert _reverse_by_glyph(session, 1) == {False}
+        assert _sgr_before(raw.read_bytes(), _BAR_DESCRIPTION) == ["0", "2"]
+
+        opened_at = raw.stat().st_size
+        session.send("\t")
+        _wait_row(session, "> /sa-bar")
+        assert _backgrounds(session, range(1, 3)) == {"default"}
+        assert _reverse_by_glyph(session, 1) == {True}
+        assert _reverse_by_glyph(session, 2) == {False}
+        assert _sgr_before(raw.read_bytes()[opened_at:], _BAR_DESCRIPTION) == ["0", "7"]
+
+
+def test_scrolling_menu_paints_no_background(skills_dir: Path) -> None:
+    for n in range(25):
+        (skills_dir / "user" / f"zz{n:02}.md").write_text("---\ndescription: z\n---\nbody\n")
+    with _pty(skills_dir, rows=30) as session:
+        session.send("/zz\t")
+        rows = _wait_text(session, "zz15")
+        assert not any("zz24" in row for row in rows)
+        assert _backgrounds(session, range(1, 17)) == {"default"}
