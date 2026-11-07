@@ -14,9 +14,10 @@ runners:
     one JSON line per dict. Verified end-to-end by Spike 7 (replayed
     tool_use blocks are NOT re-dispatched).
   - `complete_step` is a synthesized MCP tool like any other. Its wrapper
-    raises StepComplete; the SDK surfaces tool exceptions as `is_error: true`
-    tool_results, so the runner watches for the next assistant message and
-    extracts the captured args from a shared state dict.
+    records the args in the shared `_RunState` and returns normally; the runner
+    reads them from there. Wrappers catch imp's tool errors and return
+    `{"content": [...], "is_error": True}` — the SDK reads only `is_error`
+    (not MCP's `isError`) when building the wire result.
 
 History isolation, by config dir. claude-p (CC 2.x) writes an `ai-title` session
 stub to its `CLAUDE_CONFIG_DIR`/projects/ on every spawn; imp keeps that off the
@@ -769,37 +770,41 @@ CAPTURED_TOOL_RESULTS_FILENAME = "captured_tool_results.jsonl"
 
 def _append_captured_tool_result(
     transcript_dir: Path, name: str, tool_input: dict[str, Any], content: str,
+    *, is_error: bool,
 ) -> None:
-    """Best-effort append of one plain-tool success to the per-step sidecar, keyed by
+    """Best-effort append of one imp tool result to the per-step sidecar, keyed by
     tool name + input (the SDK gives no usable tool_use_id for in-process MCP tools).
-    The whole body is inside suppress: a capture failure must never flip a real
-    success into an is_error result — a lost line just falls back to the placeholder.
+    The whole body is inside suppress: a lost line must never change the result the
+    tool returns — resume just falls back to the placeholder.
     """
     path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
     with contextlib.suppress(Exception):
         line = json.dumps(
-            {"name": name, "input": tool_input, "content": content, "is_error": False})
+            {"name": name, "input": tool_input, "content": content, "is_error": is_error})
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
 
 def _load_captured_tool_results(
     transcript_dir: Path,
-) -> dict[str, tuple[str, bool]]:
-    """Load the per-step capture sidecar into a captured_result_key(name, input) ->
-    (content, is_error) dict; {} when absent, so repair falls back to placeholders.
+) -> tuple[dict[str, tuple[str, bool]], dict[str, str]]:
+    """Load the per-step capture sidecar; the last record per captured_result_key
+    wins. Returns (successes as key -> (content, False), failures as key -> content);
+    failures are identity evidence for the marker repair, never replayed.
     """
     path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
     if not path.exists():
-        return {}
-    out: dict[str, tuple[str, bool]] = {}
+        return {}, {}
+    latest: dict[str, tuple[str, bool]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rec = json.loads(line)
-        key = captured_result_key(rec["name"], rec["input"])
-        out[key] = (rec["content"], rec["is_error"])
-    return out
+        latest[captured_result_key(rec["name"], rec["input"])] = (
+            rec["content"], rec["is_error"])
+    captured = {k: v for k, v in latest.items() if not v[1]}
+    failures = {k: content for k, (content, is_error) in latest.items() if is_error}
+    return captured, failures
 
 
 def _wrap_one(
@@ -826,6 +831,8 @@ def _wrap_one(
                 "claude MCP tool dispatched off the runner loop "
                 "(same-loop topology pin)")
         inflight_key: str | None = None
+        clean_args = {k: v for k, v in args.items()
+                      if not (k.startswith("__") and k.endswith("__"))}
         try:
             # Ahead of the sweep: a raising sweep must not strand this call's verdict.
             accepted = name != "complete_step" or await state.complete_verdicts.get()
@@ -929,8 +936,6 @@ def _wrap_one(
                 # sub_agent flush above). No-ops when no llm group is open; None
                 # until _enter assigns the closure (pre-loop).
                 state.flush_llm_group()
-            clean_args = {k: v for k, v in args.items()
-                          if not (k.startswith("__") and k.endswith("__"))}
             inflight_key = captured_result_key(name, clean_args)
             state.register_inflight(inflight_key, name)
             with suspend_inactivity_watchdog(ctx):
@@ -940,19 +945,22 @@ def _wrap_one(
                 caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                 if ctx.parent_transcript_dir is not None:
                     _append_captured_tool_result(
-                        ctx.parent_transcript_dir, name, clean_args, caption)
+                        ctx.parent_transcript_dir, name, clean_args, caption, is_error=False)
                 state.resolve_inflight(inflight_key, caption, is_error=False)
                 return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if ctx.parent_transcript_dir is not None:
                 _append_captured_tool_result(
-                    ctx.parent_transcript_dir, name, clean_args, content_str)
+                    ctx.parent_transcript_dir, name, clean_args, content_str, is_error=False)
             state.resolve_inflight(inflight_key, content_str, is_error=False)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
             if inflight_key is not None:
                 state.resolve_inflight(inflight_key, str(fte), is_error=True)
+            if ctx.parent_transcript_dir is not None and name != "complete_step":
+                _append_captured_tool_result(
+                    ctx.parent_transcript_dir, name, clean_args, str(fte), is_error=True)
             return _tool_response(str(fte), is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
@@ -967,6 +975,9 @@ def _wrap_one(
                 state.resolve_inflight(inflight_key, text, is_error=True)
             raise_if_suspended(exc)
             state.runtime_errors.append(text)
+            if ctx.parent_transcript_dir is not None and name != "complete_step":
+                _append_captured_tool_result(
+                    ctx.parent_transcript_dir, name, clean_args, text, is_error=True)
             return _tool_response(text, is_error=True)
         except BaseException:
             # CancelledError — the SDK cancelling this handler — misses both arms
@@ -986,17 +997,17 @@ def _wrap_one(
     return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 
-async def _make_impty_sdk_tools(driver: Any) -> list[Any]:
+async def _make_impty_sdk_tools(driver: Any, transcript_dir: Path) -> list[Any]:
     """Build SDK MCP tools for each ImptyDriver method, sourced from impty_tool_specs."""
     from claude_agent_sdk import tool as sdk_tool
 
     from impty.mcp import impty_tool_specs
 
     specs = impty_tool_specs(driver)
-    return [_wrap_impty_one(spec, sdk_tool) for spec in specs]
+    return [_wrap_impty_one(spec, sdk_tool, transcript_dir) for spec in specs]
 
 
-def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
+def _wrap_impty_one(spec: Any, sdk_tool: Any, transcript_dir: Path) -> Any:
     allowed = set(spec.input_schema.get("properties", {}))
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
@@ -1008,17 +1019,19 @@ def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
             result = await asyncio.to_thread(lambda: spec.method(**clean))
             return _tool_response(result, is_error=False)
         except Exception as exc:
+            # Full prefixed name: captured_result_key strips only mcp__imp__.
+            _append_captured_tool_result(
+                transcript_dir, f"mcp__impty__{spec.name}", clean, str(exc), is_error=True)
             return _tool_response(str(exc), is_error=True)
 
     return sdk_tool(spec.name, spec.description, spec.input_schema)(_impl)
 
 
 def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:
-    """Per SDK convention, tool wrappers return {content: [...]} or
-    {content: [...], isError: true}."""
+    """SDK tool-handler return value; the SDK flags the wire result from `is_error` only."""
     body: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
     if is_error:
-        body["isError"] = True
+        body["is_error"] = True
     return body
 
 
@@ -1476,15 +1489,17 @@ class ClaudeSession(ObserveSession):
             from imp.agents.tools.context import attach_impty_driver
             runner._impty_driver = attach_impty_driver(
                 ctx, journal_dir=invocation.transcript_dir)
-            impty_tools = await _make_impty_sdk_tools(runner._impty_driver)
+            impty_tools = await _make_impty_sdk_tools(
+                runner._impty_driver, invocation.transcript_dir)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
-        captured = _load_captured_tool_results(invocation.transcript_dir)
+        captured, captured_failures = _load_captured_tool_results(invocation.transcript_dir)
         # Must precede every classification below: they all read this one list.
-        repair_interrupt_marker_on_resume(existing, transcript, captured=captured)
+        repair_interrupt_marker_on_resume(
+            existing, transcript, captured=captured, captured_failures=captured_failures)
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step): re-emit the final text as the deliverable rather than
         # native-resuming or soliciting the human (AWAITING_USER). Prose over an
@@ -2100,7 +2115,8 @@ class ClaudeSession(ObserveSession):
                 runner._handoff_requested = False
                 self._flush_turn_record()
                 # imp executed these tools itself; the SDK's account of them is hearsay.
-                captured = _load_captured_tool_results(invocation.transcript_dir)
+                captured, captured_failures = _load_captured_tool_results(
+                    invocation.transcript_dir)
                 settled = await _settle_inflight(
                     self.runner._state, INFLIGHT_RESULT_BOUND_S)
                 for s in settled:
@@ -2108,7 +2124,8 @@ class ClaudeSession(ObserveSession):
                 _correct_withheld_results(elog, aid, runner._state, captured)
                 # Marker repair first: it collapses the tail the dangling repair then no-ops on.
                 repair_interrupt_marker_on_resume(
-                    self.messages, self.transcript, captured=captured)
+                    self.messages, self.transcript, captured=captured,
+                    captured_failures=captured_failures)
                 repair_dangling_tool_use_on_resume(
                     self.messages, self.transcript, captured=captured)
                 increment = correction_increment(settled)
@@ -2140,7 +2157,8 @@ class ClaudeSession(ObserveSession):
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
             # imp executed these tools itself; the SDK's account of them is hearsay.
-            captured = _load_captured_tool_results(invocation.transcript_dir)
+            captured, captured_failures = _load_captured_tool_results(
+                invocation.transcript_dir)
             settled = await _settle_inflight(
                 runner._state, INFLIGHT_RESULT_BOUND_S)
             for s in settled:
@@ -2149,7 +2167,8 @@ class ClaudeSession(ObserveSession):
             # The marker is still in the trailing user run here; _enter's repair
             # can no longer reach it once the re-query appends an assistant turn.
             repair_interrupt_marker_on_resume(
-                self.messages, self.transcript, captured=captured)
+                self.messages, self.transcript, captured=captured,
+                captured_failures=captured_failures)
             increment = correction_increment(settled)
             if increment:
                 deliver_engine_continuation(

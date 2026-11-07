@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,8 +17,10 @@ from imp.agents.transcript import (
     ContinuationNote,
     SkillReply,
     Transcript,
+    _synthetic_tool_result_content,
     answer_complete_step_on_resume,
     balance_success_on_resume,
+    captured_result_key,
     complete_step_tail,
     deliver_continuation_reply,
     deliver_engine_continuation,
@@ -1019,7 +1022,7 @@ def test_interrupt_marker_repair_drops_marker_and_reframes_rejection(
         marker=marker,
     )
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert len(msgs) == 3
     assert not any(
@@ -1044,11 +1047,11 @@ def test_interrupt_marker_repair_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "transcript.jsonl"
     msgs, t = _interrupt_tail(
         tmp_path, ToolUseBlock(id="tu1", name="mcp__imp__sub_agent", input={"x": 1}))
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
     after_first = list(msgs)
     bytes_first = path.read_bytes()
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs == after_first
     assert path.read_bytes() == bytes_first
@@ -1061,7 +1064,7 @@ def test_interrupt_marker_repair_uses_bash_body_for_bash(tmp_path: Path) -> None
     msgs, t = _interrupt_tail(
         tmp_path, ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "make test"}))
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
     assert results[0].content == _SYNTHETIC_BASH
@@ -1077,7 +1080,7 @@ def test_interrupt_marker_repair_leaves_success_results_untouched(tmp_path: Path
     bad = ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True)
     msgs, t = _interrupt_tail(tmp_path, ok, killed, results=(good, bad))
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["r1"] == good
@@ -1101,7 +1104,7 @@ def test_interrupt_marker_repair_ignores_ordinary_text_tail(tmp_path: Path) -> N
     before = list(msgs)
     bytes_before = path.read_bytes()
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs == before
     assert path.read_bytes() == bytes_before
@@ -1123,7 +1126,7 @@ def test_interrupt_marker_dropped_over_an_unanswered_tool_use(tmp_path: Path) ->
         t.append(m)
     beneath = msgs[:2]
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs == beneath
     assert Transcript(path).load() == beneath
@@ -1143,7 +1146,7 @@ def test_interrupt_marker_left_alone_after_plain_assistant_text(tmp_path: Path) 
     before = list(msgs)
     bytes_before = path.read_bytes()
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs == before
     assert path.read_bytes() == bytes_before
@@ -1165,7 +1168,7 @@ def test_interrupt_marker_repair_prefers_captured_result(tmp_path: Path) -> None
             ("wrote 42 bytes to a.py", False),
     }
 
-    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured, captured_failures={})
 
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["w1"].content == "wrote 42 bytes to a.py"
@@ -1175,6 +1178,73 @@ def test_interrupt_marker_repair_prefers_captured_result(tmp_path: Path) -> None
     # Survives the rewrite — this is what gets replayed to the model on resume.
     reloaded = Transcript(tmp_path / "transcript.jsonl").load()
     assert reloaded == msgs
+
+
+_GONE = "FileNotFoundError: [Errno 2] No such file or directory: 'gone.txt'"
+_GONE_READ = ToolUseBlock(id="r1", name="mcp__imp__read_file", input={"path": "gone.txt"})
+
+
+def _gone_failures() -> dict[str, str]:
+    return {captured_result_key("read_file", {"path": "gone.txt"}): _GONE}
+
+
+def test_interrupt_marker_repair_keeps_a_captured_genuine_failure(tmp_path: Path) -> None:
+    killed = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "x"})
+    genuine = ToolResultBlock(tool_use_id="r1", content=_GONE, is_error=True)
+    filler = ToolResultBlock(tool_use_id="b1", content=_REJECTION_BODY, is_error=True)
+    msgs, t = _interrupt_tail(tmp_path, _GONE_READ, killed, results=(genuine, filler))
+
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures=_gone_failures())
+
+    results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
+    assert results[0] == genuine
+    assert results[1].content == _SYNTHETIC_BASH and results[1].is_error is True
+    notes = [b for b in msgs[-1].content
+             if isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE]
+    assert len(notes) == 1
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+@pytest.mark.parametrize("content", [_GONE, [{"type": "text", "text": _GONE}]])
+def test_interrupt_marker_repair_leaves_a_lone_genuine_failure_untouched(
+        tmp_path: Path, content: Any) -> None:
+    genuine = ToolResultBlock(tool_use_id="r1", content=content, is_error=True)
+    msgs, t = _interrupt_tail(tmp_path, _GONE_READ, results=(genuine,))
+
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures=_gone_failures())
+
+    assert len(msgs) == 3  # only the marker turn is dropped
+    assert msgs[-1] == Message(role="user", content=(genuine,))
+
+
+def test_interrupt_marker_repair_keeps_a_captured_sub_agent_failure(tmp_path: Path) -> None:
+    args = {"subagent_name": "nope", "task_description": "do it"}
+    sub = ToolUseBlock(id="s1", name="mcp__imp__sub_agent", input=args)
+    text = "ValueError: undeclared subagent 'nope'"
+    genuine = ToolResultBlock(tool_use_id="s1", content=text, is_error=True)
+    msgs, t = _interrupt_tail(tmp_path, sub, results=(genuine,))
+
+    repair_interrupt_marker_on_resume(
+        msgs, t, captured_failures={captured_result_key("sub_agent", args): text})
+
+    assert msgs[-1] == Message(role="user", content=(genuine,))
+
+
+def test_interrupt_marker_repair_never_replays_a_captured_failure(tmp_path: Path) -> None:
+    wait = ToolUseBlock(id="w1", name="mcp__impty__wait", input={})
+    msgs, t = _interrupt_tail(tmp_path, wait)
+
+    repair_interrupt_marker_on_resume(
+        msgs, t, captured={},
+        captured_failures={captured_result_key("mcp__impty__wait", {}):
+                           "RuntimeError: no session"})
+
+    (rb,) = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
+    assert rb.content == _synthetic_tool_result_content("mcp__impty__wait")
+    assert rb.is_error is True
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msgs[-1].content)
+    assert "no session" not in (tmp_path / "transcript.jsonl").read_text()
 
 
 def test_interrupt_marker_repair_drops_the_note_when_every_result_is_recovered(
@@ -1199,7 +1269,7 @@ def test_interrupt_marker_repair_drops_the_note_when_every_result_is_recovered(
             ("wrote b.py", False),
     }
 
-    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured, captured_failures={})
 
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["w1"].content == "wrote a.py" and by_id["w1"].is_error is False
@@ -1226,7 +1296,7 @@ def test_interrupt_marker_repair_keeps_the_note_when_a_result_is_unrecovered(
             ("wrote 42 bytes to a.py", False),
     }
 
-    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured, captured_failures={})
 
     assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
 
@@ -1247,7 +1317,7 @@ def test_interrupt_marker_repair_keeps_the_note_when_a_recovered_result_failed(
             ("PermissionError: denied", True),
     }
 
-    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured, captured_failures={})
 
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
     assert by_id["w1"].is_error is True
@@ -1291,7 +1361,7 @@ def test_interrupt_marker_repair_restates_every_per_block_rejection(
     t = _write(tmp_path, msgs)
     captured = {captured_result_key("sub_agent", dict(sub.input)): ("coder done", False)}
 
-    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured, captured_failures={})
 
     assert msgs[3:] == [
         Message(role="user", content=(
@@ -1317,7 +1387,7 @@ def test_interrupt_marker_repair_keeps_user_text_after_the_marker(tmp_path: Path
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs[1:] == [
         Message(role="user", content=(
@@ -1338,7 +1408,7 @@ def test_interrupt_marker_repair_drops_every_marker_up_to_the_last(tmp_path: Pat
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert len(msgs) == 2
     assert msgs[1].content == (
@@ -1358,7 +1428,7 @@ def test_interrupt_marker_repair_adds_no_note_over_a_success(tmp_path: Path) -> 
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs[1:] == [Message(role="user", content=(ok,))]
     assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
@@ -1377,7 +1447,7 @@ def test_interrupt_marker_repair_leaves_complete_step_results(tmp_path: Path) ->
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs[1:] == [Message(role="user", content=(rejected,))]
 
@@ -1399,7 +1469,7 @@ def test_interrupt_marker_repair_adds_no_second_note(tmp_path: Path) -> None:
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert _note_count(msgs) == 1
     assert msgs[2:] == [first, Message(role="user", content=(
@@ -1416,7 +1486,7 @@ def test_interrupt_marker_repair_keeps_an_orphan_error_result(tmp_path: Path) ->
     ]
     t = _write(tmp_path, msgs)
 
-    repair_interrupt_marker_on_resume(msgs, t)
+    repair_interrupt_marker_on_resume(msgs, t, captured_failures={})
 
     assert msgs[1:] == [Message(role="user", content=(orphan,))]
     assert _note_count(msgs) == 0
@@ -1680,7 +1750,7 @@ def test_complete_step_tail_is_none_for_a_rejected_call_after_marker_repair(
     for m in messages:
         t.append(m)
 
-    repair_interrupt_marker_on_resume(messages, t)
+    repair_interrupt_marker_on_resume(messages, t, captured_failures={})
 
     assert complete_step_tail(messages) is None
     assert _batch_turn("user", _BATCH_REJECTION) in messages

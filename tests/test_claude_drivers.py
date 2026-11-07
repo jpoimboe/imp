@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+from imp.agents.transcript import captured_result_key
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude import (
+    CAPTURED_TOOL_RESULTS_FILENAME,
     ClaudeAgentRunner,
     _make_impty_sdk_tools,
+    _tool_response,
+    _wrap_impty_one,
 )
 from impty.driver import ImptyDriver
-from impty.mcp import THIN_DESCRIPTIONS
+from impty.mcp import THIN_DESCRIPTIONS, ImptyToolSpec
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
 
@@ -67,9 +72,10 @@ def test_no_driver_no_impty_grant(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_impty_sdk_tools_carry_driver_names_and_descriptions() -> None:
+async def test_impty_sdk_tools_carry_driver_names_and_descriptions(
+        tmp_path: Path) -> None:
     driver = ImptyDriver()
-    sdk_tools = await _make_impty_sdk_tools(driver)
+    sdk_tools = await _make_impty_sdk_tools(driver, tmp_path)
     by_name = {t.name: t for t in sdk_tools}
     assert set(by_name) == {
         "start", "view", "send", "send_signal", "resize",
@@ -79,6 +85,33 @@ async def test_impty_sdk_tools_carry_driver_names_and_descriptions() -> None:
         # Provider surface carries the thin one-liner, not the full docstring.
         assert sdk.description == THIN_DESCRIPTIONS[name]
         assert sdk.description != method_docs[name]
+
+
+@pytest.mark.anyio
+async def test_impty_tool_failure_captures_to_sidecar(tmp_path: Path) -> None:
+    def _wait(timeout: float = 0) -> str:
+        raise RuntimeError("no live session")
+
+    spec = ImptyToolSpec(
+        name="wait", description="",
+        input_schema={"type": "object", "properties": {"timeout": {"type": "number"}}},
+        method=_wait)
+
+    def _passthrough(name, description, schema, annotations=None):  # type: ignore[no-untyped-def]
+        return lambda fn: fn
+
+    wrapped = _wrap_impty_one(spec, _passthrough, tmp_path)
+
+    out = await wrapped({"timeout": 1, "__tool_use_id__": ""})
+
+    assert out == _tool_response("no live session", is_error=True)
+    lines = (tmp_path / CAPTURED_TOOL_RESULTS_FILENAME).read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert captured_result_key(entry["name"], entry["input"]) == captured_result_key(
+        "mcp__impty__wait", {"timeout": 1})
+    assert entry["content"] == "no live session"
+    assert entry["is_error"] is True
 
 
 @pytest.mark.anyio
@@ -127,3 +160,45 @@ async def test_run_closes_the_impty_session_in_teardown(
     assert closed == [True, True]
     # The journal lands in THIS step's transcript dir, beside its stderr.log.
     assert journal_dirs == [tmp_path / "step"]
+
+
+@pytest.mark.anyio
+async def test_run_passes_the_transcript_dir_to_the_impty_sdk_tools(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    (tmp_path / "step").mkdir(parents=True, exist_ok=True)
+    transcript_dirs: list[Path] = []
+
+    class _SpyDriver:
+        def __init__(self, sandbox: Any = None, journal_dir: Any = None,
+                     snapshot_dir: Any = None, cwd_resolver: Any = None) -> None:
+            pass
+
+        def tool_methods(self) -> list[Any]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("impty.driver.ImptyDriver", _SpyDriver)
+    from imp.providers import claude as claude_mod
+    original = claude_mod._make_impty_sdk_tools
+
+    async def _spy(driver: Any, transcript_dir: Path) -> list[Any]:
+        transcript_dirs.append(transcript_dir)
+        return await original(driver, transcript_dir)
+
+    monkeypatch.setattr(claude_mod, "_make_impty_sdk_tools", _spy)
+
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda opts: FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    async for _ in runner.run(_inv(tmp_path, frozenset({"impty"}))):
+        pass
+    assert transcript_dirs == [tmp_path / "step"]

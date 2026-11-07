@@ -358,7 +358,7 @@ async def test_claude_load_skill_via_wrap_one(tmp_path: Path) -> None:
     assert out["content"][0]["text"] == SKILL_BODY, (
         f"wrapped response mismatch: {out['content'][0]['text']!r}"
     )
-    assert "isError" not in out
+    assert "is_error" not in out
 
     # Assertion B (== parity assertion 2 for claude): exactly ONE
     # skill_load event with correct payload and agent_id=None.

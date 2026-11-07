@@ -31,6 +31,7 @@ from imp.providers.claude import (
     _make_sdk_tools,
     _RunState,
     _settle_inflight,
+    _tool_response,
     _wrap_one,
 )
 
@@ -83,7 +84,7 @@ async def test_wrap_complete_step_captures_args(tmp_path: Path) -> None:
     assert state.complete_step_called is True
     assert state.complete_step_args == {"status": "Success"}
     assert out["content"][0]["text"] == "step complete"
-    assert "isError" not in out  # success path
+    assert "is_error" not in out  # success path
 
 
 @pytest.mark.anyio
@@ -114,12 +115,19 @@ async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) 
         "status": "Success", "spec_path": "docs/my-spec.md"}
 
 
-@pytest.mark.anyio
-async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: Path) -> None:
-    """Real SDK decorator + MCP server: its input validation must accept a nested dict."""
+async def _call_real_server(sdk_tools: list[Any], name: str, args: dict[str, Any]) -> Any:
     from claude_agent_sdk import create_sdk_mcp_server
     from mcp.types import CallToolRequest, CallToolRequestParams
 
+    server = create_sdk_mcp_server(name="imp", tools=sdk_tools)["instance"]
+    res = await server.request_handlers[CallToolRequest](CallToolRequest(
+        method="tools/call", params=CallToolRequestParams(name=name, arguments=args)))
+    return res.root
+
+
+@pytest.mark.anyio
+async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: Path) -> None:
+    """Real SDK decorator + MCP server: its input validation must accept a nested dict."""
     state = _RunState()
     schema = OutputSchema(
         fields=(
@@ -131,18 +139,54 @@ async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: 
     )
     sdk_tools = _make_sdk_tools(
         {"complete_step": make_complete_step_tool(schema)}, _ctx(tmp_path), state)
-    server = create_sdk_mcp_server(name="imp", tools=sdk_tools)["instance"]
     args = {"status": "Success", "data": {"k": 1, "nested": {"x": [1]}}}
 
     state.complete_verdicts.put_nowait(True)
-    res = await server.request_handlers[CallToolRequest](CallToolRequest(
-        method="tools/call",
-        params=CallToolRequestParams(name="complete_step", arguments=args),
-    ))
+    result = await _call_real_server(sdk_tools, "complete_step", args)
 
-    result = res.root
     assert result.isError is False, result.content
     assert state.complete_step_args == args
+
+
+@pytest.mark.anyio
+async def test_failing_tool_is_flagged_on_the_real_sdk_wire(tmp_path: Path) -> None:
+    from imp.agents.tools import get_registry
+
+    sdk_tools = _make_sdk_tools(
+        {"read_file": get_registry()["read_file"]}, _ctx(tmp_path), _RunState())
+    result = await _call_real_server(sdk_tools, "read_file", {"path": "nonexistent.txt"})
+    assert result.isError is True
+    assert "FileNotFoundError" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_succeeding_tool_is_unflagged_on_the_real_sdk_wire(tmp_path: Path) -> None:
+    from imp.agents.tools import get_registry
+
+    (tmp_path / "x.txt").write_text("hello")
+    sdk_tools = _make_sdk_tools(
+        {"read_file": get_registry()["read_file"]}, _ctx(tmp_path), _RunState())
+    result = await _call_real_server(sdk_tools, "read_file", {"path": "x.txt"})
+    assert result.isError is False
+    assert "hello" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_batched_complete_step_rejection_is_flagged_on_the_real_sdk_wire(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bg as bg_mod
+
+    async def noop(ctx):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", noop)
+    state = _RunState()
+    state.complete_verdicts.put_nowait(False)
+    sdk_tools = _make_sdk_tools(
+        {"complete_step": make_complete_step_tool(_status_schema())}, _ctx(tmp_path), state)
+    result = await _call_real_server(sdk_tools, "complete_step", {"status": "Success"})
+    assert result.isError is True
+    assert result.content[0].text == COMPLETE_STEP_BATCHED
 
 
 def _status_schema() -> OutputSchema:
@@ -174,7 +218,7 @@ async def test_wrap_complete_step_rejected_verdict_captures_nothing(
     out = await wrapped({"status": "Success"})
 
     assert out["content"][0]["text"] == COMPLETE_STEP_BATCHED
-    assert out["isError"] is True
+    assert out["is_error"] is True
     assert state.complete_step_called is False
     assert state.complete_step_args == {}
     assert swept["n"] == 1
@@ -217,7 +261,7 @@ async def test_wrap_complete_step_raising_sweep_does_not_strand_the_verdict(
 
     out = await wrapped({"status": "Success"})
 
-    assert out["isError"] is True
+    assert out["is_error"] is True
     assert "sweep failed" in out["content"][0]["text"]
     assert state.complete_verdicts.empty()
 
@@ -249,25 +293,116 @@ async def test_wrap_tool_raises_surfaces_as_is_error(tmp_path: Path) -> None:
         "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
     )
     out = await wrapped({"path": "nonexistent.txt"})
-    assert out.get("isError") is True
+    assert out.get("is_error") is True
     assert "FileNotFoundError" in out["content"][0]["text"]
     assert state.runtime_errors  # error was recorded
 
 
 @pytest.mark.anyio
-async def test_wrap_tool_raises_writes_no_sidecar_entry(tmp_path: Path) -> None:
-    """A tool that raises must write NO sidecar entry even with parent_transcript_dir set."""
+async def test_wrap_tool_raises_captures_the_failure_to_sidecar(tmp_path: Path) -> None:
     from imp.agents.tools import get_registry
+    from imp.providers.claude import _load_captured_tool_results
 
     state = _RunState()
     ctx = _ctx(tmp_path)
     ctx.parent_transcript_dir = tmp_path
-    read = get_registry()["read_file"]
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator)
 
-    wrapped = _wrap_one("read_file", read, ctx, state, _passthrough_decorator)
-    out = await wrapped({"path": "nonexistent.txt"})
+    out = await wrapped({"path": "nonexistent.txt", "__tool_use_id__": ""})
 
-    assert out.get("isError") is True
+    lines = (tmp_path / "captured_tool_results.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["name"] == "read_file"
+    assert entry["input"] == {"path": "nonexistent.txt"}
+    assert entry["is_error"] is True
+    assert "FileNotFoundError" in entry["content"]
+    assert out == _tool_response(entry["content"], is_error=True)
+    key = captured_result_key("read_file", {"path": "nonexistent.txt"})
+    captured, failures = _load_captured_tool_results(tmp_path)
+    assert failures[key] == entry["content"]
+    assert key not in captured
+
+
+@pytest.mark.anyio
+async def test_wrap_fatal_tool_error_captures_the_failure_to_sidecar(tmp_path: Path) -> None:
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        raise FatalToolError("gate refused")
+
+    boom = Tool(name="boom", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    wrapped = _wrap_one("boom", boom, ctx, _RunState(), _passthrough_decorator)
+
+    out = await wrapped({})
+
+    lines = (tmp_path / "captured_tool_results.jsonl").read_text().splitlines()
+    assert [json.loads(x) for x in lines] == [
+        {"name": "boom", "input": {}, "content": "gate refused", "is_error": True}]
+    assert out == _tool_response("gate refused", is_error=True)
+
+
+@pytest.mark.anyio
+async def test_wrap_reraised_suspension_is_never_captured(tmp_path: Path) -> None:
+    from imp.agents.subagents import SubagentSuspended
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        raise SubagentSuspended("child paused")
+
+    boom = Tool(name="boom", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    wrapped = _wrap_one("boom", boom, ctx, _RunState(), _passthrough_decorator)
+
+    with pytest.raises(SubagentSuspended):
+        await wrapped({})
+
+    assert not (tmp_path / "captured_tool_results.jsonl").exists()
+
+
+@pytest.mark.anyio
+async def test_wrap_sub_agent_failure_captures_to_sidecar(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    wrapped = _wrap_one(
+        "sub_agent", make_task_tool(), ctx, _RunState(), _passthrough_decorator)
+
+    out = await wrapped({"subagent_name": "nope", "task_description": "do it",
+                         "__tool_use_id__": ""})
+
+    lines = (tmp_path / "captured_tool_results.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert captured_result_key(entry["name"], entry["input"]) == captured_result_key(
+        "sub_agent", {"subagent_name": "nope", "task_description": "do it"})
+    assert entry["is_error"] is True
+    assert entry["content"].startswith("ValueError: ")
+    assert out == _tool_response(entry["content"], is_error=True)
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_failure_is_never_captured(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bg as bg_mod
+
+    async def boom(ctx):  # type: ignore[no-untyped-def]
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", boom)
+    state = _RunState()
+    state.complete_verdicts.put_nowait(True)
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(_status_schema()), ctx, state,
+        _passthrough_decorator)
+
+    out = await wrapped({"status": "Success"})
+
+    assert out == _tool_response("RuntimeError: sweep failed", is_error=True)
     assert not (tmp_path / "captured_tool_results.jsonl").exists()
 
 
@@ -606,7 +741,7 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
-    assert out.get("isError") is True
+    assert out.get("is_error") is True
 
     results = [e for e in elog.read() if e["type"] == "tool_result"]
     assert len(results) == 1
@@ -679,7 +814,7 @@ async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
     finally:
         cc_mod.dispatch_task = monkey  # type: ignore[assignment]
     assert "abort_dispatch" not in seen["kwargs"]        # refusal apparatus gone
-    assert out.get("isError") is not True                # dispatched, not refused
+    assert out.get("is_error") is not True                # dispatched, not refused
     assert not hasattr(state, "inflight_task_dispatches")  # counter field removed
     results = [e for e in elog.read() if e["type"] == "tool_result"]
     assert results[-1]["payload"]["error"] is False      # success close is canonical
@@ -825,7 +960,7 @@ async def test_wrap_plain_tool_capture_failure_preserves_success(tmp_path: Path)
 
     out = await wrapped({"path": "x.txt"})
 
-    assert out.get("isError") is not True            # success preserved
+    assert out.get("is_error") is not True            # success preserved
     assert "hello" in out["content"][0]["text"]
     assert state.runtime_errors == []                # no error recorded
 
@@ -853,7 +988,7 @@ async def test_wrap_list_content_returns_mcp_image_content(tmp_path: Path) -> No
     assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
     assert out["content"][1] == {
         "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
-    assert "isError" not in out
+    assert "is_error" not in out
 
 
 def _plain_list_tool() -> Tool:
@@ -889,7 +1024,7 @@ async def test_wrap_list_content_captures_caption_to_parent_transcript(tmp_path:
     assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
     assert out["content"][1] == {
         "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
-    assert "isError" not in out
+    assert "is_error" not in out
 
     sidecar = tmp_path / "captured_tool_results.jsonl"
     lines = sidecar.read_text().splitlines()
@@ -1025,7 +1160,7 @@ async def test_wrap_resolves_the_in_flight_entry_on_fatal_tool_error(
 
     out = await wrapped({})
 
-    assert out["isError"] is True
+    assert out["is_error"] is True
     assert seen["entry"].future.result() == ("gate refused", True)
     assert state.inflight == {}
 

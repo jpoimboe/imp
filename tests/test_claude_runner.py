@@ -482,6 +482,73 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("flag", [True, False])
+async def test_echoed_tool_error_flag_reaches_the_loop_guard(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: bool) -> None:
+    from imp.agents.loop_guard import LoopGuard
+
+    observed: list[Any] = []
+    real_observe = LoopGuard.observe
+
+    def spy(self: LoopGuard, record: Any) -> Any:
+        observed.append(record)
+        return real_observe(self, record)
+
+    monkeypatch.setattr(LoopGuard, "observe", spy)
+    scripted = [
+        assistant(tool_use("r1", "read_file", {"path": "gone.txt"})),
+        user(tool_result("r1", "FileNotFoundError: gone.txt", is_error=flag)),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted))
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "read_file"}))
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_result"
+    rec = next(r for r in observed if any(t.name == "read_file" for t in r.tools))
+    (read,) = [t for t in rec.tools if t.name == "read_file"]
+    assert read.is_error is flag
+    assert LoopGuard()._is_progress(rec) is (not flag)
+
+
+def _failing_read_turns(n: int, *, is_error: bool) -> list[Any]:
+    out: list[Any] = []
+    for i in range(n):
+        out += [assistant(tool_use(f"r{i}", "read_file", {"path": "gone.txt"})),
+                user(tool_result(f"r{i}", "FileNotFoundError: gone.txt", is_error=is_error)),
+                result()]
+    return out
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("flag", [True, False])
+async def test_identical_failing_reads_trip_repeated_failure_only_when_flagged(
+        tmp_path: Path, flag: bool) -> None:
+    from imp.agents.loop_guard import DEFAULT_REPEAT_K
+
+    # Exactly K turns: an unflagged first read of a new target counts as progress,
+    # so unflagged repeats would only trip at K+1.
+    scripted = [*_failing_read_turns(DEFAULT_REPEAT_K, is_error=flag),
+                assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result()]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted))
+    inv = replace(_inv(tmp_path, tools=frozenset({"complete_step", "read_file"})),
+                  continuation_fn=lambda _text: ("keep going", False))
+    events = [ev async for ev in runner.run(inv) if ev["type"] != "tool_heartbeat"]
+    if flag:
+        assert events[-1]["type"] == "error"
+        assert (events[-1]["payload"]["category"],
+                events[-1]["payload"]["kind"]) == ("loop", "repeated_failure")
+    else:
+        assert events[-1]["type"] == "agent_result"
+
+
+@pytest.mark.anyio
 async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
@@ -4510,17 +4577,91 @@ def test_load_captured_tool_results_reads_sidecar(tmp_path: Path) -> None:
         + json.dumps({"name": "edit_file", "input": {"path": "b"},
                       "content": "edited b", "is_error": False}) + "\n")
 
-    got = _load_captured_tool_results(tmp_path)
+    got, failures = _load_captured_tool_results(tmp_path)
     # Keyed by captured_result_key; the prefix-stripped transcript name resolves the
     # same entry, proving capture(bare) <-> resume(mcp__imp__-prefixed) reconciliation.
     assert got[captured_result_key("write_file", {"path": "a"})] == ("wrote a", False)
     assert got[captured_result_key("mcp__imp__edit_file", {"path": "b"})] == ("edited b", False)
+    assert failures == {}
 
 
 def test_load_captured_tool_results_missing_file_is_empty(tmp_path: Path) -> None:
     from imp.providers.claude import _load_captured_tool_results
 
-    assert _load_captured_tool_results(tmp_path) == {}
+    assert _load_captured_tool_results(tmp_path) == ({}, {})
+
+
+def test_load_captured_tool_results_later_failure_masks_earlier_success(
+        tmp_path: Path) -> None:
+    from imp.agents.transcript import captured_result_key
+    from imp.providers.claude import (
+        CAPTURED_TOOL_RESULTS_FILENAME,
+        _load_captured_tool_results,
+    )
+
+    rec = {"name": "read_file", "input": {"path": "gone.txt"}}
+    (tmp_path / CAPTURED_TOOL_RESULTS_FILENAME).write_text(
+        json.dumps({**rec, "content": "STALE BODY", "is_error": False}) + "\n"
+        + json.dumps({**rec, "content": "FileNotFoundError: gone.txt",
+                      "is_error": True}) + "\n")
+
+    captured, failures = _load_captured_tool_results(tmp_path)
+
+    key = captured_result_key("read_file", {"path": "gone.txt"})
+    assert failures == {key: "FileNotFoundError: gone.txt"}
+    assert captured == {}
+
+
+def test_load_captured_tool_results_later_success_supersedes_earlier_failure(
+        tmp_path: Path) -> None:
+    from imp.agents.transcript import captured_result_key
+    from imp.providers.claude import (
+        CAPTURED_TOOL_RESULTS_FILENAME,
+        _load_captured_tool_results,
+    )
+
+    rec = {"name": "read_file", "input": {"path": "late.txt"}}
+    (tmp_path / CAPTURED_TOOL_RESULTS_FILENAME).write_text(
+        json.dumps({**rec, "content": "FileNotFoundError: late.txt",
+                    "is_error": True}) + "\n"
+        + json.dumps({**rec, "content": "FRESH BODY", "is_error": False}) + "\n")
+
+    captured, failures = _load_captured_tool_results(tmp_path)
+
+    key = captured_result_key("read_file", {"path": "late.txt"})
+    assert captured == {key: ("FRESH BODY", False)}
+    assert failures == {}
+
+
+def test_dangling_repair_never_replays_a_captured_failure(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock, ToolUseBlock
+    from imp.agents.transcript import (
+        Transcript,
+        _synthetic_tool_result_content,
+        repair_dangling_tool_use_on_resume,
+    )
+    from imp.providers.claude import (
+        CAPTURED_TOOL_RESULTS_FILENAME,
+        _load_captured_tool_results,
+    )
+
+    (tmp_path / CAPTURED_TOOL_RESULTS_FILENAME).write_text(json.dumps(
+        {"name": "mcp__impty__wait", "input": {},
+         "content": "RuntimeError: no session", "is_error": True}) + "\n")
+    captured, _ = _load_captured_tool_results(tmp_path)
+    wait = ToolUseBlock(id="w1", name="mcp__impty__wait", input={})
+    msgs = [Message(role="user", content=(TextBlock(text="go"),)),
+            Message(role="assistant", content=(wait,))]
+    t = Transcript(tmp_path / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+
+    synth = repair_dangling_tool_use_on_resume(msgs, t, captured=captured)
+
+    assert synth is not None
+    (rb,) = synth
+    assert rb.content == _synthetic_tool_result_content("mcp__impty__wait")
+    assert rb.is_error is True
 
 
 @pytest.mark.anyio

@@ -241,6 +241,28 @@ async def test_claude_saves_after_the_logged_result(
 
 
 @pytest.mark.anyio
+async def test_claude_flagged_save_result_does_not_checkpoint(tmp_path: Path) -> None:
+    hook = _SaveHook()
+    scripted = [
+        cc.assistant(cc.tool_use("s1", "save_and_exit", {})),
+        cc.user(cc.tool_result("s1", "RuntimeError: boom", is_error=True)),
+        cc.assistant(cc.tool_use("c1", "complete_step", {"status": "Success"})),
+        cc.result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: cc.FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    inv = replace(_claude_inv(tmp_path, tools=frozenset({"save_and_exit", "complete_step"})),
+                  coordinator=_coordinator(hook))
+    # hook.scope: a regressed is_error guard fails fast instead of parking until the backstop.
+    with anyio.fail_after(HANG_BACKSTOP), hook.scope:
+        events = [ev async for ev in runner.run(inv)]
+    assert hook.calls == []
+    assert events[-1]["type"] == "agent_result"
+
+
+@pytest.mark.anyio
 async def test_codex_saves_after_the_logged_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

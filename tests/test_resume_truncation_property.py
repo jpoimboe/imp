@@ -196,7 +196,8 @@ def test_interrupt_repairs_hold_at_every_truncation(tmp_path: Path, mode: str) -
         for name, inp, real in _variants(pre):
             captured = _captured(outstanding, real, mode)
             out = list(inp)
-            repair_interrupt_marker_on_resume(out, transcript, captured=captured)
+            repair_interrupt_marker_on_resume(
+                out, transcript, captured=captured, captured_failures={})
             answer_unanswered_tool_uses_on_resume(
                 out, transcript, InMemoryEventLog(), "step:p/s", captured=captured)
             if fails := _check(inp, out, captured):
@@ -229,7 +230,7 @@ def _cs_cases() -> list[tuple[str, ToolUseBlock, list[Message]]]:
 
 def _resume_cs(msgs: list[Message], transcript: Transcript, elog: InMemoryEventLog,
                feedback: str | None) -> ToolUseBlock | None:
-    repair_interrupt_marker_on_resume(msgs, transcript)
+    repair_interrupt_marker_on_resume(msgs, transcript, captured_failures={})
     cs = complete_step_tail(msgs)
     if cs is not None:
         answer_complete_step_on_resume(msgs, transcript, elog, "step:p/s", cs, feedback)
