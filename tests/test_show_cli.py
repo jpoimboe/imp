@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -945,3 +947,63 @@ def test_show_absent_spec_message_is_unchanged(
     err = capsys.readouterr().err
     assert rc == 2, err
     assert err.rstrip("\n") == f"imp: no spec for '{_ID}'"
+
+
+@pytest.fixture
+def chicago_tz():
+    prev = os.environ.get("TZ")
+    os.environ["TZ"] = "America/Chicago"   # September → CDT (UTC-5)
+    time.tzset()
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prev
+        time.tzset()
+
+
+_LOG_WITH_INNER_WHEN = (
+    "# Gate failure — fast\n\n"
+    "- command: make check\n"
+    "- exit: 2\n"
+    "- when: 2026-09-04T18:22:31Z\n\n"
+    f"{_FAILURE_LINE}\n"
+    "- when: 2026-01-01T00:00:00Z\n"
+)
+
+
+def test_show_verify_renders_header_when_in_local_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    verify = ch.quest_dir / "artifacts" / "verify"
+    verify.mkdir(parents=True)
+    (verify / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
+
+    out = _run(monkeypatch, tmp_path, "show", _ID, "verify")
+
+    assert out.splitlines() == [
+        "# Gate failure — fast",
+        "",
+        "- command: make check",
+        "- exit: 2",
+        "- when: 2026-09-04 13:22:31",
+        "",
+        _FAILURE_LINE,
+        "- when: 2026-01-01T00:00:00Z",   # gate output is never rewritten
+    ]
+
+
+def test_show_spec_does_not_rewrite_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    (ch.quest_dir / "artifacts" / "spec" / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
+
+    out = _run(monkeypatch, tmp_path, "show", _ID, "spec")
+
+    assert out == _LOG_WITH_INNER_WHEN
