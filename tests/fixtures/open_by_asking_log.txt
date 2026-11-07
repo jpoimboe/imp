@@ -463,4 +463,4 @@ final-review · sonnet
 
 final-review · complete · 32s
 
-Merged 2026-06-06-ch4buk into master.
+Merged 2026-06-06-ch4buk into master as 36faeecb.

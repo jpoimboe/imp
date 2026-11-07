@@ -1029,9 +1029,10 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(completed) == {
         "t": "CompletedNode", "quest_id": "abc123",
         "commits": [{"sha": "f" * 40, "subject": "ship it"}]}
-    merged = nv.MergedNode(quest_id="abc123", base="master")
+    merged = nv.MergedNode(quest_id="abc123", base="master", commit="e" * 40)
     assert nv.structural_repr(merged) == {
-        "t": "MergedNode", "quest_id": "abc123", "base": "master", "commits": []}
+        "t": "MergedNode", "quest_id": "abc123", "base": "master", "commit": "e" * 40,
+        "commits": []}
 
 
 def test_current_activity_collapses_multiline_bash_command() -> None:
@@ -1912,6 +1913,7 @@ def test_quest_merged_becomes_merged_node_not_fallback() -> None:
     assert len(merged) == 1
     assert merged[0].quest_id == "runx01"
     assert merged[0].base == "master"
+    assert merged[0].commit == "37dde900abc"
     # the raw event no longer leaks as a fallback line anywhere in the tree
     fbs: list[nv.FallbackLine] = []
 

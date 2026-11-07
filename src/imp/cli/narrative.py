@@ -529,6 +529,7 @@ class MergedNode:
     """Terminal quest_merged event — rendered as the friendly footer in imp log only (F5)."""
     quest_id: str
     base: str
+    commit: str
     commits: list[dict[str, str]] = field(default_factory=list)
     collapsible = False
 
@@ -1376,6 +1377,7 @@ def _h_quest_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_warnings_summary()
     self._root.children.append(MergedNode(quest_id=descriptor,
                                           base=str(p.get("base", "")),
+                                          commit=p["commit"],
                                           commits=p.get("commits", [])))
 
 
@@ -2886,7 +2888,7 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
     if isinstance(node, MergedNode):
         return {"t": t, "quest_id": node.quest_id, "base": node.base,
-                "commits": node.commits}
+                "commit": node.commit, "commits": node.commits}
     if isinstance(node, CompletedNode):
         return {"t": t, "quest_id": node.quest_id, "commits": node.commits}
     return {"t": t}

@@ -19,7 +19,7 @@ EVENTS: list[dict[str, Any]] = [
      "payload": {"source": "claude_login_expiry", "message": MESSAGE,
                  "detail": {}}},
     {"id": "m", "agent_id": None, "type": "quest_merged",
-     "payload": {"base": "master"}},
+     "payload": {"base": "master", "commit": "f" * 40}},
 ]
 
 

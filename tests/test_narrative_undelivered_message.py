@@ -48,7 +48,7 @@ def _firing_stop(prefix: str) -> list[dict[str, Any]]:
 
 
 FIRING = [STEP, *_firing_stop("a")]
-MERGED = _ev("m", "quest_merged", agent_id=None, base="master")
+MERGED = _ev("m", "quest_merged", agent_id=None, base="master", commit="f" * 40)
 
 
 def _log(events: list[dict[str, Any]], *, full: bool = False,

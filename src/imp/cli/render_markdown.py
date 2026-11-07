@@ -363,7 +363,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         return
     if isinstance(node, nv.MergedNode):
         yield _commit_block(
-            f"**✓ Merged {esc(node.quest_id)} into {esc(node.base)}.**",
+            f"**✓ Merged {esc(node.quest_id)} into {esc(node.base)} as `{node.commit[:8]}`.**",
             node.commits, esc)
         return
     if isinstance(node, nv.TiersResolvedNode):

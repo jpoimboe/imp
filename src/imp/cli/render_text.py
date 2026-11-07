@@ -1325,8 +1325,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
 
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
-        yield _line(f"{mark}Merged {node.quest_id} into {node.base}.", depth, color,
-                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        yield _line(f"{mark}Merged {node.quest_id} into {node.base} as {node.commit[:8]}.",
+                    depth, color, *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         yield from _commit_lines(node.commits, depth, color, gutters=gutters)
         return
 

@@ -2374,7 +2374,7 @@ def test_completed_node_suppressed_in_live_leaf() -> None:
 
 def test_merged_node_still_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
-    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master"), 0)
+    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master", commit="37dde900abc"), 0)
     assert out.getvalue() == "\n"
     assert "abc123" not in out.getvalue()
     assert "master" not in out.getvalue()
@@ -2382,7 +2382,7 @@ def test_merged_node_still_suppressed_in_live_leaf() -> None:
 
 def test_merged_node_with_commits_still_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
-    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master",
+    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master", commit="37dde900abc",
                                  commits=[{"sha": "4091ab6d" + "0" * 32,
                                            "subject": "cli: print the commit list"}]), 0)
     # main.py's completion block owns the live list; the log footer's body must not
@@ -3878,7 +3878,8 @@ def test_finish_counts_the_flushed_open_burst_as_the_tail() -> None:
 
 
 @pytest.mark.parametrize("node", [
-    nv.MergedNode(quest_id="q", base="main"), nv.CompletedNode(quest_id="q")],
+    nv.MergedNode(quest_id="q", base="main", commit="37dde900abc"),
+    nv.CompletedNode(quest_id="q")],
     ids=["merged", "completed"])
 def test_finish_counts_a_terminal_node_blank_as_the_tail(node: object) -> None:
     drv, status, out = _closing_driver()
@@ -3890,7 +3891,8 @@ def test_finish_counts_a_terminal_node_blank_as_the_tail(node: object) -> None:
 
 
 @pytest.mark.parametrize(("landing", "merge_fields", "head"), [
-    (ev("6", "quest_merged", base="main", quest_id="2026-06-12-run-x"),
+    (ev("6", "quest_merged", base="main", commit="83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f",
+        quest_id="2026-06-12-run-x"),
      ("main", "83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"),
      "2026-06-12-run-x · (unnamed) · merged into main as 83e4cf23"),
     (ev("6", "workflow_completed", quest_id="2026-06-12-run-x"), None,

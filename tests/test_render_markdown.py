@@ -394,7 +394,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
                                     "differ_from": None}]),
         nv.WarningsSummaryNode(lines=[("disk low", 2)], total=2),
         nv.CompletedNode(quest_id="gumu81"),
-        nv.MergedNode(quest_id="gumu81", base="main"),
+        nv.MergedNode(quest_id="gumu81", base="main", commit=_SHA_M),
         nv.FallbackLine(event_type="odd_event", payload={"k": "v"}),
     ]
     tree = nv.NarrativeTree(root=root)
@@ -408,12 +408,13 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     assert "**2 warnings this run**" in out            # WarningsSummaryNode
     assert "disk low" in out and "(×2)" in out
     assert "**✓ Completed gumu81.**" in out            # CompletedNode
-    assert "**✓ Merged gumu81 into main.**" in out     # MergedNode
+    assert "**✓ Merged gumu81 into main as `83e4cf23`.**" in out     # MergedNode
     assert "odd_event k=v" in out                      # FallbackLine
 
 
 _SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
 _SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+_SHA_M = "83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"
 
 
 def _footer_md(node) -> str:
@@ -424,11 +425,11 @@ def _footer_md(node) -> str:
 
 def test_merged_footer_gains_an_unquoted_commit_list() -> None:
     out = _footer_md(nv.MergedNode(
-        quest_id="gumu81", base="main",
+        quest_id="gumu81", base="main", commit=_SHA_M,
         commits=[{"sha": _SHA_A, "subject": "cli: derive the quest's commits"},
                  {"sha": _SHA_B, "subject": "cli: print the commit list"}]))
     # one block: no blank line between the bold footer and its list
-    assert ("**✓ Merged gumu81 into main.**\n"
+    assert ("**✓ Merged gumu81 into main as `83e4cf23`.**\n"
             "- `4091ab6d` cli: derive the quest's commits\n"
             "- `832c04d7` cli: print the commit list") in out
     assert "> - " not in out       # a bold footer takes a bare list, not a callout
@@ -442,7 +443,7 @@ def test_completed_footer_gains_the_same_list() -> None:
 
 def test_commit_subject_is_md_escaped_in_the_list() -> None:
     out = _footer_md(nv.MergedNode(
-        quest_id="gumu81", base="main",
+        quest_id="gumu81", base="main", commit=_SHA_M,
         commits=[{"sha": _SHA_A, "subject": "fix <script> & \x1b[2Jwipe"}]))
     assert "- `4091ab6d` fix &lt;script&gt; &amp; ^[[2Jwipe" in out
     assert "<script>" not in out
@@ -450,8 +451,8 @@ def test_commit_subject_is_md_escaped_in_the_list() -> None:
 
 
 def test_footers_with_no_commits_stay_the_bare_bold_line() -> None:
-    merged = _footer_md(nv.MergedNode(quest_id="gumu81", base="main"))
-    assert merged.strip().endswith("**✓ Merged gumu81 into main.**")
+    merged = _footer_md(nv.MergedNode(quest_id="gumu81", base="main", commit=_SHA_M))
+    assert merged.strip().endswith("**✓ Merged gumu81 into main as `83e4cf23`.**")
     assert "- `" not in merged
     completed = _footer_md(nv.CompletedNode(quest_id="gumu81", commits=[]))
     assert completed.strip().endswith("**✓ Completed gumu81.**")
@@ -1266,7 +1267,7 @@ _IMG = "<img src=x onerror=alert(1)>"
     (nv.build_tree(_agent_events("[a](b`c) <script> `d`")), None, 0),
     (_node_tree(nv.ErrorNode(
         message="```\n<script>alert(1)</script>\n<details>\n```")), None, 0),
-    (_node_tree(nv.MergedNode(quest_id="q", base="main", commits=[
+    (_node_tree(nv.MergedNode(quest_id="q", base="main", commit=_SHA_M, commits=[
         {"sha": _SHA_A, "subject": f"    {_IMG}"}])), None, 0),
     (nv.build_tree(_agent_events(
         "```\nfoo", f"```\n<details>\n<summary>{_IMG}</summary>\n```")), None, 0),
@@ -1342,7 +1343,7 @@ def test_inline_subagent_status_keeps_its_code_span_verbatim() -> None:
 def test_commit_subject_and_error_keep_code_spans_verbatim() -> None:
     md = render_markdown(_node_tree(
         nv.ErrorNode(message="`a -> b`"),
-        nv.MergedNode(quest_id="q", base="main",
+        nv.MergedNode(quest_id="q", base="main", commit=_SHA_M,
                       commits=[{"sha": _SHA_A, "subject": "`a -> b`"}])), full=False)
     assert "> **error:** `a -> b`" in md
     assert "- `4091ab6d` `a -> b`" in md
