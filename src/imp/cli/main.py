@@ -4705,8 +4705,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "Search active (in-flight + drafts), backlog, and history (completed, "
             "abandoned, archived) quests "
             "for the query as a case-insensitive substring of a quest's id, "
-            "title, or conversation content. With no zone flag, all three zones "
-            "are searched. --completed scopes to completed quests."),
+            "title, or conversation content. --active, --backlog, --completed, "
+            "--abandoned, and --archived narrow the search and combine; with none "
+            "of them, everything is searched."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",

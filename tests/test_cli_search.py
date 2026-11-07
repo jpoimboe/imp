@@ -349,7 +349,7 @@ def test_search_help_mentions_completed_and_merged_after(capsys) -> None:
     out_flat = " ".join(out.split())
     assert "Search completed quests." in out
     assert "implies --completed" in out_flat
-    assert "--completed scopes to completed quests" in out_flat
+    assert "with none of them, everything is searched" in out_flat
 
 
 def test_cmd_search_count_line_leads_plural(tmp_path: Path, capsys) -> None:
