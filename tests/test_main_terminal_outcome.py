@@ -223,25 +223,11 @@ def test_emit_paused_summary_renders_the_info_it_is_handed_not_the_event_log(
     assert "loop limit" not in out
 
 
-def test_emit_leave_pause_keystroke_prints_the_caret_shadow_above_the_head(
-    monkeypatch, capsys,
-) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_leave_pause(_Change([]), "ctrl-d")
-    out = capsys.readouterr().out
-    assert out == (
-        "> Ctrl-D\n"
-        "paused · Ctrl-D\n"
-        "2026-06-12-run-x\n"
-        "resume: imp resume 2026-06-12-run-x\n"
-        "\n")
-
-
 @pytest.mark.parametrize(
     ("trigger", "display"),
-    [("sigterm", "SIGTERM"), ("sighup", "SIGHUP"), ("sigquit", "SIGQUIT"),
-     ("pause", "/pause")])
-def test_emit_leave_pause_non_keystroke_prints_no_caret(
+    [("ctrl-d", "Ctrl-D"), ("sigterm", "SIGTERM"), ("sighup", "SIGHUP"),
+     ("sigquit", "SIGQUIT"), ("pause", "/pause")])
+def test_emit_leave_pause_prints_only_the_pause_block(
     trigger, display, monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
@@ -532,7 +518,7 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
 
 
 def test_a_non_leave_pause_prints_no_caret(monkeypatch, capsys) -> None:
-    # AC 4c: the caret shadow belongs to the keystroke-leave row alone.
+    # The summary is the whole block: nothing prints beside it.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     events = [{"type": "workflow_paused", "payload": {"reason": "interrupt"}}]
     with patch.object(main, "_emit_paused_summary") as ps:

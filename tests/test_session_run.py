@@ -1766,7 +1766,6 @@ async def test_ctrl_d_leave_still_renders_its_pause_block(
     assert rc == 130
     # The WHOLE buffer, not a prefix: AC 5 asks for byte-identical leave rendering.
     assert out == (
-        "> Ctrl-D\n"                       # the caret shadow of the keystroke
         "paused · Ctrl-D\n"
         f"{quest.id} · T\n"
         f"resume: imp resume {quest.id}\n"
@@ -1791,7 +1790,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused · SIGTERM\n"               # a signal typed nothing: no caret shadow
+        "paused · SIGTERM\n"
         f"{quest.id} · T\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
@@ -1846,7 +1845,7 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
         f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
-    assert "> Ctrl-D" not in out          # row 1 prints no caret shadow
+    assert "> Ctrl-D" not in out          # row 1 prints no caret row
     assert "paused · Ctrl-D" not in out   # …and no trigger head
 
 
@@ -2175,7 +2174,6 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "> Ctrl-D\n"
         "paused · Ctrl-D\n"
         f"{quest.id} · T\n"
         f"resume: imp resume {quest.id}\n"

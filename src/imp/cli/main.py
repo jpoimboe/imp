@@ -268,19 +268,16 @@ _ERROR_LABELS: dict[str, str] = {
     "crash": "crash",
 }
 
-# Deliberate-leave trigger -> its banner display form. Internal reason
-# strings stay lowercase; only the banner display is transformed.
-_LEAVE_DISPLAY: dict[str, str] = {
+# Pause trigger -> its banner display form. Internal reason strings stay
+# lowercase; only the banner display is transformed.
+_PAUSE_QUALIFIER: dict[str, str] = {
     "ctrl-d": "Ctrl-D",
     "sigterm": "SIGTERM",
     "sighup": "SIGHUP",
     "sigquit": "SIGQUIT",
     "pause": "/pause",
+    "max_loops": "loop limit",
 }
-# The single keystroke leave; signals and the typed /pause (already echoed) get no caret shadow.
-_LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
-# Adds the machine-triggered loop ceiling; _LEAVE_DISPLAY stays leave-only for its second consumer.
-_PAUSE_QUALIFIER: dict[str, str] = {**_LEAVE_DISPLAY, "max_loops": "loop limit"}
 
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
@@ -415,12 +412,7 @@ def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
 
 def _emit_leave_pause(quest: Quest, trigger: str, *,
                       intent: str | None = None) -> None:
-    """A deliberate leave's own block: the keystroke's caret shadow — never a signal's,
-    since nothing was typed — then the trigger-qualified pause block."""
-    if trigger in _LEAVE_KEYSTROKES:
-        color = should_use_color(sys.stdout)
-        print(pal.caret(enabled=color)
-              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
+    """A deliberate leave's own block: the trigger-qualified pause block."""
     _emit_paused_summary(quest, info=_PauseInfo(trigger, None), intent=intent)
 
 

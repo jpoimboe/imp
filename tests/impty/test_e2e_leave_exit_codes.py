@@ -71,6 +71,16 @@ def _events(quest_dir: Path) -> list[dict]:
     return [json.loads(ln) for ln in (quest_dir / "events.jsonl").read_text().splitlines()]
 
 
+def _assert_ctrl_d_block(s: TerminalSession, quest_id: str, title: str) -> None:
+    rows = s.lines()
+    screen = "\n".join(rows)
+    assert "> Ctrl-D" not in rows, screen
+    assert "paused · Ctrl-D" in rows, screen
+    at = rows.index("paused · Ctrl-D")
+    assert rows[at + 1:at + 3] == [
+        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], screen
+
+
 def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
     script = _seed_scripted_gate_project(tmp_path, turns=[
         {"text": "setting up", "tools": [
@@ -89,7 +99,7 @@ def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · Ctrl-D",))
+        _assert_ctrl_d_block(s, quest_dir.name, "ctrl d gate")
 
 
 def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> None:
@@ -112,7 +122,6 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
 
         assert rc == 130, "\n".join(s.lines())
         assert_screen(s, contains=("paused · /pause",))
-        assert not any(ln.strip() == "> Ctrl-D" for ln in s.lines())
 
     paused = [e["payload"] for e in _events(quest_dir) if e["type"] == "workflow_paused"]
     assert paused[-1]["interrupt_reason"] == "pause"
@@ -212,6 +221,32 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: s
         assert not any(e["type"] == "awaiting_user_input" and e["payload"].get("interrupt")
                        for e in _after_resume())
         assert not any("interrupted ·" in ln for ln in r.lines())
+
+
+def test_ctrl_d_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=[
+        {"text": "working", "tools": [
+            {"name": "create_and_enter_worktree", "input": {}},
+            # Attached, then busy once: the marker proves the step is mid-run.
+            {"name": "bash", "input": {
+                "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
+                           ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
+        ]},
+        {"text": "the next turn ran"},
+    ])
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new", "ctrl-d-mid-run", "--title", "ctrl d mid run"],
+        cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
+    ) as s:
+        quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
+        assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), (
+            "the step never went busy\n" + "\n".join(s.lines()))
+        assert Quest.load(tmp_path, quest_dir.name).materialized
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(s.lines())
+        _assert_ctrl_d_block(s, quest_dir.name, "ctrl d mid run")
 
 
 def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> None:
