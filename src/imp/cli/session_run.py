@@ -112,6 +112,7 @@ def _closing_block(
     witnessed, and it can only upgrade a lost connection to a completed run, never
     invent a pause."""
     from imp.cli.main import (
+        Merge,
         _emit_completed,
         _emit_daemon_died,
         _emit_leave_block,
@@ -135,11 +136,14 @@ def _closing_block(
     terminal = witness.terminal()
     if terminal is not None:
         if terminal.type == "quest_merged":
-            _emit_completed(quest, merged_base=terminal.payload["base"], intent=intent,
-                            commits=terminal.payload.get("commits", []))
+            _emit_completed(
+                quest,
+                merge=Merge(base=terminal.payload["base"], commit=terminal.payload["commit"]),
+                intent=intent,
+                commits=terminal.payload.get("commits", []))
             return ExitCode.OK
         if terminal.type == "workflow_completed":
-            _emit_completed(quest, merged_base=None, intent=intent,
+            _emit_completed(quest, merge=None, intent=intent,
                             commits=terminal.payload.get("commits", []))
             return ExitCode.OK
         _emit_merge_blocked(
@@ -167,12 +171,13 @@ def _closing_block(
     outcome = resolve_settled_outcome(quest)
     settled_intent = _resolve_intent(outcome.events)
     if outcome.completed:
-        merged = outcome.merge_commit is not None
+        merge = (Merge(base=quest.base_branch, commit=outcome.merge_commit)
+                 if outcome.merge_commit is not None else None)
         _emit_completed(
             quest,
-            merged_base=quest.base_branch if merged else None,
+            merge=merge,
             intent=settled_intent,
-            commits=_recorded_commits(outcome.events, merged=merged))
+            commits=_recorded_commits(outcome.events, merged=merge is not None))
         return ExitCode.OK
     _emit_lost_connection(quest, intent=settled_intent or intent)
     return ExitCode.LOST_CONNECTION

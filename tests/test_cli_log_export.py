@@ -257,3 +257,4 @@ def test_html_export_renders_the_commit_list_as_a_real_list(tmp_path, monkeypatc
     # a genuine <li>, i.e. the Markdown list was not swallowed into the footer's
     # paragraph on the way through markdown-it
     assert "<li><code>4091ab6d</code> cli: print the commit list</li>" in html
+    assert "into main as <code>ffffffff</code>.</strong>" in html

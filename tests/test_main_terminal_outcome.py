@@ -320,6 +320,8 @@ def test_clean_block_untitled_is_bare_gold_id() -> None:
 
 _SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
 _SHA_B = "832c04d7aabbccddeeff00112233445566778899"
+_SHA_MERGE = "83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"
+_MERGE = main.Merge(base="master", commit=_SHA_MERGE)
 
 
 def _quest(*, quest_id: str = "soro82",
@@ -365,11 +367,11 @@ def test_emit_completed_merged_renders_the_full_after_state(monkeypatch, capsys)
     # AC 1: spine, two commit lines indented exactly two spaces, one trailing blank.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(
-        _quest(), merged_base="master",
+        _quest(), merge=_MERGE,
         commits=[{"sha": _SHA_A, "subject": "first"},
                  {"sha": _SHA_B, "subject": "second"}])
     assert capsys.readouterr().out == (
-        "soro82 · Closing commit list layout · merged into master\n"
+        "soro82 · Closing commit list layout · merged into master as 83e4cf23\n"
         "  4091ab6d  first\n"
         "  832c04d7  second\n"
         "\n")
@@ -379,7 +381,7 @@ def test_emit_completed_not_merged_renders_the_same_commit_list(monkeypatch, cap
     # AC 2: the four-segment done tail, same indented list beneath it.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(
-        _quest(), merged_base=None,
+        _quest(), merge=None,
         commits=[{"sha": _SHA_A, "subject": "first"},
                  {"sha": _SHA_B, "subject": "second"}])
     assert capsys.readouterr().out == (
@@ -392,9 +394,9 @@ def test_emit_completed_not_merged_renders_the_same_commit_list(monkeypatch, cap
 def test_emit_completed_with_no_commits_is_the_bare_spine(monkeypatch, capsys) -> None:
     # AC 3a
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_quest(), merged_base="master")
+    main._emit_completed(_quest(), merge=_MERGE)
     assert capsys.readouterr().out == (
-        "soro82 · Closing commit list layout · merged into master\n"
+        "soro82 · Closing commit list layout · merged into master as 83e4cf23\n"
         "\n")
 
 
@@ -404,8 +406,8 @@ def test_emit_completed_untitled_and_intentless_shows_the_unnamed_placeholder(
     """Neither a title nor an opening intent: the middle segment is the dim
     `(unnamed)` placeholder — never a bare id with no ` · `."""
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_quest(title=""), merged_base="master")
-    assert capsys.readouterr().out == "soro82 · (unnamed) · merged into master\n\n"
+    main._emit_completed(_quest(title=""), merge=_MERGE)
+    assert capsys.readouterr().out == "soro82 · (unnamed) · merged into master as 83e4cf23\n\n"
 
 
 def test_emit_completed_merged_prints_the_gold_spine_never_green(
@@ -414,12 +416,12 @@ def test_emit_completed_merged_prints_the_gold_spine_never_green(
     # AC 4a, 4b, 4c
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_quest(), merged_base="master",
+    main._emit_completed(_quest(), merge=_MERGE,
                          commits=[{"sha": _SHA_A, "subject": "first"}])
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert lines[0] == (f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
-                        f'{pal.ansi("merged into master", "wordmark")}')
+                        f'{pal.ansi("merged into master as 83e4cf23", "wordmark")}')
     assert lines[1] == "  " + pal.ansi("4091ab6d", "gray") + "  first"  # subject unstyled
     assert lines[2] == ""
     assert pal.ansi("X", "green").split("X")[0] not in out   # no green-coded text at all
@@ -436,9 +438,10 @@ def test_emit_completed_names_the_witnessed_base_not_the_quest_attribute(
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _quest()
     assert quest.base_branch == "master"      # the attribute the emitter must NOT read
-    main._emit_completed(quest, merged_base="release/9")
+    main._emit_completed(quest, merge=main.Merge(base="release/9", commit=_SHA_MERGE))
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "soro82 · Closing commit list layout · merged into release/9"
+    assert out.split("\n")[0] == (
+        "soro82 · Closing commit list layout · merged into release/9 as 83e4cf23")
     assert "master" not in out
 
 
@@ -449,7 +452,7 @@ def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     quest = _quest()
     assert quest.materialized is False                          # the real render seam
-    main._emit_completed(quest, merged_base=None)
+    main._emit_completed(quest, merge=None)
     out = capsys.readouterr().out
     # The tail names the quest branch imp/<id>, NOT the base branch, even though the
     # client quest object is still materialized=False.
@@ -457,6 +460,7 @@ def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
         f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
         f'{pal.ansi("completed · commits on imp/soro82", "wordmark")}')
     assert "commits on master" not in out
+    assert " as " not in out
     assert pal.ansi("completed · commits on imp/soro82", "green") not in out
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
@@ -467,7 +471,7 @@ def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
 ) -> None:
     # AC 6
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_quest(), merged_base="master",
+    main._emit_completed(_quest(), merge=_MERGE,
                          commits=[{"sha": _SHA_A, "subject": "boom\x1b[2Jwipe\x07"}])
     out = capsys.readouterr().out
     assert "  4091ab6d  boom^[[2Jwipe^G\n" in out
@@ -478,10 +482,10 @@ def test_emit_completed_emits_no_escape_byte_from_a_commit_subject(
 def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
     # AC 5
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_quest(title=""), merged_base="master",
+    main._emit_completed(_quest(title=""), merge=_MERGE,
                          intent="add a dark mode toggle")
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "soro82 · add a dark mode toggle · merged into master"
+    assert out.split("\n")[0] == "soro82 · add a dark mode toggle · merged into master as 83e4cf23"
     assert "(unnamed)" not in out
     assert "\x1b[" not in out
 
@@ -548,7 +552,7 @@ def _merged_run_events(warnings: list[str]) -> list[dict]:
     events += [
         ev("4", "step_completed", step="merging", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
-        ev("5", "quest_merged", base="master"),
+        ev("5", "quest_merged", base="master", commit=_SHA_MERGE),
     ]
     return events
 
@@ -611,7 +615,7 @@ def test_exactly_one_blank_between_narrative_and_the_spine(
     monkeypatch.setenv("NO_COLOR", "1")
     raw = _end_of_run_output(warnings, tty=tty)
     rows = _screen_rows(raw, tty=tty)
-    spine = "2026-06-12-run-x · (unnamed) · merged into master"
+    spine = "2026-06-12-run-x · (unnamed) · merged into master as 83e4cf23"
     h = next(i for i, r in enumerate(rows) if r.strip() == spine)
     assert rows[h - 1].strip() == ""      # exactly one blank directly above the spine
     assert rows[h - 2].strip() != ""      # …and not two
@@ -636,7 +640,7 @@ def test_the_closing_block_prints_the_commits_recorded_on_the_merge(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "2026-06-12-run-x · (unnamed) · merged into master\n"
+        "2026-06-12-run-x · (unnamed) · merged into master as ffffffff\n"
         "  4091ab6d  first\n"
         "  832c04d7  second\n"
         "\n")
@@ -697,7 +701,7 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
 
 
 _SEED_EMITTERS = [
-    pytest.param(lambda q: main._emit_completed(q, merged_base="master"), id="completed"),
+    pytest.param(lambda q: main._emit_completed(q, merge=_MERGE), id="completed"),
     pytest.param(lambda q: main._emit_paused_summary(q, info=None), id="paused"),
     pytest.param(lambda q: main._emit_leave_pause(q, "sigterm"), id="leave-pause"),
     pytest.param(lambda q: main._emit_merge_blocked(q, "worktree_dirty"), id="merge-blocked"),
@@ -728,7 +732,8 @@ def test_a_handed_intent_wins_over_seed_opening(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     q = _quest(title="")
     q.seed_opening = "the seeded brief"
-    main._emit_completed(q, merged_base="master", intent="what the client witnessed")
+    main._emit_completed(q, merge=_MERGE, intent="what the client witnessed")
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "soro82 · what the client witnessed · merged into master"
+    assert out.split("\n")[0] == (
+        "soro82 · what the client witnessed · merged into master as 83e4cf23")
     assert "the seeded brief" not in out

@@ -8,7 +8,7 @@ def _warn(eid: str, message: str) -> dict:
 
 def _merged(eid: str = "m") -> dict:
     return {"id": eid, "agent_id": None, "type": "quest_merged",
-            "payload": {"base": "master"}}
+            "payload": {"base": "master", "commit": "f" * 40}}
 
 
 def _summary_nodes(root) -> list[nv.WarningsSummaryNode]:

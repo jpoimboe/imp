@@ -229,16 +229,23 @@ def _resume_line(token: str, suffix: str = "") -> str:
     return f"resume: imp resume {token}{suffix}"
 
 
-def _emit_completed(quest: Quest, *, merged_base: str | None,
+@dataclass(frozen=True)
+class Merge:
+    """Where a run's merge landed: the base branch and the merge commit's full sha."""
+    base: str
+    commit: str
+
+
+def _emit_completed(quest: Quest, *, merge: Merge | None,
                     intent: str | None = None,
                     commits: Sequence[dict[str, str]] = ()) -> None:
-    """The clean-finish block on the shared status spine: a gold `merged into <base>` /
-    `completed · commits on imp/<id>` tail, then the run's commits indented beneath it,
-    oldest-first when any were recorded; one trailing blank. `merged_base` is the branch
-    the merge landed on, None when the run completed without merging."""
+    """The clean-finish block on the shared status spine: a gold
+    `merged into <base> as <sha8>` / `completed · commits on imp/<id>` tail, then the
+    run's commits indented beneath it, oldest-first when any were recorded; one trailing
+    blank. `merge` is None when the run completed without merging."""
     color = should_use_color(sys.stdout)
     intent = quest_row.fallback_intent(intent, quest.seed_opening)
-    tail = (f"merged into {merged_base}" if merged_base is not None
+    tail = (f"merged into {merge.base} as {merge.commit[:8]}" if merge is not None
             else f"completed · commits on imp/{quest.id}")
     print(_status_spine(quest.id, quest.title, tail, "wordmark", color=color,
                         intent=intent))
