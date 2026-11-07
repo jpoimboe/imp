@@ -195,6 +195,38 @@ async def test_marker_interrupt_result_is_loaded_not_streamed(tmp_path: Path) ->
     assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
 
 
+_GONE = "FileNotFoundError: [Errno 2] No such file or directory: 'b.txt'"
+
+
+@pytest.mark.anyio
+async def test_marker_interrupt_keeps_a_captured_genuine_failure(tmp_path: Path) -> None:
+    r = await _resume(
+        tmp_path, [*_PRIOR, _a(_read("t1", "b.txt")),
+                   _u(_tr("t1", _GONE, is_error=True)), _u(_txt(_MARKER))],
+        captured=({"name": "read_file", "input": {"path": "b.txt"},
+                   "content": "STALE BODY OF b.txt", "is_error": False},
+                  {"name": "read_file", "input": {"path": "b.txt"},
+                   "content": _GONE, "is_error": True}))
+    body = _assert_boundary(r)
+    tr = _last_result(body, "t1")
+    assert tr.content == _GONE and tr.is_error
+    assert not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+                   for m in body for b in m.content)
+    assert "STALE BODY OF b.txt" not in r.persisted
+
+
+@pytest.mark.anyio
+async def test_marker_interrupt_restates_an_uncaptured_failure(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_read("t1", "b.txt")),
+        _u(_tr("t1", _GONE, is_error=True)), _u(_txt(_MARKER))])
+    body = _assert_boundary(r)
+    tr = _last_result(body, "t1")
+    assert tr.is_error and tr.content != _GONE
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for m in body for b in m.content)
+
+
 @pytest.mark.anyio
 async def test_dangling_placeholder_is_loaded_not_streamed(tmp_path: Path) -> None:
     r = await _resume(tmp_path, [*_PRIOR, _a(_read("t1", "b.txt"))])

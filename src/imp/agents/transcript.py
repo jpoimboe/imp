@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from imp.agents.loop_guard import _flatten_result_text
 from imp.agents.runner import (
     ContentBlock,
     Message,
@@ -381,6 +382,7 @@ def _resume_result(
 def repair_interrupt_marker_on_resume(
     messages: list[Message], transcript: Transcript,
     captured: dict[str, tuple[str, bool]] | None = None,
+    *, captured_failures: dict[str, str],
 ) -> None:
     """Strip claude-p's interrupt framing before resume classification.
 
@@ -395,9 +397,11 @@ def repair_interrupt_marker_on_resume(
     (a lone marker over prose), drop every marker up to the last and restate each
     is_error result in R as an interruption — imp's captured result when the call
     really completed, else the synthetic body; tool_uses resolve by id anywhere.
-    complete_step results are left for the complete_step-tail answer. Turns after
-    the last marker are untouched. Journals nothing: the pause already recorded
-    these results in the event log, so a second entry would falsify it.
+    An is_error result whose text equals imp's captured failure for that call
+    (`captured_failures`) is a genuine failure that reached the CLI and stays
+    verbatim. complete_step results are left for the complete_step-tail answer.
+    Turns after the last marker are untouched. Journals nothing: the pause already
+    recorded these results in the event log, so a second entry would falsify it.
 
     The durability note is appended to R's last turn only when some result was
     restated as a placeholder or a captured error and R does not already hold it.
@@ -419,12 +423,14 @@ def repair_interrupt_marker_on_resume(
     for m in run:
         blocks: list[ContentBlock] = []
         for b in m.content:
-            tu = (tool_uses.get(b.tool_use_id)
-                  if isinstance(b, ToolResultBlock) and b.is_error else None)
-            # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
-            if tu is not None and canonicalize_tool_name(tu.name) != "complete_step":
-                b = _resume_result(tu, captured)
-                cut_off = cut_off or b.is_error
+            if isinstance(b, ToolResultBlock) and b.is_error:
+                tu = tool_uses.get(b.tool_use_id)
+                # Identity with imp's own captured failure marks a genuine one, not CLI filler.
+                if (tu is not None and canonicalize_tool_name(tu.name) != "complete_step"
+                        and _flatten_result_text(b.content) != captured_failures.get(
+                            captured_result_key(tu.name, tu.input))):
+                    b = _resume_result(tu, captured)
+                    cut_off = cut_off or b.is_error
             blocks.append(b)
         repaired.append(Message(role="user", content=tuple(blocks)))
     if cut_off and not any(_has_durability_note(m) for m in repaired):

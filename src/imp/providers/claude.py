@@ -1485,9 +1485,10 @@ class ClaudeSession(ObserveSession):
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
-        captured, _ = _load_captured_tool_results(invocation.transcript_dir)
+        captured, captured_failures = _load_captured_tool_results(invocation.transcript_dir)
         # Must precede every classification below: they all read this one list.
-        repair_interrupt_marker_on_resume(existing, transcript, captured=captured)
+        repair_interrupt_marker_on_resume(
+            existing, transcript, captured=captured, captured_failures=captured_failures)
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step): re-emit the final text as the deliverable rather than
         # native-resuming or soliciting the human (AWAITING_USER). Prose over an
@@ -2103,7 +2104,8 @@ class ClaudeSession(ObserveSession):
                 runner._handoff_requested = False
                 self._flush_turn_record()
                 # imp executed these tools itself; the SDK's account of them is hearsay.
-                captured, _ = _load_captured_tool_results(invocation.transcript_dir)
+                captured, captured_failures = _load_captured_tool_results(
+                    invocation.transcript_dir)
                 settled = await _settle_inflight(
                     self.runner._state, INFLIGHT_RESULT_BOUND_S)
                 for s in settled:
@@ -2111,7 +2113,8 @@ class ClaudeSession(ObserveSession):
                 _correct_withheld_results(elog, aid, runner._state, captured)
                 # Marker repair first: it collapses the tail the dangling repair then no-ops on.
                 repair_interrupt_marker_on_resume(
-                    self.messages, self.transcript, captured=captured)
+                    self.messages, self.transcript, captured=captured,
+                    captured_failures=captured_failures)
                 repair_dangling_tool_use_on_resume(
                     self.messages, self.transcript, captured=captured)
                 increment = correction_increment(settled)
@@ -2143,7 +2146,8 @@ class ClaudeSession(ObserveSession):
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
             # imp executed these tools itself; the SDK's account of them is hearsay.
-            captured, _ = _load_captured_tool_results(invocation.transcript_dir)
+            captured, captured_failures = _load_captured_tool_results(
+                invocation.transcript_dir)
             settled = await _settle_inflight(
                 runner._state, INFLIGHT_RESULT_BOUND_S)
             for s in settled:
@@ -2152,7 +2156,8 @@ class ClaudeSession(ObserveSession):
             # The marker is still in the trailing user run here; _enter's repair
             # can no longer reach it once the re-query appends an assistant turn.
             repair_interrupt_marker_on_resume(
-                self.messages, self.transcript, captured=captured)
+                self.messages, self.transcript, captured=captured,
+                captured_failures=captured_failures)
             increment = correction_increment(settled)
             if increment:
                 deliver_engine_continuation(
