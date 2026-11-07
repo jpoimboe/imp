@@ -25,7 +25,9 @@ fi
 
 count=$(grep -cE '^## Task [0-9]' "$NEWEST" || true)
 
-printf '✓ plan %s/%s · %s tasks\n' "$PLAN_INDEX" "$PLAN_TOTAL" "$count"
+noun=tasks
+[[ "$count" == 1 ]] && noun=task
+printf '✓ plan %s/%s · %s %s\n' "$PLAN_INDEX" "$PLAN_TOTAL" "$count" "$noun"
 n=0
 while IFS= read -r line; do
   n=$((n + 1))
