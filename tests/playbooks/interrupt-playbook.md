@@ -91,6 +91,7 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 > built quest's prompt, and `paused · SIGTERM` / `paused · SIGHUP` / `paused · SIGQUIT` for
 > signal leaves. The internal reason stays lowercase; only the display form differs.
 > No leave echoes a caret line of its own; a typed `/pause` keeps its ordinary `> /pause` echo.
+> On a terminal, the closing block has exactly one blank row above it.
 
 ### 0b. The bar for "correct" (every interrupt point, unless stated otherwise)
 
