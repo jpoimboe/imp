@@ -71,14 +71,9 @@ def format_timestamp(iso: str | None) -> str:
 
 
 ID_W = 6        # bare 6-char quest id
-STATUS_W = 35   # combined status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this
 NAME_CAP = 70   # cap a long name/intent's pull on the shared width so STATUS keeps its content
-
-# Fixed columns plus their three 2-space gaps; the NAME column gets whatever
-# terminal width remains after this.
-_PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 
 # Meaning-based palette keyed by the resolved word: bold weight for
 # waiting / error / merge_blocked; every other status renders plain.
@@ -100,19 +95,6 @@ def _truncate(text: str, width: int) -> str:
     return text[: width - 1] + "…"
 
 
-def name_budget(*, indent: int = 0) -> int:
-    """Width available for the trailing NAME column on the current terminal.
-
-    `indent` accounts for any prefix a caller prints before the row (e.g. the
-    resume picker's selection marker). Falls back to an 80-col terminal when
-    stdout isn't a tty (pipes, the remote/telegram path), keeping piped output
-    stable, capped at NAME_CAP so wide terminals stay compact, and never below
-    NAME_MIN.
-    """
-    cols = shutil.get_terminal_size((80, 24)).columns
-    return max(NAME_MIN, min(NAME_CAP, cols - _PREFIX_W - indent))
-
-
 def overview_widths(rows: list[tuple[str, str | None, str]], *,
                     indent: int = 0) -> tuple[int, int]:
     """(status_width, name_width) sized to what (raw status, label, name) `rows` print."""
@@ -127,8 +109,7 @@ def overview_widths(rows: list[tuple[str, str | None, str]], *,
     return status_width, name_width
 
 
-def header_line(*, color: bool, name_width: int,
-                status_width: int = STATUS_W) -> str:
+def header_line(*, color: bool, name_width: int, status_width: int) -> str:
     text = (f"{'ID':<{ID_W}}  {'NAME':<{name_width}}  "
             f"{'STATUS':<{status_width}}  UPDATED")
     return pal.ansi(text, "dim", enabled=color)
@@ -153,8 +134,7 @@ def _fit_label(status: str, label: str | None, width: int) -> str:
 
 
 def _status_segment(status: str, step: str, step_label: str | None,
-                    *, phase_label: str | None = None,
-                    status_width: int = STATUS_W) -> str:
+                    *, phase_label: str | None = None, status_width: int) -> str:
     return _fit_label(status, compose_status_label(step, step_label, phase_label),
                       status_width)
 
@@ -164,7 +144,7 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                        phase_label: str | None = None,
                        last_iso: str | None, now: datetime,
                        color: bool, name_width: int = 80,
-                       status_width: int = STATUS_W, dim: bool = False,
+                       status_width: int, dim: bool = False,
                        intent: str | None = None) -> str:
     id_pad = f"{quest_id:<{ID_W}}"
     shown = display_word(status)

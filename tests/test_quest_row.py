@@ -4,11 +4,9 @@ from datetime import UTC, datetime
 import pytest
 
 from imp.cli.quest_row import (
-    NAME_MIN,
     fallback_intent,
     format_quest_line,
     header_line,
-    name_budget,
     relative_age,
 )
 
@@ -35,7 +33,7 @@ def test_relative_age(then_iso, expected):
 def _row(**kw):
     base = dict(quest_id="yaitd7", title="Add version flag",
                 status="running", step="code",
-                last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
+                last_iso="2026-06-11T11:45:00+00:00", now=_NOW, status_width=35)
     base.update(kw)
     return base
 
@@ -66,7 +64,7 @@ def test_format_unnamed_shows_id_and_unnamed_label():
 
 
 def test_header_line_leads_with_id_ends_with_updated():
-    h = header_line(color=False, name_width=40)
+    h = header_line(color=False, name_width=40, status_width=35)
     assert h.startswith("ID")
     assert h.rstrip().endswith("UPDATED")
     assert "NAME" in h            # NAME is the second column now
@@ -130,41 +128,10 @@ def test_completed_status_renders_plain():
     assert not re.search(r"\x1b\[[\d;]*m\s*completed", line)
 
 
-def test_name_budget_fills_remaining_width(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((100, 24)))
-    # 100 cols - 54 fixed prefix = 46 left for the name (below the 70 cap).
-    assert name_budget() == 46
-    # An indent (e.g. the resume picker's marker) shrinks the budget.
-    assert name_budget(indent=2) == 44
-
-
-def test_name_budget_caps_at_name_cap(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((200, 24)))
-    # 200 - 54 = 146 available, but the NAME column is capped at NAME_CAP (70).
-    assert name_budget() == 70
-    # The indent is applied before the cap; here it is still absorbed by the cap.
-    assert name_budget(indent=2) == 70
-
-
 def test_header_column_reads_updated_not_age():
-    h = header_line(color=False, name_width=40)
+    h = header_line(color=False, name_width=40, status_width=35)
     assert "UPDATED" in h
     assert "AGE" not in h
-
-
-def test_name_budget_floors_at_minimum(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((20, 24)))
-    assert name_budget() == NAME_MIN
-
 
 
 def test_status_cell_merges_step_label_as_dim_suffix():
@@ -277,8 +244,8 @@ def test_status_cell_omits_phase_when_none():
 def test_status_width_drops_oversized_label():
     # status_width 20 -> budget 20-7-3 = 10; a 30-char label does not fit and is
     # dropped whole, leaving the bare status word (never a partial `(…)`).
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="a" * 30, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="a" * 30, color=False)
     assert "running" in line
     assert "…" not in line
     assert "(" not in line
@@ -288,9 +255,9 @@ def test_status_width_drops_oversized_label():
 def test_status_subfloor_drops_suffix_no_overflow():
     # status_width 8 -> budget 8-7-3 = -2 < 1, so the suffix is dropped and the
     # bare status word is rendered (never the untruncated label).
-    line = format_quest_line(**_row(status="running", step="x"),
+    line = format_quest_line(**_row(status="running", step="x", status_width=8),
                               step_label="a very long label that will not fit",
-                              status_width=8, color=False)
+                              color=False)
     assert "running" in line
     assert "(" not in line            # suffix dropped entirely
     assert "a very long label" not in line
@@ -298,15 +265,15 @@ def test_status_subfloor_drops_suffix_no_overflow():
 
 def test_status_label_fits_at_budget_boundary():
     # status_width 20 -> budget 10; a label of exactly 10 chars still fits in full.
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="b" * 10, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="b" * 10, color=False)
     assert "running (" + "b" * 10 + ")" in line
 
 
 def test_status_label_drops_one_char_over_budget():
     # status_width 20 -> budget 10; an 11-char label is one over and is dropped whole.
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="b" * 11, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="b" * 11, color=False)
     assert "running" in line
     assert "(" not in line
 

@@ -104,10 +104,11 @@ missing symbol can't break unrelated scenes):
 import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).parent)); import data
 from imp.cli import quest_row            # a new module → only resolves in the after tree
 def scene_status():
-    rows = [quest_row.header_line(color=True, name_width=48)]
+    rows = [quest_row.header_line(color=True, name_width=48, status_width=35)]
     for cid, title, st, step, age in data.ROWS:
         rows.append(quest_row.format_quest_line(quest_id=cid, title=title,
-            status=st, step=step, last_iso=data.iso(age), now=data.NOW, color=True))
+            status=st, step=step, last_iso=data.iso(age), now=data.NOW, color=True,
+            status_width=35))
     return rows
 SCENES = {"status": scene_status, ...}
 sys.stdout.write("\n".join(SCENES[sys.argv[1]]()) + "\n")

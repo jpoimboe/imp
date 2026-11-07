@@ -3459,7 +3459,7 @@ async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.step == "check"
     assert state.step_label == "processing 5"
-    seg = _status_segment(state.status, state.step, state.step_label)
+    seg = _status_segment(state.status, state.step, state.step_label, status_width=35)
     assert "{{" not in seg
     assert "processing 5" in seg
 

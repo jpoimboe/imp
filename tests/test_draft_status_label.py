@@ -84,7 +84,8 @@ def test_parked_draft_renders_real_status_word(tmp_path: Path) -> None:
     row = next(r for r in s._status_rows(tmp_path) if r[0] == "drbare")
     line = quest_row.format_quest_line(
         quest_id=row[0], title=row[4], status=row[1], step=row[2],
-        step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False)
+        step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False,
+        status_width=35)
     assert "paused" in line
 
 
@@ -157,7 +158,7 @@ def test_shipped_label_over_the_status_budget_drops_to_the_bare_word() -> None:
     line = quest_row.format_quest_line(
         quest_id="dflt01", title="X", status="paused", step=step.name,
         step_label=step.label, phase_label=step.phase_label,
-        last_iso=None, now=datetime.now(UTC), color=False)
+        last_iso=None, now=datetime.now(UTC), color=False, status_width=20)
     assert "paused" in line
     assert "(" not in line
     assert "spec phase" not in line
