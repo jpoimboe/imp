@@ -131,7 +131,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
     session: Any = _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-        editing_mode=mode, erase_when_done=True,
+        complete_while_typing=False, editing_mode=mode, erase_when_done=True,
         multiline=True, reserve_space_for_menu=0, color_depth=color_depth,
         cursor=ModalCursorShapeConfig() if mode == EditingMode.VI else None)
     if dot_state is not None:
