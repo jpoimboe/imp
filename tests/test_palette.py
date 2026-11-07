@@ -274,10 +274,10 @@ def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
     pal.set_theme("dark")
     assert pal.toolbar_bg_open(enabled=True) == "\x1b[48;2;43;47;58m"      # #2B2F3A
     assert pal.toolbar_bg_open(enabled=False) == ""   # early return, regardless of theme
-    assert pal.toolbar_bg_open(enabled=True) != pal.user_bg_open(enabled=True)
+    assert pal.toolbar_bg_open(enabled=True) != pal.user_emphasis_open(enabled=True)
     pal.set_theme("light")
     assert pal.toolbar_bg_open(enabled=True) == "\x1b[48;2;228;234;242m"   # #E4EAF2
-    assert pal.toolbar_bg_open(enabled=True) != pal.user_bg_open(enabled=True)
+    assert pal.toolbar_bg_open(enabled=True) != pal.user_emphasis_open(enabled=True)
     pal.set_theme("ansi")
     assert pal.toolbar_bg_open(enabled=True) == ""      # no subtle band in 16-color
     assert pal.toolbar_bg_open(enabled=False) == ""     # color off
@@ -296,12 +296,15 @@ def test_reverse_attr_is_theme_independent() -> None:
         assert pal.ansi("x", "reverse", enabled=True) == "\x1b[7mx\x1b[0m"
 
 
-def test_user_bg_open_reverse_under_ansi_band_under_truecolor() -> None:
+def test_user_emphasis_open_bold_under_ansi_band_under_truecolor() -> None:
     pal.set_theme("ansi")
-    assert pal.user_bg_open(enabled=True) == "\x1b[7m"          # 16-color emphasis
+    assert pal.user_emphasis_open(enabled=True) == "\x1b[1m"          # 16-color: bold, default fg
     pal.set_theme("dark")
-    assert pal.user_bg_open(enabled=True) == "\x1b[48;2;67;56;40m"   # warm band kept
-    assert pal.user_bg_open(enabled=False) == ""               # color off, any theme
+    assert pal.user_emphasis_open(enabled=True) == "\x1b[48;2;67;56;40m"   # warm band kept
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        assert pal.user_emphasis_open(enabled=False) == ""            # color off, any theme
+    pal.set_theme("ansi")
 
 
 def test_theme_override_reads_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:

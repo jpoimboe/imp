@@ -2734,7 +2734,7 @@ def test_compose_position_row_bands_and_pads_with_project_under_dark_theme() -> 
                                    quest_id="z9gixx", title="t", context_tokens=None,
                                    color=True, width=120)
         gray = pal.sgr("gray", enabled=True)
-        user_bg = pal.user_bg_open(enabled=True)
+        user_bg = pal.user_emphasis_open(enabled=True)
         clipped = pal.clip_display(row, 120 - 1)
     finally:
         pal.set_theme("ansi")
