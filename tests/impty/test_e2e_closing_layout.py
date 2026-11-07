@@ -1,0 +1,203 @@
+"""Every closing block on a real terminal has exactly one blank row above it."""
+
+from __future__ import annotations
+
+import signal
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from impty import TerminalSession
+from tests.impty.e2e_support import (
+    E2E_EXIT_POLL_TIMEOUT,
+    E2E_POLL_TIMEOUT,
+    _poll,
+    can_pty,
+)
+from tests.impty.test_e2e_leave_exit_codes import (
+    _assert_closing_layout,
+    _assert_ctrl_d_block,
+    _assert_pause_block,
+    _at_the_question,
+    _await_quest_dir,
+    _env,
+)
+from tests.impty.test_e2e_relay_hibernation_gate import (
+    _ATTACH_POLL,
+    _seed_scripted_gate_project,
+)
+
+pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
+
+_SIGNALS = [(signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP"), (signal.SIGQUIT, "SIGQUIT")]
+_PLACEHOLDER = "type a message, or /help"
+
+_QUESTION_TURNS: list[dict[str, Any]] = [
+    {"text": "setting up", "tools": [
+        {"name": "create_and_enter_worktree", "input": {}},
+        {"name": "bash", "input": {"command": _ATTACH_POLL}},
+    ]},
+    {"text": "waiting for you"},
+]
+_BUSY_TURNS: list[dict[str, Any]] = [
+    {"text": "working", "tools": [
+        {"name": "create_and_enter_worktree", "input": {}},
+        # Attached, then busy once: the marker proves the step is mid-run.
+        {"name": "bash", "input": {
+            "command": f'{_ATTACH_POLL}; [ -f "$IMP_QUEST_DIR/busy" ] && exit 0; '
+                       ': > "$IMP_QUEST_DIR/busy"; sleep 30'}},
+    ]},
+    {"text": "the next turn ran"},
+]
+
+
+def _session(tmp_path: Path, turns: list[dict[str, Any]], title: str, cols: int = 80,
+             ) -> TerminalSession:
+    script = _seed_scripted_gate_project(tmp_path, turns=turns)
+    return TerminalSession(
+        [sys.executable, "-m", "imp", "new", title, "--title", title],
+        cwd=str(tmp_path), env=_env(script), cols=cols, rows=24)
+
+
+def _screen(s: TerminalSession) -> str:
+    return "\n".join(s.lines())
+
+
+def _at_empty_prompt(s: TerminalSession) -> None:
+    assert _poll(lambda: any(_PLACEHOLDER in ln for ln in s.lines()),
+                 timeout=E2E_POLL_TIMEOUT), _screen(s)
+
+
+def _send_and_see(s: TerminalSession, keys: str, row: str) -> None:
+    s.send(keys)
+    assert _poll(lambda: any(row in ln for ln in s.lines()),
+                 timeout=E2E_POLL_TIMEOUT), _screen(s)
+
+
+@pytest.mark.parametrize(("sig", "display"), _SIGNALS, ids=[d for _, d in _SIGNALS])
+def test_signal_at_a_prompt_renders_the_closing_layout(
+    tmp_path: Path, sig: signal.Signals, display: str,
+) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "signal prompt") as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        s.send_signal(sig)
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        _assert_pause_block(s, f"paused · {display}", quest_dir.name, "signal prompt")
+
+
+@pytest.mark.parametrize(("sig", "display"), _SIGNALS, ids=[d for _, d in _SIGNALS])
+def test_signal_mid_run_renders_the_closing_layout(
+    tmp_path: Path, sig: signal.Signals, display: str,
+) -> None:
+    with _session(tmp_path, _BUSY_TURNS, "signal mid run") as s:
+        quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
+        assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), _screen(s)
+        s.send_signal(sig)
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        _assert_pause_block(s, f"paused · {display}", quest_dir.name, "signal mid run")
+
+
+def test_abandon_confirmed_keeps_the_answer_row_above_the_blank(tmp_path: Path) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "abandon gate", cols=100) as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "/abandon\r", "[y/N]")
+        s.send("y")
+        s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        rows = s.lines()
+        at = _assert_closing_layout(rows, f"{quest_dir.name} · abandon gate · abandoned")
+        assert rows[at - 2].endswith("[y/N] y"), _screen(s)
+
+
+def test_ctrl_c_hint_then_ctrl_d_keeps_the_hint_above_the_blank(tmp_path: Path) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "hint gate") as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        at = _assert_ctrl_d_block(s, quest_dir.name, "hint gate")
+        assert s.lines()[at - 2] == "press ctrl-d to pause & exit", _screen(s)
+
+
+def test_ctrl_c_hint_then_sigterm_keeps_the_hint_above_the_blank(tmp_path: Path) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "hint gate") as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+        s.send_signal(signal.SIGTERM)
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        at = _assert_pause_block(s, "paused · SIGTERM", quest_dir.name, "hint gate")
+        assert s.lines()[at - 2] == "press ctrl-d to pause & exit", _screen(s)
+
+
+def test_help_reprompt_then_ctrl_d_renders_the_closing_layout(tmp_path: Path) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "help gate") as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "/help\r", "Complete a /command")
+        _at_empty_prompt(s)
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        at = _assert_ctrl_d_block(s, quest_dir.name, "help gate")
+        assert "Complete a /command" in s.lines()[at - 2], _screen(s)
+
+
+def test_declined_abandon_then_help_then_ctrl_d_renders_the_closing_layout(
+    tmp_path: Path,
+) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "kept gate", cols=100) as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "/abandon\r", "[y/N]")
+        _send_and_see(s, "n", f"Kept {quest_dir.name}")
+        _at_empty_prompt(s)
+        _send_and_see(s, "/help\r", "Complete a /command")
+        _at_empty_prompt(s)
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        at = _assert_ctrl_d_block(s, quest_dir.name, "kept gate")
+        assert "Complete a /command" in s.lines()[at - 2], _screen(s)
+
+
+def test_sigterm_with_stdout_piped_writes_no_row_above_the_block(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_BUSY_TURNS)
+    out_path = tmp_path / "stdout.txt"
+    with out_path.open("w") as out:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "imp", "new", "piped", "--title", "piped"],
+            cwd=tmp_path, env=_env(script), stdin=subprocess.DEVNULL, stdout=out,
+            stderr=subprocess.STDOUT)
+        try:
+            quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
+            assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), (
+                out_path.read_text())
+            proc.send_signal(signal.SIGTERM)
+            assert proc.wait(timeout=E2E_EXIT_POLL_TIMEOUT) == 130, out_path.read_text()
+        finally:
+            proc.kill()
+            proc.wait()
+
+    rows = out_path.read_text().splitlines()
+    assert "paused · SIGTERM" in rows, "\n".join(rows)
+    at = rows.index("paused · SIGTERM")
+    assert at >= 1, "\n".join(rows)
+    assert rows[at - 1] != "", "\n".join(rows)
+    assert rows[at + 1:at + 3] == [
+        f"{quest_dir.name} · piped", f"resume: imp resume {quest_dir.name}"], "\n".join(rows)

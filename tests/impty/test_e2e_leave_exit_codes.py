@@ -71,14 +71,29 @@ def _events(quest_dir: Path) -> list[dict]:
     return [json.loads(ln) for ln in (quest_dir / "events.jsonl").read_text().splitlines()]
 
 
-def _assert_ctrl_d_block(s: TerminalSession, quest_id: str, title: str) -> None:
-    rows = s.lines()
+def _assert_closing_layout(rows: list[str], head: str) -> int:
+    """`head` sits under exactly one blank row; returns its index."""
     screen = "\n".join(rows)
-    assert "> Ctrl-D" not in rows, screen
-    assert "paused · Ctrl-D" in rows, screen
-    at = rows.index("paused · Ctrl-D")
+    assert rows.count(head) == 1, screen
+    at = rows.index(head)
+    assert at >= 2, screen
+    assert rows[at - 1] == "", screen
+    assert rows[at - 2] != "", screen
+    return at
+
+
+def _assert_pause_block(s: TerminalSession, head: str, quest_id: str, title: str) -> int:
+    """The closing layout above `head`, then the identity and resume rows; returns its index."""
+    rows = s.lines()
+    at = _assert_closing_layout(rows, head)
     assert rows[at + 1:at + 3] == [
-        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], screen
+        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], "\n".join(rows)
+    return at
+
+
+def _assert_ctrl_d_block(s: TerminalSession, quest_id: str, title: str) -> int:
+    assert "> Ctrl-D" not in s.lines(), "\n".join(s.lines())
+    return _assert_pause_block(s, "paused · Ctrl-D", quest_id, title)
 
 
 def test_ctrl_d_at_a_built_quests_question_exits_130(tmp_path: Path) -> None:
@@ -121,7 +136,8 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · /pause",))
+        at = _assert_pause_block(s, "paused · /pause", quest_dir.name, "pause gate")
+        assert s.lines()[at - 2] == "> /pause", "\n".join(s.lines())
 
     paused = [e["payload"] for e in _events(quest_dir) if e["type"] == "workflow_paused"]
     assert paused[-1]["interrupt_reason"] == "pause"
@@ -269,4 +285,4 @@ def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> 
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("archived",))
+        _assert_closing_layout(s.lines(), f"{quest_dir.name} · hello there · archived")
