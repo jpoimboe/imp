@@ -173,7 +173,7 @@ def _generic(payload: dict[str, Any]) -> str:
         if isinstance(v, (str, int, float, bool)) or v is None:
             parts.append(f"{k}={v}")
         else:
-            parts.append(f"{k}=<{type(v).__name__}>")
+            parts.append(f"{k}={json.dumps(v, default=str)}")
     return _collapse(" ".join(parts))
 
 
