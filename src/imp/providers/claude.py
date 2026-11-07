@@ -785,21 +785,24 @@ def _append_captured_tool_result(
 
 def _load_captured_tool_results(
     transcript_dir: Path,
-) -> dict[str, tuple[str, bool]]:
-    """Load the per-step capture sidecar into a captured_result_key(name, input) ->
-    (content, is_error) dict; {} when absent, so repair falls back to placeholders.
+) -> tuple[dict[str, tuple[str, bool]], dict[str, str]]:
+    """Load the per-step capture sidecar; the last record per captured_result_key
+    wins. Returns (successes as key -> (content, False), failures as key -> content);
+    failures are identity evidence for the marker repair, never replayed.
     """
     path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
     if not path.exists():
-        return {}
-    out: dict[str, tuple[str, bool]] = {}
+        return {}, {}
+    latest: dict[str, tuple[str, bool]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rec = json.loads(line)
-        key = captured_result_key(rec["name"], rec["input"])
-        out[key] = (rec["content"], rec["is_error"])
-    return out
+        latest[captured_result_key(rec["name"], rec["input"])] = (
+            rec["content"], rec["is_error"])
+    captured = {k: v for k, v in latest.items() if not v[1]}
+    failures = {k: content for k, (content, is_error) in latest.items() if is_error}
+    return captured, failures
 
 
 def _wrap_one(
@@ -1482,7 +1485,7 @@ class ClaudeSession(ObserveSession):
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
-        captured = _load_captured_tool_results(invocation.transcript_dir)
+        captured, _ = _load_captured_tool_results(invocation.transcript_dir)
         # Must precede every classification below: they all read this one list.
         repair_interrupt_marker_on_resume(existing, transcript, captured=captured)
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
@@ -2100,7 +2103,7 @@ class ClaudeSession(ObserveSession):
                 runner._handoff_requested = False
                 self._flush_turn_record()
                 # imp executed these tools itself; the SDK's account of them is hearsay.
-                captured = _load_captured_tool_results(invocation.transcript_dir)
+                captured, _ = _load_captured_tool_results(invocation.transcript_dir)
                 settled = await _settle_inflight(
                     self.runner._state, INFLIGHT_RESULT_BOUND_S)
                 for s in settled:
@@ -2140,7 +2143,7 @@ class ClaudeSession(ObserveSession):
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
             # imp executed these tools itself; the SDK's account of them is hearsay.
-            captured = _load_captured_tool_results(invocation.transcript_dir)
+            captured, _ = _load_captured_tool_results(invocation.transcript_dir)
             settled = await _settle_inflight(
                 runner._state, INFLIGHT_RESULT_BOUND_S)
             for s in settled:
