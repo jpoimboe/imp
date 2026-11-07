@@ -1133,22 +1133,21 @@ def _render(node: Any, *, depth: int, full: bool = False,
         if not node.interactive:
             return                       # invariant: user_message is always a human turn
         # A brand-orange `>` caret marks the human turn on the first line only; it
-        # sits OUTSIDE the slate. One separating space follows the caret column and
-        # is also OUTSIDE the slate (unpainted); the wrapped text sits ON the slate
-        # so the band hugs the text exactly. Continuation lines carry a blank caret
-        # column (no repeated caret) and align under the first line's text (two
-        # columns past the caret), with the slate band continuing.
+        # sits OUTSIDE the emphasis. One separating space follows the caret column
+        # and is also OUTSIDE it (unpainted); only the wrapped text carries the
+        # emphasis, so it hugs the text exactly. Continuation lines carry a blank
+        # caret column (no repeated caret) and align under the first line's text
+        # (two columns past the caret), with the emphasis continuing.
         #
-        # On a truecolor theme the reprinted (scrolled-back) turn carries a subtle
-        # entered-input background, opened AFTER the caret AND its separating space
-        # so the highlight covers only the typed text and closes at text end (no
-        # full-width fill → clean copy/paste). The band's left and right edges both
-        # hug the text (symmetric). Blank separator lines stay unpainted. The live
-        # input field is painted by prompt.py, not here.
+        # The emphasis is a subtle warm-amber background band on a truecolor theme
+        # and bold default-fg text under `ansi`. It opens AFTER the caret AND its
+        # separating space and closes at text end (no full-width fill → clean
+        # copy/paste). Blank separator lines stay unpainted. The live input field
+        # is painted by prompt.py, not here.
         indent = _gutter_indent(depth, gutters, color)
         caret = pal.ansi(">", "wordmark", enabled=color)
-        bg = pal.user_bg_open(enabled=color)
-        end = "\x1b[0m" if bg else ""
+        emph = pal.user_emphasis_open(enabled=color)
+        end = "\x1b[0m" if emph else ""
         avail = max(8, width - _INDENT_W * depth - 2)
         first = True
         for para in _caret_escape(node.text).split("\n"):
@@ -1157,7 +1156,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
                 continue
             for line in textwrap.wrap(para, width=avail) or [""]:
                 lead = caret if first else " "
-                yield indent + lead + " " + bg + line + end
+                yield indent + lead + " " + emph + line + end
                 first = False
         return
 

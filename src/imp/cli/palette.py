@@ -161,7 +161,7 @@ def caret(*, enabled: bool) -> str:
 # that marks a SUBMITTED (scrolled-back) user turn and ties visually to the gold
 # `>` caret. Only the reprinted turn carries it; the live input field stays
 # unpainted while typing. The `ansi` 16-color theme has no good subtle band, so
-# it uses reverse-video emphasis there instead (see user_bg_open). dark: a warm
+# it uses bold default-fg text there instead (see user_emphasis_open). dark: a warm
 # amber above the #1e1e1e surface; light: a pale warm cream.
 _USER_BG_RGB: dict[str, tuple[int, int, int]] = {
     "dark": (0x43, 0x38, 0x28),
@@ -169,14 +169,14 @@ _USER_BG_RGB: dict[str, tuple[int, int, int]] = {
 }
 
 
-def user_bg_open(*, enabled: bool) -> str:
+def user_emphasis_open(*, enabled: bool) -> str:
     """The opening SGR for the entered-input emphasis: a warm background band in a
-    truecolor theme, or reverse-video under `ansi` (16-color has no subtle band).
+    truecolor theme, or bold under `ansi` (16-color has no subtle band).
     '' when color is off."""
     if not enabled:
         return ""
     if _active_theme == "ansi":
-        return _ATTRS["reverse"]
+        return _ATTRS["bold"]
     rgb = _USER_BG_RGB.get(_active_theme)
     if rgb is None:
         return ""
@@ -186,8 +186,8 @@ def user_bg_open(*, enabled: bool) -> str:
 # Cool blue-gray "toolbar/footer" background, per truecolor theme — the band
 # behind the interactive prompt's bottom toolbar and the live-status footer.
 # Split from the warmer user-scrollback band (_USER_BG_RGB) so the two surfaces
-# color independently. The `ansi` 16-color theme gets no toolbar band (unlike
-# user_bg_open, the toolbar has no reverse-video treatment). dark: #2B2F3A;
+# color independently. The `ansi` 16-color theme gets no toolbar band and no
+# substitute emphasis (unlike user_emphasis_open's bold). dark: #2B2F3A;
 # light: #E4EAF2.
 _TOOLBAR_BG_RGB: dict[str, tuple[int, int, int]] = {
     "dark": (0x2B, 0x2F, 0x3A),

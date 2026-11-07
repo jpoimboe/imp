@@ -1178,19 +1178,21 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_reverse_emphasis_ansi_color_on() -> None:
-    """Under the `ansi` 16-color theme the scrolled-back user turn carries
-    reverse-video emphasis (no truecolor band): a brand-orange `>` caret sits
-    OUTSIDE the bar, then one separating space (also outside) precedes \x1b[7m,
-    which hugs only the body and closes at text end. Continuation lines drop the
-    caret (blank column) but keep the bar."""
+def test_user_message_bold_emphasis_ansi_color_on() -> None:
+    """Under the `ansi` 16-color theme the scrolled-back user turn is bold
+    default-fg text (no reverse-video, no band): a brand-orange `>` caret sits
+    outside the emphasis, then one unpainted separating space precedes \\x1b[1m,
+    which covers only the body and closes at text end. Continuation lines drop
+    the caret (blank column) but stay bold."""
     pal.set_theme("ansi")
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[33m>\x1b[0m \x1b[7mline one\x1b[0m"
-    assert out[1] == "    \x1b[7mline two\x1b[0m"
-    assert "\x1b[48;2;" not in out[0]              # no truecolor band under ansi
+    assert out[0] == "  \x1b[33m>\x1b[0m \x1b[1mline one\x1b[0m"
+    assert out[1] == "    \x1b[1mline two\x1b[0m"
+    for line in out:
+        assert "\x1b[7m" not in line                  # no reverse-video
+        assert "\x1b[48;" not in line                 # no background band under ansi
 
 
 def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
