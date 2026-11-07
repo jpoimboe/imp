@@ -996,17 +996,17 @@ def _wrap_one(
     return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 
-async def _make_impty_sdk_tools(driver: Any) -> list[Any]:
+async def _make_impty_sdk_tools(driver: Any, transcript_dir: Path) -> list[Any]:
     """Build SDK MCP tools for each ImptyDriver method, sourced from impty_tool_specs."""
     from claude_agent_sdk import tool as sdk_tool
 
     from impty.mcp import impty_tool_specs
 
     specs = impty_tool_specs(driver)
-    return [_wrap_impty_one(spec, sdk_tool) for spec in specs]
+    return [_wrap_impty_one(spec, sdk_tool, transcript_dir) for spec in specs]
 
 
-def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
+def _wrap_impty_one(spec: Any, sdk_tool: Any, transcript_dir: Path) -> Any:
     allowed = set(spec.input_schema.get("properties", {}))
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
@@ -1018,6 +1018,9 @@ def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
             result = await asyncio.to_thread(lambda: spec.method(**clean))
             return _tool_response(result, is_error=False)
         except Exception as exc:
+            # Full prefixed name: captured_result_key strips only mcp__imp__.
+            _append_captured_tool_result(
+                transcript_dir, f"mcp__impty__{spec.name}", clean, str(exc), is_error=True)
             return _tool_response(str(exc), is_error=True)
 
     return sdk_tool(spec.name, spec.description, spec.input_schema)(_impl)
@@ -1486,7 +1489,8 @@ class ClaudeSession(ObserveSession):
             from imp.agents.tools.context import attach_impty_driver
             runner._impty_driver = attach_impty_driver(
                 ctx, journal_dir=invocation.transcript_dir)
-            impty_tools = await _make_impty_sdk_tools(runner._impty_driver)
+            impty_tools = await _make_impty_sdk_tools(
+                runner._impty_driver, invocation.transcript_dir)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 
         existing = transcript.load(
