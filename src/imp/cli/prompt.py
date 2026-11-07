@@ -30,6 +30,17 @@ OPENING_HINTS = {
     "new": "describe what you want built, or /help",
     "chat": "ask anything, or /help",
 }
+# `default` wins the attribute merge and emits no colour code, so the terminal's colours show.
+_PROMPT_STYLE = {
+    "bottom-toolbar": "noreverse",
+    "completion-menu": "bg:default fg:default",
+    "completion-menu.completion.current": "bg:default fg:default reverse",
+    "completion-menu.meta.completion": "bg:default fg:default dim",
+    # nodim: dotted classes inherit, so .current would pick up dim from meta.completion.
+    "completion-menu.meta.completion.current": "bg:default fg:default nodim reverse",
+    "scrollbar.background": "bg:default",
+    "scrollbar.button": "bg:default fg:default dim reverse",
+}
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,
@@ -104,6 +115,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     completer = (
         SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
+    from prompt_toolkit.application import get_app
     from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.output import ColorDepth
@@ -114,8 +126,11 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
         """Ends the layout with an unconditional filler after the toolbar, so the
         renderer's forced full-height fill lands there and the toolbar hugs the input."""
 
+        _input_window: Any
+
         def _create_layout(self) -> Any:
             layout = super()._create_layout()
+            self._input_window = layout.current_window
             layout.container.children.append(  # type: ignore[attr-defined]
                 # take_using_weights costs ~weight x visual rows per render, so
                 # the weight must stay modest while still dominating the input
@@ -126,12 +141,28 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                 Window(height=Dimension(weight=100)))
             return layout
 
+        def _get_default_buffer_control_height(self) -> Dimension:
+            state = self.default_buffer.complete_state
+            app = get_app()
+            if state is None or not state.completions or app.is_done:
+                return Dimension()
+            doc = self.default_buffer.document
+            # 16 is the max_height prompt_toolkit gives CompletionsMenu.
+            rows = doc.cursor_position_row + 1 + min(len(state.completions), 16)
+            size = app.output.get_size()
+            window = self._input_window
+            content_rows = window.content.preferred_height(
+                size.columns, size.rows, window.wrap_lines(), window.get_line_prefix)
+            # Not min, which shows "Window too small..."; content_rows stops it clipping the buffer.
+            # weight outbids the question window, so the menu stays below the caret.
+            return Dimension(preferred=max(rows, content_rows), weight=5)
+
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
-    # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
+    # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed, no idle menu rows.
     session: Any = _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-        editing_mode=mode, erase_when_done=True,
+        complete_while_typing=False, editing_mode=mode, erase_when_done=True,
         multiline=True, reserve_space_for_menu=0, color_depth=color_depth,
         cursor=ModalCursorShapeConfig() if mode == EditingMode.VI else None)
     if dot_state is not None:
@@ -278,6 +309,7 @@ class Prompt:
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
         solicit_line becomes a harmless defensive no-op (kept)."""
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+        from prompt_toolkit.styles import Style
 
         from imp.cli import palette as pal
 
@@ -294,7 +326,6 @@ class Prompt:
                             else _placeholder_text(color=False, text=ph_text))
         extra: dict[str, Any] = {}
         if bottom_toolbar is not None:
-            from prompt_toolkit.styles import Style
             spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
             # Inline fragment-level noreverse beats the default reverse-video
             # bottom-toolbar class regardless of class-merge precedence.
@@ -302,7 +333,6 @@ class Prompt:
                 extra["bottom_toolbar"] = to_formatted_text(ANSI(spaced), style="noreverse")
             else:
                 extra["bottom_toolbar"] = spaced
-            extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         stdin = sys.stdin
         if stdin.isatty():
             # Drop typed-ahead kernel-buffered bytes so they don't auto-submit into this prompt.
@@ -314,6 +344,7 @@ class Prompt:
                 termios.tcflush(stdin.fileno(), termios.TCIFLUSH)
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
+            style=Style.from_dict(_PROMPT_STYLE),
             prompt_continuation=lambda _w, _l, _s: cont, **extra)
         return str(result) if result is not None else ""
 

@@ -191,12 +191,13 @@ to score).
   `/compact`, `/pause`, `/archive`, and `/clear`, but each prints a redirect and re-prompts
   when typed. **There is no `/list`, `/search`, or `/resume`** client-side. Each is handled
   without spending a model turn; Tab completion covers them (`send("/sk\t")` → `/skills`), an
-  unambiguous prefix fills and an ambiguous one lists candidates; Up-arrow recalls previous
-  input; Alt+Enter (`send("\x1b\r")`) inserts a newline; Ctrl-C clears the buffer (and hints
-  Ctrl-D once). **Note** (see `slash.py`): an unmatched command-shaped `/<name>` (e.g. `/list`)
-  prints `Unknown command: /<name> — /help for the list` and re-prompts; only a path-shaped
-  token (holding `/` or `.`, e.g. `/home/user/foo.py`) is submitted to the model verbatim. Test
-  both: a typo errors client-side, and a pasted path submits as ordinary input.
+  unambiguous prefix fills and an ambiguous one lists candidates, then further Tabs cycle them;
+  Up-arrow recalls previous input; Alt+Enter (`send("\x1b\r")`) inserts a newline;
+  Ctrl-C clears the buffer (and hints Ctrl-D once). **Note** (see `slash.py`): an unmatched
+  command-shaped `/<name>` (e.g. `/list`) prints `Unknown command: /<name> — /help for the list`
+  and re-prompts; only a path-shaped token (holding `/` or `.`, e.g. `/home/user/foo.py`) is
+  submitted to the model verbatim. Test both: a typo errors client-side, and a pasted path submits
+  as ordinary input.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
   (ask something about the repo), then `/pause`. The block should end `· paused` and the chat
   should stay in `imp list`. In fresh chats, after an exchange, try `/archive` and `/clear`

@@ -61,31 +61,37 @@ async def test_ctrl_j_submits_single_line() -> None:
 
 
 async def _drive_keys(skills_dir: Path, editing_mode: str, keys: list[str]) -> str:
-    """Feed keys while the prompt runs; Tab waits for completions of the text
-    typed so far. Times out if Enter never submits."""
+    """Feed keys while the prompt runs; the first Tab waits for the text typed so far,
+    and every Tab then waits for a text change or listed completions, so only drive Tabs
+    that have an effect. Times out if Enter never submits."""
     with create_pipe_input() as pipe, create_app_session(
         input=pipe, output=DummyOutput()
     ):
         session = _build_session(skills_dir, editing_mode=editing_mode)
         buffer = session.default_buffer
 
-        async def completions_ready(typed: str) -> None:
-            while not (
-                buffer.text == typed
-                and buffer.complete_state
-                and buffer.complete_state.original_document.text == typed
-                and buffer.complete_state.completions
+        async def text_typed(typed: str) -> None:
+            while buffer.text != typed:
+                await asyncio.sleep(0.01)
+
+        async def tab_applied(before: str) -> None:
+            while buffer.text == before and not (
+                buffer.complete_state and buffer.complete_state.completions
             ):
                 await asyncio.sleep(0.01)
 
         async def drive() -> str:
             task = asyncio.create_task(session.prompt_async("> "))
+            first_tab = keys.index("\t")
             try:
                 for i, key in enumerate(keys):
-                    if key == "\t":
-                        await completions_ready("".join(keys[:i]))
+                    if i == first_tab:
+                        await text_typed("".join(keys[:i]))
+                    before = buffer.text
                     await asyncio.sleep(0.01)
                     pipe.send_text(key)
+                    if key == "\t":
+                        await tab_applied(before)
                 return str(await task)
             finally:
                 if not task.done():
@@ -99,10 +105,28 @@ async def _drive_keys(skills_dir: Path, editing_mode: str, keys: list[str]) -> s
 async def test_enter_submits_selected_completion_first_press(
     tmp_path: Path, editing_mode: str
 ) -> None:
-    # Builtins only: the first `/pa` candidate is `/pause`.
+    # Builtins only: the second Tab selects `/archive`, the first candidate of `/a`.
+    result = await _drive_keys(tmp_path, editing_mode, ["/", "a", "\t", "\t", "\r"])
+    assert result == "/archive"
+    assert "\n" not in result
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("editing_mode", ["vi", "emacs"])
+async def test_enter_submits_typed_text_when_menu_has_no_selection(
+    tmp_path: Path, editing_mode: str
+) -> None:
+    result = await _drive_keys(tmp_path, editing_mode, ["/", "s", "\t", "\r"])
+    assert result == "/s"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("editing_mode", ["vi", "emacs"])
+async def test_enter_submits_sole_match_filled_by_tab(
+    tmp_path: Path, editing_mode: str
+) -> None:
     result = await _drive_keys(tmp_path, editing_mode, ["/", "p", "a", "\t", "\r"])
     assert result == "/pause"
-    assert "\n" not in result
 
 
 @pytest.mark.anyio
