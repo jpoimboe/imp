@@ -40,7 +40,7 @@ from imp.engine.errors import LoadError
 from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
 
-_REQUIRED_TIERS: tuple[str, ...] = ("low", "medium", "high")
+_REQUIRED_TIERS: tuple[str, ...] = ("high", "medium", "low")
 
 _COMMAND_KEY_EXAMPLES: dict[str, str] = {
     "test_cmd_fast": '"ruff check . && pytest -q"',

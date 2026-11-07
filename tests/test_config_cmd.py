@@ -585,3 +585,30 @@ def test_provider_key_lines_keep_their_three_shapes(
         "  ✗ openai         OPENAI_API_KEY not set",
         "  ✗ codex          MY_CODEX_KEY not set",
     ]
+
+
+@pytest.mark.parametrize("show_all", [True, False])
+def test_config_lists_tiers_high_medium_low(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, show_all: bool
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_config(eff, out, state_dir=None, color=False, show_all=show_all)
+    rows = [ln.split()[:2] for ln in _block(out.getvalue().splitlines(), "tiers:")]
+    tiers = [tier for tier, _ in rows]
+    assert list(dict.fromkeys(tiers)) == ["high", "medium", "low"]
+    assert tiers == sorted(tiers, key=["high", "medium", "low"].index)
+    for tier in ("high", "medium", "low"):
+        vendors = [v for t, v in rows if t == tier]
+        assert vendors == sorted(vendors)
+        if show_all:
+            assert len(vendors) > 1
+
+
+def test_explain_unknown_tier_lists_known_tiers_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_explain(eff, "x", out, color=False)
+    assert out.getvalue() == "unknown tier 'x' (known: ['high', 'medium', 'low'])\n"
