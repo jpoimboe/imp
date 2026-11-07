@@ -24,7 +24,9 @@ Run in a **standalone `git clone`** (not a `git worktree add`) — see the READM
 **Throwaway-clone reference** for why.
 
 ```bash
-REPO=$(git rev-parse --show-toplevel)        # main checkout — the report lands here
+REPO=$(git rev-parse --show-toplevel)        # main checkout — cloned from; stays clean
+REPORTS=${IMP_PLAYBOOK_REPORTS:-${IMP_HOME:-$HOME/.imp}/playbook-reports/$(basename "$REPO")}
+mkdir -p "$REPORTS"                          # reports land here, outside every checkout
 cd "$REPO"
 WT=${TMPDIR:-/tmp}/imp-remote-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
@@ -172,10 +174,10 @@ notes that justify it.
 
 ## 6. Output — the results report
 
-Write one report to the **main checkout** (survives clone deletion):
+Write one report to `$REPORTS` (outside every checkout; survives clone deletion):
 
 ```
-"$REPO"/docs/bugs/<YYYY-MM-DD>-remote-control-playbook-results.md
+"$REPORTS"/<YYYY-MM-DD>-remote-control-playbook-results.md
 ```
 
 It opens, top to bottom, with: (1) the critical `REMOTE-CONTROL: PASS/FAIL` line, the build under
@@ -194,8 +196,9 @@ cd "$WT" && imp list | grep . && imp abandon <id>   # skip if no open change
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 [ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
-git -C "$REPO" status --short   # only the new report file should appear
+git -C "$REPO" status --short   # must print nothing — reports live in $REPORTS
 ```
 
-Stop with a one-paragraph summary: build tested, provider, the `REMOTE-CONTROL: PASS/FAIL` verdict,
-the invariant `RESULT:` line, headline UX findings (or "none"), and the report path.
+If it prints anything, flag it. Stop with a one-paragraph summary: build tested, provider, the
+`REMOTE-CONTROL: PASS/FAIL` verdict, the invariant `RESULT:` line, headline UX findings (or "none"),
+and the report's absolute path.

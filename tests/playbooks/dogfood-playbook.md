@@ -23,11 +23,13 @@
 
 Run in a **standalone `git clone`**, not a `git worktree add` — see the README's
 **Throwaway-clone reference** for why (a clone's control root is *itself*, so the local-layer
-provider override both wins and stays isolated; reports written to the main checkout survive the
-clone's deletion).
+provider override both wins and stays isolated; reports go to `$REPORTS`, outside every checkout,
+so they survive the clone's deletion).
 
 ```bash
-REPO=$(git rev-parse --show-toplevel)        # main checkout — the report lands here
+REPO=$(git rev-parse --show-toplevel)        # main checkout — cloned from; stays clean
+REPORTS=${IMP_PLAYBOOK_REPORTS:-${IMP_HOME:-$HOME/.imp}/playbook-reports/$(basename "$REPO")}
+mkdir -p "$REPORTS"                          # reports land here, outside every checkout
 cd "$REPO"
 WT=${TMPDIR:-/tmp}/imp-dogfood-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                       # standalone clone of HEAD; control root resolves to $WT
@@ -155,10 +157,10 @@ not judged away.
 
 ## 5. Output — the results report
 
-Write one report to the **main checkout** (survives clone deletion):
+Write one report to `$REPORTS` (outside every checkout; survives clone deletion):
 
 ```
-"$REPO"/docs/bugs/<YYYY-MM-DD>-dogfood-playbook-results.md
+"$REPORTS"/<YYYY-MM-DD>-dogfood-playbook-results.md
 ```
 
 It opens, top to bottom, with:
@@ -183,9 +185,9 @@ cd "$WT" && imp list | grep . && imp abandon <id>   # skip if no open change (id
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 [ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
-git -C "$REPO" status --short   # only the new report file should appear
+git -C "$REPO" status --short   # must print nothing — reports live in $REPORTS
 ```
 
-If anything in the main checkout differs beyond the report file, flag it. Stop with a one-paragraph
-summary: build tested, provider, the `DOGFOOD: PASS/FAIL` verdict, the invariant `RESULT:` line,
-headline findings (or "none"), and the report path.
+If it prints anything, flag it. Stop with a one-paragraph summary: build tested, provider, the
+`DOGFOOD: PASS/FAIL` verdict, the invariant `RESULT:` line, headline findings (or "none"), and the
+report's absolute path.

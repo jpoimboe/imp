@@ -26,7 +26,10 @@ description: Drive imp's CLI with fresh eyes and emit a PASS/FAIL UX verdict plu
 ## 1. Setup (throwaway clone)
 
 ```bash
-REPO=$(git rev-parse --show-toplevel)     # main checkout — notes land here, survives clone deletion
+REPO=$(git rev-parse --show-toplevel)        # main checkout — cloned from; stays clean
+REPORTS=${IMP_PLAYBOOK_REPORTS:-${IMP_HOME:-$HOME/.imp}/playbook-reports/$(basename "$REPO")}
+mkdir -p "$REPORTS"                          # reports land here, outside every checkout
+SHOTS="$REPORTS/$(date +%F)-imp-ux-shots"; mkdir -p "$SHOTS"; echo "$SHOTS"   # snapshot dir — note the absolute path
 WT=${TMPDIR:-/tmp}/imp-ux-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
 echo "$WT"                                # cwd for every imp run
@@ -60,7 +63,9 @@ Read state:
 - `view()` → status header `[alive=… regime=… cursor=(x,y)]` + grid; for the streaming CLI
   `regime=scroll` (normal scrollback). Cursor parked after a prompt = waiting on you.
 - `view(full=True)` → the whole run so far (scrollback + screen).
-- `snapshot()` → PNG; use it to **see** color, glyphs, alignment, spacing when judging polish.
+- `snapshot(path="<SHOTS>/<theme>-<screen>.png")` → PNG; use it to **see** color, glyphs,
+  alignment, spacing when judging polish. Save **every** snapshot this way, with `<SHOTS>` the
+  literal absolute path echoed at setup — the tool expands no `$SHOTS` and creates no parent dirs.
 - `wait()` → settle after output. `stop()` → end a run.
 
 ### The interrupt model
@@ -231,9 +236,9 @@ to score).
 
 ## 4. Output — PASS/FAIL verdict + suggestions
 
-Write **one** report to the main checkout (survives clone deletion):
+Write **one** report to `$REPORTS` (outside every checkout; survives clone deletion):
 ```
-"$REPO"/docs/issues/<YYYY-MM-DD>-imp-ux-cli-notes.md
+"$REPORTS"/<YYYY-MM-DD>-imp-ux-cli-notes.md
 ```
 
 Open with the **verdict**, then functional findings, then suggestions — in this order:
@@ -248,7 +253,9 @@ Open with the **verdict**, then functional findings, then suggestions — in thi
 2. **Functional findings** — anything that broke or misbehaved, each with repro (exact `start`
    argv, keystrokes, config) and `view(full=True)` / `snapshot()` evidence.
 3. **Polish suggestions** — the open-ended list: per-area usability/readability/polish notes
-   with `snapshot()` PNG paths for visuals and per-theme (dark/light/ansi) differences; a
+   with relative image links for visuals (e.g.
+   `![plan screen, dark](<YYYY-MM-DD>-imp-ux-shots/dark-plan.png)`) and per-theme
+   (dark/light/ansi) differences; a
    ranked top-suggestions shortlist (highest-impact first, one-line rationale + rough effort);
    and a "what worked well" call-out (a clean area is a result).
 
@@ -266,8 +273,7 @@ functional findings as *defects* (severity = correctness).
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 [ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 cd "$REPO" && rm -rf "$WT"
-git -C "$REPO" status --short    # only the notes file(s) should be new
+git -C "$REPO" status --short   # must print nothing — reports live in $REPORTS
 ```
-If anything in the main checkout changed besides the notes file(s), flag it. Then stop with a
-one-paragraph wrap-up: build tested, themes/commands walked, the PASS/FAIL verdict,
-headline suggestions, report path.
+If it prints anything, flag it. Then stop with a one-paragraph wrap-up: build tested,
+themes/commands walked, the PASS/FAIL verdict, headline suggestions, the report's absolute path.

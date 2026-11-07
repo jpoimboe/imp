@@ -22,10 +22,10 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
 
 - **Surface polish pass** (`imp-ux-playbook.md`) — open-ended, judgment-led. Walk the CLI
   surface with fresh eyes and emit an agent-authored **PASS/FAIL verdict** plus a
-  suggestions list → `docs/issues/`.
+  suggestions list → `<YYYY-MM-DD>-imp-ux-cli-notes.md`.
 - **Correctness matrix** (`interrupt-playbook.md`) — exhaustive and binary. Fire every
   (provider × state × trigger) combination, grep for orphans and event-log classification,
-  pass/fail each cell → `docs/bugs/`.
+  pass/fail each cell → `<YYYY-MM-DD>-interrupt-playbook-results.md`.
 
 ## Conventions
 
@@ -40,11 +40,15 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
   render. Full scroll-back is `view(full=True)`, not a separate tool. See the shared impty
   fidelity reference below.
 - **Run in a throwaway standalone `git clone`** — see the throwaway-clone reference below.
-- **Reports land in the main checkout** so they survive clone deletion: correctness matrices →
-  `docs/bugs/<YYYY-MM-DD>-<name>-playbook-results.md`; polish passes →
-  `docs/issues/<YYYY-MM-DD>-imp-ux-cli-notes.md`. **A clean run is still a report** — write
-  the matrix/verdict and an explicit "no defects observed" note. A passing run that produces no
-  artifact is the most likely failure of this convention.
+- **Reports land outside every checkout**, in `$REPORTS`: `$IMP_PLAYBOOK_REPORTS` if set, else
+  `${IMP_HOME:-$HOME/.imp}/playbook-reports/<repo-name>/`, created at setup. They survive clone
+  deletion and leave the main checkout completely clean. Correctness matrices →
+  `<YYYY-MM-DD>-<name>-playbook-results.md`; polish passes → `<YYYY-MM-DD>-imp-ux-cli-notes.md`,
+  with screenshots beside it in `<YYYY-MM-DD>-imp-ux-shots/`. **A clean run is still a report** —
+  write the matrix/verdict and an explicit "no defects observed" note. A passing run that produces
+  no artifact is the most likely failure of this convention.
+- **Run playbooks outside imp's sandbox** (a host shell or `/sandbox off`): inside it
+  `~/.imp/projects` is read-only and writes under `$HOME` are discarded when the step ends.
 
 ## Shared impty fidelity reference
 
@@ -100,13 +104,15 @@ symbols or branch paths into a playbook.
   A communication artifact, not a pass/fail test.
 - `dogfood-playbook.md` — run-to-completion outcome/e2e acceptance test: drive a full `imp new` run
   to completion + merge, judge the produced work with fresh eyes, run `check_dogfood_invariants.py`,
-  and write a critical PASS/FAIL results report → `docs/bugs/`.
+  and write a critical PASS/FAIL results report → `<YYYY-MM-DD>-dogfood-playbook-results.md`.
 - `remote-control-playbook.md` — drive a full Change from the chat (fake Telegram harness + real
   `imp remote-control start` via `IMP_TELEGRAM_API_BASE`) to completion + merge, exercise `/help` /
   `/list` / `/new` / `/abandon` / the unknown-command notice / the unroutable-message hint, judge
-  the multi-Change chat UX, and write a PASS/FAIL + UX verdict → `docs/bugs/`. Validates
+  the multi-Change chat UX, and write a PASS/FAIL + UX verdict →
+  `<YYYY-MM-DD>-remote-control-playbook-results.md`. Validates
   `imp/specs/2026-06-14-remote-control-chat-commands.md`.
 - `imp-ux-playbook.md` — surface polish pass: walk the CLI surface with fresh eyes and emit an
-  agent-authored PASS/FAIL verdict plus a suggestions list → `docs/issues/`.
+  agent-authored PASS/FAIL verdict plus a suggestions list → `<YYYY-MM-DD>-imp-ux-cli-notes.md`.
 - `interrupt-playbook.md` — correctness matrix: fire every (provider × state × trigger)
-  combination, grep for orphans and event-log classification, pass/fail each cell → `docs/bugs/`.
+  combination, grep for orphans and event-log classification, pass/fail each cell →
+  `<YYYY-MM-DD>-interrupt-playbook-results.md`.

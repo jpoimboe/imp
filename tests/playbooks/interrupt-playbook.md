@@ -221,7 +221,7 @@ A correct imp does **all** of:
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
-- **Bug report** goes to the **main checkout** (survives clone deletion). Path in §7.
+- **Bug report** goes to `$REPORTS`, outside every checkout (survives clone deletion). Path in §7.
 
 If any of these is wrong, say so and stop.
 
@@ -271,7 +271,9 @@ Use a **standalone `git clone`**, not `git worktree add` — see §1. A clone's 
 isolated; a linked worktree's local layer would resolve to the shared main checkout.
 
 ```bash
-REPO=$(git rev-parse --show-toplevel)   # main checkout — report lands here, survives clone deletion
+REPO=$(git rev-parse --show-toplevel)        # main checkout — cloned from; stays clean
+REPORTS=${IMP_PLAYBOOK_REPORTS:-${IMP_HOME:-$HOME/.imp}/playbook-reports/$(basename "$REPO")}
+mkdir -p "$REPORTS"                          # reports land here, outside every checkout
 cd "$REPO"
 WT=${TMPDIR:-/tmp}/imp-interrupt-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                 # standalone clone of HEAD → control root resolves to $WT itself
@@ -544,15 +546,18 @@ These don't need to run at every point — fire each **at least once** somewhere
 
 ## 7. Report
 
-Write a report to the **main checkout** (not the clone):
+Write a report to `$REPORTS` (outside every checkout; survives clone deletion):
 
 ```
-"$REPO"/docs/bugs/<YYYY-MM-DD>-interrupt-playbook-results.md
+"$REPORTS"/<YYYY-MM-DD>-interrupt-playbook-results.md
 ```
 
 For each point and trigger, record: the state reached, the trigger delivered, the full
-`view(full=True)` snippet (or `snapshot()` path), whether the §0 bar passed, and any
-deviation from expected behavior.
+`view(full=True)` snippet (or a cited snapshot), whether the §0 bar passed, and any
+deviation from expected behavior. Save a cited snapshot with `snapshot(path=…)` under
+`"$REPORTS"/<YYYY-MM-DD>-interrupt-shots/` (create it only if you cite one; pass the literal
+absolute path — the tool expands no variables and creates no parent dirs) and link it
+relatively, e.g. `![point C leave banner](<YYYY-MM-DD>-interrupt-shots/point-c.png)`.
 
 Include:
 - **Build under test:** `git -C "$REPO" rev-parse --short HEAD`
@@ -573,13 +578,13 @@ cd "$WT" && imp abandon <id>   # abandon any open quests in the clone (get <id> 
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 [ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
-git -C "$REPO" status --short  # only the report file should be new
+git -C "$REPO" status --short   # must print nothing — reports live in $REPORTS
 ```
 
-If anything in the main checkout is different from the report file, flag it.
+If it prints anything, flag it.
 
 Stop with a one-paragraph summary: build tested and provider, tally of PASS/FAIL/SKIP
-per point, headline defects (or "none"), report path.
+per point, headline defects (or "none"), the report's absolute path.
 
 ---
 
