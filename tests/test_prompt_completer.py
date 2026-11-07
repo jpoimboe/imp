@@ -124,6 +124,11 @@ def test_model_arg_completes_full_set_including_aliases(tmp_path: Path) -> None:
     assert set(_texts(c, "/model ")) == set(_ROSTER)
 
 
+def test_model_arg_candidates_keep_the_source_order(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path), roster_models=lambda: list(_ROSTER))
+    assert _texts(c, "/model ") == _ROSTER
+
+
 def test_model_arg_prefix_narrows(tmp_path: Path) -> None:
     c = SlashCompleter(_skills(tmp_path), roster_models=lambda: list(_ROSTER))
     # bare-alias prefix: only the alias starts with "op"
