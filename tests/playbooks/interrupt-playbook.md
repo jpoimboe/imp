@@ -89,16 +89,8 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 > **state**: `paused` (gold) followed by a dim ` · <Display>` qualifier naming the trigger —
 > `paused · Ctrl-D` for the keystroke leave, `paused · /pause` for a typed `/pause` at a
 > built quest's prompt, and `paused · SIGTERM` / `paused · SIGHUP` / `paused · SIGQUIT` for
-> signal leaves. The internal reason stays lowercase; only the display form differs. The
-> keystroke leave also echoes a dim `> Ctrl-D` shadow at the caret above the head (see the
-> caret-shadow note below); `/pause` (already echoed as typed) and signal leaves print no
-> caret line.
-
-> **Keystroke caret shadow — `> Ctrl-D` above the head.** On a keystroke (Ctrl-D) leave,
-> `pal.caret()` (gold `> `) prints immediately followed by the dim display form `Ctrl-D`, so a
-> `> Ctrl-D` shadow renders just above the `paused · Ctrl-D` head — an intentional echo of the
-> keystroke, not a stray caret. Out-of-band signal leaves (SIGTERM/SIGHUP/SIGQUIT) print no
-> caret line.
+> signal leaves. The internal reason stays lowercase; only the display form differs.
+> No leave echoes a caret line of its own; a typed `/pause` keeps its ordinary `> /pause` echo.
 
 ### 0b. The bar for "correct" (every interrupt point, unless stated otherwise)
 
