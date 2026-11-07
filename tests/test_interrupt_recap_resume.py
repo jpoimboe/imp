@@ -137,8 +137,13 @@ def test_quiet_attach_recap_without_splash_keeps_one_blank_each_side() -> None:
 def test_no_recap_text_leaves_the_resume_screen_unchanged() -> None:
     events = _opening_thinking()
     lines = _prompt_screen(events, [LIVE_GATE], recap=False)
-    assert lines == ["banner", "", "", "> PROMPT"]
+    assert lines == ["banner", "", "> PROMPT"]
     assert _prompt_screen(events, [LIVE_GATE], recap=True) == lines
+
+
+def test_first_prompt_without_a_splash_keeps_its_separator_under_the_header() -> None:
+    lines = _prompt_screen(_opening_thinking(), [LIVE_GATE], splash=False, recap=False)
+    assert lines == ["feat · demo · resuming", "", "> PROMPT"]
 
 
 @pytest.fixture

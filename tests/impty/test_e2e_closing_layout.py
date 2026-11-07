@@ -14,6 +14,7 @@ from impty import TerminalSession
 from tests.impty.e2e_support import (
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
+    _flock_free,
     _poll,
     can_pty,
 )
@@ -201,3 +202,34 @@ def test_sigterm_with_stdout_piped_writes_no_row_above_the_block(tmp_path: Path)
     assert rows[at - 1] != "", "\n".join(rows)
     assert rows[at + 1:at + 3] == [
         f"{quest_dir.name} · piped", f"resume: imp resume {quest_dir.name}"], "\n".join(rows)
+
+
+def test_live_resume_has_one_blank_above_its_first_prompt_and_its_closing_block(
+    tmp_path: Path,
+) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_BUSY_TURNS, interrupt="cooperative")
+    env = _env(script)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new", "live resume", "--title", "live resume"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        quest_dir = _await_quest_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
+        assert _poll(lambda: (quest_dir / "busy").exists(), timeout=E2E_POLL_TIMEOUT), _screen(s)
+        s.send_signal(signal.SIGTERM)
+        s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+    assert _poll(lambda: _flock_free(quest_dir / "lock"), timeout=E2E_POLL_TIMEOUT)
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "resume", quest_dir.name],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as r:
+        _at_empty_prompt(r)
+        rows = r.lines()
+        at = next(i for i, row in enumerate(rows) if _PLACEHOLDER in row)
+        assert rows[at - 1] == "", _screen(r)
+        assert rows[at - 2] != "", _screen(r)
+        r.send("\x04")
+        rc = r.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(r)
+        _assert_ctrl_d_block(r, quest_dir.name, "live resume")

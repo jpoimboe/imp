@@ -885,7 +885,7 @@ class LiveDriver:
         the prompt active so subsequent _print_lines are deferred (§5a). Self-hiding
         and idempotent."""
         self._status.hide()
-        if self._prev_prose:
+        if self._prev_prose and not (self._preceded_by_blank and not self._emitted_any):
             depth = self._frontier_depth()
             indent = rt._gutter_indent(depth, self._gutters(), self._color)
             self._stream.write(indent + "\n")
