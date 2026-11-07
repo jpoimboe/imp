@@ -1074,6 +1074,114 @@ def test_group_c_state_reads_poll_and_report_evidence():
         assert "evidence(" in src
 
 
+_DAEMON_GONE_WHAT = "daemon exited before the interrupt: the lock was gone after the bash tool_call"
+
+
+def _record_signals(monkeypatch):
+    signals = []
+    monkeypatch.setattr(os, "kill", lambda *args: signals.append(args))
+    return signals
+
+
+def test_relay_skip_or_fail_without_a_pid_fails_and_signals_nothing(tmp_path, monkeypatch):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = tmp_path / "q"
+    with pytest.raises(pytest.fail.Exception) as exc:
+        _relay_skip_or_fail(
+            _DAEMON_GONE_WHAT, quest_dir / "events.jsonl", ["a screen line"], None, quest_dir)
+    msg = str(exc.value)
+    assert msg.startswith(_DAEMON_GONE_WHAT)
+    assert "a screen line" in msg
+    assert "events.jsonl types: []" in msg
+    assert "daemon stack dump:\n<daemon already exited>" in msg
+    assert signals == []
+
+
+def test_relay_skip_or_fail_with_a_pid_reports_the_daemon_stack_dump(tmp_path, monkeypatch):
+    import tests.test_relay_hibernation_live as relay
+    signals = _record_signals(monkeypatch)
+    monkeypatch.setattr(relay, "_usr1_stack_dump", lambda pid, _quest_dir: f"stack of {pid}")
+    quest_dir = tmp_path / "q"
+    with pytest.raises(pytest.fail.Exception) as exc:
+        relay._relay_skip_or_fail("a miss", quest_dir / "events.jsonl", [], 4242, quest_dir)
+    assert "daemon stack dump:\nstack of 4242" in str(exc.value)
+    assert signals == []
+
+
+@pytest.mark.parametrize("daemon_pid", [None, 4242])
+def test_relay_skip_or_fail_skips_on_the_sandbox_precondition(tmp_path, monkeypatch, daemon_pid):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    events = quest_dir / "events.jsonl"
+    _write_events(events, [_bash_call(), _sandbox_failed_result(shape="list")])
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _relay_skip_or_fail(_DAEMON_GONE_WHAT, events, [], daemon_pid, quest_dir)
+    assert exc.value.msg == _EXPECTED_REASON
+    assert signals == []
+
+
+def test_relay_skip_or_fail_skips_on_the_sandbox_precondition_in_a_reaped_home(
+    tmp_path, monkeypatch,
+):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = _archived_quest_dir(
+        tmp_path, "arch06", _events_text(_bash_call(), _sandbox_failed_result(shape="list")))
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _relay_skip_or_fail(_DAEMON_GONE_WHAT, quest_dir / "events.jsonl", [], None, quest_dir)
+    assert exc.value.msg == _EXPECTED_REASON
+    assert signals == []
+
+
+def test_relay_test_checks_foreground_sleep_before_the_grace_sleep():
+    import tests.test_relay_hibernation_live as relay
+    src = Path(relay.__file__).read_text()
+    wait = src.index("bash_call = wait_for_bash_tool_call(events, timeout=120.0)")
+    assert (src.index('assert bash_call, "never saw bash tool_call"', wait)
+            < src.index("skip_unless_foreground_sleep(bash_call)", wait)
+            < src.index("time.sleep(_CC_STARTUP_GRACE)", wait))
+
+
+def test_relay_test_first_lock_read_tolerates_a_reaped_home():
+    import re
+
+    import tests.test_relay_hibernation_live as relay
+    src = Path(relay.__file__).read_text()
+    guarded = re.search(
+        r"try:\s+daemon_pid = int\((lock_path\.read_text\(\))\.strip\(\)\)\s+"
+        r"except FileNotFoundError:\s+_relay_skip_or_fail\(\s+"
+        + re.escape(f'"{_DAEMON_GONE_WHAT}"')
+        + r",\s+events, s\.lines\(\), None, quest_dir,",
+        src,
+    )
+    assert guarded is not None
+    assert src.index("lock_path.read_text()") == guarded.start(1)
+
+
+def test_relay_test_registers_quest_evidence_once_the_home_is_known():
+    import inspect
+
+    import tests.test_relay_hibernation_live as relay
+    test_fn = relay.test_relay_hibernate_then_resume_reengages
+    assert "register_quest_evidence" in inspect.signature(test_fn).parameters
+    src = Path(relay.__file__).read_text()
+    assert (src.index("quest_dir = _await_change_dir(")
+            < src.index("register_quest_evidence(quest_dir)")
+            < src.index("bash_call = wait_for_bash_tool_call("))
+
+
+def test_live_helpers_no_longer_name_the_retired_mount_failure():
+    for rel in ("tests/_live.py", "tests/test_relay_hibernation_live.py",
+                "tests/test_mid_step_resume_live.py"):
+        body = (_REPO_ROOT / rel).read_text().lower()
+        for stale in ("overlay", "rc 32", "wrong fs type"):
+            assert stale not in body, f"{rel} still names {stale!r}"
+    assert "~2s" not in (_REPO_ROOT / "tests/test_relay_hibernation_live.py").read_text()
+
+
 def test_live_category_prose_never_says_api():
     """The `live` marker gates on a provider toolchain, which may be only a CLI
     binary — so `live-API` is retired as the category name."""

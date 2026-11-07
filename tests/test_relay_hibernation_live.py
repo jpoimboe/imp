@@ -21,7 +21,9 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -30,6 +32,7 @@ from tests._live import (
     _await_change_dir,
     evidence,
     sandbox_sleep_precondition_failed,
+    skip_unless_foreground_sleep,
     wait_for_bash_tool_call,
     wait_for_status,
 )
@@ -139,17 +142,21 @@ def _relay_skip_or_fail(
     what: str,
     events: Path,
     screen: list[str],
-    daemon_pid: int,
+    daemon_pid: int | None,
     quest_dir: Path,
-) -> None:
-    """On a gate miss: skip legibly when imp's bash-sandbox overlay mount failed
-    (the writer's `sleep 30` never ran, so the mid-turn SIGINT never interrupted
-    a live turn); otherwise fail with diagnostics — the current screen lines, the
-    events.jsonl event-type sequence, and the daemon's own SIGUSR1 stack dump."""
+) -> NoReturn:
+    """On a gate miss: skip legibly when imp's bash sandbox could not start (the
+    writer's `sleep 30` never ran, so the mid-turn SIGINT never interrupted a live
+    turn); otherwise fail with diagnostics — the current screen lines, the
+    events.jsonl event-type sequence, and the daemon's own SIGUSR1 stack dump. A
+    None daemon_pid means the daemon has exited, so nothing is signalled."""
     reason = sandbox_sleep_precondition_failed(events)
     if reason is not None:
         pytest.skip(reason)
-    stack = _usr1_stack_dump(daemon_pid, quest_dir)
+    stack = (
+        "<daemon already exited>" if daemon_pid is None
+        else _usr1_stack_dump(daemon_pid, quest_dir)
+    )
     pytest.fail(
         f"{what}\n"
         f"screen lines:\n" + "\n".join(screen) + "\n"
@@ -159,7 +166,9 @@ def _relay_skip_or_fail(
 
 
 @pytest.mark.live("claude")
-def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
+def test_relay_hibernate_then_resume_reengages(
+    tmp_path: Path, register_quest_evidence: Callable[[Path], None],
+) -> None:
     _seed_cc_project(tmp_path)
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     _pypath = env.get("PYTHONPATH", "")
@@ -175,18 +184,28 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         # at the permanent control-root home .imp/quests/<id>/. The minimal
         # workflow never calls create_and_enter_worktree, so it runs as a draft.
         quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        register_quest_evidence(quest_dir)
         slug = quest_dir.name
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
         lock_path = quest_dir / "lock"
 
-        assert wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
+        bash_call = wait_for_bash_tool_call(events, timeout=120.0)
+        assert bash_call, "never saw bash tool_call"
+        skip_unless_foreground_sleep(bash_call)
         time.sleep(_CC_STARTUP_GRACE)
 
         # The daemon holds the flock throughout the live turn; capture its pid now
         # so a residual-failure diagnostic can SIGUSR1 it for a stack dump before
-        # the SIGQUIT detach below tears it down.
-        daemon_pid = int(lock_path.read_text().strip())
+        # the SIGQUIT detach below tears it down. A run that has already finished
+        # reaped its home, lock included.
+        try:
+            daemon_pid = int(lock_path.read_text().strip())
+        except FileNotFoundError:
+            _relay_skip_or_fail(
+                "daemon exited before the interrupt: the lock was gone after the bash tool_call",
+                events, s.lines(), None, quest_dir,
+            )
 
         # SIGINT mid-turn is the cooperative interrupt: the run yields inline to
         # the human (it does NOT pause yet — that happens on the SIGQUIT detach
@@ -197,12 +216,12 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         # Authoritative gate-engaged check: the engine journals an
         # awaiting_user_input{interrupt: true} event the instant the steer gate
         # engages — before any socket relay or pty repaint — so it is
-        # render-independent. When it never arrives the cause is imp's bash-sandbox
-        # per-command overlay home failing to mount: `sleep 30` never ran, the
-        # model's turn ended in ~2s, and the mid-turn SIGINT landed too late to
-        # interrupt a live turn (the cooperative interrupt then times out ~2002ms
-        # and escalates to a hard-kill paused). _relay_skip_or_fail SKIPs on that
-        # precondition and otherwise fails with diagnostics.
+        # render-independent. It never arrives when imp's bash sandbox could not
+        # start: the bash result has status sandbox_setup_failed, `sleep 30` never
+        # ran, and the mid-turn SIGINT landed too late to interrupt a live turn (the
+        # cooperative interrupt then times out ~2002ms and escalates to a hard-kill
+        # paused). _relay_skip_or_fail SKIPs on that precondition and otherwise fails
+        # with diagnostics.
         if not _poll(lambda: _interrupt_gate_engaged(events), timeout=E2E_POLL_TIMEOUT):
             _relay_skip_or_fail(
                 "cooperative interrupt-steer gate never engaged "
@@ -212,7 +231,7 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
 
         # The tty must still paint the hint once the gate genuinely engaged: this
         # guards the pty render path, so a real render regression fails here — now
-        # distinguishable from the overlay-mount precondition handled above. That
+        # distinguishable from the sandbox-setup precondition handled above. That
         # repaint trails the durable gate event by an extra cross-process relay ->
         # prompt_toolkit render (3 async hops over a socket), which -n auto CPU
         # saturation can stretch past the base ceiling. Give this one render-bound
