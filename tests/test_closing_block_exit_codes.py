@@ -57,7 +57,7 @@ def _paused(**payload: str) -> Any:
     pytest.param(_ended_by("save"), "paused", 130, id="end-frame-leave"),
     pytest.param(
         _ending_with(StreamEnding.CUT,
-                     {"type": "quest_merged", "payload": {"base": "main"}}),
+                     {"type": "quest_merged", "payload": {"base": "main", "commit": "abc123"}}),
         "paused", 0, id="merged"),
     pytest.param(
         _ending_with(StreamEnding.CUT, {"type": "workflow_completed", "payload": {}}),

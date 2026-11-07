@@ -3779,12 +3779,14 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
     drv.finish()                           # shared teardown: preserves the one owned blank
     monkeypatch.setenv("NO_COLOR", "1")    # plain block → clean screen rows
     with contextlib.redirect_stdout(out):
-        main._emit_completed(_Quest(), merged_base="master")
+        main._emit_completed(
+            _Quest(), merge=main.Merge(base="master",
+                                       commit="83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"))
 
     screen = TerminalScreen(80, 16, history=200, ratio=0.5)
     pyte.ByteStream(screen).feed(out.getvalue().encode())
     rows = screen_lines(screen)
-    spine = "2026-06-12-run-x · (unnamed) · merged into master"
+    spine = "2026-06-12-run-x · (unnamed) · merged into master as 83e4cf23"
     c = next(i for i, r in enumerate(rows) if r.strip() == spine)
     assert rows[c - 1].strip() == ""            # exactly one blank directly above the block
     assert rows[c - 2].strip() != ""            # …and not two — the row above the blank has content
@@ -3887,14 +3889,16 @@ def test_finish_counts_a_terminal_node_blank_as_the_tail(node: object) -> None:
     assert _rows_above_closing_block(out) == ["last row", ""]
 
 
-@pytest.mark.parametrize(("landing", "merged_base", "head"), [
-    (ev("6", "quest_merged", base="main", quest_id="2026-06-12-run-x"), "main",
-     "2026-06-12-run-x · (unnamed) · merged into main"),
+@pytest.mark.parametrize(("landing", "merge_fields", "head"), [
+    (ev("6", "quest_merged", base="main", quest_id="2026-06-12-run-x"),
+     ("main", "83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"),
+     "2026-06-12-run-x · (unnamed) · merged into main as 83e4cf23"),
     (ev("6", "workflow_completed", quest_id="2026-06-12-run-x"), None,
      "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x"),
 ], ids=["merged", "completed"])
 def test_landing_block_has_one_blank_above_it(
-    landing: dict, merged_base: str | None, head: str, monkeypatch: pytest.MonkeyPatch,
+    landing: dict, merge_fields: tuple[str, str] | None, head: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import contextlib
 
@@ -3921,7 +3925,8 @@ def test_landing_block_has_one_blank_above_it(
     drv.finish()
     monkeypatch.setenv("NO_COLOR", "1")
     with contextlib.redirect_stdout(out):
-        main._emit_completed(_Quest(), merged_base=merged_base)
+        main._emit_completed(
+            _Quest(), merge=None if merge_fields is None else main.Merge(*merge_fields))
     rows = _screen_rows(out)
     at = rows.index(head)
     assert rows[at - 1] == ""

@@ -662,7 +662,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
-    assert "merged into main" in captured.out         # rendered from the archived merge commit
+    assert "merged into main as abc123" in captured.out   # sha from the archived merge commit
 
 
 @pytest.mark.anyio
@@ -1405,7 +1405,7 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
     # The daemon finished in the milliseconds after the cut (the behi75 case).
     quest = _make_quest(tmp_path, "2026-07-04-cut-merged")
     State(id=quest.id, step=None, step_attempt=0, status="completed",
-          merge_commit="abc123").save(
+          merge_commit="83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f").save(
         quest.state_dir)
     quest.event_log().append(agent_id=None, type="quest_merged", payload={})
     monkeypatch.setattr(session_run, "run_terminal_client", _cut)
@@ -1415,7 +1415,7 @@ async def test_cut_ending_with_merged_state_renders_the_completed_block(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main as 83e4cf23"
     assert "lost the connection" not in out
 
 
@@ -1636,7 +1636,7 @@ async def test_end_frame_with_merged_state_renders_the_completed_block(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main as abc123"
     assert "lost the connection" not in out
 
 
@@ -2021,7 +2021,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
     assert rc == 0
     # The witnessed payload names the base (the quest's own attribute is `main`),
     # and the identity line carries the witnessed opening prompt.
-    assert out == f"{quest.id} · fold the corrections · merged into master\n\n"
+    assert out == f"{quest.id} · fold the corrections · merged into master as 20d0d699\n\n"
     assert "paused" not in out
     assert "resume: imp resume" not in out
 
@@ -2190,7 +2190,7 @@ async def test_a_witnessed_outcome_preempts_a_keystroke_leave_and_prints_no_care
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == f"{quest.id} · T · merged into main\n\n"
+    assert out == f"{quest.id} · T · merged into main as abc123\n\n"
     assert "> Ctrl-D" not in out
     assert "paused" not in out
 
@@ -2310,7 +2310,7 @@ async def test_a_resumed_merge_blocked_then_a_merge_renders_merged(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.split("\n")[0] == f"{quest.id} · T · merged into main"
+    assert out.split("\n")[0] == f"{quest.id} · T · merged into main as abc123"
     assert "merge blocked" not in out
 
 
