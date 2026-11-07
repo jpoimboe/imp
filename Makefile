@@ -85,6 +85,7 @@ _LIVE_TEST_FILES := \
   tests/test_claude_resume_stub_live.py \
   tests/test_native_session_resume_live.py \
   tests/test_relay_hibernation_live.py \
+  tests/test_complete_step_batched_live.py \
   tests/test_codex_provider_live.py \
   tests/test_codex_started_keying_live.py \
   tests/test_codex_context_reading_live.py \

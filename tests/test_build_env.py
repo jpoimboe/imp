@@ -205,3 +205,10 @@ def test_test_live_runs_the_read_only_credentials_copy_test() -> None:
     out = _make_n("test-live")
     assert out.returncode == 0, out.stderr
     assert "tests/test_provider_auth_readonly_live.py" in out.stdout
+
+
+def test_test_live_runs_the_batched_complete_step_test() -> None:
+    # `make test-live` runs only its listed files, so an unlisted one runs nowhere.
+    out = _make_n("test-live")
+    assert out.returncode == 0, out.stderr
+    assert "tests/test_complete_step_batched_live.py" in out.stdout
