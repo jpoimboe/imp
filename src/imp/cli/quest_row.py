@@ -113,26 +113,17 @@ def name_budget(*, indent: int = 0) -> int:
     return max(NAME_MIN, min(NAME_CAP, cols - _PREFIX_W - indent))
 
 
-def overview_widths(rows: list[tuple[str, str | None, str]]) -> tuple[int, int]:
-    """Compute (status_width, name_width) for the overview from its rendered
-    rows. Each row is (status_word, inner_label_or_None, name_text). STATUS and
-    NAME share the flexible region left after the fixed ID/UPDATED columns and
-    the three 2-space gaps; NAME is the first claimant, capped at NAME_CAP, and
-    STATUS takes the leftover, floored at the status-word width and grown only
-    up to the width its own content needs."""
+def overview_widths(rows: list[tuple[str, str | None, str]], *,
+                    indent: int = 0) -> tuple[int, int]:
+    """(status_width, name_width) sized to what (raw status, label, name) `rows` print."""
     cols = shutil.get_terminal_size((80, 24)).columns
-    region = cols - (ID_W + AGE_W + 6)     # three 2-space gaps
-
-    def cell_len(status: str, label: str | None) -> int:
-        return len(status) if label is None else len(status) + len(label) + 3
-
-    status_floor = max([len("STATUS")] + [len(s) for s, _, _ in rows])
-    status_content = max([len("STATUS")] + [cell_len(s, lbl) for s, lbl, _ in rows])
-    name_content = min(NAME_CAP, max([0] + [len(n) for _, _, n in rows]))
-
-    status_width = min(max(region - name_content, status_floor), status_content)
-    status_width = min(status_width, max(status_floor, region - NAME_MIN))
-    name_width = min(NAME_CAP, max(NAME_MIN, region - status_width))
+    region = cols - (ID_W + AGE_W + 6) - indent     # three 2-space gaps
+    status_floor = max([len("STATUS")] + [len(display_word(s)) for s, _, _ in rows])
+    name_content = max(NAME_MIN, min(NAME_CAP, max([0] + [len(n) for _, _, n in rows])))
+    name_width = max(NAME_MIN, min(name_content, region - status_floor))
+    budget = max(status_floor, region - name_width)
+    status_width = max([len("STATUS")]
+                       + [len(_fit_label(display_word(s), lbl, budget)) for s, lbl, _ in rows])
     return status_width, name_width
 
 
@@ -154,23 +145,18 @@ def compose_status_label(step: str, step_label: str | None,
     return f"{phase_label} · {label}" if phase_label else label
 
 
+def _fit_label(status: str, label: str | None, width: int) -> str:
+    """`status (label)` if the whole suffix fits width, else the bare word."""
+    if label is None or len(label) > width - len(status) - 3:
+        return status
+    return f"{status} ({label})"
+
+
 def _status_segment(status: str, step: str, step_label: str | None,
                     *, phase_label: str | None = None,
                     status_width: int = STATUS_W) -> str:
-    """Status word plus dim ` (label)` suffix; bare word for stepless rows.
-
-    When the full ` (label)` suffix does not fit the cell — either no room for
-    the framing (budget < 1) or the label itself is longer than the budget —
-    the whole parenthetical is dropped and the bare status word is returned,
-    never a partial `(…)`; the segment length is always <= status_width.
-    """
-    label = compose_status_label(step, step_label, phase_label)
-    if label is None:
-        return status
-    budget = status_width - len(status) - 3   # one space + "(" + ")"
-    if budget < 1 or len(label) > budget:
-        return status
-    return f"{status} ({label})"
+    return _fit_label(status, compose_status_label(step, step_label, phase_label),
+                      status_width)
 
 
 def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
