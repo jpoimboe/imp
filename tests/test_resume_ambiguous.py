@@ -82,3 +82,71 @@ def test_exit_ambiguous_names_titleless_candidates_by_their_opening(
     assert "summarize foo.py" in next(ln for ln in lines if ln.startswith("amb001"))
     assert "fix the login crash" in next(ln for ln in lines if ln.startswith("amb002"))
     assert "(unnamed)" not in err
+
+
+def test_exit_ambiguous_sizes_columns_to_content(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    import os
+    import re
+
+    from imp.cli.store import QuestCard
+
+    class FakeStore:
+        def quest_card(self, cid: str) -> QuestCard:
+            return QuestCard(
+                quest_id=cid, status="paused", pause_reason=None, step="plan",
+                last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
+                created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
+                workflow="default", base_branch=None, merge_commit=None, parent=None,
+                depends_on=[], intent=None, seed_opening=None, summary=None, vars={})
+
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: FakeStore())
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((80, 24)))
+    with pytest.raises(SystemExit):
+        m._exit_ambiguous("a", ["aaa111", "abb222"], tmp_path)
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[1] == "ID      NAME        STATUS         UPDATED"
+    assert re.fullmatch(r"aaa111  Title 111   paused \(plan\)  \d+[smhd]", lines[2])
+    assert re.fullmatch(r"abb222  Title 222   paused \(plan\)  \d+[smhd]", lines[3])
+
+
+def test_exit_ambiguous_sizes_around_missing_and_titleless_cards(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    import os
+    import re
+
+    from imp.cli.store import QuestCard
+
+    def card(cid: str, title: str | None, seed_opening: str | None) -> QuestCard:
+        return QuestCard(
+            quest_id=cid, status="paused", pause_reason=None, step="plan",
+            last="2026-06-11T11:45:00+00:00", title=title,
+            created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
+            workflow="default", base_branch=None, merge_commit=None, parent=None,
+            depends_on=[], intent=None, seed_opening=seed_opening, summary=None, vars={})
+
+    class FakeStore:
+        def quest_card(self, cid: str) -> QuestCard | None:
+            return {
+                "aaa111": card(cid, "Title 111", None),
+                "abb222": card(cid, None, "Fix the flaky relay test"),
+                "acc333": None,
+            }[cid]
+
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: FakeStore())
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((80, 24)))
+    with pytest.raises(SystemExit):
+        m._exit_ambiguous("a", ["aaa111", "abb222", "acc333"], tmp_path)
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[1] == "ID      NAME                      STATUS         UPDATED"
+    assert re.fullmatch(
+        r"aaa111  Title 111                 paused \(plan\)  \d+[smhd]", lines[2])
+    assert re.fullmatch(
+        r"abb222  Fix the flaky relay test  paused \(plan\)  \d+[smhd]", lines[3])
+    assert lines[4] == "  acc333"

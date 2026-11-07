@@ -46,7 +46,11 @@ class ResumePicker:
 
     def render(self) -> str:
         out = []
-        name_w = quest_row.name_budget(indent=2)  # the 2-char selection marker
+        status_w, name_w = quest_row.overview_widths(
+            [(c.status, quest_row.compose_status_label(c.step, c.step_label, c.phase_label),
+              quest_row.resolve_display_name(c.title, c.intent).text)
+             for c in self.candidates],
+            indent=2)  # the 2-char selection marker
         for i, c in enumerate(self.candidates):
             if i == self.index:
                 # Inner line built color-off so no inner reset breaks the reverse bar.
@@ -54,14 +58,16 @@ class ResumePicker:
                     quest_id=c.quest_id, title=c.title,
                     status=c.status, step=c.step, step_label=c.step_label,
                     phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
-                    now=self.now, color=False, name_width=name_w)
+                    now=self.now, color=False, name_width=name_w,
+                    status_width=status_w)
                 out.append(pal.ansi(inner, "reverse", enabled=self.color))
             else:
                 out.append("  " + quest_row.format_quest_line(
                     quest_id=c.quest_id, title=c.title,
                     status=c.status, step=c.step, step_label=c.step_label,
                     phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
-                    now=self.now, color=self.color, name_width=name_w))
+                    now=self.now, color=self.color, name_width=name_w,
+                    status_width=status_w))
         return "\n".join(out)
 
 

@@ -1820,11 +1820,17 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    name_w = quest_row.name_budget()
-    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     store = make_store(control)
-    for cid in sorted(candidates):
-        card = store.quest_card(cid)
+    cards = [(cid, store.quest_card(cid)) for cid in sorted(candidates)]
+    intents = {c.quest_id: quest_row.fallback_intent(c.intent, c.seed_opening)
+               for _, c in cards if c is not None}
+    status_w, name_w = quest_row.overview_widths([
+        (c.status, quest_row.compose_status_label(c.step, c.step_label, c.phase_label),
+         quest_row.resolve_display_name(c.title, intents[c.quest_id]).text)
+        for _, c in cards if c is not None])
+    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+          file=sys.stderr)
+    for cid, card in cards:
         if card is None:
             print(f"  {cid}", file=sys.stderr)
             continue
@@ -1832,8 +1838,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             quest_id=card.quest_id, title=card.title, status=card.status,
             step=card.step, step_label=card.step_label,
             phase_label=card.phase_label, last_iso=card.last,
-            now=now, color=color, name_width=name_w,
-            intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
+            now=now, color=color, name_width=name_w, status_width=status_w,
+            intent=intents[card.quest_id]),
             file=sys.stderr)
     raise SystemExit(2)
 
@@ -2219,8 +2225,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                     cutoff=None), indent=2).splitlines(),
                 no_pager=args.no_pager)
             return 0
-        lines = _overview_lines(control, show_all=args.all, now=now, color=color,
-                                name_cap=quest_row.NAME_CAP)
+        lines = _overview_lines(control, show_all=args.all, now=now, color=color)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     try:
@@ -3108,13 +3113,17 @@ def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    name_w = quest_row.name_budget()
-    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
+    intents = {r[0]: _row_display_intent(control, r) for r in rows}
+    status_w, name_w = quest_row.overview_widths([
+        (r[1], quest_row.compose_status_label(r[2], r[6], r[7]),
+         quest_row.resolve_display_name(r[4], intents[r[0]]).text) for r in rows])
+    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+          file=sys.stderr)
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w, intent=_row_display_intent(control, r)),
+            name_width=name_w, status_width=status_w, intent=intents[r[0]]),
             file=sys.stderr)
     return 2
 
@@ -3605,8 +3614,8 @@ def _history_by_disposition(control: Path, *, dispositions: set[str],
 
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                    history: list[_Row], *, intents: dict[str, str | None],
-                   history_label: str, now: datetime,
-                   color: bool, name_cap: int | None) -> list[str]:
+                   history_label: str, inflight_notice: bool, now: datetime,
+                   color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
 
     def _name_text(r: _Row) -> str:
@@ -3622,10 +3631,12 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     for r in history:
         specs.append((r[1], None, _name_text(r)))
 
-    status_width, name_width = quest_row.overview_widths(specs, name_cap=name_cap)
+    status_width, name_width = quest_row.overview_widths(specs)
 
     lines = [quest_row.header_line(color=color, name_width=name_width,
                                    status_width=status_width)]
+    if inflight_notice and not inflight:
+        lines.append(pal.ansi("no active quests", "dim", enabled=color))
     for r in inflight:
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3653,7 +3664,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
-                    color: bool, name_cap: int | None = None) -> list[str]:
+                    color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
                           cutoff=None)
@@ -3661,8 +3672,8 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label=label, now=now,
-                          color=color, name_cap=name_cap)
+                          intents=rows.display_intents, history_label=label,
+                          inflight_notice=True, now=now, color=color)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
@@ -3725,8 +3736,9 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label="history:", now=now,
-                          color=color, name_cap=quest_row.NAME_CAP)
+                          intents=rows.display_intents, history_label="history:",
+                          inflight_notice="active" in dispositions and cutoff is None,
+                          now=now, color=color)
 
 
 def _board_entry_json(r: _Row, *, zone: Zone,
@@ -3765,19 +3777,6 @@ def _board_json(control: Path, *, dispositions: set[str],
         entries.append(_board_entry_json(r, zone="history", status=r[1],
                                          intent=rows.intents.get(r[0])))
     return entries
-
-
-def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
-    from imp.engine import worktree
-    try:
-        control = _control if _control is not None else _control_root()
-    except worktree.PreconditionError:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
-    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
-                            color=should_use_color(sys.stdout))
-    _emit_human(lines)
-    return 0
 
 
 _SEARCH_ZONES: tuple[Zone, ...] = ("active", "backlog", "history")

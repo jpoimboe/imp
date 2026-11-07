@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import argparse
 import io
 import os
 from contextlib import redirect_stdout
 
 import imp.cli.main as m
-from imp.cli.main import _cmd_status, main
+from imp.cli.main import main
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
@@ -28,16 +27,6 @@ def test_list_caps_name_column_on_wide_terminal(tmp_path, monkeypatch):
     out = buf.getvalue()
     assert "L" * 69 + "…" in out       # NAME capped at 70 -> 69 chars + ellipsis
     assert "L" * 80 not in out          # the full 80-char title is never printed
-
-
-def test_status_keeps_full_name_column_on_wide_terminal(tmp_path, monkeypatch, capsys):
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="L" * 80, quest_id="alpha", base_branch="main")
-    monkeypatch.setenv("NO_COLOR", "1")
-    _term(monkeypatch, 200)
-    assert _cmd_status(argparse.Namespace(all=False), tmp_path) == 0
-    out = capsys.readouterr().out
-    assert "L" * 80 in out              # status is uncapped: full title shown
 
 
 def test_filtered_list_caps_name_column_on_wide_terminal(tmp_path, monkeypatch):

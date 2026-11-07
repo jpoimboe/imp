@@ -4,11 +4,9 @@ from datetime import UTC, datetime
 import pytest
 
 from imp.cli.quest_row import (
-    NAME_MIN,
     fallback_intent,
     format_quest_line,
     header_line,
-    name_budget,
     relative_age,
 )
 
@@ -35,7 +33,7 @@ def test_relative_age(then_iso, expected):
 def _row(**kw):
     base = dict(quest_id="yaitd7", title="Add version flag",
                 status="running", step="code",
-                last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
+                last_iso="2026-06-11T11:45:00+00:00", now=_NOW, status_width=35)
     base.update(kw)
     return base
 
@@ -66,7 +64,7 @@ def test_format_unnamed_shows_id_and_unnamed_label():
 
 
 def test_header_line_leads_with_id_ends_with_updated():
-    h = header_line(color=False, name_width=40)
+    h = header_line(color=False, name_width=40, status_width=35)
     assert h.startswith("ID")
     assert h.rstrip().endswith("UPDATED")
     assert "NAME" in h            # NAME is the second column now
@@ -130,41 +128,10 @@ def test_completed_status_renders_plain():
     assert not re.search(r"\x1b\[[\d;]*m\s*completed", line)
 
 
-def test_name_budget_fills_remaining_width(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((100, 24)))
-    # 100 cols - 54 fixed prefix = 46 left for the name (below the 70 cap).
-    assert name_budget() == 46
-    # An indent (e.g. the resume picker's marker) shrinks the budget.
-    assert name_budget(indent=2) == 44
-
-
-def test_name_budget_caps_at_name_cap(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((200, 24)))
-    # 200 - 54 = 146 available, but the NAME column is capped at NAME_CAP (70).
-    assert name_budget() == 70
-    # The indent is applied before the cap; here it is still absorbed by the cap.
-    assert name_budget(indent=2) == 70
-
-
 def test_header_column_reads_updated_not_age():
-    h = header_line(color=False, name_width=40)
+    h = header_line(color=False, name_width=40, status_width=35)
     assert "UPDATED" in h
     assert "AGE" not in h
-
-
-def test_name_budget_floors_at_minimum(monkeypatch):
-    import os
-
-    monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((20, 24)))
-    assert name_budget() == NAME_MIN
-
 
 
 def test_status_cell_merges_step_label_as_dim_suffix():
@@ -277,8 +244,8 @@ def test_status_cell_omits_phase_when_none():
 def test_status_width_drops_oversized_label():
     # status_width 20 -> budget 20-7-3 = 10; a 30-char label does not fit and is
     # dropped whole, leaving the bare status word (never a partial `(…)`).
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="a" * 30, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="a" * 30, color=False)
     assert "running" in line
     assert "…" not in line
     assert "(" not in line
@@ -288,9 +255,9 @@ def test_status_width_drops_oversized_label():
 def test_status_subfloor_drops_suffix_no_overflow():
     # status_width 8 -> budget 8-7-3 = -2 < 1, so the suffix is dropped and the
     # bare status word is rendered (never the untruncated label).
-    line = format_quest_line(**_row(status="running", step="x"),
+    line = format_quest_line(**_row(status="running", step="x", status_width=8),
                               step_label="a very long label that will not fit",
-                              status_width=8, color=False)
+                              color=False)
     assert "running" in line
     assert "(" not in line            # suffix dropped entirely
     assert "a very long label" not in line
@@ -298,15 +265,15 @@ def test_status_subfloor_drops_suffix_no_overflow():
 
 def test_status_label_fits_at_budget_boundary():
     # status_width 20 -> budget 10; a label of exactly 10 chars still fits in full.
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="b" * 10, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="b" * 10, color=False)
     assert "running (" + "b" * 10 + ")" in line
 
 
 def test_status_label_drops_one_char_over_budget():
     # status_width 20 -> budget 10; an 11-char label is one over and is dropped whole.
-    line = format_quest_line(**_row(status="running", step="x"),
-                              step_label="b" * 11, status_width=20, color=False)
+    line = format_quest_line(**_row(status="running", step="x", status_width=20),
+                              step_label="b" * 11, color=False)
     assert "running" in line
     assert "(" not in line
 
@@ -384,20 +351,39 @@ def _term(monkeypatch, cols):
                         lambda fallback=(80, 24): os.terminal_size((cols, 24)))
 
 
-def test_overview_widths_80col_name_full_status_clips(monkeypatch):
+def test_overview_widths_80col_drops_label_that_does_not_fit(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 80 - (6 + 7 + 6) = 61; name_content = 20; status_content = 7+40+3 = 50.
+    # region = 61; NAME takes its 20, leaving 41 — too few for the 50-col labelled
+    # cell, so the label drops and STATUS shrinks to the bare word it prints.
     status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
-    assert (status_w, name_w) == (41, 20)
+    assert (status_w, name_w) == (7, 20)
 
 
 def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 130)
-    # region = 111; status_content = 50 fits, so STATUS gets its content width.
+    # region = 111; the 50-col labelled cell fits, and NAME stays at its content.
     status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
-    assert (status_w, name_w) == (50, 61)
+    assert (status_w, name_w) == (50, 20)
+
+
+def test_overview_widths_status_is_widest_rendered_cell(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 100)
+    # region = 81, NAME 20 -> 61 left: the 30-col cell fits, the 70-col one drops
+    # to its 7-col word, so STATUS is 30, not the 61 available or the 70 it could be.
+    status_w, name_w = overview_widths([("running", "a" * 20, "n" * 20),
+                                        ("waiting", "b" * 60, "n" * 20)])
+    assert (status_w, name_w) == (30, 20)
+
+
+def test_overview_widths_indent_shrinks_the_status_budget(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 80)
+    rows = [("running", "x" * 30, "y" * 20)]   # labelled cell = 40 cols
+    assert overview_widths(rows) == (40, 20)            # 61 - 20 = 41 left: fits
+    assert overview_widths(rows, indent=2) == (7, 20)   # 59 - 20 = 39 left: drops
 
 
 def test_overview_widths_name_cap_protects_status(monkeypatch):
@@ -408,10 +394,10 @@ def test_overview_widths_name_cap_protects_status(monkeypatch):
     assert status_w == 50
 
 
-def test_overview_widths_subfloor_floors_status_to_word(monkeypatch):
+def test_overview_widths_capped_name_leaves_no_room_for_label(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; the tiny region floors STATUS to the word (7) regardless of the 70 cap.
+    # region = 61; NAME claims 54, leaving 7 — too few for the labelled cell, so the label drops.
     status_w, name_w = overview_widths([("running", "x" * 40, "i" * 80)])
     assert (status_w, name_w) == (7, 54)
 
@@ -428,8 +414,8 @@ def test_overview_widths_floors_name_at_min(monkeypatch):
 def test_overview_widths_empty_rows(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; no rows -> status_floor=status_content=6, name_content=0.
-    assert overview_widths([]) == (6, 55)
+    # No rows: STATUS keeps its header width, NAME its NAME_MIN floor.
+    assert overview_widths([]) == (6, 10)
 
 
 def test_intent_fallback_has_no_prompt_prefix():
@@ -519,30 +505,13 @@ def test_updated_is_final_column_no_trailing_whitespace():
     assert line.rstrip().endswith("15m")  # the relative age is the last cell
 
 
-def test_overview_widths_name_cap_clamps_name_width(monkeypatch):
-    from imp.cli.quest_row import overview_widths
+def test_overview_widths_caps_name_at_name_cap(monkeypatch):
+    from imp.cli.quest_row import NAME_CAP, overview_widths
     _term(monkeypatch, 200)
-    # region = 200 - 19 = 181; uncapped NAME would be 131. name_cap clamps it to 60.
-    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 80)], name_cap=60)
-    assert name_w == 60
-    assert status_w == 50          # STATUS sizing is untouched by the cap
-
-
-def test_overview_widths_name_cap_none_matches_uncapped(monkeypatch):
-    from imp.cli.quest_row import overview_widths
-    _term(monkeypatch, 200)
-    rows = [("running", "x" * 40, "y" * 80)]
-    assert overview_widths(rows, name_cap=None) == overview_widths(rows)
-    _status_w, name_w = overview_widths(rows)
-    assert name_w == 131           # uncapped, byte-for-byte today's behavior
-
-
-def test_overview_widths_name_cap_inert_when_name_already_narrow(monkeypatch):
-    from imp.cli.quest_row import overview_widths
-    _term(monkeypatch, 80)
-    # region = 61; NAME is already 20 (< 60), so name_cap=60 is inert.
-    rows = [("running", "x" * 40, "y" * 20)]
-    assert overview_widths(rows, name_cap=60) == overview_widths(rows)
+    # region = 200 - 19 = 181; STATUS takes its 50-col content and NAME stops at the cap.
+    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 80)])
+    assert name_w == NAME_CAP == 70
+    assert status_w == 50
 
 
 def test_fallback_intent_prefers_the_events_intent():
@@ -565,3 +534,43 @@ def test_fallback_intent_is_none_when_both_are_blank_or_absent():
 def test_fallback_intent_returns_text_unflattened():
     # Flattening/clipping is the resolver's and caller's job, not the source picker's.
     assert fallback_intent(None, "line one\n  line two") == "line one\n  line two"
+
+
+def test_overview_row_has_no_padding_gap(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 80)
+    status_w, name_w = overview_widths([("running", "l" * 60, "Fix the login button")])
+    assert header_line(color=False, name_width=name_w, status_width=status_w) == (
+        "ID      NAME                  STATUS   UPDATED")
+    line = format_quest_line(
+        quest_id="abc123", title="Fix the login button", status="running", step="x",
+        step_label="l" * 60, last_iso="2026-06-11T11:59:58+00:00", now=_NOW,
+        color=False, name_width=name_w, status_width=status_w)
+    assert line == "abc123  Fix the login button  running  2s"
+
+
+def test_overview_clips_long_name_at_cap_on_wide_terminal(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 200)
+    status_w, name_w = overview_widths([("running", None, "y" * 80)])
+    line = format_quest_line(**_row(title="y" * 80, step="-", name_width=name_w,
+                                    status_width=status_w), color=False)
+    assert "  " + "y" * 69 + "…  running  15m" in line
+
+
+@pytest.mark.parametrize("cols", [200, 80, 30])
+def test_overview_header_status_aligns_with_row_status(monkeypatch, cols):
+    from imp.cli.quest_row import ID_W, overview_widths
+    _term(monkeypatch, cols)
+    specs = [("running", "s" * 40, "y" * 80), ("waiting", None, "short")]
+    status_w, name_w = overview_widths(specs)
+    col = ID_W + 2 + name_w + 2
+    assert header_line(color=False, name_width=name_w,
+                       status_width=status_w)[col:].startswith("STATUS")
+    for status, label, name in specs:
+        line = format_quest_line(**_row(title=name, status=status,
+                                        step="x" if label else "-",
+                                        name_width=name_w, status_width=status_w),
+                                 step_label=label, color=False)
+        assert line[col:].startswith(status)
+        assert "(…" not in line and "…)" not in line

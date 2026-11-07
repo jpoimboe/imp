@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-import argparse
+from datetime import UTC, datetime
 from pathlib import Path
 
 import imp.cli.main as m
 import imp.cli.store as s
-from imp.cli.main import _cmd_status
 from imp.cli.store import _status_rows
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _git, _seed_control
+
+
+def _list_out(control: Path, monkeypatch, capsys) -> str:
+    """Run `imp list` against `control`; return stdout."""
+    monkeypatch.setattr(m, "_control_root", lambda: control)
+    assert m.main(["list"]) == 0
+    return capsys.readouterr().out
 
 
 def test_status_lists_inflight_worktrees(tmp_path: Path) -> None:
@@ -69,36 +75,32 @@ def test_backlog_rows_carry_provenance_and_empty_step_when_ready(tmp_path: Path)
     assert row[6] is None
 
 
-def test_cmd_status_merges_status_and_renders_bare_backlog(
-    tmp_path: Path, capsys,
+def test_list_merges_status_and_renders_bare_backlog(
+    tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                         base_branch="main", origin="idea", seed_opening="Brief")
-    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
+    out = _list_out(tmp_path, monkeypatch, capsys)
     assert "new (s)" in out                           # merged Active status + step label
     backlog_line = next(ln for ln in out.splitlines() if ln.startswith("bk1"))
     assert "idea" in backlog_line
     assert "(" not in backlog_line                   # ready ⇒ bare word, no suffix
 
 
-def test_cmd_status_shows_intent_for_empty_title(tmp_path: Path, capsys) -> None:
+def test_list_shows_intent_for_empty_title(tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="", quest_id="alpha", base_branch="main")
     ch.event_log().append(agent_id=None, type="user_message",
                           payload={"role": "user", "subtype": "intent",
                                    "content": [{"type": "text", "text": "add a dark mode toggle"}]})
-    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
+    out = _list_out(tmp_path, monkeypatch, capsys)
     assert "add a dark mode toggle" in out
     assert "(unnamed)" not in out
 
 
-def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) -> None:
+def test_list_intent_falls_back_to_user_message(tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="", quest_id="alpha", base_branch="main")
     ch.event_log().append(agent_id=None, type="awaiting_user_input",
@@ -107,8 +109,7 @@ def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) ->
         agent_id=None, type="user_message",
         payload={"role": "user",
                  "content": [{"type": "text", "text": "fix the flaky test"}]})
-    _cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
+    out = _list_out(tmp_path, monkeypatch, capsys)
     assert "fix the flaky test" in out
 
 
@@ -157,9 +158,7 @@ def test_resolve_intent_skips_synthetic_task_prompt() -> None:
     assert s._resolve_intent(events) is None
 
 
-def test_cmd_status_named_row_skips_events_load(
-    tmp_path: Path, monkeypatch, capsys,
-) -> None:
+def test_overview_named_row_skips_events_load(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Named", quest_id="alpha", base_branch="main")
 
@@ -167,8 +166,8 @@ def test_cmd_status_named_row_skips_events_load(
         raise AssertionError("events loaded for a named row")
 
     monkeypatch.setattr(s, "_load_events_for_id", boom)
-    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
-    assert rc == 0
+    lines = m._overview_lines(tmp_path, show_all=False, now=datetime.now(UTC), color=False)
+    assert any(ln.startswith("alpha") for ln in lines)
 
 
 def test_create_draft_seeds_raw_templated_label(tmp_path: Path) -> None:
@@ -203,15 +202,13 @@ def test_create_seeds_raw_templated_label(tmp_path: Path) -> None:
     assert st.step_label == "seeding {{ vars.k }}"
 
 
-def test_cmd_status_renders_unmaterialized_as_new_in_active(
-    tmp_path: Path, capsys,
+def test_list_renders_unmaterialized_as_new_in_active(
+    tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="Draftish", quest_id="d1",
                         base_branch="main")          # un-materialized, origin "draft"
-    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
+    out = _list_out(tmp_path, monkeypatch, capsys)
     assert "backlog" not in out          # a lone draft creates no backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
     assert "new" in d1_line  # a fresh un-materialized quest shows its real status in Active

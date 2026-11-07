@@ -305,3 +305,18 @@ def test_resolve_id_still_reaches_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_terminal(tmp_path, "arch40", "completed")
     assert m._resolve_id(tmp_path, "arch40") == "arch40"
+
+
+def test_non_tty_candidate_list_sizes_columns_to_content(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    import os
+    import re
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((80, 24)))
+    assert m._resume_picker_non_tty(tmp_path, [_row("lodo40"), _row("lodo77")]) == 2
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[1] == "ID      NAME          STATUS         UPDATED"
+    assert re.fullmatch(r"lodo40  Title lodo40  paused \(plan\)  \d+[smhd]", lines[2])
+    assert re.fullmatch(r"lodo77  Title lodo77  paused \(plan\)  \d+[smhd]", lines[3])
