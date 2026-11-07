@@ -250,7 +250,10 @@ def test_search_no_matches_trailing_blank_on_tty(
     rc = m.main(["search", "nomatch"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == "No quests match 'nomatch'.\n\n"   # spec-named early-exit, one blank
+    assert out == (
+        'No quests match "nomatch".\n'
+        "Try another term, or `imp events search` to include tool calls and results.\n"
+        "\n")   # spec-named early-exit, one blank
 
 
 def test_events_not_started_trailing_blank_on_tty(

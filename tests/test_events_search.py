@@ -11,6 +11,7 @@ import pytest
 
 import imp.cli.main as m
 import imp.cli.store as s
+from imp.cli import palette as pal
 from imp.cli.main import main
 from imp.cli.store import HomeDigest
 from imp.engine import archive
@@ -298,12 +299,37 @@ def test_cmd_events_search_rich_header_and_digest(monkeypatch, capsys, tmp_path:
     assert "#1" in out and "tool_call" in out and "GREPTARGET" in out
 
 
-def test_cmd_events_search_empty_message(monkeypatch, capsys, tmp_path: Path) -> None:
+@pytest.mark.parametrize(("flags", "hint"), [
+    ({}, "Try another term."),
+    ({"list": True}, "Try another term."),
+    ({"history": True, "type": ["tool_call"]},
+     "Try another term, or drop --history --type to widen the search."),
+    ({"backlog": True, "agent": ["coder"]},
+     "Try another term, or drop --backlog --agent to widen the search."),
+    ({"active": True, "backlog": True, "history": True}, "Try another term."),
+    ({"active": True, "backlog": True, "history": True,
+      "type": ["tool_call"], "agent": ["coder"]},
+     "Try another term, or drop --type --agent to widen the search."),
+])
+def test_cmd_events_search_no_match_headline_and_hint(
+        monkeypatch, capsys, tmp_path: Path, flags: dict, hint: str) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
-    rc = m._cmd_events_search(_search_ns("zzz"), tmp_path)
-    out = capsys.readouterr().out
+    rc = m._cmd_events_search(_search_ns("zzqq", **flags), tmp_path)
     assert rc == 0
-    assert '0 matches for "zzz"' in out
+    assert capsys.readouterr().out == f'No quests match "zzqq".\n{hint}\n'
+
+
+def test_cmd_events_search_no_match_dims_only_the_hint(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
+    m._cmd_events_search(_search_ns("zzqq"), tmp_path)
+    assert capsys.readouterr().out.splitlines() == [
+        'No quests match "zzqq".',
+        pal.ansi("Try another term.", "dim", enabled=True),
+    ]
 
 
 def test_cmd_events_search_no_match_json_is_empty_array(

@@ -57,7 +57,7 @@ names rather than guessing them.
   are searched. Add `--merged-after <commit>` to keep only completed quests whose
   merge landed after `<commit>` (implies `--completed`). Default output is grep-style matched
   excerpts per quest; `-l` / `--list` prints one terse line per quest
-  (`id  title  [zone]`).
+  (`id  title  [zone]`). A miss prints a hint suggesting a next step.
 - `imp events search <query>` — the structured-event sibling of `imp search`: the
   same case-insensitive substring search, but over quests' **event content** (tool
   calls, tool results, agent reasoning, skill loads) rather than only their
@@ -73,7 +73,8 @@ names rather than guessing them.
   matched quest unless capped with `--limit N`; `--all` lifts both search-result
   bounds for intentionally exhaustive rich or JSON output. Scan with `--list`, then
   retrieve exact payloads from a chosen quest with
-  `imp events <id> <range> --json`.
+  `imp events <id> <range> --json`. A miss prints a hint naming any scoping
+  flags to drop.
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
 finished); do not invent quests that the commands did not list.
