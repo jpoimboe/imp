@@ -37,7 +37,8 @@ def test_new_backlog_creates_quest_home_with_origin_backlog(
     assert quest.seed_opening == "Wire OAuth login"
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == ["2026-06-16-dep001"]
-    assert new_id in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        f"Recorded backlog quest {new_id} (start it with `imp resume {new_id}`).\n")
 
 
 def test_new_idea_description_populates_seed_opening(
@@ -66,8 +67,7 @@ def test_new_idea_blank_title_errors_without_creating(
     assert rc == 2
     assert not (project_state_dir(tmp_path) / "quests").exists()
     captured = capsys.readouterr()
-    assert "imp:" in captured.err
-    assert "--backlog" in captured.err
+    assert captured.err == "imp: --backlog title must be non-empty\n"
 
 
 def test_new_idea_with_title_flag_is_error(

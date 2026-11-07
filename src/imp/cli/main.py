@@ -935,6 +935,11 @@ async def _clear_loop(
     return rc
 
 
+def _backlog_recorded(quest_id: str) -> str:
+    return (f"Recorded backlog quest {quest_id} "
+            f"(start it with `imp resume {quest_id}`).")
+
+
 def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
     from imp.engine import backlog
@@ -965,8 +970,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
-    _emit_human([f"imp: recorded backlog quest {quest_id} "
-                 f"(start it with `imp resume {quest_id}`)"])
+    _emit_human([_backlog_recorded(quest_id)])
     return 0
 
 
@@ -1008,8 +1012,8 @@ def apply_new(
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
         spawn.start_quest(control, quest_id)
-        return 0, (f"imp: started quest {quest_id} (running autonomously in the "
-                   f"background; appears in the active list)")
+        return 0, (f"Started quest {quest_id} (running autonomously in the "
+                   f"background; appears in the active list).")
 
     if idea is not None:
         if not idea.strip():
@@ -1023,8 +1027,7 @@ def apply_new(
                 provider=provider)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
-        return 0, (f"imp: recorded backlog quest {quest_id} "
-                   f"(start it with `imp resume {quest_id}`)")
+        return 0, _backlog_recorded(quest_id)
 
     try:
         Quest.create_draft(
@@ -1034,8 +1037,7 @@ def apply_new(
             defer_seed=True, vars=quest_vars, provider=provider)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
-    return 0, (f"imp: recorded backlog quest {quest_id} "
-               f"(start it with `imp resume {quest_id}`)")
+    return 0, _backlog_recorded(quest_id)
 
 
 def _select_headless(

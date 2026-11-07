@@ -506,7 +506,7 @@ async def test_new_background_delegates_to_apply_new(
 
     def _fake_apply_new(control: object, **kw: object) -> tuple[int, str]:
         calls.update(kw)
-        return 0, "imp: started quest z9y8x7 (background)"
+        return 0, "Started quest z9y8x7 (background)"
 
     monkeypatch.setattr(m, "apply_new", _fake_apply_new)
 
@@ -520,7 +520,7 @@ async def test_new_background_delegates_to_apply_new(
     assert calls["depends_on"] == ["d1"]
     assert calls.get("idea") is None
     out = capsys.readouterr()
-    assert "started quest z9y8x7" in out.out
+    assert "Started quest z9y8x7" in out.out
 
 
 @pytest.mark.anyio

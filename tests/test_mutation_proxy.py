@@ -123,9 +123,11 @@ def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
         "opening": "brief text", "title": None, "workflow": None, "base": None,
         "idea": "From the agent", "depends_on": None, "var_flags": None})
     assert result["returncode"] == 0
-    assert "recorded backlog quest" in result["message"]
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
-    assert Quest.load(tmp_path, quests[-1].name).title == "From the agent"
+    qid = quests[-1].name
+    assert result["message"] == (
+        f"Recorded backlog quest {qid} (start it with `imp resume {qid}`).")
+    assert Quest.load(tmp_path, qid).title == "From the agent"
 
 
 @pytest.mark.anyio
@@ -204,7 +206,7 @@ def test_async_cmd_new_proxies_when_socket_set(
     async def _fake(op: str, args: dict) -> dict:
         seen["op"] = op
         seen["args"] = args
-        return {"returncode": 0, "message": "imp: recorded backlog quest q9"}
+        return {"returncode": 0, "message": "Recorded backlog quest q9"}
 
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(
@@ -238,8 +240,10 @@ def test_run_mutation_new_background_starts_quest(
         "opening": "brief", "title": "T", "workflow": None, "base": None,
         "idea": None, "depends_on": None, "var_flags": None, "background": True})
     assert result["returncode"] == 0
-    assert "started quest" in result["message"]
-    assert "qid" in started
+    qid = started["qid"]
+    assert result["message"] == (
+        f"Started quest {qid} (running autonomously in the background; "
+        f"appears in the active list).")
 
 
 @pytest.mark.anyio
@@ -369,7 +373,7 @@ def test_new_mutation_threads_var_flags_to_apply_new(
 
     def _fake_apply_new(control: Path, **kwargs: object) -> tuple[int, str]:
         seen.update(kwargs)
-        return 0, "imp: recorded backlog quest q1"
+        return 0, "Recorded backlog quest q1"
 
     monkeypatch.setattr("imp.cli.main.apply_new", _fake_apply_new)
 
@@ -390,7 +394,7 @@ def test_async_cmd_new_proxy_forwards_background(
     async def _fake(op: str, args: dict) -> dict:
         seen["op"] = op
         seen["args"] = args
-        return {"returncode": 0, "message": "imp: started quest q9"}
+        return {"returncode": 0, "message": "Started quest q9"}
 
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(

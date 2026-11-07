@@ -439,7 +439,7 @@ def test_record_idea_trailing_blank_on_tty(
         tmp_path, "main")
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.endswith("`)\n\n")        # confirmation line + exactly one blank
+    assert out.endswith("`).\n\n")        # confirmation line + exactly one blank
     assert not out.endswith("\n\n\n")
 
 
@@ -518,7 +518,7 @@ def test_record_idea_unchanged_when_piped(
         tmp_path, "main")
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.endswith("`)\n")          # confirmation line + single newline
+    assert out.endswith("`).\n")          # confirmation line + single newline
     assert not out.endswith("\n\n")      # no added blank when piped
 
 
