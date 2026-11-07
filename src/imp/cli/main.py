@@ -899,7 +899,9 @@ async def _run_cleared_session(
             stream=watched, color=color, width=_term_width,
             display_width=_display_width, status=status,
             quest_id=quest.id, title=quest.title,
-            project=quest.control_root.name)
+            project=quest.control_root.name, preceded_by_blank=True)
+        if quest.seed_opening:
+            driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1079,7 +1081,7 @@ async def _run_fresh_session(
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=not auto_headless)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1094,7 +1096,7 @@ async def _run_fresh_session(
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1343,7 +1345,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
@@ -1363,7 +1365,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
-                            project=quest.control_root.name)
+                            project=quest.control_root.name, preceded_by_blank=True)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()

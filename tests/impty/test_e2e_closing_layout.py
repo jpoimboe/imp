@@ -10,10 +10,12 @@ from typing import Any
 
 import pytest
 
+from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests.impty.e2e_support import (
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
+    _event_types,
     _flock_free,
     _poll,
     can_pty,
@@ -41,6 +43,10 @@ _QUESTION_TURNS: list[dict[str, Any]] = [
         {"name": "create_and_enter_worktree", "input": {}},
         {"name": "bash", "input": {"command": _ATTACH_POLL}},
     ]},
+    {"text": "waiting for you"},
+]
+_CHAT_TURNS: list[dict[str, Any]] = [
+    {"text": "setting up", "tools": [{"name": "bash", "input": {"command": _ATTACH_POLL}}]},
     {"text": "waiting for you"},
 ]
 _BUSY_TURNS: list[dict[str, Any]] = [
@@ -233,3 +239,64 @@ def test_live_resume_has_one_blank_above_its_first_prompt_and_its_closing_block(
 
         assert rc == 130, _screen(r)
         _assert_ctrl_d_block(r, quest_dir.name, "live resume")
+
+
+@pytest.mark.parametrize("hint_first", [False, True], ids=["plain", "after-ctrl-c-hint"])
+def test_message_after_clear_echoes_once(tmp_path: Path, hint_first: bool) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_CHAT_TURNS)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "chat", "hello there"],
+        cwd=str(tmp_path), env=_env(script), cols=80, rows=40,
+    ) as s:
+        first = _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        _send_and_see(s, "/clear\r", "ask anything, or /help")
+        if hint_first:
+            _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+        _send_and_see(s, "next thing\r", "> next thing")
+
+        def _second_quest_at_its_question() -> bool:
+            journals = (project_state_dir(tmp_path) / "quests").glob("*/events.jsonl")
+            return any(j.parent != first and "awaiting_user_input" in _event_types(j)
+                       for j in journals)
+
+        assert _poll(_second_quest_at_its_question, timeout=E2E_POLL_TIMEOUT), _screen(s)
+        _at_empty_prompt(s)
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, _screen(s)
+        rows = s.lines()
+        assert rows.count("> next thing") == 1, _screen(s)
+        head = next((row for row in rows if row.endswith(" · next thing · archived")), None)
+        assert head is not None, _screen(s)
+        _assert_closing_layout(rows, head)
+
+
+def _assert_one_blank_under_the_header(rows: list[str]) -> None:
+    screen = "\n".join(rows)
+    at = next((i for i, row in enumerate(rows) if row.endswith(" · t · new")), None)
+    assert at is not None, screen
+    assert rows[at + 1] == "", screen
+    assert rows[at + 2].startswith("── work phase "), screen
+
+
+def test_run_with_no_intent_has_one_blank_under_the_header_on_a_terminal(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_QUESTION_TURNS)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new", "--title", "t", "--headless"],
+        cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
+    ) as s:
+        s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+        _assert_one_blank_under_the_header(s.lines())
+
+
+def test_run_with_no_intent_has_one_blank_under_the_header_when_piped(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_QUESTION_TURNS)
+    out_path = tmp_path / "stdout.txt"
+    with out_path.open("w") as out:
+        subprocess.run(
+            [sys.executable, "-m", "imp", "new", "--title", "t", "--headless"],
+            cwd=tmp_path, env=_env(script), stdin=subprocess.DEVNULL, stdout=out,
+            stderr=subprocess.STDOUT, timeout=E2E_EXIT_POLL_TIMEOUT)
+    _assert_one_blank_under_the_header(out_path.read_text().splitlines())

@@ -82,6 +82,47 @@ async def test_run_cleared_session_opens_fresh_new_draft(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(("reply", "echoes"), [("next thing", ["next thing"]), ("", [])],
+                         ids=["message", "whitespace-only-skill"])
+async def test_run_cleared_session_seeds_a_blank_tail_and_echoes_the_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: str, echoes: list[str],
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: True)
+    monkeypatch.setattr(m, "Prompt", lambda **k: SimpleNamespace())
+
+    async def _read_reply(*a: object, **k: object) -> str:
+        return reply
+
+    monkeypatch.setattr(m, "_read_intent_line", _read_reply)
+
+    driver_kwargs: dict[str, object] = {}
+    echoed: list[str] = []
+
+    class _CapDriver:
+        def __init__(self, **kwargs: object) -> None:
+            driver_kwargs.update(kwargs)
+
+        def seed_opening_intent(self, text: str) -> None:
+            echoed.append(text)
+
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _CapDriver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_confirm", lambda *a, **k: None)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+
+    assert await m._run_cleared_session(tmp_path, "main", leave_state={}) == 0
+    assert driver_kwargs["preceded_by_blank"] is True
+    assert echoed == echoes
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
 async def test_run_cleared_session_cancel_returns_130_no_draft(
     exc: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
