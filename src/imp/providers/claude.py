@@ -769,16 +769,17 @@ CAPTURED_TOOL_RESULTS_FILENAME = "captured_tool_results.jsonl"
 
 def _append_captured_tool_result(
     transcript_dir: Path, name: str, tool_input: dict[str, Any], content: str,
+    *, is_error: bool,
 ) -> None:
-    """Best-effort append of one plain-tool success to the per-step sidecar, keyed by
+    """Best-effort append of one imp tool result to the per-step sidecar, keyed by
     tool name + input (the SDK gives no usable tool_use_id for in-process MCP tools).
-    The whole body is inside suppress: a capture failure must never flip a real
-    success into an is_error result — a lost line just falls back to the placeholder.
+    The whole body is inside suppress: a lost line must never change the result the
+    tool returns — resume just falls back to the placeholder.
     """
     path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
     with contextlib.suppress(Exception):
         line = json.dumps(
-            {"name": name, "input": tool_input, "content": content, "is_error": False})
+            {"name": name, "input": tool_input, "content": content, "is_error": is_error})
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
@@ -829,6 +830,8 @@ def _wrap_one(
                 "claude MCP tool dispatched off the runner loop "
                 "(same-loop topology pin)")
         inflight_key: str | None = None
+        clean_args = {k: v for k, v in args.items()
+                      if not (k.startswith("__") and k.endswith("__"))}
         try:
             # Ahead of the sweep: a raising sweep must not strand this call's verdict.
             accepted = name != "complete_step" or await state.complete_verdicts.get()
@@ -932,8 +935,6 @@ def _wrap_one(
                 # sub_agent flush above). No-ops when no llm group is open; None
                 # until _enter assigns the closure (pre-loop).
                 state.flush_llm_group()
-            clean_args = {k: v for k, v in args.items()
-                          if not (k.startswith("__") and k.endswith("__"))}
             inflight_key = captured_result_key(name, clean_args)
             state.register_inflight(inflight_key, name)
             with suspend_inactivity_watchdog(ctx):
@@ -943,19 +944,22 @@ def _wrap_one(
                 caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                 if ctx.parent_transcript_dir is not None:
                     _append_captured_tool_result(
-                        ctx.parent_transcript_dir, name, clean_args, caption)
+                        ctx.parent_transcript_dir, name, clean_args, caption, is_error=False)
                 state.resolve_inflight(inflight_key, caption, is_error=False)
                 return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if ctx.parent_transcript_dir is not None:
                 _append_captured_tool_result(
-                    ctx.parent_transcript_dir, name, clean_args, content_str)
+                    ctx.parent_transcript_dir, name, clean_args, content_str, is_error=False)
             state.resolve_inflight(inflight_key, content_str, is_error=False)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
             if inflight_key is not None:
                 state.resolve_inflight(inflight_key, str(fte), is_error=True)
+            if ctx.parent_transcript_dir is not None and name != "complete_step":
+                _append_captured_tool_result(
+                    ctx.parent_transcript_dir, name, clean_args, str(fte), is_error=True)
             return _tool_response(str(fte), is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
@@ -970,6 +974,9 @@ def _wrap_one(
                 state.resolve_inflight(inflight_key, text, is_error=True)
             raise_if_suspended(exc)
             state.runtime_errors.append(text)
+            if ctx.parent_transcript_dir is not None and name != "complete_step":
+                _append_captured_tool_result(
+                    ctx.parent_transcript_dir, name, clean_args, text, is_error=True)
             return _tool_response(text, is_error=True)
         except BaseException:
             # CancelledError — the SDK cancelling this handler — misses both arms
