@@ -104,6 +104,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     completer = (
         SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
+    from prompt_toolkit.application import get_app
     from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.output import ColorDepth
@@ -126,9 +127,19 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                 Window(height=Dimension(weight=100)))
             return layout
 
+        def _get_default_buffer_control_height(self) -> Dimension:
+            state = self.default_buffer.complete_state
+            if state is None or not state.completions or get_app().is_done:
+                return Dimension()
+            doc = self.default_buffer.document
+            # 16 is the max_height prompt_toolkit gives CompletionsMenu.
+            rows = doc.cursor_position_row + 1 + min(len(state.completions), 16)
+            # Not min, which shows "Window too small..." on a short terminal.
+            return Dimension(preferred=rows)
+
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
-    # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
+    # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed, no idle menu rows.
     session: Any = _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
         complete_while_typing=False, editing_mode=mode, erase_when_done=True,
