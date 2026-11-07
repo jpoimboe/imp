@@ -160,3 +160,33 @@ def test_bare_remote_control_prints_full_help_on_stderr(
     assert rc == 2
     assert "start" in err
     assert "stop" in err
+
+
+_NEW_DESCRIPTION = (
+    "Start a new quest and run the workflow from your opening message. By "
+    "default imp scopes the work with you first, and the quest stays a draft "
+    "with no branch until you choose to build it. Once you've replied, a draft "
+    "you leave stays in your active list, ready for imp resume <id>. Use "
+    "--backlog to save an idea for later, or --background to run the quest "
+    "detached with no live prompt."
+)
+
+_CHAT_DESCRIPTION = (
+    "Open a conversation with imp: ask how it works, check on existing work, "
+    "or scope a new quest. Nothing is built until you choose to. Once you've "
+    "replied, a conversation you leave is archived, still findable with imp "
+    "search and resumable with imp resume <id>; if a quest took shape, it "
+    "stays in your active list as a draft instead."
+)
+
+
+@pytest.mark.parametrize(
+    ("command", "description"),
+    [("new", _NEW_DESCRIPTION), ("chat", _CHAT_DESCRIPTION)],
+)
+def test_new_and_chat_help_print_description_before_positionals(
+    command: str, description: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    flat = " ".join(_help_for([command, "-h"], capsys).split())
+    assert description in flat
+    assert flat.index(description) < flat.index("positional arguments:")

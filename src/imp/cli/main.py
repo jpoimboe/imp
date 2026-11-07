@@ -4396,7 +4396,14 @@ def _build_parser() -> argparse.ArgumentParser:
              "pythonpath in the non-interactive path; validated against disk.")
 
     p_new = sub.add_parser(
-        "new", help="Start a new quest: run the workflow from an opening intent.")
+        "new", help="Start a new quest: run the workflow from an opening intent.",
+        description=(
+            "Start a new quest and run the workflow from your opening message. "
+            "By default imp scopes the work with you first, and the quest stays "
+            "a draft with no branch until you choose to build it. Once you've "
+            "replied, a draft you leave stays in your active list, ready for "
+            "imp resume <id>. Use --backlog to save an idea for later, or "
+            "--background to run the quest detached with no live prompt."))
     p_new.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Opening intent handed verbatim to the workflow's opening step "
@@ -4453,7 +4460,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat = sub.add_parser(
         "chat",
         help="Open a conversation with imp (ask questions, scout work, or "
-             "scope a quest).")
+             "scope a quest).",
+        description=(
+            "Open a conversation with imp: ask how it works, check on existing "
+            "work, or scope a new quest. Nothing is built until you choose to. "
+            "Once you've replied, a conversation you leave is archived, still "
+            "findable with imp search and resumable with imp resume <id>; if a "
+            "quest took shape, it stays in your active list as a draft instead."))
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
