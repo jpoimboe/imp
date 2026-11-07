@@ -56,6 +56,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     from prompt_toolkit import PromptSession
     from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
     from prompt_toolkit.enums import EditingMode
+    from prompt_toolkit.formatted_text import to_plain_text
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
 
@@ -75,14 +76,13 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     @kb.add("c-c")
     def _(event: Any) -> None:
-        # Typed Ctrl-C must NEVER raise (the default binding does). Non-empty
-        # buffer → clear it; empty buffer → hint at Ctrl-D, once per session.
+        # Must NEVER raise (the default binding does); a skipped hint stays unspent.
         nonlocal hint_shown
         buf = event.app.current_buffer
         if buf.text:
             buf.reset()                    # clear the typed line in place
             return
-        if not hint_shown:
+        if not hint_shown and "ctrl-d" not in to_plain_text(session.placeholder).lower():
             hint_shown = True
             from prompt_toolkit.application import run_in_terminal
             # Fire-and-forget: run_in_terminal schedules via ensure_future; the
