@@ -482,6 +482,73 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("flag", [True, False])
+async def test_echoed_tool_error_flag_reaches_the_loop_guard(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: bool) -> None:
+    from imp.agents.loop_guard import LoopGuard
+
+    observed: list[Any] = []
+    real_observe = LoopGuard.observe
+
+    def spy(self: LoopGuard, record: Any) -> Any:
+        observed.append(record)
+        return real_observe(self, record)
+
+    monkeypatch.setattr(LoopGuard, "observe", spy)
+    scripted = [
+        assistant(tool_use("r1", "read_file", {"path": "gone.txt"})),
+        user(tool_result("r1", "FileNotFoundError: gone.txt", is_error=flag)),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted))
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "read_file"}))
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_result"
+    rec = next(r for r in observed if any(t.name == "read_file" for t in r.tools))
+    (read,) = [t for t in rec.tools if t.name == "read_file"]
+    assert read.is_error is flag
+    assert LoopGuard()._is_progress(rec) is (not flag)
+
+
+def _failing_read_turns(n: int, *, is_error: bool) -> list[Any]:
+    out: list[Any] = []
+    for i in range(n):
+        out += [assistant(tool_use(f"r{i}", "read_file", {"path": "gone.txt"})),
+                user(tool_result(f"r{i}", "FileNotFoundError: gone.txt", is_error=is_error)),
+                result()]
+    return out
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("flag", [True, False])
+async def test_identical_failing_reads_trip_repeated_failure_only_when_flagged(
+        tmp_path: Path, flag: bool) -> None:
+    from imp.agents.loop_guard import DEFAULT_REPEAT_K
+
+    # Exactly K turns: an unflagged first read of a new target counts as progress,
+    # so unflagged repeats would only trip at K+1.
+    scripted = [*_failing_read_turns(DEFAULT_REPEAT_K, is_error=flag),
+                assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result()]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted))
+    inv = replace(_inv(tmp_path, tools=frozenset({"complete_step", "read_file"})),
+                  continuation_fn=lambda _text: ("keep going", False))
+    events = [ev async for ev in runner.run(inv) if ev["type"] != "tool_heartbeat"]
+    if flag:
+        assert events[-1]["type"] == "error"
+        assert (events[-1]["payload"]["category"],
+                events[-1]["payload"]["kind"]) == ("loop", "repeated_failure")
+    else:
+        assert events[-1]["type"] == "agent_result"
+
+
+@pytest.mark.anyio
 async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
