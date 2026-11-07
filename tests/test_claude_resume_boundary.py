@@ -13,6 +13,7 @@ import pytest
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
+    COMPLETE_STEP_BATCHED,
     RESUME_CONTINUE_NUDGE,
     RESUME_DURABILITY_NOTE,
     RESUME_REDO_NUDGE,
@@ -597,3 +598,47 @@ async def test_complete_step_rework_sweeps_an_earlier_call(tmp_path: Path) -> No
             and e["payload"]["id"] in ("t1", "c0")] == ["t1"]
     assert _streamed_text(r) == RESUME_REDO_NUDGE
     assert fb not in json.dumps(r.streamed)
+
+
+_RECORDED = "previous step output recorded; resuming"
+_KILLED_MID_SIBLING = [
+    *_PRIOR, _a(_bash("b1", "sleep 30")), _a(_cs("c1")),
+    _u(_tr("c1", COMPLETE_STEP_BATCHED, is_error=True)),
+]
+
+
+@pytest.mark.anyio
+async def test_kill_mid_sibling_resumes_without_recording_output(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, list(_KILLED_MID_SIBLING))
+    body = _assert_boundary(r)
+    rejection = _last_result(body, "c1")
+    assert rejection.content == COMPLETE_STEP_BATCHED and rejection.is_error
+    sibling = _last_result(body, "b1")
+    assert sibling.is_error
+    assert sibling.content == _synthetic_tool_result_content(_bash("b1", "x").name)
+    assert _RECORDED not in r.persisted
+    assert RESUME_REDO_NUDGE not in r.persisted
+    assert _streamed_text(r) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_kill_mid_sibling_with_feedback_delivers_a_continuation(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, list(_KILLED_MID_SIBLING), retry_feedback="REVISE: again")
+    body = _assert_boundary(r)
+    assert _last_result(body, "c1").content == COMPLETE_STEP_BATCHED
+    assert _last_result(body, "b1").is_error
+    assert REWORK_RESULT_FRAME not in r.persisted
+    assert _streamed_text(r) == "REVISE: again"
+
+
+@pytest.mark.anyio
+async def test_accepted_then_rejected_fragments_deliver_a_continuation(tmp_path: Path) -> None:
+    r = await _resume(tmp_path, [
+        *_PRIOR, _a(_cs("c1")), _a(_cs("c2")),
+        _u(_tr("c2", COMPLETE_STEP_BATCHED, is_error=True)),
+    ], retry_feedback="REVISE: again")
+    body = _assert_boundary(r)
+    assert _last_result(body, "c2").content == COMPLETE_STEP_BATCHED
+    assert _last_result(body, "c1").is_error
+    assert REWORK_RESULT_FRAME not in r.persisted
+    assert _streamed_text(r) == "REVISE: again"

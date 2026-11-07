@@ -4,10 +4,12 @@ from __future__ import annotations
 from imp.agents.classify import (
     ResumeState,
     _contains_tool_result,
+    _trailing_prose_over_resolved_complete_step,
     classify_resume,
     count_tool_uses,
 )
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from imp.agents.transcript import COMPLETE_STEP_BATCHED
 
 
 def test_empty_is_fresh() -> None:
@@ -193,3 +195,27 @@ def test_contains_tool_result_distinguishes_tail_shape() -> None:
     assert _contains_tool_result(tool_result_tail) is True
     assert _contains_tool_result(text_tail) is False
     assert _contains_tool_result(mixed_tail) is True
+
+
+def _prose_over_complete_step(content: str) -> list[Message]:
+    return [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content=content, is_error=True),
+        )),
+        Message(role="assistant", content=(TextBlock(text="Done."),)),
+    ]
+
+
+def test_rejected_complete_step_under_prose_is_not_step_completed() -> None:
+    msgs = _prose_over_complete_step(COMPLETE_STEP_BATCHED)
+    assert _trailing_prose_over_resolved_complete_step(msgs) is False
+    assert classify_resume(msgs) is ResumeState.AWAITING_USER
+
+
+def test_complete_step_with_another_error_under_prose_stays_step_completed() -> None:
+    msgs = _prose_over_complete_step("Input validation error: status is required")
+    assert _trailing_prose_over_resolved_complete_step(msgs) is True
+    assert classify_resume(msgs) is ResumeState.STEP_COMPLETED

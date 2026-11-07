@@ -9,6 +9,7 @@ import pytest
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
+    COMPLETE_STEP_BATCHED,
     RESUME_DURABILITY_NOTE,
     RESUME_REDO_NUDGE,
     REWORK_RESULT_FRAME,
@@ -1639,3 +1640,60 @@ def test_append_fsyncs_the_transcript(
     Transcript(path).append(Message(role="user", content=(TextBlock(text="hi"),)))
 
     assert synced == [path.resolve()]
+
+
+_BATCH_BASH = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "sleep 30"})
+_BATCH_CS = ToolUseBlock(id="c1", name="mcp__imp__complete_step", input={"status": "Success"})
+_BATCH_REJECTION = ToolResultBlock("c1", COMPLETE_STEP_BATCHED, is_error=True)
+
+
+def _batch_turn(role: str, *blocks: object) -> Message:
+    return Message(role=role, content=blocks)  # type: ignore[arg-type]
+
+
+def test_complete_step_batched_copy_is_verbatim() -> None:
+    assert COMPLETE_STEP_BATCHED == (
+        "complete_step was not run: it must be called on its own, after you have "
+        "read the results of your other tool calls. Check those results, then call "
+        "complete_step again.")
+
+
+def test_complete_step_tail_is_none_for_a_rejected_call() -> None:
+    split = [_batch_turn("assistant", _BATCH_BASH), _batch_turn("assistant", _BATCH_CS),
+             _batch_turn("user", _BATCH_REJECTION)]
+    together = [_batch_turn("assistant", _BATCH_BASH, _BATCH_CS),
+                _batch_turn("user", _BATCH_REJECTION)]
+    assert complete_step_tail(split) is None
+    assert complete_step_tail(together) is None
+
+
+def test_complete_step_tail_is_none_for_a_rejected_call_after_marker_repair(
+        tmp_path: Path) -> None:
+    filler = "The user doesn't want to proceed with this tool use."
+    messages = [
+        _batch_turn("assistant", _BATCH_BASH), _batch_turn("assistant", _BATCH_CS),
+        _batch_turn("user", _BATCH_REJECTION),
+        _batch_turn("user", ToolResultBlock("b1", filler, is_error=True)),
+        _batch_turn("user", TextBlock(text="[Request interrupted by user for tool use]")),
+    ]
+    t = Transcript(tmp_path / "transcript.jsonl")
+    for m in messages:
+        t.append(m)
+
+    repair_interrupt_marker_on_resume(messages, t)
+
+    assert complete_step_tail(messages) is None
+    assert _batch_turn("user", _BATCH_REJECTION) in messages
+    restated = next(b for m in messages for b in m.content
+                    if isinstance(b, ToolResultBlock) and b.tool_use_id == "b1")
+    assert restated.content != filler
+
+
+@pytest.mark.parametrize("content,is_error", [
+    ("step complete", False),
+    ("Input validation error: status is required", True),
+])
+def test_complete_step_tail_keeps_any_other_result(content: str, is_error: bool) -> None:
+    messages = [_batch_turn("assistant", _BATCH_CS),
+                _batch_turn("user", ToolResultBlock("c1", content, is_error=is_error))]
+    assert complete_step_tail(messages) == _BATCH_CS
