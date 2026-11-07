@@ -93,3 +93,21 @@ def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path, w
     assert "✓ plan 2/3 · 2 tasks" in r.stdout
     assert "1. Beta" in r.stdout and "2. Gamma" in r.stdout
     assert json.loads(out_file.read_text()) == {"task_total": 2}
+
+
+def test_plan_finalized_script_singular_for_one_task(tmp_path) -> None:
+    script = Path("src/imp/assets/workflows/default/scripts/plan-finalized.sh").resolve()
+    plans = tmp_path / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "abc-plan-1.md").write_text("# P\n## Task 1: Alpha\nbody\n")
+    out_file = tmp_path / "out.json"
+    env = {**os.environ,
+           "IMP_PROJECT_ROOT": str(tmp_path),
+           "IMP_QUEST_DIR": str(tmp_path),
+           "IMP_QUEST_ID": "abc",
+           "IMP_OUTPUT": str(out_file)}
+    r = subprocess.run(["bash", str(script), "1", "1"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "✓ plan 1/1 · 1 task\n" in r.stdout
+    assert json.loads(out_file.read_text()) == {"task_total": 1}

@@ -595,7 +595,7 @@ planning phase · plan 1/2 · reviewing plan · complete · clean · 3m 12s
 
 planning phase · plan 1/2 · finalizing plan
 
-• ✓ plan 1/2 · 1 tasks
+• ✓ plan 1/2 · 1 task
 
    1 Close the session/receive generators with aclosing + regression test
 
