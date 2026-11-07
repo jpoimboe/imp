@@ -293,3 +293,15 @@ def test_menu_floats_over_lines_below_the_caret(skills_dir: Path) -> None:
         session.send("\x07")
         restored = _wait_row(session, "line2")
     assert restored[:11] == ["> /a", *[f"  line{n}" for n in range(2, 10)], "", _TOOLBAR]
+
+
+def test_menu_stays_below_the_caret_under_a_tall_question(skills_dir: Path) -> None:
+    question = [f"q{n}" for n in range(1, 9)]
+    with _pty(skills_dir, rows=12, question="\n".join(question)) as session:
+        session.send("/\t")
+        rows = _wait_row(session, "help")
+        assert rows[:3] == ["q1", "q2", "> /"]
+        assert rows[3].strip() == "help"
+        session.send("\x07")
+        restored = _wait_row(session, "q8")
+    assert restored[:10] == [*question, "", "> /"]
