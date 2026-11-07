@@ -139,21 +139,21 @@ imp: archive data is at v17, newer than this imp (knows v16). A running imp keep
 
 `archive index is at v...` is the same refusal for the index's schema floor.
 
-Tokened `imp resume` is the one refusal that runs to more than one line. A
-partial token matches archived conversations as well as live quests, so a token
-matching an **archived** record this install cannot read refuses and names that
-record, rather than silently resuming whatever else the token matched. The floor
-line follows indented, and any readable match is offered as a hint:
+Tokened `imp resume` is the one refusal that runs to more than one line. A token
+matching any quest on the active board (`running`, `waiting`, `error`, `new`,
+`paused`, `merge_blocked` or backlog) ignores archived matches, so version skew
+cannot change the outcome. Any other token can match archived conversations, so
+one matching an **archived** record this install cannot read refuses and names
+that record. The floor line follows indented:
 
 ```
 imp: 'lodo' matches an archived quest this imp cannot read: lodo77
   archive data is at v17, newer than this imp (knows v16). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
-  hint: readable match lodo40 — pass its full id to resume it.
 ```
 
-A quest with a live home on disk always resolves by its full id; a partial token
-resolves it too, unless that token also matches an archived record this install
-cannot read.
+A quest with a home on disk always resolves by its full id, whatever the archive's
+version. A finished quest's leftover home is not on the active board, so a partial
+token matching it can still refuse over an unreadable archived record.
 
 The usual cause is a stale process, not a stale checkout. A running imp keeps the
 code it started with: a session daemon warms its module graph at startup, so
