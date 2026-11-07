@@ -1930,6 +1930,7 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
         lines.append("")
         lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
+    lines.extend(_vars_blocks(quest_vars, color=color))
     return lines
 
 
@@ -1938,9 +1939,17 @@ def _var_value(value: object) -> str:
     return str(value).lower() if isinstance(value, bool) else str(value)
 
 
+_LONG_VAR_CHARS = 80
+
+
+def _is_long_var(text: str) -> bool:
+    return "\n" in text or len(text) > _LONG_VAR_CHARS
+
+
 def _vars_row(values: dict[str, object], width: int, *, color: bool) -> list[str]:
-    """The `vars:` rows: entries wrapped whole at `, ` to the terminal width, never clipped."""
-    entries = [f"{name}={_var_value(values[name])}" for name in sorted(values)]
+    """The `vars:` rows for short vars: entries wrapped whole at `, `, never clipped."""
+    texts = {name: _var_value(values[name]) for name in sorted(values)}
+    entries = [f"{name}={text}" for name, text in texts.items() if not _is_long_var(text)]
     avail = _term_width() - width
     rows: list[str] = []
     for i, entry in enumerate(entries):
@@ -1955,6 +1964,17 @@ def _vars_row(values: dict[str, object], width: int, *, color: bool) -> list[str
     rows = [row + "," for row in rows[:-1]] + rows[-1:]
     return [_card_field("vars:", rows[0], width, color=color),
             *(" " * width + row for row in rows[1:])]
+
+
+def _vars_blocks(values: dict[str, object], *, color: bool) -> list[str]:
+    """Each long var as its own dim `vars.<name>:` section, value verbatim."""
+    lines: list[str] = []
+    for name in sorted(values):
+        text = _var_value(values[name])
+        if _is_long_var(text):
+            lines += ["", pal.ansi(f"vars.{name}:", "dim", enabled=color),
+                      *text.rstrip("\n").split("\n")]
+    return lines
 
 
 # Short card phrasing for the halt reasons a bare token does not explain; the long
@@ -2096,6 +2116,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
         lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
+    lines.extend(_vars_blocks(card.vars, color=color))
     if ledger is not None:
         lines.append("")
         lines.append(pal.ansi("ledger:", "dim", enabled=color))
