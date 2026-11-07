@@ -10,6 +10,7 @@ from typing import Literal, TextIO
 from imp.cli import palette as pal
 from imp.paths import display_path, imp_home
 from imp.providers import Readiness, provider_readiness
+from imp.providers.config import _REQUIRED_TIERS
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
 from imp.remote.drivers import REGISTRY
 
@@ -51,7 +52,7 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
     cfg, prov = eff.config, eff.provenance
     configured = set(cfg.providers)
     tier_rows: list[tuple[str, str, str]] = []
-    for tier in sorted(cfg.tiers):
+    for tier in sorted(cfg.tiers, key=_REQUIRED_TIERS.index):
         for vendor in sorted(cfg.tiers[tier]):
             if not show_all and configured and vendor not in configured:
                 continue
@@ -105,7 +106,8 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
 def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool = False) -> None:
     cfg, prov = eff.config, eff.provenance
     if tier not in cfg.tiers:
-        out.write(f"unknown tier {tier!r} (known: {sorted(cfg.tiers)})\n")
+        out.write(f"unknown tier {tier!r} "
+                  f"(known: {sorted(cfg.tiers, key=_REQUIRED_TIERS.index)})\n")
         return
     out.write(f"tier {tier}:\n")
     rows = [
