@@ -301,6 +301,38 @@ def test_menu_floats_over_lines_below_the_caret(skills_dir: Path) -> None:
     assert restored[:11] == ["> /a", *[f"  line{n}" for n in range(2, 10)], "", _TOOLBAR]
 
 
+def test_menu_keeps_wrapped_lines_below_the_caret_on_screen(skills_dir: Path) -> None:
+    wrapped = ["  " + "x" * 78] * 3 + ["  " + "x" * 66]
+    with _pty(skills_dir) as session:
+        session.send("/a\x1b\r" + "x" * 300)
+        _wait_row(session, wrapped[3].strip())
+        session.send("\x1b[A\x05")
+        _wait_screen(session, lambda _rows: session.cursor() == (4, 0))
+        session.send("\t")
+        rows = _wait_text(session, "abandon")
+        assert rows[0] == "> /a"
+        assert [row.split()[1] for row in rows[1:3]] == ["archive", "abandon"]
+        assert rows[3:7] == [wrapped[2], wrapped[3], "", _TOOLBAR]
+
+        session.send("\x07")
+        restored = _wait_row(session, wrapped[0].strip())
+    assert restored[:7] == ["> /a", *wrapped, "", _TOOLBAR]
+
+
+def test_search_focus_keeps_wrapped_lines_below_the_caret_on_screen(skills_dir: Path) -> None:
+    last = f"  {'x' * 66}"
+    with _pty(skills_dir) as session:
+        session.send("/a\x1b\r" + "x" * 300)
+        _wait_row(session, last.strip())
+        session.send("\x1b[A\x05")
+        _wait_screen(session, lambda _rows: session.cursor() == (4, 0))
+        session.send("\t")
+        _wait_text(session, "abandon")
+        session.send("\x12")
+        rows = _wait_text(session, "I-search")
+    assert last in rows
+
+
 def test_menu_stays_below_the_caret_under_a_tall_question(skills_dir: Path) -> None:
     question = [f"q{n}" for n in range(1, 9)]
     with _pty(skills_dir, rows=12, question="\n".join(question)) as session:

@@ -126,8 +126,11 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
         """Ends the layout with an unconditional filler after the toolbar, so the
         renderer's forced full-height fill lands there and the toolbar hugs the input."""
 
+        _input_window: Any
+
         def _create_layout(self) -> Any:
             layout = super()._create_layout()
+            self._input_window = layout.current_window
             layout.container.children.append(  # type: ignore[attr-defined]
                 # take_using_weights costs ~weight x visual rows per render, so
                 # the weight must stay modest while still dominating the input
@@ -140,14 +143,19 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
         def _get_default_buffer_control_height(self) -> Dimension:
             state = self.default_buffer.complete_state
-            if state is None or not state.completions or get_app().is_done:
+            app = get_app()
+            if state is None or not state.completions or app.is_done:
                 return Dimension()
             doc = self.default_buffer.document
             # 16 is the max_height prompt_toolkit gives CompletionsMenu.
             rows = doc.cursor_position_row + 1 + min(len(state.completions), 16)
-            # Not min, which shows "Window too small..."; line_count stops it clipping the buffer.
+            size = app.output.get_size()
+            window = self._input_window
+            content_rows = window.content.preferred_height(
+                size.columns, size.rows, window.wrap_lines(), window.get_line_prefix)
+            # Not min, which shows "Window too small..."; content_rows stops it clipping the buffer.
             # weight outbids the question window, so the menu stays below the caret.
-            return Dimension(preferred=max(rows, doc.line_count), weight=5)
+            return Dimension(preferred=max(rows, content_rows), weight=5)
 
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
