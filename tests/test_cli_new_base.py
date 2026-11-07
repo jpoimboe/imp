@@ -191,9 +191,10 @@ def test_apply_new_backlog_records_quest(tmp_path: Path, monkeypatch) -> None:
         tmp_path, opening="wire the widget", title=None, workflow=None,
         base=None, idea="Widget work", depends_on=["dep55"])
     assert rc == 0
-    assert "recorded backlog quest" in msg
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
+    assert msg == (f"Recorded backlog quest {quest.id} "
+                   f"(start it with `imp resume {quest.id}`).")
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert quest.origin == "backlog"
     assert quest.title == "Widget work"
@@ -207,9 +208,10 @@ def test_apply_new_draft_records_quest(tmp_path: Path, monkeypatch) -> None:
         tmp_path, opening="do the thing", title="Thing", workflow=None,
         base=None, idea=None, depends_on=None)
     assert rc == 0
-    assert "recorded backlog quest" in msg
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
+    assert msg == (f"Recorded backlog quest {quest.id} "
+                   f"(start it with `imp resume {quest.id}`).")
     assert quest.origin == "backlog"
     assert quest.title == "Thing"
     assert quest.seed_opening == "do the thing"
@@ -222,7 +224,7 @@ def test_apply_new_empty_idea_returns_error(tmp_path: Path, monkeypatch) -> None
         tmp_path, opening="x", title=None, workflow=None,
         base=None, idea="   ", depends_on=None)
     assert rc == 2
-    assert "non-empty" in msg
+    assert msg == "imp: --backlog title must be non-empty"
 
 
 def test_apply_new_bad_base_returns_error(tmp_path: Path, monkeypatch) -> None:
@@ -276,9 +278,10 @@ def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
         tmp_path, opening="do the thing", title="Task", workflow=None,
         base=None, idea=None, depends_on=None, background=True, parent="mom3")
     assert rc == 0
-    assert "started quest" in msg
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
+    assert msg == (f"Started quest {quest.id} (running autonomously in the "
+                   f"background; appears in the active list).")
     assert quest.origin == "draft"
     assert started["qid"] == quest.id
     meta = json.loads((quest.quest_dir / "quest.json").read_text())

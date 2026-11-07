@@ -101,7 +101,7 @@ styles its own line.
   `imp: <message>` on **stderr** via `_emit_cli_error`, which centralizes the
   prefix so no CLI call site hand-rolls it. The prefix lands on the first line only:
   a message may carry indented continuation lines (a `LoadError` hint, one auth hint
-  per configured provider).
+  per configured provider). Success confirmations carry no `imp:` prefix.
 
 Carved out (unchanged): rc-conditional proxy-response relays that print a
 pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,

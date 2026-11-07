@@ -214,7 +214,7 @@ def test_session_proxy_payload_carries_the_raw_var_flags(
 
     async def _fake_proxy(op: str, args: dict[str, object]) -> dict[str, object]:
         sent.update(args)
-        return {"returncode": 0, "message": "imp: recorded backlog quest q1"}
+        return {"returncode": 0, "message": "Recorded backlog quest q1"}
 
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake_proxy)
 
