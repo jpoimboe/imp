@@ -127,8 +127,8 @@ def test_merged_after_returns_its_fail_safe_false(tmp_path: Path) -> None:
 def test_resume_refuses_a_token_whose_archived_candidate_is_unreadable(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An archived candidate this install cannot read is named, not dropped:
-    the token refuses rather than silently opening the one live match."""
+    """An archived candidate this install cannot read is named, not dropped: a
+    token matching no live quest refuses rather than reporting nothing to resume."""
     import anyio
 
     from imp.engine.abandon import archive_conversation
@@ -145,7 +145,7 @@ def test_resume_refuses_a_token_whose_archived_candidate_is_unreadable(
 
     async def _resolve() -> str | int:
         return await m._resolve_resume_target(
-            tmp_path, "lodo", non_interactive=True)
+            tmp_path, "lodo7", non_interactive=True)
 
     rc = anyio.run(_resolve)
 
@@ -154,9 +154,8 @@ def test_resume_refuses_a_token_whose_archived_candidate_is_unreadable(
                                  known=archive._DATA_VERSION))
     assert rc == 2
     assert captured.err == (
-        "imp: 'lodo' matches an archived quest this imp cannot read: lodo77\n"
-        f"  {reason}\n"
-        "  hint: readable match lodo40 — pass its full id to resume it.\n")
+        "imp: 'lodo7' matches an archived quest this imp cannot read: lodo77\n"
+        f"  {reason}\n")
     assert captured.out == ""
 
 

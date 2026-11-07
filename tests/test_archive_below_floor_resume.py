@@ -1,6 +1,6 @@
-"""Tokened `imp resume` below the blob floor: a token matching the unreadable
-archived candidate refuses and names it, while a quest with a live home still
-resolves — the `test_archive_floor_fallbacks` contract, downward."""
+"""Tokened `imp resume` below the blob floor: a token matching only the unreadable
+archived candidate refuses and names it, while a token matching a live quest resolves
+it and ignores the archive — the `test_archive_floor_fallbacks` contract, downward."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,13 +40,19 @@ def _resolve(control: Path, token: str) -> str | int:
     return anyio.run(run)
 
 
-def test_a_current_marker_offers_both_candidates(tmp_path: Path) -> None:
-    """Control: above the floor the archived resumable candidate IS offered."""
+def test_a_current_marker_offers_the_archived_candidate_only_without_a_live_match(
+    tmp_path: Path,
+) -> None:
+    """Control: above the floor the archived candidate is readable, yet a live match
+    still shadows it; its own full id reaches it."""
     _live_and_shelved(tmp_path)
 
-    rows, unreadable = m._resumable_matches(tmp_path, "lodo")
+    shadowed, shadowed_unreadable = m._resumable_matches(tmp_path, "lodo")
+    rows, unreadable = m._resumable_matches(tmp_path, SHELVED)
 
-    assert {r[0] for r in rows} == {LIVE, SHELVED}
+    assert {r[0] for r in shadowed} == {LIVE}
+    assert shadowed_unreadable is None
+    assert {r[0] for r in rows} == {SHELVED}
     assert unreadable is None
 
 
@@ -65,7 +71,7 @@ def test_below_floor_a_live_id_resolves_to_itself(
     assert capsys.readouterr().err == ""
 
 
-def test_below_floor_a_token_matching_both_refuses_and_names_the_archived_id(
+def test_below_floor_a_token_matching_both_resolves_live(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _live_and_shelved(tmp_path)
@@ -74,13 +80,27 @@ def test_below_floor_a_token_matching_both_refuses_and_names_the_archived_id(
     rows, unreadable = m._resumable_matches(tmp_path, "lodo")
     target = _resolve(tmp_path, "lodo")
 
+    assert {r[0] for r in rows} == {LIVE}
+    assert unreadable is None
+    assert target == LIVE
+    assert capsys.readouterr().err == ""
+
+
+def test_below_floor_a_token_matching_only_the_archived_id_refuses_and_names_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _live_and_shelved(tmp_path)
+    _lower_data_floor(tmp_path)
+
+    rows, unreadable = m._resumable_matches(tmp_path, "lodo7")
+    target = _resolve(tmp_path, "lodo7")
+
     reason = str(ArchiveMismatch(floor="data",
                                  stored=BELOW_DATA_FLOOR,
                                  known=archive._DATA_VERSION))
-    assert {r[0] for r in rows} == {LIVE}
+    assert rows == []
     assert unreadable == m._UnreadableMatches(ids=(SHELVED,), reason=reason)
     assert target == 2
     assert capsys.readouterr().err == (
-        f"imp: 'lodo' matches an archived quest this imp cannot read: {SHELVED}\n"
-        f"  {reason}\n"
-        f"  hint: readable match {LIVE} — pass its full id to resume it.\n")
+        f"imp: 'lodo7' matches an archived quest this imp cannot read: {SHELVED}\n"
+        f"  {reason}\n")
