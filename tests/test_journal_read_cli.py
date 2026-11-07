@@ -133,7 +133,7 @@ def test_status_shows_merged_section_from_archive(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     # in-flight slug appears under in-flight; merged slug under completed.
@@ -166,7 +166,7 @@ def test_status_inflight_takes_precedence_over_archive(
 
     completed = m._completed_rows(tmp_path)
     assert [r[0] for r in completed] == []  # in-flight worktree wins
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     # The change appears only once (in-flight section wins; no duplicate in past).
@@ -196,7 +196,7 @@ def test_status_empty_prints_no_changes(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     assert capsys.readouterr().out == "No quests yet — start one with imp new\n"
 
@@ -215,7 +215,7 @@ def test_status_precondition_error_prints_no_changes(
 
     monkeypatch.setattr(m, "_control_root", _raise)
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     assert capsys.readouterr().out == "No quests yet — start one with imp new\n"
 
@@ -237,7 +237,7 @@ def test_status_column_alignment_short_ids(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
     status_col = lines[0].index("STATUS")
@@ -265,7 +265,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "\x1b[" not in out
@@ -289,7 +289,7 @@ def test_status_all_history_merged_not_dim(
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     row = next(ln for ln in out.splitlines() if "gone" in ln)
@@ -316,7 +316,7 @@ def test_overview_default_shows_merged_disposition(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    rc = main(["list"])
     assert rc == 0
     out = capsys.readouterr().out
     # Section headers are the only lines ending in `:`; every quest row ends in its age.
@@ -348,7 +348,7 @@ def test_overview_all_shows_history_label_and_abandoned(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "history:" in out
@@ -374,11 +374,11 @@ def test_overview_default_shows_all_merged(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    main(["list"])
     default_out = capsys.readouterr().out
     assert sum(1 for ln in default_out.splitlines() if "done" in ln) == 12
 
-    m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    main(["list", "-a"])
     all_out = capsys.readouterr().out
     assert sum(1 for ln in all_out.splitlines() if "done" in ln) == 12
 
@@ -400,9 +400,9 @@ def test_overview_excludes_unknown_archived_status(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    main(["list"])
     assert "chatid" not in capsys.readouterr().out
-    m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    main(["list", "-a"])
     assert "chatid" not in capsys.readouterr().out
 
 
@@ -420,7 +420,7 @@ def test_overview_empty_history_omits_block(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    main(["list"])
     out = capsys.readouterr().out
     assert "live" in out
     assert "completed:" not in out
@@ -442,7 +442,7 @@ def test_overview_only_history_not_reported_empty(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    main(["list"])
     out = capsys.readouterr().out
     assert out != "No quests yet — start one with imp new\n"
     assert "done" in out and "completed" in out
@@ -465,7 +465,7 @@ def test_status_all_history_abandoned_not_dim(
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": True})())
+    rc = main(["list", "-a"])
     assert rc == 0
     out = capsys.readouterr().out
     row = next(ln for ln in out.splitlines() if "abandoned" in ln)
@@ -488,7 +488,7 @@ def test_status_default_inflight_columns_and_color(
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": False})())
+    rc = main(["list"])
     assert rc == 0
     out = capsys.readouterr().out
     lines = out.splitlines()
