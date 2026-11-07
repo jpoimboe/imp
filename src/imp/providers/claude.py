@@ -54,6 +54,7 @@ from imp.agents.loop_guard import (
     LoopGuard,
     ToolOutcome,
     TurnRecord,
+    _flatten_result_text,
     _result_preview,
 )
 from imp.agents.loop_items import EndOfTurn, Error, Thinking, Warning
@@ -92,6 +93,7 @@ from imp.agents.tools.image import BASE64_TARGET_BYTES
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.spill import wrap_task_result
 from imp.agents.transcript import (
+    COMPLETE_STEP_BATCHED,
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
     RESUME_STUB_NOTE,
@@ -444,6 +446,8 @@ class _RunState:
     """
     complete_step_called: bool = False
     complete_step_args: dict[str, Any] = field(default_factory=dict)
+    # One verdict (accepted?) per complete_step tool_use, FIFO; its handler can enter first.
+    complete_verdicts: asyncio.Queue[bool] = field(default_factory=asyncio.Queue)
     save_and_exit_logged: bool = False
     runtime_errors: list[str] = field(default_factory=list)
     # When a tool raises FatalToolError the wrapper captures (tool, message)
@@ -823,6 +827,8 @@ def _wrap_one(
                 "(same-loop topology pin)")
         inflight_key: str | None = None
         try:
+            # Ahead of the sweep: a raising sweep must not strand this call's verdict.
+            accepted = name != "complete_step" or await state.complete_verdicts.get()
             # Decision 10 sweep site: EVERY tool dispatch — the claude
             # analog of agents/dispatch.py's first-statement sweep. Inside the
             # try: a sweep raise must degrade to an is_error tool result, not
@@ -908,6 +914,8 @@ def _wrap_one(
                         id_ns="block")
                 return _tool_response(wrapped, is_error=False)
             if name == "complete_step":
+                if not accepted:
+                    return _tool_response(COMPLETE_STEP_BATCHED, is_error=True)
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args
                 # after the next yielded message and emits agent_result.
@@ -1625,6 +1633,8 @@ class ClaudeSession(ObserveSession):
         self._pending_tools: dict[str, ToolOutcome] = {}
         self._pending_complete = False
         self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
+        self._tool_use_mid: str | None = None
+        self._rejected_complete: set[str] = set()
 
         body = _project_for_cli(messages[:resume_base])
         if native_resume:
@@ -1676,6 +1686,35 @@ class ClaudeSession(ObserveSession):
         from imp.engine.reincarnation import handoff_path_for
         self._handoff_phase: str | None = None
         self._handoff_path_obj = handoff_path_for(invocation.transcript_dir)
+
+    def _reject_batched_complete(self, call: ToolUseBlock) -> None:
+        self.elog.append_tool_call(
+            agent_id=self.aid,
+            block=ToolUseBlock(id=call.id, name="complete_step", input=call.input))
+        # Recorded now: the sibling may run for minutes and a killed daemon must still resume.
+        record = ToolResultBlock(call.id, COMPLETE_STEP_BATCHED, is_error=True)
+        message = Message(role="user", content=(record,))
+        self.messages.append(message)
+        self.transcript.append(message)
+        self.elog.append_tool_result(agent_id=self.aid, block=record)
+        self._rejected_complete.add(call.id)
+
+    def _without_rejection_echoes(self, message: Message) -> Message | None:
+        def echo(b: Any) -> bool:
+            if not isinstance(b, ToolResultBlock):
+                return False
+            if b.tool_use_id in self._rejected_complete:
+                return True
+            # A schema-invalid rejected call skips its handler; its False reaches the next handler.
+            if _flatten_result_text(b.content) != COMPLETE_STEP_BATCHED:
+                return False
+            call = _tool_use_block(self.messages, b.tool_use_id)
+            return call is not None and _canon_tool_name(call.name) == "complete_step"
+
+        kept = tuple(b for b in message.content if not echo(b))
+        if len(kept) == len(message.content):
+            return message
+        return Message(role="user", content=kept) if kept else None
 
     def _flush_turn_record(self) -> TurnRecord | None:
         if (not self._pending_text and not self._pending_tools
@@ -1833,6 +1872,8 @@ class ClaudeSession(ObserveSession):
             yield Thinking(text=content)
         for w in warns:
             yield Warning(text=w)
+        if imp_msg is not None and imp_msg.role == "user":
+            imp_msg = self._without_rejection_echoes(imp_msg)
         if imp_msg is not None:
             self.messages.append(imp_msg)
             self.transcript.append(imp_msg)
@@ -1847,6 +1888,10 @@ class ClaudeSession(ObserveSession):
                         else turn_text)
                 if cls_name == "AssistantMessage":
                     mid = getattr(raw, "message_id", None)
+                    # Ahead of the crossing return past the block loop. A None id matches nothing.
+                    tool_use_seen = mid is not None and mid == self._tool_use_mid
+                    if any(isinstance(b, ToolUseBlock) for b in imp_msg.content):
+                        self._tool_use_mid = mid
                     if (self._llm_group_open and mid is not None
                             and self._llm_group_key is not None
                             and mid != self._llm_group_key):
@@ -1896,6 +1941,8 @@ class ClaudeSession(ObserveSession):
                         self._flush_llm_group()
                     for b in imp_msg.content:
                         if isinstance(b, ToolUseBlock):
+                            batched = tool_use_seen
+                            tool_use_seen = True
                             if b.name in CC_WEB_BUILTIN_TO_NORM:
                                 norm = CC_WEB_BUILTIN_TO_NORM[b.name]
                                 self._web_calls[b.id] = (norm, b.input)
@@ -1905,6 +1952,10 @@ class ClaudeSession(ObserveSession):
                                                        input=b.input))
                                 continue
                             if _canon_tool_name(b.name) == "complete_step":
+                                state.complete_verdicts.put_nowait(not batched)
+                                if batched:
+                                    self._reject_batched_complete(b)
+                                    continue
                                 state.complete_step_called = True
                                 state.complete_step_args = b.input
                                 # Part A: complete_step is terminal — re-emit the
@@ -2000,6 +2051,10 @@ class ClaudeSession(ObserveSession):
         if type(raw).__name__ != "ResultMessage":
             return False
         self._last_raw = raw
+        # An interrupted turn leaves verdicts no handler will take.
+        verdicts = self.runner._state.complete_verdicts
+        while not verdicts.empty():
+            verdicts.get_nowait()
         elog = self.elog
         aid = self.aid
         ctx = self.ctx

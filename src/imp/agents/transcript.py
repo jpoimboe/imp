@@ -50,6 +50,13 @@ REWORK_RESULT_FRAME = (
     "below and re-run the step; call complete_step again when the work is done."
 )
 
+# Matched by equality on resume. SINGLE unbroken line (prompt-embedded).
+COMPLETE_STEP_BATCHED = (
+    "complete_step was not run: it must be called on its own, after you have read "
+    "the results of your other tool calls. Check those results, then call "
+    "complete_step again."
+)
+
 RESUME_CONTINUE_NUDGE = (
     "The run was paused and is now resuming — this is not a "
     "rejection and nothing failed. Continue the step from where you left off "
@@ -343,14 +350,20 @@ def unanswered_tool_uses(messages: list[Message]) -> list[ToolUseBlock]:
 def complete_step_tail(messages: list[Message]) -> ToolUseBlock | None:
     """The complete_step tool_use in the last assistant turn when only user turns
     follow it: dangling, under its stored "step complete" result, or already
-    answered by an earlier resume. Read after the marker repair has dropped claude's
-    interrupt marker."""
+    answered by an earlier resume. A rejected call recorded no output, so it is no
+    tail. Read after the marker repair has dropped claude's interrupt marker."""
     start = _trailing_user_start(messages)
     if start == 0 or messages[start - 1].role != "assistant":
         return None
-    return next((b for b in messages[start - 1].content
-                 if isinstance(b, ToolUseBlock)
-                 and canonicalize_tool_name(b.name) == "complete_step"), None)
+    cs = next((b for b in messages[start - 1].content
+               if isinstance(b, ToolUseBlock)
+               and canonicalize_tool_name(b.name) == "complete_step"), None)
+    if cs is not None and any(
+            isinstance(b, ToolResultBlock) and b.tool_use_id == cs.id
+            and b.content == COMPLETE_STEP_BATCHED
+            for m in messages[start:] for b in m.content):
+        return None
+    return cs
 
 
 def _resume_result(

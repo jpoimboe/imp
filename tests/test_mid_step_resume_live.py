@@ -72,7 +72,7 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
 def _skip_or_fail_unpaused(
     quest_dir: Path, state: dict[str, object], proc: subprocess.Popen
 ) -> NoReturn:
-    """Skip on the overlay-mount precondition failure, else fail with diagnostics."""
+    """Skip when imp's bash sandbox could not start, else fail with diagnostics."""
     reason = sandbox_sleep_precondition_failed(quest_dir / "events.jsonl")
     if reason is not None:
         pytest.skip(reason)

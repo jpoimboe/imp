@@ -105,3 +105,10 @@ def test_normalize_keeps_free_form_open_and_closes_the_rest() -> None:
             "shut": {"type": "object", "additionalProperties": False, "properties": {}},
         },
     }
+
+
+def test_description_says_to_call_it_alone_after_reading_results() -> None:
+    assert make_complete_step_tool(_schema()).description == (
+        "Terminate this step with the structured output. "
+        "Args correspond to the agent's declared output schema. "
+        "Call it on its own, after reading the results of your other tool calls.")

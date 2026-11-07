@@ -16,6 +16,7 @@ from imp.agents.runner import (
     ToolUseBlock,
     canonicalize_tool_name,
 )
+from imp.agents.transcript import COMPLETE_STEP_BATCHED
 
 
 class ResumeState(Enum):
@@ -52,9 +53,9 @@ def classify_resume(messages: list[Message]) -> ResumeState:
 def _trailing_prose_over_resolved_complete_step(messages: list[Message]) -> bool:
     """True when the tail is one-or-more trailing assistant text-only turns (and
     system replay artifacts) sitting directly on a `complete_step` tool_use whose
-    tool_result immediately follows it. Bounded to the trailing run: the resolved
-    complete_step must be immediately behind the prose, never buried behind other
-    tool activity."""
+    tool_result immediately follows it, unless that result is a batched rejection,
+    which recorded no output. Bounded to the trailing run: the resolved complete_step
+    must be immediately behind the prose, never buried behind other tool activity."""
     i = len(messages) - 1
     while i >= 0 and (
         messages[i].role == "system"
@@ -66,16 +67,17 @@ def _trailing_prose_over_resolved_complete_step(messages: list[Message]) -> bool
         i -= 1
     if i <= 0 or messages[i].role != "user":
         return False
-    result_ids = {
-        b.tool_use_id for b in messages[i].content if isinstance(b, ToolResultBlock)
+    results = {
+        b.tool_use_id: b for b in messages[i].content if isinstance(b, ToolResultBlock)
     }
-    if not result_ids:
+    if not results:
         return False
     prev = messages[i - 1]
     return prev.role == "assistant" and any(
         isinstance(b, ToolUseBlock)
         and canonicalize_tool_name(b.name) == "complete_step"
-        and b.id in result_ids
+        and b.id in results
+        and results[b.id].content != COMPLETE_STEP_BATCHED
         for b in prev.content
     )
 

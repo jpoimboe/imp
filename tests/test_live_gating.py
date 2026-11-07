@@ -281,19 +281,10 @@ import json as _json  # noqa: E402
 
 from tests._live import sandbox_sleep_precondition_failed  # noqa: E402
 
-# The imp sandbox's per-command COW overlay home failing to mount:
-_OVERLAY_STDERR = (
-    "mount: /tmp/imp-abc123/w.overlay-merged: wrong fs type, bad option, "
-    "bad superblock on overlay, missing codepage or helper program, "
-    "or other error"
-)
-
-# Exact AC text (spec §"Acceptance criteria"); the "…" is U+2026.
 _EXPECTED_REASON = (
-    'imp bash-sandbox overlay mount failed (rc 32: "wrong fs type … on '
-    'overlay"); the writer\'s `sleep 30` never ran, so the '
-    "mid-turn-interrupt precondition is unmet. This is a sandbox/environment "
-    "failure, not an interrupt-resume regression."
+    "imp's bash sandbox could not start (the bash result has status sandbox_setup_failed); "
+    "the writer's `sleep 30` never ran, so the mid-turn-interrupt precondition is unmet. "
+    "This is a sandbox/environment failure, not an interrupt-resume regression."
 )
 
 
@@ -323,24 +314,26 @@ def _bash_result(tool_id="b1", *, returncode, stderr, stdout="", shape="str"):
             "payload": {"id": tool_id, "content": content, "error": returncode != 0}}
 
 
-def test_precondition_failed_returns_exact_reason_on_overlay_mount(tmp_path):
-    ev = tmp_path / "events.jsonl"
-    _write_events(ev, [
-        _bash_call(),
-        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
-    ])
-    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+def _sandbox_failed_result(tool_id="b1", *, shape="str"):
+    # What the bash tool returns when its sandbox cannot start: no returncode, and
+    # the tool call itself is not an error.
+    inner = _json.dumps({"stdout": "", "stderr": "", "status": "sandbox_setup_failed",
+                         "error": "the sandbox could not start"})
+    content = inner if shape == "str" else [{"type": "text", "text": inner}]
+    return {"type": "tool_result",
+            "payload": {"id": tool_id, "content": content, "error": False}}
 
 
-def test_precondition_failed_returns_reason_on_claude_list_content(tmp_path):
-    # claude's bash tool_result content is a LIST of text parts, not a
-    # string; the mount failure must still be detected so the two claude
-    # targets SKIP (spec AC: all five tests SKIP on the overlay mount failure).
+def test_sandbox_setup_skip_reason_replaces_the_mount_reason():
+    import tests._live as live
+    assert live._SANDBOX_SETUP_SKIP_REASON == _EXPECTED_REASON
+    assert not hasattr(live, "_OVERLAY_MOUNT_SKIP_REASON")
+
+
+@pytest.mark.parametrize("shape", ["str", "list"])
+def test_precondition_failed_returns_exact_reason_on_sandbox_setup_failure(tmp_path, shape):
     ev = tmp_path / "events.jsonl"
-    _write_events(ev, [
-        _bash_call(),
-        _bash_result(returncode=32, stderr=_OVERLAY_STDERR, shape="list"),
-    ])
+    _write_events(ev, [_bash_call(), _sandbox_failed_result(shape=shape)])
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
 
 
@@ -362,11 +355,14 @@ def test_precondition_returns_none_on_clean_bash(tmp_path):
     assert sandbox_sleep_precondition_failed(ev) is None
 
 
-def test_precondition_returns_none_on_rc32_without_overlay_signature(tmp_path):
+def test_precondition_returns_none_when_the_command_itself_failed(tmp_path):
+    # Any returncode means the sandbox started and the command ran. The stderr is the
+    # mount failure the helper used to match, so restoring that match fails here.
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         _bash_call(),
-        _bash_result(returncode=32, stderr="mount: some unrelated error"),
+        _bash_result(returncode=32,
+                     stderr="mount: /m: wrong fs type, bad option, bad superblock on overlay"),
     ])
     assert sandbox_sleep_precondition_failed(ev) is None
 
@@ -376,9 +372,7 @@ def test_precondition_returns_none_for_non_bash_tool(tmp_path):
     read_call = {"type": "tool_call",
                  "payload": {"id": "r1", "name": "read_file",
                              "input": {"path": "a.txt"}}}
-    # A rc-32 overlay-looking result on a NON-bash tool id must not match.
-    _write_events(ev, [read_call, _bash_result("r1", returncode=32,
-                                               stderr=_OVERLAY_STDERR)])
+    _write_events(ev, [read_call, _sandbox_failed_result("r1")])
     assert sandbox_sleep_precondition_failed(ev) is None
 
 
@@ -390,10 +384,46 @@ def test_precondition_tolerates_blank_and_garbage_lines(tmp_path):
     ev = tmp_path / "events.jsonl"
     _write_events(
         ev,
-        [_bash_call(), _bash_result(returncode=32, stderr=_OVERLAY_STDERR)],
+        [_bash_call(), _sandbox_failed_result()],
         extra_lines=("", "   ", "{not valid json", "partial-line-no-brace"),
     )
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+
+
+def test_precondition_returns_none_on_garbage_alone(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(
+        ev,
+        [_bash_call(), {"type": "tool_result", "payload": {"id": "b1", "content": "not json"}}],
+        extra_lines=(
+            "", "   ", '{"type": "tool_result", "payload": {"status": "sandbox_setup_failed',
+        ),
+    )
+    assert sandbox_sleep_precondition_failed(ev) is None
+
+
+def _events_text(*records):
+    return "".join(_json.dumps(rec) + "\n" for rec in records)
+
+
+def test_precondition_reads_archived_events_when_live_home_is_gone(tmp_path):
+    quest_dir = _archived_quest_dir(
+        tmp_path, "arch03", _events_text(_bash_call(), _sandbox_failed_result(shape="list")))
+    assert not quest_dir.exists()
+    assert sandbox_sleep_precondition_failed(quest_dir / "events.jsonl") == _EXPECTED_REASON
+
+
+def test_precondition_returns_none_on_clean_archived_events(tmp_path):
+    quest_dir = _archived_quest_dir(
+        tmp_path, "arch04", _events_text(_bash_call(), _bash_result(returncode=0, stderr="")))
+    assert sandbox_sleep_precondition_failed(quest_dir / "events.jsonl") is None
+
+
+def test_precondition_returns_none_when_neither_live_nor_archived_events_exist(tmp_path):
+    archived = _archived_quest_dir(
+        tmp_path, "arch05", _events_text(_bash_call(), _sandbox_failed_result()))
+    assert sandbox_sleep_precondition_failed(
+        archived.parent / "other1" / "events.jsonl") is None
 
 
 from tests.test_relay_hibernation_live import _interrupt_gate_engaged  # noqa: E402
@@ -1019,7 +1049,7 @@ class _NoPipeProc:
     stderr = None
 
 
-def test_skip_or_fail_unpaused_skips_on_overlay_mount_precondition(tmp_path):
+def test_skip_or_fail_unpaused_skips_on_sandbox_setup_precondition(tmp_path):
     from tests.test_mid_step_resume_live import _skip_or_fail_unpaused
     quest_dir = tmp_path / "q"
     quest_dir.mkdir()
@@ -1027,10 +1057,7 @@ def test_skip_or_fail_unpaused_skips_on_overlay_mount_precondition(tmp_path):
     # itself, sandbox_sleep_precondition_failed swallows the IsADirectoryError in
     # its `except OSError: return None` guard, silently killing this skip and
     # turning a sandbox precondition miss into a hard failure.
-    _write_events(quest_dir / "events.jsonl", [
-        _bash_call(),
-        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
-    ])
+    _write_events(quest_dir / "events.jsonl", [_bash_call(), _sandbox_failed_result()])
     with pytest.raises(pytest.skip.Exception) as exc:
         _skip_or_fail_unpaused(quest_dir, {"status": "running"}, _NoPipeProc())
     assert str(exc.value) == _EXPECTED_REASON
@@ -1045,6 +1072,114 @@ def test_group_c_state_reads_poll_and_report_evidence():
         assert 'json.loads(state_path.read_text())["status"]' not in src
         assert 'wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)' in src
         assert "evidence(" in src
+
+
+_DAEMON_GONE_WHAT = "daemon exited before the interrupt: the lock was gone after the bash tool_call"
+
+
+def _record_signals(monkeypatch):
+    signals = []
+    monkeypatch.setattr(os, "kill", lambda *args: signals.append(args))
+    return signals
+
+
+def test_relay_skip_or_fail_without_a_pid_fails_and_signals_nothing(tmp_path, monkeypatch):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = tmp_path / "q"
+    with pytest.raises(pytest.fail.Exception) as exc:
+        _relay_skip_or_fail(
+            _DAEMON_GONE_WHAT, quest_dir / "events.jsonl", ["a screen line"], None, quest_dir)
+    msg = str(exc.value)
+    assert msg.startswith(_DAEMON_GONE_WHAT)
+    assert "a screen line" in msg
+    assert "events.jsonl types: []" in msg
+    assert "daemon stack dump:\n<daemon already exited>" in msg
+    assert signals == []
+
+
+def test_relay_skip_or_fail_with_a_pid_reports_the_daemon_stack_dump(tmp_path, monkeypatch):
+    import tests.test_relay_hibernation_live as relay
+    signals = _record_signals(monkeypatch)
+    monkeypatch.setattr(relay, "_usr1_stack_dump", lambda pid, _quest_dir: f"stack of {pid}")
+    quest_dir = tmp_path / "q"
+    with pytest.raises(pytest.fail.Exception) as exc:
+        relay._relay_skip_or_fail("a miss", quest_dir / "events.jsonl", [], 4242, quest_dir)
+    assert "daemon stack dump:\nstack of 4242" in str(exc.value)
+    assert signals == []
+
+
+@pytest.mark.parametrize("daemon_pid", [None, 4242])
+def test_relay_skip_or_fail_skips_on_the_sandbox_precondition(tmp_path, monkeypatch, daemon_pid):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    events = quest_dir / "events.jsonl"
+    _write_events(events, [_bash_call(), _sandbox_failed_result(shape="list")])
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _relay_skip_or_fail(_DAEMON_GONE_WHAT, events, [], daemon_pid, quest_dir)
+    assert exc.value.msg == _EXPECTED_REASON
+    assert signals == []
+
+
+def test_relay_skip_or_fail_skips_on_the_sandbox_precondition_in_a_reaped_home(
+    tmp_path, monkeypatch,
+):
+    from tests.test_relay_hibernation_live import _relay_skip_or_fail
+    signals = _record_signals(monkeypatch)
+    quest_dir = _archived_quest_dir(
+        tmp_path, "arch06", _events_text(_bash_call(), _sandbox_failed_result(shape="list")))
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _relay_skip_or_fail(_DAEMON_GONE_WHAT, quest_dir / "events.jsonl", [], None, quest_dir)
+    assert exc.value.msg == _EXPECTED_REASON
+    assert signals == []
+
+
+def test_relay_test_checks_foreground_sleep_before_the_grace_sleep():
+    import tests.test_relay_hibernation_live as relay
+    src = Path(relay.__file__).read_text()
+    wait = src.index("bash_call = wait_for_bash_tool_call(events, timeout=120.0)")
+    assert (src.index('assert bash_call, "never saw bash tool_call"', wait)
+            < src.index("skip_unless_foreground_sleep(bash_call)", wait)
+            < src.index("time.sleep(_CC_STARTUP_GRACE)", wait))
+
+
+def test_relay_test_first_lock_read_tolerates_a_reaped_home():
+    import re
+
+    import tests.test_relay_hibernation_live as relay
+    src = Path(relay.__file__).read_text()
+    guarded = re.search(
+        r"try:\s+daemon_pid = int\((lock_path\.read_text\(\))\.strip\(\)\)\s+"
+        r"except FileNotFoundError:\s+_relay_skip_or_fail\(\s+"
+        + re.escape(f'"{_DAEMON_GONE_WHAT}"')
+        + r",\s+events, s\.lines\(\), None, quest_dir,",
+        src,
+    )
+    assert guarded is not None
+    assert src.index("lock_path.read_text()") == guarded.start(1)
+
+
+def test_relay_test_registers_quest_evidence_once_the_home_is_known():
+    import inspect
+
+    import tests.test_relay_hibernation_live as relay
+    test_fn = relay.test_relay_hibernate_then_resume_reengages
+    assert "register_quest_evidence" in inspect.signature(test_fn).parameters
+    src = Path(relay.__file__).read_text()
+    assert (src.index("quest_dir = _await_change_dir(")
+            < src.index("register_quest_evidence(quest_dir)")
+            < src.index("bash_call = wait_for_bash_tool_call("))
+
+
+def test_live_helpers_no_longer_name_the_retired_mount_failure():
+    for rel in ("tests/_live.py", "tests/test_relay_hibernation_live.py",
+                "tests/test_mid_step_resume_live.py"):
+        body = (_REPO_ROOT / rel).read_text().lower()
+        for stale in ("overlay", "rc 32", "wrong fs type"):
+            assert stale not in body, f"{rel} still names {stale!r}"
+    assert "~2s" not in (_REPO_ROOT / "tests/test_relay_hibernation_live.py").read_text()
 
 
 def test_live_category_prose_never_says_api():

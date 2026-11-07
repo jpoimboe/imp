@@ -72,7 +72,8 @@ def make_complete_step_tool(output_schema: OutputSchema) -> Tool:
         name="complete_step",
         description=(
             "Terminate this step with the structured output. "
-            "Args correspond to the agent's declared output schema."
+            "Args correspond to the agent's declared output schema. "
+            "Call it on its own, after reading the results of your other tool calls."
         ),
         input_schema=schema,
         fn=_invoke,

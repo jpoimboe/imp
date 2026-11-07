@@ -23,7 +23,7 @@ from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.transcript import captured_result_key
+from imp.agents.transcript import COMPLETE_STEP_BATCHED, captured_result_key
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude import (
@@ -78,6 +78,7 @@ async def test_wrap_complete_step_captures_args(tmp_path: Path) -> None:
         "complete_step", tool, _ctx(tmp_path), state, _passthrough_decorator,
     )
 
+    state.complete_verdicts.put_nowait(True)
     out = await wrapped({"status": "Success"})
     assert state.complete_step_called is True
     assert state.complete_step_args == {"status": "Success"}
@@ -103,9 +104,11 @@ async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) 
         _passthrough_decorator,
     )
 
+    state.complete_verdicts.put_nowait(True)
     await wrapped({"status": "Success"})
     assert state.complete_step_args == {"status": "Success"}
 
+    state.complete_verdicts.put_nowait(True)
     await wrapped({"status": "Success", "spec_path": "docs/my-spec.md"})
     assert state.complete_step_args == {
         "status": "Success", "spec_path": "docs/my-spec.md"}
@@ -131,6 +134,7 @@ async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: 
     server = create_sdk_mcp_server(name="imp", tools=sdk_tools)["instance"]
     args = {"status": "Success", "data": {"k": 1, "nested": {"x": [1]}}}
 
+    state.complete_verdicts.put_nowait(True)
     res = await server.request_handlers[CallToolRequest](CallToolRequest(
         method="tools/call",
         params=CallToolRequestParams(name="complete_step", arguments=args),
@@ -139,6 +143,83 @@ async def test_complete_step_object_field_round_trips_real_sdk_server(tmp_path: 
     result = res.root
     assert result.isError is False, result.content
     assert state.complete_step_args == args
+
+
+def _status_schema() -> OutputSchema:
+    return OutputSchema(
+        fields=(OutputField(name="status", type="enum",
+                            values=("Success", "Error"), required=True),),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_rejected_verdict_captures_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bg as bg_mod
+
+    swept = {"n": 0}
+
+    async def counting(ctx):  # type: ignore[no-untyped-def]
+        swept["n"] += 1
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    state = _RunState()
+    state.complete_verdicts.put_nowait(False)
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(_status_schema()), _ctx(tmp_path), state,
+        _passthrough_decorator,
+    )
+
+    out = await wrapped({"status": "Success"})
+
+    assert out["content"][0]["text"] == COMPLETE_STEP_BATCHED
+    assert out["isError"] is True
+    assert state.complete_step_called is False
+    assert state.complete_step_args == {}
+    assert swept["n"] == 1
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_waits_for_a_verdict_queued_later(tmp_path: Path) -> None:
+    state = _RunState()
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(_status_schema()), _ctx(tmp_path), state,
+        _passthrough_decorator,
+    )
+
+    task = asyncio.create_task(wrapped({"status": "Success"}))
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    state.complete_verdicts.put_nowait(False)
+    out = await task
+
+    assert out["content"][0]["text"] == COMPLETE_STEP_BATCHED
+    assert state.complete_step_called is False
+
+
+@pytest.mark.anyio
+async def test_wrap_complete_step_raising_sweep_does_not_strand_the_verdict(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bg as bg_mod
+
+    async def boom(ctx):  # type: ignore[no-untyped-def]
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", boom)
+    state = _RunState()
+    state.complete_verdicts.put_nowait(True)
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(_status_schema()), _ctx(tmp_path), state,
+        _passthrough_decorator,
+    )
+
+    out = await wrapped({"status": "Success"})
+
+    assert out["isError"] is True
+    assert "sweep failed" in out["content"][0]["text"]
+    assert state.complete_verdicts.empty()
 
 
 @pytest.mark.anyio

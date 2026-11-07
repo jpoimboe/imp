@@ -138,11 +138,10 @@ def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | N
     return provider_available(provider)
 
 
-_OVERLAY_MOUNT_SKIP_REASON = (
-    'imp bash-sandbox overlay mount failed (rc 32: "wrong fs type … on '
-    'overlay"); the writer\'s `sleep 30` never ran, so the '
-    "mid-turn-interrupt precondition is unmet. This is a sandbox/environment "
-    "failure, not an interrupt-resume regression."
+_SANDBOX_SETUP_SKIP_REASON = (
+    "imp's bash sandbox could not start (the bash result has status sandbox_setup_failed); "
+    "the writer's `sleep 30` never ran, so the mid-turn-interrupt precondition is unmet. "
+    "This is a sandbox/environment failure, not an interrupt-resume regression."
 )
 
 
@@ -174,22 +173,24 @@ def _bash_result_dicts(content: object):
 
 
 def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
-    """Scan events.jsonl for the writer's bash `tool_result`. When it shows
-    imp's per-command COW overlay home failing to mount (returncode 32 with the
-    'wrong fs type … on overlay' / 'w.overlay-merged' signature in stderr), the
-    scripted `sleep 30` never ran and the mid-turn-interrupt precondition is
-    unmet — return a fixed descriptive skip reason. Otherwise return None.
+    """Scan events.jsonl (the archived copy once the home is reaped) for the
+    writer's bash `tool_result`. When its status is sandbox_setup_failed, imp's
+    bash sandbox could not start, the scripted `sleep 30` never ran and the
+    mid-turn-interrupt precondition is unmet — return a fixed descriptive skip
+    reason. Otherwise return None.
 
     A `tool_result` payload carries no tool name, so bash results are found by
     correlating `payload["id"]` back to a preceding bash `tool_call`. The bash
-    result JSON ({stdout, stderr, returncode}) is a string for the in-process
-    providers and list-wrapped for claude — `_bash_result_dicts`
-    normalises both shapes.
+    result JSON is a string for the in-process providers and list-wrapped for
+    claude — `_bash_result_dicts` normalises both shapes.
     """
-    if not events_path.exists():
-        return None
     try:
         body = events_path.read_text()
+    except FileNotFoundError:
+        archived = _archived_events(events_path.parent)
+        if archived is None:
+            return None
+        body = archived.decode(errors="replace")
     except OSError:
         return None
     bash_ids: set[str] = set()
@@ -208,12 +209,8 @@ def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
                 bash_ids.add(tool_id)
         elif rec.get("type") == "tool_result" and payload.get("id") in bash_ids:
             for result in _bash_result_dicts(payload.get("content")):
-                stderr = result.get("stderr", "")
-                if (result.get("returncode") == 32
-                        and isinstance(stderr, str)
-                        and "wrong fs type" in stderr
-                        and "overlay" in stderr):
-                    return _OVERLAY_MOUNT_SKIP_REASON
+                if result.get("status") == "sandbox_setup_failed":
+                    return _SANDBOX_SETUP_SKIP_REASON
     return None
 
 
