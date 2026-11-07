@@ -1,7 +1,11 @@
 # tests/test_events_digest.py
 from __future__ import annotations
 
-from imp.engine.events_digest import digest_event
+from typing import Any
+
+import pytest
+
+from imp.engine.events_digest import digest_event, summarize
 
 
 def test_digest_event_is_single_line() -> None:
@@ -222,12 +226,10 @@ def test_warning_digest_missing_message_key() -> None:
 
 
 def test_summarize_exposes_type_aware_tail() -> None:
-    from imp.engine.events_digest import summarize
     tail = summarize({"type": "tool_call",
                       "payload": {"name": "grep", "input": {"pattern": "x"}}})
     assert "grep" in tail
-    # the type-aware tool_call handler json-serializes the input dict; the
-    # generic fallback would render it as `input=<dict>` instead.
+    # the type-aware tool_call handler leads with the tool name, then the input as JSON.
     assert '"pattern": "x"' in tail
 
 
@@ -465,3 +467,155 @@ def test_agent_message_ctx_ignores_non_numeric_occupancy_fields() -> None:
     line = digest_event(ev)
     assert "ctx=" not in line
     assert "stop=end_turn" in line
+
+
+def _tier(provider: str, model: str, differ_from: str | None = None,
+          differ_tier: int | None = None, **extra: Any) -> dict[str, Any]:
+    return {"provider": provider, "model": model,
+            "differ_from": differ_from, "differ_tier": differ_tier, **extra}
+
+
+def _tiers_ev(payload: dict[str, Any]) -> dict[str, Any]:
+    return {"id": "t1", "parent_id": None, "agent_id": None,
+            "timestamp": "2026-07-01T00:00:20+00:00", "type": "tiers_resolved",
+            "payload": payload}
+
+
+_THREE_TIERS = {
+    "low": _tier("claude", "claude-haiku-5-5"),
+    "medium": _tier("claude", "claude-sonnet-5-5"),
+    "high": _tier("claude", "claude-opus-5-5"),
+}
+
+_TIERS_WITH_STEP_OVERRIDE = {
+    "tiers": {
+        "low": _tier("claude", "claude-haiku-4-5-20251001"),
+        "medium": _tier("claude", "claude-sonnet-4-6"),
+        "high": _tier("claude", "claude-opus-4-7"),
+    },
+    "steps": {
+        "code-reviewer": _tier("claude", "claude-sonnet-4-6",
+                               differ_from="task-lead", differ_tier=2),
+    },
+}
+
+
+def test_tiers_resolved_renders_tiers_and_empty_steps() -> None:
+    assert summarize(_tiers_ev({"tiers": _THREE_TIERS, "steps": {}})) == (
+        "tiers: low=claude/claude-haiku-5-5 medium=claude/claude-sonnet-5-5 "
+        "high=claude/claude-opus-5-5 steps: none"
+    )
+
+
+def test_tiers_resolved_step_override_carries_divergence_suffix() -> None:
+    assert summarize(_tiers_ev(_TIERS_WITH_STEP_OVERRIDE)) == (
+        "tiers: low=claude/claude-haiku-4-5-20251001 medium=claude/claude-sonnet-4-6 "
+        "high=claude/claude-opus-4-7 steps: code-reviewer=claude/claude-sonnet-4-6 "
+        "(differs from task-lead: tier 2)"
+    )
+
+
+def test_tiers_resolved_tier_entry_carries_divergence_suffix() -> None:
+    tiers = {
+        "medium": _tier("anthropic", "sonnet"),
+        "high": _tier("openai", "gpt-5.5", differ_from="medium", differ_tier=1),
+    }
+    assert summarize(_tiers_ev({"tiers": tiers, "steps": {}})) == (
+        "tiers: medium=anthropic/sonnet "
+        "high=openai/gpt-5.5 (differs from medium: tier 1) steps: none"
+    )
+
+
+def test_tiers_resolved_ignores_legacy_extra_keys() -> None:
+    legacy = {name: {**entry, "warning": "old codex selection warning"}
+              for name, entry in _THREE_TIERS.items()}
+    assert (summarize(_tiers_ev({"tiers": legacy, "steps": {}}))
+            == summarize(_tiers_ev({"tiers": _THREE_TIERS, "steps": {}})))
+
+
+def test_tiers_resolved_empty_payload_renders_none_sections() -> None:
+    assert summarize(_tiers_ev({})) == "tiers: none steps: none"
+
+
+def test_tiers_resolved_non_dict_section_renders_none() -> None:
+    assert summarize(_tiers_ev({"tiers": "garbage", "steps": ["x"]})) == (
+        "tiers: none steps: none"
+    )
+
+
+def test_tiers_resolved_non_dict_entry_renders_as_json() -> None:
+    payload = {
+        "tiers": {"low": "oops", "high": _tier("claude", "claude-opus-5-5")},
+        "steps": {"coder": ["a", "b"]},
+    }
+    assert summarize(_tiers_ev(payload)) == (
+        'tiers: low="oops" high=claude/claude-opus-5-5 steps: coder=["a", "b"]'
+    )
+
+
+def test_tiers_resolved_digest_line_keeps_envelope() -> None:
+    line = digest_event(_tiers_ev({"tiers": _THREE_TIERS, "steps": {}}))
+    assert line.startswith("2026-07-01T00:00:20+00:00 tiers_resolved [-] tiers: low=")
+    assert "<dict>" not in line
+
+
+_STEP_COMPLETED = {
+    "id": "g1", "parent_id": None, "agent_id": None,
+    "timestamp": "2026-07-01T00:00:21+00:00", "type": "step_completed",
+    "payload": {
+        "step": "threshold", "kind": "agent",
+        "action": {"verb": "goto", "target": "scope-code-check",
+                   "resume": False, "rework": False},
+        "var_mutations": {"fast_path": False},
+        "label": None,
+    },
+}
+
+_QUOTA_READING = {
+    "id": "g2", "parent_id": None, "agent_id": None,
+    "timestamp": "2026-07-01T00:00:22+00:00", "type": "quota_reading",
+    "payload": {"windows": [{"name": "5h", "pct": 41.5}, {"name": "7d", "pct": 12}],
+                "raw": {"five_hour": 41.5}},
+}
+
+_ERROR_WITH_NEWLINE = {
+    "id": "g3", "parent_id": None, "agent_id": None,
+    "timestamp": "2026-07-01T00:00:23+00:00", "type": "error",
+    "payload": {"message": "boom", "detail": {"trace": "line one\nline two"}},
+}
+
+
+def test_generic_fallback_renders_nested_values_as_inline_json() -> None:
+    assert summarize(_STEP_COMPLETED) == (
+        'step=threshold kind=agent action={"verb": "goto", "target": "scope-code-check", '
+        '"resume": false, "rework": false} var_mutations={"fast_path": false} label=None'
+    )
+
+
+def test_generic_fallback_renders_list_as_json_array() -> None:
+    line = summarize(_QUOTA_READING)
+    assert 'windows=[{"name": "5h", "pct": 41.5}, {"name": "7d", "pct": 12}]' in line
+    assert 'raw={"five_hour": 41.5}' in line
+
+
+def test_generic_fallback_escapes_embedded_newline() -> None:
+    line = digest_event(_ERROR_WITH_NEWLINE)
+    assert "\n" not in line
+    assert 'detail={"trace": "line one\\nline two"}' in line
+
+
+@pytest.mark.parametrize("event", [
+    _tiers_ev({"tiers": _THREE_TIERS, "steps": {}}),
+    _tiers_ev(_TIERS_WITH_STEP_OVERRIDE),
+    _tiers_ev({}),
+    _tiers_ev({"tiers": "garbage", "steps": ["x"]}),
+    _tiers_ev({"tiers": {"low": "line\nbreak"}, "steps": {"a\nb": {"provider": "p"}}}),
+    _STEP_COMPLETED,
+    _QUOTA_READING,
+    _ERROR_WITH_NEWLINE,
+])
+def test_nested_payload_digest_has_no_placeholder_and_one_line(event: dict[str, Any]) -> None:
+    for line in (summarize(event), digest_event(event)):
+        assert "<dict>" not in line
+        assert "<list>" not in line
+        assert "\n" not in line

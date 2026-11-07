@@ -147,13 +147,33 @@ def _h_query_result(payload: dict[str, Any]) -> str:
             f"stop={payload.get('stop_reason')} subtype={payload.get('subtype')}")
 
 
+def _tier_entries(section: Any) -> str:
+    if not isinstance(section, dict) or not section:
+        return "none"
+    parts: list[str] = []
+    for name, entry in section.items():
+        if not isinstance(entry, dict):
+            parts.append(f"{name}={json.dumps(entry, default=str)}")
+            continue
+        part = f"{name}={entry.get('provider')}/{entry.get('model')}"
+        if entry.get("differ_tier") is not None:
+            part += f" (differs from {entry.get('differ_from')}: tier {entry['differ_tier']})"
+        parts.append(part)
+    return " ".join(parts)
+
+
+def _h_tiers_resolved(payload: dict[str, Any]) -> str:
+    return _collapse(f"tiers: {_tier_entries(payload.get('tiers'))} "
+                     f"steps: {_tier_entries(payload.get('steps'))}")
+
+
 def _generic(payload: dict[str, Any]) -> str:
     parts: list[str] = []
     for k, v in payload.items():
         if isinstance(v, (str, int, float, bool)) or v is None:
             parts.append(f"{k}={v}")
         else:
-            parts.append(f"{k}=<{type(v).__name__}>")
+            parts.append(f"{k}={json.dumps(v, default=str)}")
     return _collapse(" ".join(parts))
 
 
@@ -172,6 +192,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "tool_result": _h_tool_result,
     "agent_result": _h_agent_result,
     "step_context": _h_step_context,
+    "tiers_resolved": _h_tiers_resolved,
     "warning": _h_warning,
 }
 
