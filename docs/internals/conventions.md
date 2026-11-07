@@ -71,6 +71,13 @@ reuse `_with_trailing_blank`. Piped/redirected output and machine formats
 (`--json`, `log --html/--md/-`, `wrote <path>` confirmations) stay byte-clean —
 no added blank line. New human subcommands must follow this rule.
 
+## Rows during a live session
+
+Between `LiveDriver` construction and `finish`, a row the session commits to the
+terminal goes through `_emit_now` or `LiveDriver.commit_row`, never a direct
+`print`. The driver tracks whether the last committed row is blank, and teardown
+relies on that to leave exactly one blank row above the closing block.
+
 ## Error and diagnostic output
 
 imp routes error and diagnostic surfaces through two shared sinks — no surface
