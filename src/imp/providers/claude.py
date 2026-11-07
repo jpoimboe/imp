@@ -14,9 +14,10 @@ runners:
     one JSON line per dict. Verified end-to-end by Spike 7 (replayed
     tool_use blocks are NOT re-dispatched).
   - `complete_step` is a synthesized MCP tool like any other. Its wrapper
-    raises StepComplete; the SDK surfaces tool exceptions as `is_error: true`
-    tool_results, so the runner watches for the next assistant message and
-    extracts the captured args from a shared state dict.
+    records the args in the shared `_RunState` and returns normally; the runner
+    reads them from there. Wrappers catch imp's tool errors and return
+    `{"content": [...], "is_error": True}` — the SDK reads only `is_error`
+    (not MCP's `isError`) when building the wire result.
 
 History isolation, by config dir. claude-p (CC 2.x) writes an `ai-title` session
 stub to its `CLAUDE_CONFIG_DIR`/projects/ on every spawn; imp keeps that off the
@@ -1027,11 +1028,10 @@ def _wrap_impty_one(spec: Any, sdk_tool: Any, transcript_dir: Path) -> Any:
 
 
 def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:
-    """Per SDK convention, tool wrappers return {content: [...]} or
-    {content: [...], isError: true}."""
+    """SDK tool-handler return value; the SDK flags the wire result from `is_error` only."""
     body: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
     if is_error:
-        body["isError"] = True
+        body["is_error"] = True
     return body
 
 
