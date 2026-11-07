@@ -6,7 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 import imp.providers.model_roster as mod
+from imp.cli.model_command import render_roster
+from imp.providers.catalog import catalog_aliases
 from imp.providers.claude_model_cache import ClaudeModelOption
+from imp.providers.config import ProviderModel
 from imp.providers.model_roster import ModelGroup, ProviderRoster, discover_roster, group_models
 
 
@@ -26,7 +29,7 @@ def test_unions_catalog_and_config_tier_models(monkeypatch) -> None:
     # A tier names a model NOT in the catalog — it must still appear.
     tiers = {"high": {"anthropic": "made-up-model-x"}}
     rosters = discover_roster(_config(tiers), claude_options=[])
-    names = list(rosters[0].entries)
+    names = list(rosters[0].names)
     assert "claude-fable-5[1m]" in names          # from the catalog
     assert "made-up-model-x" in names             # from the config tiers block
 
@@ -37,7 +40,7 @@ def test_claude_cache_values_dedup(monkeypatch) -> None:
     # A cache value already present via the catalog must appear exactly once.
     opts = [ClaudeModelOption(value="claude-fable-5[1m]")]
     rosters = discover_roster(_config(tiers), claude_options=opts)
-    names = list(rosters[0].entries)
+    names = list(rosters[0].names)
     assert names.count("claude-fable-5[1m]") == 1
 
 
@@ -46,7 +49,7 @@ def test_claude_cache_adds_new_values(monkeypatch) -> None:
     tiers = {"high": {"claude": "claude-opus-4-8[1m]"}}
     opts = [ClaudeModelOption(value="cache-only-model")]
     rosters = discover_roster(_config(tiers), claude_options=opts)
-    assert "cache-only-model" in list(rosters[0].entries)
+    assert "cache-only-model" in list(rosters[0].names)
 
 
 def test_non_claude_provider_ignores_claude_options(monkeypatch) -> None:
@@ -54,21 +57,21 @@ def test_non_claude_provider_ignores_claude_options(monkeypatch) -> None:
     tiers = {"high": {"anthropic": "claude-opus-4-8[1m]"}}
     opts = [ClaudeModelOption(value="cache-only-model")]
     rosters = discover_roster(_config(tiers), claude_options=opts)
-    assert "cache-only-model" not in list(rosters[0].entries)
+    assert "cache-only-model" not in list(rosters[0].names)
 
 
 def test_shared_openai_catalog_exposes_astra_to_both_providers(monkeypatch) -> None:
     monkeypatch.setattr(mod, "available_providers", lambda config: ["openai", "codex"])
     rosters = discover_roster(_config({}), claude_options=[])
     assert [roster.provider for roster in rosters] == ["openai", "codex"]
-    assert all("gpt-6-astra" in roster.entries for roster in rosters)
+    assert all("gpt-6-astra" in roster.names for roster in rosters)
 
 
-def test_returns_bare_string_entries(monkeypatch) -> None:
+def test_returns_bare_string_names(monkeypatch) -> None:
     monkeypatch.setattr(mod, "available_providers", lambda config: ["anthropic"])
     rosters = discover_roster(_config({}), claude_options=[])
     assert isinstance(rosters[0], ProviderRoster)
-    assert all(isinstance(e, str) for e in rosters[0].entries)
+    assert all(isinstance(e, str) for e in rosters[0].names)
 
 
 def _flat(provider: str, names: Iterable[str]) -> list[str]:
@@ -163,3 +166,39 @@ def test_no_name_is_dropped_and_duplicates_collapse() -> None:
 
 def test_a_non_ascii_digit_is_not_a_version_component() -> None:
     assert _flat("openai", ["gpt-5.²", "gpt-5.1"]) == ["gpt-5.1", "gpt-5.²"]
+
+
+def test_a_roster_carries_groups_and_a_flat_ordered_view(monkeypatch) -> None:
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude"])
+    roster = discover_roster(_config({}), claude_options=[])[0]
+    assert roster.groups == group_models("claude", catalog_aliases("claude"))
+    assert roster.names == tuple(m for group in roster.groups for m in group.models)
+    assert set(roster.names) == set(catalog_aliases("claude"))
+    assert not hasattr(roster, "entries")
+
+
+def test_unknown_tier_and_cache_models_land_in_other_alphabetically(monkeypatch) -> None:
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["claude"])
+    tiers = {"high": {"claude": "zz-tier-model"}}
+    opts = [ClaudeModelOption(value="aa-cache-model")]
+    roster = discover_roster(_config(tiers), claude_options=opts)[0]
+    assert roster.groups[-1] == ModelGroup("Other", ("aa-cache-model", "zz-tier-model"))
+
+
+def test_tiers_feed_every_provider_and_the_cache_only_claude(monkeypatch) -> None:
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["openai", "scripted"])
+    tiers = {"high": {"openai": "oa-tier", "scripted": "sc-tier"}}
+    opts = [ClaudeModelOption(value="cache-only-model")]
+    openai, scripted = discover_roster(_config(tiers), claude_options=opts)
+    assert set(openai.names) == {*catalog_aliases("openai"), "oa-tier"}
+    assert scripted.names == ("sc-tier",)
+
+
+@pytest.mark.parametrize("configured", [["openai", "anthropic"], ["anthropic", "openai"]])
+def test_rendered_provider_order_follows_the_configured_order(
+    monkeypatch, configured: list[str],
+) -> None:
+    monkeypatch.setattr(mod, "available_providers", lambda config: configured)
+    rosters = discover_roster(_config({}), claude_options=[])
+    lines = render_roster(ProviderModel("anthropic", "claude-opus-5"), rosters)
+    assert [ln.strip() for ln in lines if ln.strip() in configured] == configured

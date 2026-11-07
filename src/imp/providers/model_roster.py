@@ -7,8 +7,8 @@ For each env-available provider the roster is the de-duplicated union of:
   2. the model names the effective config's `tiers` block names for it, and
   3. for `claude` only: the values in Claude Code's local model cache.
 Discovery is pure over its inputs — the caller reads the cache and passes it in —
-so it needs no disk or network access. Entries are bare model-name strings; the
-listing carries no descriptions."""
+so it needs no disk or network access. Each provider's bare model names are sorted
+into family groups, most capable and newest first; the listing carries no descriptions."""
 from __future__ import annotations
 
 import re
@@ -39,7 +39,11 @@ class ModelGroup:
 @dataclass(frozen=True, slots=True)
 class ProviderRoster:
     provider: str
-    entries: tuple[str, ...]
+    groups: tuple[ModelGroup, ...]
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(name for group in self.groups for name in group.models)
 
 
 def _claude_group(name: str) -> str:
@@ -111,9 +115,5 @@ def discover_roster(
                 names.append(model)
         if provider == "claude":
             names.extend(opt.value for opt in claude_options)
-        order: list[str] = []
-        for name in names:
-            if name not in order:
-                order.append(name)
-        rosters.append(ProviderRoster(provider, tuple(order)))
+        rosters.append(ProviderRoster(provider, group_models(provider, names)))
     return rosters

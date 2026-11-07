@@ -297,18 +297,6 @@ def test_anthropic_catalog_has_opus_5_5_entries() -> None:
     assert (resolved.cli_model, resolved.betas) == ("claude-opus-5-5", ())
 
 
-def test_opus_5_5_is_listed_ahead_of_opus_5_in_both_rosters() -> None:
-    # catalog_aliases returns table order and /model prints it, so placement IS
-    # display order: 5.5 leads the family it supersedes, on both providers.
-    for provider in ("claude", "anthropic"):
-        aliases = catalog_aliases(provider)
-        last_5_5 = max(aliases.index(key) for key in
-                       ("claude-opus-5-5", "claude-opus-5-5[1m]"))
-        first_5 = min(aliases.index(key) for key in
-                      ("claude-opus-5", "claude-opus-5[1m]"))
-        assert last_5_5 < first_5, provider
-
-
 def test_limits_for_covers_fable() -> None:
     # Both forms are exact catalog keys — a prefix fallback would miss entirely,
     # not land on 1M — and both now carry the native 1M window.
@@ -402,17 +390,6 @@ def test_gpt_6_sizes_hand_off_at_the_200k_ceiling() -> None:
                 {"input_tokens": 199_999}, provider, model) is False
             assert context_threshold_crossed(
                 {"input_tokens": 200_000}, provider, model) is True
-
-
-def test_gpt_6_sizes_follow_astra_and_lead_5_6_in_both_rosters() -> None:
-    # catalog_aliases returns table order and /model prints it, so placement IS
-    # display order: the 6.x family leads the 5.6 family it supersedes.
-    for provider in ("openai", "codex"):
-        aliases = catalog_aliases(provider)
-        astra = aliases.index("gpt-6-astra")
-        assert aliases[astra:astra + 4] == (
-            "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"), provider
-        assert astra + 4 <= aliases.index("gpt-5.6-sol"), provider
 
 
 def test_the_1m_anthropic_models_all_hand_off_at_the_200k_ceiling() -> None:

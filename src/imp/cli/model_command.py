@@ -8,7 +8,7 @@ from typing import Any
 
 from imp.providers.config import ProviderModel
 from imp.providers.model_arg import ModelArgError, parse_model_arg
-from imp.providers.model_roster import ProviderRoster
+from imp.providers.model_roster import ProviderRoster, group_models
 
 # Hidden from the roster but still resolvable; exact-name match keeps dated ids listed.
 _HIDDEN_ALIASES = frozenset({"haiku", "sonnet", "opus", "gpt-5.6"})
@@ -25,10 +25,16 @@ def render_roster(
     ]
     for roster in rosters:
         lines.append(f"  {roster.provider}")
-        for name in roster.entries:
-            if name in _HIDDEN_ALIASES:
-                continue
-            lines.append(f"    {name}")
+        marked = None
+        groups = roster.groups
+        if roster.provider == current.provider:
+            marked = current.model
+            groups = group_models(roster.provider, (*roster.names, marked))
+        for group in groups:
+            rows = [n for n in group.models if n == marked or n not in _HIDDEN_ALIASES]
+            if rows:
+                lines.append(f"    {group.name}")
+            lines.extend(f"      {n}   current" if n == marked else f"      {n}" for n in rows)
     lines.append("")
     lines.append("Switch with  /model <name>  or  /model provider:model")
     return lines
@@ -66,7 +72,7 @@ def roster_model_names(quest: Any) -> list[str]:
     rosters = discover_roster(config, claude_options=read_claude_model_options())
     names: list[str] = []
     for roster in rosters:
-        for name in roster.entries:
+        for name in roster.names:
             if name not in names:
                 names.append(name)
     return names
