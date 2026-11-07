@@ -1820,11 +1820,17 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    name_w = quest_row.name_budget()
-    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     store = make_store(control)
-    for cid in sorted(candidates):
-        card = store.quest_card(cid)
+    cards = [(cid, store.quest_card(cid)) for cid in sorted(candidates)]
+    intents = {c.quest_id: quest_row.fallback_intent(c.intent, c.seed_opening)
+               for _, c in cards if c is not None}
+    status_w, name_w = quest_row.overview_widths([
+        (c.status, quest_row.compose_status_label(c.step, c.step_label, c.phase_label),
+         quest_row.resolve_display_name(c.title, intents[c.quest_id]).text)
+        for _, c in cards if c is not None])
+    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+          file=sys.stderr)
+    for cid, card in cards:
         if card is None:
             print(f"  {cid}", file=sys.stderr)
             continue
@@ -1832,8 +1838,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             quest_id=card.quest_id, title=card.title, status=card.status,
             step=card.step, step_label=card.step_label,
             phase_label=card.phase_label, last_iso=card.last,
-            now=now, color=color, name_width=name_w,
-            intent=quest_row.fallback_intent(card.intent, card.seed_opening)),
+            now=now, color=color, name_width=name_w, status_width=status_w,
+            intent=intents[card.quest_id]),
             file=sys.stderr)
     raise SystemExit(2)
 
@@ -3107,13 +3113,17 @@ def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    name_w = quest_row.name_budget()
-    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
+    intents = {r[0]: _row_display_intent(control, r) for r in rows}
+    status_w, name_w = quest_row.overview_widths([
+        (r[1], quest_row.compose_status_label(r[2], r[6], r[7]),
+         quest_row.resolve_display_name(r[4], intents[r[0]]).text) for r in rows])
+    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+          file=sys.stderr)
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w, intent=_row_display_intent(control, r)),
+            name_width=name_w, status_width=status_w, intent=intents[r[0]]),
             file=sys.stderr)
     return 2
 

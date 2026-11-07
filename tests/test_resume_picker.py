@@ -169,3 +169,36 @@ def test_render_no_reverse_bar_color_off() -> None:
     lines = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER).render().splitlines()
     assert "\x1b[7m" not in lines[0]               # color off → no escape at all
     assert lines[0].startswith("▸ ")               # the ▸ alone marks the row
+
+
+def _term(monkeypatch, cols: int) -> None:
+    import os
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((cols, 24)))
+
+
+def _short_id_cands() -> list[Candidate]:
+    return [
+        Candidate(quest_id="aaa111", title="Add version flag", status="paused",
+                  step="plan", last_iso="2026-06-11T11:45:00+00:00"),
+        Candidate(quest_id="bbb222", title="Other change", status="new",
+                  step="spec", last_iso="2026-06-10T11:45:00+00:00"),
+    ]
+
+
+def test_render_sizes_columns_to_content(monkeypatch) -> None:
+    _term(monkeypatch, 80)
+    lines = ResumePicker(_short_id_cands(), now=_NOW, color=False,
+                         header=_HEADER).render().splitlines()
+    assert lines == [
+        "▸ aaa111  Add version flag  paused (plan)  15m",
+        "  bbb222  Other change      new (spec)     1d",
+    ]
+
+
+def test_render_rows_fit_a_narrow_terminal(monkeypatch) -> None:
+    _term(monkeypatch, 40)
+    lines = ResumePicker(_short_id_cands(), now=_NOW, color=False,
+                         header=_HEADER).render().splitlines()
+    assert all(len(ln) <= 40 for ln in lines), lines
+    assert "(" not in "".join(lines)          # labels drop whole when they can't fit
