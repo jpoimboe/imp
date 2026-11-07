@@ -276,3 +276,20 @@ def test_plain_text_tab_changes_nothing(skills_dir: Path) -> None:
         session.send("\r")
         rows = _wait_text(session, "GOT:")
     assert rows[0] == "GOT: 'hello'"
+
+
+def test_menu_floats_over_lines_below_the_caret(skills_dir: Path) -> None:
+    with _pty(skills_dir, rows=12) as session:
+        session.send("/a" + "".join(f"\x1b\rline{n}" for n in range(2, 10)))
+        _wait_row(session, "line9")
+        session.send("\x1b[A" * 8 + "\x05")
+        _wait_screen(session, lambda _rows: session.cursor() == (4, 0))
+        session.send("\t")
+        rows = _wait_text(session, "abandon")
+        assert rows[0] == "> /a"
+        assert [row.split()[-1] for row in rows[1:3]] == ["archive", "abandon"]
+        assert rows[3:11] == [f"  line{n}" for n in range(4, 10)] + ["", _TOOLBAR]
+
+        session.send("\x07")
+        restored = _wait_row(session, "line2")
+    assert restored[:11] == ["> /a", *[f"  line{n}" for n in range(2, 10)], "", _TOOLBAR]

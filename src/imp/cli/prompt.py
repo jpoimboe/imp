@@ -134,8 +134,8 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             doc = self.default_buffer.document
             # 16 is the max_height prompt_toolkit gives CompletionsMenu.
             rows = doc.cursor_position_row + 1 + min(len(state.completions), 16)
-            # Not min, which shows "Window too small..." on a short terminal.
-            return Dimension(preferred=rows)
+            # Not min, which shows "Window too small..."; line_count stops it clipping the buffer.
+            return Dimension(preferred=max(rows, doc.line_count))
 
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
