@@ -3,8 +3,8 @@
 # Copyright 2026 Josh Poimboeuf
 # deferred-check.sh — converge guard between quest-review and deferred-sweep. The
 # sweep is a high-tier agent dispatch; when the quest's Deferred Followups list
-# holds nothing to drain there is no work for it, so skip straight to the slow
-# gate. Fails CLOSED: exit 1 is the ONLY skip signal, so any doubt — an unreadable
+# holds nothing to drain there is no work for it, so skip straight to wait-for-head.
+# Fails CLOSED: exit 1 is the ONLY skip signal, so any doubt — an unreadable
 # path, an absent IMP_QUEST_DIR — dispatches the agent. The parse is deliberately
 # dumb: it does not re-implement deferred-sweep's tag-aware drain logic, because a
 # second parser drifting from the agent's is how items get silently dropped.
@@ -12,7 +12,7 @@
 # (e.g. "## Deferred followups (2)") dispatches the sweep rather than silently skipping it.
 #
 #   1 -> nothing to drain: deferred.md absent, no `## Deferred Followups` section,
-#        or that section holds no `- [ ]` items -> converge-verify
+#        or that section holds no `- [ ]` items -> wait-for-head
 #   0 -> an open item to drain, or any error reading the file -> deferred-sweep
 # -e omitted: exit 1 is the skip signal; an -e-triggered exit reads as "nothing to drain"
 set -uo pipefail

@@ -943,12 +943,6 @@ def test_integration_verify_failure_feedback_selects_adjudicate_mode() -> None:
     assert feedback in _normalized_prompt("integration-review")
 
 
-def test_converge_verify_failure_feedback_carries_the_token_deferred_sweep_quotes() -> None:
-    feedback = _gate_failure_feedback("converge-verify", "deferred-sweep")
-    assert "(converge-verify)" in feedback
-    assert "(converge-verify)" in _normalized_prompt("deferred-sweep")
-
-
 def test_validate_memory_failure_feedback_names_a_reconciler_entry_context() -> None:
     feedback = _gate_failure_feedback("validate-memory", "reconciler")
     assert feedback in _normalized_prompt("reconciler")

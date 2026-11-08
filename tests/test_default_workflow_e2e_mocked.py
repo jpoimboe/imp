@@ -524,8 +524,8 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     assert "task-lead" in started, started
     assert "quest-review" in started, started
     assert "deferred-sweep" in started, started
-    assert "converge-verify" in started, started
-    assert started.index("converge-verify") > started.index("deferred-sweep"), started
+    assert "converge-verify" not in started, started
+    assert started[started.index("deferred-sweep") + 1] == "wait-for-head", started
     assert "gap-check" in started, started
     assert "summarizer" in started, started
     # Single plan: gap-check runs exactly once in converge and fires the quest-wide

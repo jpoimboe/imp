@@ -158,7 +158,6 @@ def test_every_step_has_its_label() -> None:
         "gap-check": "checking plan coverage",
         "quest-review": "reviewing entire diff",
         "deferred-sweep": "sweeping deferred tasks",
-        "converge-verify": "running tests",
         "summarizer": "summarizing quest",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
@@ -191,7 +190,7 @@ def test_route_labels_assigned() -> None:
 
 def test_stateless_verify_gates_are_interruptible() -> None:
     by = {s.name: s for s in _wf().flat_steps()}
-    for name in ("verify", "converge-verify", "integration-verify"):
+    for name in ("verify", "integration-verify"):
         assert by[name].interruptible is True, name
     # Commit gates mutate the tree and must stay run-to-completion.
     for name in ("spec-verify-commit", "plan-verify-commit"):
@@ -223,19 +222,6 @@ def test_phase_labels_assigned() -> None:
 def test_slow_verify_tolerated_var_declared_default_false() -> None:
     wf = _wf()
     assert wf.vars.defaults()["slow_verify_tolerated"] is False
-
-
-def test_converge_tolerate_edge_sets_slow_verify_tolerated() -> None:
-    from imp.engine.gates import evaluate_rules
-    from imp.engine.types import Goto
-    wf = _wf()
-    step = {s.name: s for s in wf.flat_steps()}["deferred-sweep"]
-    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
-    out = {"status": "Success",
-           "converge_verify_tolerated": True, "summary": ""}
-    m = evaluate_rules(step.rules, vars=base, output=out)
-    assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
-    assert m.var_mutations == {"slow_verify_tolerated": True}
 
 
 def test_integration_reviewer_accept_edge_records_tolerated() -> None:

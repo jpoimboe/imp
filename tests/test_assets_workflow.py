@@ -547,7 +547,7 @@ def test_max_loops_value_slate() -> None:
     steps = _steps(wf)
     # Uniform convergence default; every step that dropped its explicit cap rides it.
     assert wf.defaults.max_loops == 10
-    for name in ("scope-code-check", "verify", "quest-review", "converge-verify",
+    for name in ("scope-code-check", "verify", "quest-review",
                  "integration-verify", "integration-reviewer", "finalize",
                  "autosquash-resolve-merge", "check-cleared"):
         assert steps[name].max_loops == 10, name
@@ -693,27 +693,17 @@ def test_deferred_sweep_declares_converge_verify_tolerated_output() -> None:
     assert "sweep_tolerated" not in fields
 
 
-def test_deferred_sweep_normal_return_continues_without_carry() -> None:
+def test_deferred_sweep_sole_rule_goes_to_wait_for_head() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["deferred-sweep"].rules
-    # A normal sweep entry (no toleration) continues positionally into converge-verify.
+    # The sweep is converge's last step; its one explicit rule enters the merge queue.
+    assert len(rules) == 1 and rules[0].condition is None
     m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success",
-                               "converge_verify_tolerated": False})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations == {}
-
-
-def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    step = _steps(wf)["deferred-sweep"]
-    m = evaluate_rules(step.rules, vars=_BASE_VARS,
-                       output={"status": "Success",
-                               "converge_verify_tolerated": True})
+                       output={"status": "Success", "summary": "ok"})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "wait-for-head"
+    assert m.action.target == "wait-for-head" and m.action.resume is False
+    assert m.var_mutations == {}
 
 
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
@@ -1083,7 +1073,6 @@ def test_imp_gate_steps_pass_tier_arg() -> None:
     from imp.assets import bundled_workflow_dir
     steps = _steps(load_workflow(bundled_workflow_dir("default")))
     assert steps["verify"].command == "./scripts/run-verify.sh fast"
-    assert steps["converge-verify"].command == "./scripts/run-verify.sh slow"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
 
 

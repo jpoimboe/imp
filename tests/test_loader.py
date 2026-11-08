@@ -1737,7 +1737,7 @@ def test_verify_gates_acquire_test_lane() -> None:
 
     imp = {s.name: s for ph in load_workflow(bundled_workflow_dir("default")).phases
            for s in ph.steps}
-    for gate in ("verify", "converge-verify", "integration-verify"):
+    for gate in ("verify", "integration-verify"):
         assert imp[gate].acquire == "test-lane", gate
 
 
