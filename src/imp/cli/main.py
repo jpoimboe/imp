@@ -45,6 +45,7 @@ from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
     CONTROL_SAVE,
+    QUERY_USER_RENAME,
 )
 
 if TYPE_CHECKING:
@@ -3449,6 +3450,35 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon_local(control, target)
 
 
+_RESIDENT_RENAME_TIMEOUT = 10.0
+
+
+def _deliver_rename_resident(quest_id: str, title: str) -> None:
+    import anyio
+
+    from imp.cli import store_proxy
+    from imp.remote.session.discover import session_socket_path
+
+    async def _run() -> None:
+        with anyio.fail_after(_RESIDENT_RENAME_TIMEOUT):
+            await store_proxy.roundtrip(
+                str(session_socket_path(quest_id)), QUERY_USER_RENAME, {"title": title})
+
+    anyio.run(_run)
+
+
+def _renamed_by_resident(control: Path, quest_id: str, title: str) -> bool:
+    """True iff quest_id's resident session daemon applied the rename to its own quest."""
+    from imp.remote.daemon.directory import session_is_resident
+    if not session_is_resident(control, quest_id):
+        return False
+    try:
+        _deliver_rename_resident(quest_id, title)
+    except Exception:  # IPC boundary: any failure falls back to the local write
+        return False
+    return True
+
+
 def apply_edit(
     control: Path, quest_id: str, *, title: str | None, backlog: bool,
     active: bool, depends_on: list[str] | None, clear_deps: bool,
@@ -3492,7 +3522,9 @@ def apply_edit(
     title_changed = title is not None and title != quest.title
     new_base = base if base is not None and base != quest.base_branch else None
 
-    if title is not None and title != quest.title:
+    if (title is not None and title_changed
+            and not _renamed_by_resident(control, quest_id, title)):
+        quest = Quest.load(control, quest_id)  # a failed delivery may still have applied it
         if quest.materialized:
             quest.rename(title, by="user", log=quest.event_log())
         else:
