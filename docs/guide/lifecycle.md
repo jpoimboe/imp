@@ -83,7 +83,8 @@ When a phase-0 conversation is left, its fate depends on what happened:
 - **After a real exchange, an explicit `/archive` or `/clear`, or otherwise** (an
   un-renamed `imp chat` conversation) → `archive_conversation`: it leaves the
   active list but stays resumable (`archived`) via `imp resume` or findable with
-  `imp search`. `/clear` then opens a fresh conversation.
+  `imp search`. `/clear` then opens a fresh conversation of the same kind
+  (chat or `imp new`).
 
 On a built quest `/archive` and `/clear` are refused; `/pause` pauses it exactly
 like Ctrl-D at that prompt.
