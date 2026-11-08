@@ -9,12 +9,20 @@ from imp.paths import display_path, project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.effective import FLOOR_SRC, load_effective_config
 from imp.providers.paths import global_config_path
+from tests._readiness import pin_readiness
 
 
 @pytest.fixture(autouse=True)
 def _registry() -> None:
     resolve.reset_providers_for_tests()
     register_builtin_providers()
+
+
+@pytest.fixture(autouse=True)
+def _pinned_readiness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("readiness"))
 
 
 def _eff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -157,21 +165,25 @@ def test_explain_traces_one_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "anthropic" in text and "openai" in text
 
 
-def test_cli_authenticated_provider_skips_key_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_signed_out_claude_row_reads_not_signed_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """claude/codex authenticate via login, not an API key — render must NOT
-    fabricate a `CLAUDE_API_KEY not set` line (finding I1)."""
+    """claude/codex authenticate via login, not an API key — the row must NOT
+    fabricate a `CLAUDE_API_KEY not set` verdict (finding I1)."""
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("signed-out"), keys=())
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [claude]\n")
-    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config()
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
     out = io.StringIO()
-    render_config(eff, out, state_dir=None, color=False)
+    render_config(load_effective_config(), out, state_dir=None, color=False)
     text = out.getvalue()
-    assert "(CLI-authenticated)" in text
+    assert _block(text.splitlines(), "providers (local check):") == [
+        "  ✗ claude         not signed in",
+    ]
     assert "CLAUDE_API_KEY" not in text
+    assert "(CLI-authenticated)" not in text
 
 
 def test_render_lists_available_drivers(
@@ -565,25 +577,42 @@ def test_render_shows_configured_worktree_setup(
     assert line.rstrip().endswith("[imp/config.yaml]")
 
 
-def test_provider_key_lines_keep_their_three_shapes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_provider_rows_carry_a_mark_and_the_shared_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("rows"),
+                  on_path=("claude",), keys=("ANTHROPIC_API_KEY",))
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text(
         "providers: [claude, anthropic, openai, codex]\n"
         "provider_envs: {codex: {env: MY_CODEX_KEY}}\n")
     monkeypatch.setenv("IMP_HOME", str(imp_home))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("MY_CODEX_KEY", raising=False)
     out = io.StringIO()
     render_config(load_effective_config(), out, state_dir=None, color=False)
-    assert _block(out.getvalue().splitlines(), "provider keys (local check):") == [
-        "  ✓ claude         (CLI-authenticated)",
-        "  ✓ anthropic      set",
+    assert _block(out.getvalue().splitlines(), "providers (local check):") == [
+        "  ✓ claude         signed in",
+        "  ✓ anthropic      ANTHROPIC_API_KEY set",
         "  ✗ openai         OPENAI_API_KEY not set",
         "  ✗ codex          MY_CODEX_KEY not set",
+    ]
+
+
+def test_a_missing_cli_row_reads_cli_not_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("no-cli"), on_path=())
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [codex]\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    out = io.StringIO()
+    render_config(load_effective_config(), out, state_dir=None, color=False)
+    assert _block(out.getvalue().splitlines(), "providers (local check):") == [
+        "  ✗ codex          CLI not found",
     ]
 
 

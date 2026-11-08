@@ -9,7 +9,7 @@ from typing import Literal, TextIO
 
 from imp.cli import palette as pal
 from imp.paths import display_path, imp_home
-from imp.providers import Readiness, provider_readiness
+from imp.providers import provider_readiness
 from imp.providers.config import _REQUIRED_TIERS
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
 from imp.remote.drivers import REGISTRY
@@ -83,15 +83,11 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
     out.write("\nsettings:\n")
     _emit_section(out, setting_rows, width=width, color=color)
 
-    out.write("\nprovider keys (local check):\n")
+    out.write("\nproviders (local check):\n")
     for vendor in cfg.providers:
-        readiness = provider_readiness(vendor, cfg)
-        if readiness is Readiness.CLI_AUTHENTICATED:
-            out.write(f"  ✓ {vendor:<14} (CLI-authenticated)\n")
-        elif readiness is Readiness.KEY_SET:
-            out.write(f"  ✓ {vendor:<14} set\n")
-        else:
-            out.write(f"  ✗ {vendor:<14} {cfg.env_for(vendor)} not set\n")
+        status = provider_readiness(vendor, cfg)
+        mark = "✓" if status.readiness.ready else "✗"
+        out.write(f"  {mark} {vendor:<14} {status.label}\n")
 
     out.write("\navailable drivers:\n")
     enabled = (cfg.remote.get("driver") or {}).get("name")

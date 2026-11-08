@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from imp.cli.init import run_init
+from tests._readiness import pin_readiness
 from tests.conftest import _git, _init_repo
 
 
@@ -56,6 +57,13 @@ def _isolate_global_config(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _stub_theme_detection(monkeypatch):
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
+
+
+@pytest.fixture(autouse=True)
+def _pinned_readiness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("readiness"))
 
 
 @pytest.fixture(autouse=True)
@@ -1035,7 +1043,7 @@ def test_host_success_lines_carry_engine_chrome(
 ) -> None:
     from imp.providers.paths import global_config_path
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
     user_path = global_config_path()
@@ -1043,7 +1051,7 @@ def test_host_success_lines_carry_engine_chrome(
     # This one prints before the theme is applied, so its gold is the ansi gold.
     assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
-    assert f"{DIM}  anthropic — ready{RESET}" in msgs
+    assert f"{DIM}  anthropic — ANTHROPIC_API_KEY not set{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
@@ -1381,17 +1389,16 @@ def test_cmd_init_hands_run_init_the_imp_config_settings_root(
     assert seen["settings_root"] == (tmp_path.resolve() if initialized else None)
 
 
-@pytest.mark.parametrize(("key", "anthropic_line"), [
-    (None, "  anthropic — set ANTHROPIC_API_KEY"),
-    ("sk-test", "  anthropic — ready"),
+@pytest.mark.parametrize(("key", "expected"), [
+    (None, ["  claude — not signed in · run `claude login`",
+            "  anthropic — ANTHROPIC_API_KEY not set"]),
+    ("sk-test", []),
 ])
-def test_picker_confirmation_hints_every_enabled_provider(
+def test_init_summary_lists_only_providers_that_need_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    key: str | None, anthropic_line: str,
+    key: str | None, expected: list[str],
 ) -> None:
-    """Every enabled provider gets a line: `ready`, or its floor auth hint."""
-    monkeypatch.delenv("FORCE_COLOR", raising=False)
-    monkeypatch.setenv("NO_COLOR", "1")
+    _plain(monkeypatch)
     if key is None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     else:
@@ -1405,7 +1412,9 @@ def test_picker_confirmation_hints_every_enabled_provider(
     )
 
     enabled = msgs.index("Enabled: claude, anthropic")
-    assert msgs[enabled + 1:enabled + 3] == ["  claude — ready", anthropic_line]
+    assert msgs[enabled + 1:enabled + 1 + len(expected)] == expected
+    assert [m for m in msgs if m.startswith(("  claude — ", "  anthropic — "))] == expected
+    assert not any(m.endswith(" — ready") for m in msgs)
     assert not any("set this env var" in m for m in msgs)
 
 
@@ -1422,7 +1431,7 @@ def _write_machine_config(text: str) -> None:
     cfg.write_text(text)
 
 
-def test_fresh_init_reports_claude_ready_without_a_login_hint(
+def test_fresh_init_prints_no_line_for_a_signed_in_claude(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _plain(monkeypatch)
@@ -1434,33 +1443,81 @@ def test_fresh_init_reports_claude_ready_without_a_login_hint(
         detect_theme_fn=lambda: "ansi",
     )
 
-    enabled = msgs.index("Enabled: claude")
-    assert msgs[enabled + 1] == "  claude — ready"
+    assert "Enabled: claude" in msgs
+    assert not any(m.startswith("  claude — ") for m in msgs)
     assert not any("claude login" in m for m in msgs)
+
+
+def test_init_summary_names_the_fix_for_each_not_ready_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("not-ready"),
+                  on_path=("claude",), keys=())
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude", "codex"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+
+    enabled = msgs.index("Enabled: claude, codex")
+    assert msgs[enabled + 1:enabled + 3] == [
+        "  claude — not signed in · run `claude login`",
+        "  codex — CLI not found · install it, then run `codex login`",
+    ]
+    assert sum(m.startswith(("  claude — ", "  codex — ")) for m in msgs) == 2
+
+
+def test_a_provider_outside_the_floor_is_enabled_without_a_status_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("no-cli"), on_path=())
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, input_fn=_inputs(), output_fn=msgs.append,
+        providers_override=["housecat", "codex"],
+    )
+
+    enabled = msgs.index("Enabled: housecat, codex")
+    assert msgs[enabled + 1] == "  codex — CLI not found · install it, then run `codex login`"
+    assert not any(m.startswith("  housecat") for m in msgs)
 
 
 _MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"
 _MY_KEY = "provider_envs: {anthropic: {env: MY_KEY}}\n"
 
 
-# One case per builtin row of the spec's decisions table (non-builtin names get
-# no init line; see test_readiness_lines_mark_ready_or_hint_and_skip_unknown_names).
-@pytest.mark.parametrize(("provider", "extra", "env", "expected"), [
-    ("claude", "", {}, "  claude — ready"),
-    ("codex", "", {}, "  codex — ready"),
-    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": "k"}, "  claude — ready"),
-    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": None}, "  claude — run `claude login`"),
-    ("anthropic", "", {"ANTHROPIC_API_KEY": "k"}, "  anthropic — ready"),
-    ("anthropic", "", {"ANTHROPIC_API_KEY": None}, "  anthropic — set ANTHROPIC_API_KEY"),
-    ("openai", "", {"OPENAI_API_KEY": None}, "  openai — set OPENAI_API_KEY"),
-    ("anthropic", _MY_KEY, {"MY_KEY": "k", "ANTHROPIC_API_KEY": None},
-     "  anthropic — ready"),
-    ("anthropic", _MY_KEY, {"MY_KEY": None, "ANTHROPIC_API_KEY": "k"},
-     "  anthropic — set ANTHROPIC_API_KEY"),
+_CLAUDE_LOGIN = "  claude — not signed in · run `claude login`"
+_CODEX_INSTALL = "  codex — CLI not found · install it, then run `codex login`"
+
+
+# One case per readiness state init and `imp config` share; None means ready (no init line).
+@pytest.mark.parametrize(("provider", "extra", "on_path", "env", "expected"), [
+    ("claude", "", ("claude",), {}, None),
+    ("codex", "", ("codex",), {}, None),
+    ("claude", "", ("claude",), {"ANTHROPIC_API_KEY": None}, _CLAUDE_LOGIN),
+    ("codex", "", (), {}, _CODEX_INSTALL),
+    ("claude", _MY_CLAUDE, (), {"MY_CLAUDE_KEY": "k"}, None),
+    ("claude", _MY_CLAUDE, (), {"MY_CLAUDE_KEY": None}, "  claude — MY_CLAUDE_KEY not set"),
+    ("anthropic", "", (), {"ANTHROPIC_API_KEY": "k"}, None),
+    ("anthropic", "", (), {"ANTHROPIC_API_KEY": None},
+     "  anthropic — ANTHROPIC_API_KEY not set"),
+    ("openai", "", (), {"OPENAI_API_KEY": None}, "  openai — OPENAI_API_KEY not set"),
+    ("anthropic", _MY_KEY, (), {"MY_KEY": "k", "ANTHROPIC_API_KEY": None}, None),
+    ("anthropic", _MY_KEY, (), {"MY_KEY": None, "ANTHROPIC_API_KEY": "k"},
+     "  anthropic — MY_KEY not set"),
 ])
 def test_init_readiness_verdict_matches_imp_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    provider: str, extra: str, env: dict[str, str | None], expected: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    provider: str, extra: str, on_path: tuple[str, ...],
+    env: dict[str, str | None], expected: str | None,
 ) -> None:
     import io
 
@@ -1468,6 +1525,7 @@ def test_init_readiness_verdict_matches_imp_config(
     from imp.providers.effective import load_effective_config
 
     _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("parity"), on_path=on_path)
     for var, val in env.items():
         if val is None:
             monkeypatch.delenv(var, raising=False)
@@ -1478,8 +1536,8 @@ def test_init_readiness_verdict_matches_imp_config(
     out = io.StringIO()
     render_config(load_effective_config(), out, state_dir=None, color=False)
     lines = out.getvalue().splitlines()
-    key_rows = lines[lines.index("provider keys (local check):") + 1:]
-    mark = next(r.split()[0] for r in key_rows if r.split()[1:2] == [provider])
+    rows = lines[lines.index("providers (local check):") + 1:]
+    mark, _, label = next(r.split(maxsplit=2) for r in rows if r.split()[1:2] == [provider])
 
     msgs: list[str] = []
     run_init(
@@ -1487,9 +1545,12 @@ def test_init_readiness_verdict_matches_imp_config(
         input_fn=_inputs(), output_fn=msgs.append,
     )
 
-    enabled = msgs.index(f"Enabled: {provider}")
-    assert msgs[enabled + 1] == expected
-    assert (expected == f"  {provider} — ready") == (mark == "✓")
+    status_lines = [m for m in msgs if m.startswith(f"  {provider} — ")]
+    assert status_lines == ([] if expected is None else [expected])
+    assert (expected is None) == (mark == "✓")
+    if expected is not None:
+        assert msgs[msgs.index(f"Enabled: {provider}") + 1] == expected
+        assert expected.startswith(f"  {provider} — {label}")
 
 
 # The bad value sits beside a valid providers: list so init reuses it; without one,
@@ -1513,10 +1574,12 @@ def test_hint_step_degrades_to_floor_key_names_on_a_bad_config(
     )
 
     enabled = msgs.index("Enabled: claude, anthropic")
-    assert msgs[enabled + 1:enabled + 3] == [
-        "  claude — ready",
-        "  anthropic — ready" if key_set else "  anthropic — set ANTHROPIC_API_KEY",
+    expected = [] if key_set else [
+        "  claude — not signed in · run `claude login`",
+        "  anthropic — ANTHROPIC_API_KEY not set",
     ]
+    assert msgs[enabled + 1:enabled + 1 + len(expected)] == expected
+    assert [m for m in msgs if m.startswith(("  claude — ", "  anthropic — "))] == expected
     assert "Committed imp/config.yaml." in msgs
 
 
@@ -1538,7 +1601,7 @@ def test_reinit_hints_honor_the_project_layer_provider_envs(
     )
 
     enabled = msgs.index("Enabled: anthropic")
-    assert msgs[enabled + 1] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert msgs[enabled + 1] == "  anthropic — MY_KEY not set"
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
 
 
