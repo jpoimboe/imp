@@ -144,3 +144,9 @@ def test_subcommand_description_printed_after_usage(
 def test_help_command_positional_has_help_text() -> None:
     flat = " ".join(_subparser("help").format_help().split())
     assert "<command> Command to show help for." in flat
+
+
+def test_new_title_flag_help_says_the_opening_step_sets_one() -> None:
+    help_text = " ".join(_subparser("new").format_help().split())
+    assert ("Set the quest title explicitly; the workflow's opening step "
+            "sets one if omitted.") in help_text

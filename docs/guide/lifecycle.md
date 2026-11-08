@@ -77,11 +77,11 @@ When a phase-0 conversation is left, its fate depends on what happened:
 
 - **Never answered / no real exchange** (and no `/pause`) → `discard_conversation`
   (it goes away).
-- **`imp new`, an explicit `/pause`, or the quest was renamed (a design formed)**
+- **`imp new`, an explicit `/pause`, or the quest was given a title (a design formed)**
   → `save_as_draft`: the quest is `paused` and `origin` stays `draft`, so it
   remains in the active list, resumable later. It does **not** move to the backlog.
 - **After a real exchange, an explicit `/archive` or `/clear`, or otherwise** (an
-  un-renamed `imp chat` conversation) → `archive_conversation`: it leaves the
+  untitled `imp chat` conversation) → `archive_conversation`: it leaves the
   active list but stays resumable (`archived`) via `imp resume` or findable with
   `imp search`. `/clear` then opens a fresh conversation of the same kind
   (chat or `imp new`).
@@ -91,9 +91,9 @@ like Ctrl-D at that prompt.
 
 This is the exact point **training data** gets wrong — it once claimed `imp new`
 "archives a draft as resumable"; it does not. `imp new` runs `save_as_draft`, so
-the draft stays in your active list, rather than being archived. Likewise, a renamed
+the draft stays in your active list, rather than being archived. Likewise, a titled
 `imp chat` conversation is kept as an active draft,
-not archived — the rename (a design formed), not the entry point, is what keeps
+not archived — the title (a design formed), not the entry point, is what keeps
 it in the active list; and `save_as_draft` never moves anything to the backlog.
 
 ## Exit codes

@@ -205,15 +205,15 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 # segment, and a dot-joined outcome tail whose color carries meaning (green =
 # success, red = error, gold = everything-else). The middle segment is always
 # present via the shared resolver (quest_row.resolve_display_name): a real title
-# is plain, else the opening message renders dim, else the dim `(unnamed)`
+# is plain, else the opening message renders dim, else the dim `(untitled)`
 # placeholder. Dim is color-only, so NO_COLOR / non-TTY output stays plain and
 # script-parseable. Shared by `new`/`resume`, leaves, and the completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
-    """The styled middle name segment and its kind, resolved title→intent→(unnamed)."""
+    """The styled middle name segment and its kind, resolved title→intent→(untitled)."""
     resolved = quest_row.resolve_display_name(title, intent)
-    name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
+    name = quest_row._truncate(resolved.text, quest_row.TITLE_CAP)
     if resolved.kind is not quest_row.NameKind.TITLE:
         name = pal.ansi(name, "dim", enabled=color)
     return name, resolved.kind
@@ -288,10 +288,10 @@ def _identity_line(quest_id: str, title: str, *, color: bool,
                    intent: str | None = None) -> str:
     """The shared identity line: gold id, ` · `, then the resolved name — the title,
     else the dim opening-prompt fallback; a bare gold id only when the quest has
-    neither (kind UNNAMED)."""
+    neither (kind UNTITLED)."""
     ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
     name, kind = _spine_name(title, intent, color=color)
-    if kind is not quest_row.NameKind.UNNAMED:
+    if kind is not quest_row.NameKind.UNTITLED:
         ident = f"{ident} · {name}"
     return ident
 
@@ -750,7 +750,7 @@ def _run_header_line(quest_id: str, title: str, marker: str | None = None,
     if resolved.kind is quest_row.NameKind.TITLE:
         segments.append(resolved.text)
     elif resolved.kind is quest_row.NameKind.PROMPT:
-        segments.append(quest_row._truncate(resolved.text, quest_row.NAME_CAP))
+        segments.append(quest_row._truncate(resolved.text, quest_row.TITLE_CAP))
     if marker is not None:
         segments.append(marker)
     tail = "".join(f" · {s}" for s in segments)
@@ -1287,8 +1287,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     color = should_use_color(sys.stdout)
 
     quest_id = new_quest_id(existing_stems=live_stems(control))
-    # No auto-name: an unnamed quest has an empty title. The agent
-    # names it via rename_quest once intent is clear, or the user passes --title.
+    # No auto-title: an untitled quest has an empty title. The agent
+    # titles it via rename_quest once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
         quest = Quest.create_draft(
@@ -1834,11 +1834,11 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     cards = [(cid, store.quest_card(cid)) for cid in sorted(candidates)]
     intents = {c.quest_id: quest_row.fallback_intent(c.intent, c.seed_opening)
                for _, c in cards if c is not None}
-    status_w, name_w = quest_row.overview_widths([
+    status_w, title_w = quest_row.overview_widths([
         (c.status, quest_row.compose_status_label(c.step, c.step_label, c.phase_label),
          quest_row.resolve_display_name(c.title, intents[c.quest_id]).text)
         for _, c in cards if c is not None])
-    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+    print(quest_row.header_line(color=color, title_width=title_w, status_width=status_w),
           file=sys.stderr)
     for cid, card in cards:
         if card is None:
@@ -1848,7 +1848,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             quest_id=card.quest_id, title=card.title, status=card.status,
             step=card.step, step_label=card.step_label,
             phase_label=card.phase_label, last_iso=card.last,
-            now=now, color=color, name_width=name_w, status_width=status_w,
+            now=now, color=color, title_width=title_w, status_width=status_w,
             intent=intents[card.quest_id]),
             file=sys.stderr)
     raise SystemExit(2)
@@ -3152,16 +3152,16 @@ def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     intents = {r[0]: _row_display_intent(control, r) for r in rows}
-    status_w, name_w = quest_row.overview_widths([
+    status_w, title_w = quest_row.overview_widths([
         (r[1], quest_row.compose_status_label(r[2], r[6], r[7]),
          quest_row.resolve_display_name(r[4], intents[r[0]]).text) for r in rows])
-    print(quest_row.header_line(color=color, name_width=name_w, status_width=status_w),
+    print(quest_row.header_line(color=color, title_width=title_w, status_width=status_w),
           file=sys.stderr)
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w, status_width=status_w, intent=intents[r[0]]),
+            title_width=title_w, status_width=status_w, intent=intents[r[0]]),
             file=sys.stderr)
     return 2
 
@@ -3702,9 +3702,9 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     for r in history:
         specs.append((r[1], None, _name_text(r)))
 
-    status_width, name_width = quest_row.overview_widths(specs)
+    status_width, title_width = quest_row.overview_widths(specs)
 
-    lines = [quest_row.header_line(color=color, name_width=name_width,
+    lines = [quest_row.header_line(color=color, title_width=title_width,
                                    status_width=status_width)]
     if inflight_notice and not inflight:
         lines.append(pal.ansi("no active quests", "dim", enabled=color))
@@ -3712,7 +3712,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_width, status_width=status_width,
+            title_width=title_width, status_width=status_width,
             intent=intents.get(r[0])))
     if backlog_rows:
         if len(lines) > 1:
@@ -3722,7 +3722,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], phase_label=None, last_iso=r[3], now=now,
-                color=color, name_width=name_width, status_width=status_width,
+                color=color, title_width=title_width, status_width=status_width,
                 intent=intents.get(r[0])))
     if history:
         if len(lines) > 1:
@@ -3731,14 +3731,14 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
         for r in history:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step="-",
-                last_iso=r[3], now=now, color=color, name_width=name_width,
+                last_iso=r[3], now=now, color=color, title_width=title_width,
                 status_width=status_width, intent=intents.get(r[0])))
     return lines
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
-    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
+    """Overview lines across all zones, sharing one content-sized STATUS/TITLE width."""
     rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
                           cutoff=None)
     if not rows.inflight and not rows.backlog and not rows.history:
@@ -4025,13 +4025,13 @@ def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
 
 def _search_name_segment(title: str, intent: str | None, query: str, *,
                          color: bool) -> str | None:
-    """A search heading's name: a real title plain, else the dim NAME_CAP-clipped fallback."""
+    """A search heading's name: a real title plain, else the dim TITLE_CAP-clipped fallback."""
     resolved = quest_row.resolve_display_name(title, intent)
-    if resolved.kind is quest_row.NameKind.UNNAMED:
+    if resolved.kind is quest_row.NameKind.UNTITLED:
         return None
     if resolved.kind is quest_row.NameKind.TITLE:
         return _spine_segment(resolved.text, query, color=color)
-    return _spine_segment(quest_row._truncate(resolved.text, quest_row.NAME_CAP),
+    return _spine_segment(quest_row._truncate(resolved.text, quest_row.TITLE_CAP),
                           query, "dim", color=color)
 
 
@@ -4526,7 +4526,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "May also be supplied via --message.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
-                            "opening step names the quest if omitted.")
+                            "opening step sets one if omitted.")
     p_new.add_argument("--headless", action="store_true", dest="non_interactive",
                        help="Run headless: no live prompt; supply the opening "
                             "message via the positional argument or --message.")

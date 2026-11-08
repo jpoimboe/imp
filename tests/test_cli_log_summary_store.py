@@ -85,19 +85,19 @@ class _CardlessStore(_FakeStore):
 @pytest.mark.parametrize(
     "argv,expected",
     [
-        (["log", "alpha", "-s", "--no-pager"], "alpha  ·  (unnamed)  ·  ?"),
-        (["log", "alpha", "-s", "--md=-"], "# alpha — (unnamed)"),
+        (["log", "alpha", "-s", "--no-pager"], "alpha  ·  (untitled)  ·  ?"),
+        (["log", "alpha", "-s", "--md=-"], "# alpha — (untitled)"),
     ],
     ids=["terminal", "md"],
 )
-def test_a_missing_card_heads_unnamed(
+def test_a_missing_card_heads_untitled(
     argv: list[str],
     expected: str,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """No card to source a name from: the header reads `(unnamed)`."""
+    """No card to source a name from: the header reads `(untitled)`."""
     import imp.cli.main as m
     import imp.cli.store as s
     from imp.engine.quest import Quest

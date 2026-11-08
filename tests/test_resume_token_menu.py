@@ -317,6 +317,6 @@ def test_non_tty_candidate_list_sizes_columns_to_content(
                         lambda fallback=(80, 24): os.terminal_size((80, 24)))
     assert m._resume_picker_non_tty(tmp_path, [_row("lodo40"), _row("lodo77")]) == 2
     lines = capsys.readouterr().err.splitlines()
-    assert lines[1] == "ID      NAME          STATUS         UPDATED"
+    assert lines[1] == "ID      TITLE         STATUS         UPDATED"
     assert re.fullmatch(r"lodo40  Title lodo40  paused \(plan\)  \d+[smhd]", lines[2])
     assert re.fullmatch(r"lodo77  Title lodo77  paused \(plan\)  \d+[smhd]", lines[3])

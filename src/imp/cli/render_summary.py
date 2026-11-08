@@ -19,8 +19,8 @@ from imp.cli.accounting import (
 )
 from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds, fmt_seconds
 from imp.cli.quest_row import (
-    NAME_CAP,
     STATUS_COLORS,
+    TITLE_CAP,
     NameKind,
     ResolvedName,
     _truncate,
@@ -468,7 +468,7 @@ class SummaryHeader:
     def name(self) -> ResolvedName:
         resolved = resolve_display_name(self.title, self.intent)
         if resolved.kind is NameKind.PROMPT:
-            return resolved._replace(text=_truncate(resolved.text, NAME_CAP))
+            return resolved._replace(text=_truncate(resolved.text, TITLE_CAP))
         return resolved
 
 

@@ -42,7 +42,7 @@ def test_format_columns_plain():
     line = format_quest_line(**_row(), color=False)
     assert "\x1b[" not in line
     assert line.startswith("yaitd7")        # ID first
-    assert "Add version flag" in line       # NAME
+    assert "Add version flag" in line       # TITLE
     assert "running" in line
     assert "code" in line
     assert "15m" in line                    # relative AGE
@@ -50,7 +50,7 @@ def test_format_columns_plain():
 
 def test_name_is_second_column():
     line = format_quest_line(**_row(), color=False)
-    # NAME now sits right after ID, before STATUS and UPDATED.
+    # TITLE now sits right after ID, before STATUS and UPDATED.
     assert line.index("Add version flag") < line.index("running")
     assert line.index("Add version flag") < line.index("code")
     assert line.index("Add version flag") < line.index("15m")
@@ -60,28 +60,28 @@ def test_name_is_second_column():
 def test_format_unnamed_shows_id_and_unnamed_label():
     line = format_quest_line(**_row(title="   "), color=False)
     assert line.startswith("yaitd7")
-    assert "(unnamed)" in line
+    assert "(untitled)" in line
 
 
 def test_header_line_leads_with_id_ends_with_updated():
-    h = header_line(color=False, name_width=40, status_width=35)
+    h = header_line(color=False, title_width=40, status_width=35)
     assert h.startswith("ID")
     assert h.rstrip().endswith("UPDATED")
-    assert "NAME" in h            # NAME is the second column now
-    assert h.index("NAME") < h.index("STATUS")
-    assert "TITLE" not in h
+    assert "TITLE" in h            # TITLE is the second column now
+    assert h.index("TITLE") < h.index("STATUS")
+    assert "NAME" not in h
     assert "HANDLE" not in h
     assert "STEP" not in h        # STEP column is merged into STATUS
 
 
 def test_format_does_not_truncate_name_within_budget():
-    line = format_quest_line(**_row(title="x" * 40), color=False, name_width=48)
+    line = format_quest_line(**_row(title="x" * 40), color=False, title_width=48)
     assert "x" * 40 in line
     assert "…" not in line
 
 
 def test_format_truncates_name_past_budget():
-    line = format_quest_line(**_row(title="x" * 40), color=False, name_width=24)
+    line = format_quest_line(**_row(title="x" * 40), color=False, title_width=24)
     # Truncated to 24 display cols: 23 chars + ellipsis.
     assert "x" * 23 + "…" in line
     assert "x" * 24 not in line
@@ -117,7 +117,7 @@ def test_format_dim_wraps_whole_row():
 
 
 def test_dim_row_column_order():
-    # history (dim) path preserves the same column order: NAME then STATUS then UPDATED.
+    # history (dim) path preserves the same column order: TITLE then STATUS then UPDATED.
     line = format_quest_line(**_row(status="completed"), color=False, dim=True)
     assert line.index("Add version flag") < line.index("completed") < line.index("15m")
 
@@ -129,7 +129,7 @@ def test_completed_status_renders_plain():
 
 
 def test_header_column_reads_updated_not_age():
-    h = header_line(color=False, name_width=40, status_width=35)
+    h = header_line(color=False, title_width=40, status_width=35)
     assert "UPDATED" in h
     assert "AGE" not in h
 
@@ -197,7 +197,7 @@ def test_intent_fallback_for_empty_title():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=False)
     assert "add a dark mode toggle" in line
-    assert "(unnamed)" not in line
+    assert "(untitled)" not in line
 
 
 def test_intent_fallback_for_empty_title_color():
@@ -205,16 +205,16 @@ def test_intent_fallback_for_empty_title_color():
                               intent="add a dark mode toggle", color=True)
     # the opening-message fallback is dim and carries no prefix
     assert "\x1b[2madd a dark mode toggle\x1b[0m" in line
-    assert "(unnamed)" not in line
+    assert "(untitled)" not in line
 
 
 def test_intent_fallback_flattens_multiline_prompt():
     # A multi-line opening prompt (e.g. a pasted traceback) must collapse to a
-    # single row; an embedded newline in the NAME cell would spill the table.
+    # single row; an embedded newline in the TITLE cell would spill the table.
     line = format_quest_line(
         **_row(title="", status="running", step="s"),
         intent="Ready to land the draft?\n  + Exception Group Traceback\n  |  File",
-        color=False, name_width=80)
+        color=False, title_width=80)
     assert "\n" not in line
     assert "Ready to land the draft? + Exception Group Traceback | File" in line
 
@@ -222,7 +222,7 @@ def test_intent_fallback_flattens_multiline_prompt():
 def test_unnamed_when_no_intent():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent=None, color=False)
-    assert "(unnamed)" in line
+    assert "(untitled)" in line
 
 
 def test_status_cell_includes_phase_label():
@@ -275,8 +275,8 @@ def test_status_label_truncates_one_char_over_budget():
 
 def test_header_line_honors_status_width():
     from imp.cli.quest_row import ID_W
-    h = header_line(color=False, name_width=30, status_width=25)
-    # UPDATED starts after ID + gap + NAME(30) + gap + STATUS(25) + gap.
+    h = header_line(color=False, title_width=30, status_width=25)
+    # UPDATED starts after ID + gap + TITLE(30) + gap + STATUS(25) + gap.
     assert h.index("UPDATED") == ID_W + 2 + 30 + 2 + 25 + 2
 
 
@@ -349,27 +349,27 @@ def _term(monkeypatch, cols):
 def test_overview_widths_80col_truncates_label_that_does_not_fit(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; NAME takes its 20, leaving 41 — the 50-col labelled cell truncates to 41.
-    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
-    assert (status_w, name_w) == (41, 20)
+    # region = 61; TITLE takes its 20, leaving 41 — the 50-col labelled cell truncates to 41.
+    status_w, title_w = overview_widths([("running", "x" * 40, "y" * 20)])
+    assert (status_w, title_w) == (41, 20)
 
 
 def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 130)
-    # region = 111; the 50-col labelled cell fits, and NAME stays at its content.
-    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
-    assert (status_w, name_w) == (50, 20)
+    # region = 111; the 50-col labelled cell fits, and TITLE stays at its content.
+    status_w, title_w = overview_widths([("running", "x" * 40, "y" * 20)])
+    assert (status_w, title_w) == (50, 20)
 
 
 def test_overview_widths_status_is_widest_rendered_cell(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 100)
-    # region = 81, NAME 20 -> 61 left: the 30-col cell fits, the 70-col one truncates
+    # region = 81, TITLE 20 -> 61 left: the 30-col cell fits, the 70-col one truncates
     # to the 61-col budget, so STATUS is 61.
-    status_w, name_w = overview_widths([("running", "a" * 20, "n" * 20),
+    status_w, title_w = overview_widths([("running", "a" * 20, "n" * 20),
                                         ("waiting", "b" * 60, "n" * 20)])
-    assert (status_w, name_w) == (61, 20)
+    assert (status_w, title_w) == (61, 20)
 
 
 def test_overview_widths_indent_shrinks_the_status_budget(monkeypatch):
@@ -384,52 +384,52 @@ def test_overview_widths_name_cap_protects_status(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 140)
     # region = 121; an 80-char name is capped at 70 for sizing, so STATUS still gets its 50.
-    status_w, _name_w = overview_widths([("running", "x" * 40, "y" * 80)])
+    status_w, _title_w = overview_widths([("running", "x" * 40, "y" * 80)])
     assert status_w == 50
 
 
 def test_overview_widths_capped_name_leaves_no_room_for_label(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; NAME claims 54, leaving 7 — too few for the labelled cell, so the label drops.
-    status_w, name_w = overview_widths([("running", "x" * 40, "i" * 80)])
-    assert (status_w, name_w) == (7, 54)
+    # region = 61; TITLE claims 54, leaving 7 — too few for the labelled cell, so the label drops.
+    status_w, title_w = overview_widths([("running", "x" * 40, "i" * 80)])
+    assert (status_w, title_w) == (7, 54)
 
 
 def test_overview_widths_floors_name_at_min(monkeypatch):
-    from imp.cli.quest_row import NAME_MIN, overview_widths
+    from imp.cli.quest_row import TITLE_MIN, overview_widths
     _term(monkeypatch, 20)
-    # region = 1; STATUS keeps its 6-wide header floor, NAME never drops below NAME_MIN.
-    status_w, name_w = overview_widths([("new", None, "a")])
-    assert name_w == NAME_MIN
+    # region = 1; STATUS keeps its 6-wide header floor, TITLE never drops below TITLE_MIN.
+    status_w, title_w = overview_widths([("new", None, "a")])
+    assert title_w == TITLE_MIN
     assert status_w == 6
 
 
 def test_overview_widths_empty_rows(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # No rows: STATUS keeps its header width, NAME its NAME_MIN floor.
+    # No rows: STATUS keeps its header width, TITLE its TITLE_MIN floor.
     assert overview_widths([]) == (6, 10)
 
 
 def test_intent_fallback_has_no_prompt_prefix():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=False)
-    assert line.startswith("yaitd7  add a dark mode toggle")   # NAME cell starts at the text
-    assert "(unnamed)" not in line
+    assert line.startswith("yaitd7  add a dark mode toggle")   # TITLE cell starts at the text
+    assert "(untitled)" not in line
 
 
 def test_unnamed_has_no_prompt_prefix():
     line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent=None, color=False)
-    assert "(unnamed)" in line
-    assert "> (unnamed)" not in line
+    assert "(untitled)" in line
+    assert "> (untitled)" not in line
 
 
-def test_intent_fallback_clips_to_name_width():
-    # name_width 24: cell = 23 prompt chars + "…" = 24 display cols.
+def test_intent_fallback_clips_to_title_width():
+    # title_width 24: cell = 23 prompt chars + "…" = 24 display cols.
     line = format_quest_line(**_row(title="", status="running", step="s"),
-                              intent="y" * 40, color=False, name_width=24)
+                              intent="y" * 40, color=False, title_width=24)
     assert "y" * 23 + "…" in line
     assert "y" * 24 not in line
 
@@ -466,16 +466,17 @@ def test_resolve_display_name_prompt_is_not_truncated():
 def test_resolve_display_name_unnamed_when_no_intent():
     from imp.cli.quest_row import NameKind, resolve_display_name
     r = resolve_display_name("", None)
-    assert r.text == "(unnamed)"
-    assert r.kind is NameKind.UNNAMED
+    assert r.text == "(untitled)"
+    assert r.kind is NameKind.UNTITLED
+    assert NameKind.UNTITLED.value == "untitled"
 
 
 def test_resolve_display_name_unnamed_when_intent_is_blank():
-    # A whitespace-only prompt flattens to empty, so it lands on (unnamed).
+    # A whitespace-only prompt flattens to empty, so it lands on (untitled).
     from imp.cli.quest_row import NameKind, resolve_display_name
     r = resolve_display_name(None, "   \n  \t ")
-    assert r.text == "(unnamed)"
-    assert r.kind is NameKind.UNNAMED
+    assert r.text == "(untitled)"
+    assert r.kind is NameKind.UNTITLED
 
 
 def test_resolve_display_name_title_wins_over_intent():
@@ -487,9 +488,9 @@ def test_resolve_display_name_title_wins_over_intent():
 
 def test_name_column_right_padded_so_status_aligns():
     from imp.cli.quest_row import ID_W
-    # Short title, fixed name_width -> STATUS starts at a deterministic offset:
-    # ID_W + 2 (gap) + name_width + 2 (gap).
-    line = format_quest_line(**_row(title="abc"), color=False, name_width=20)
+    # Short title, fixed title_width -> STATUS starts at a deterministic offset:
+    # ID_W + 2 (gap) + title_width + 2 (gap).
+    line = format_quest_line(**_row(title="abc"), color=False, title_width=20)
     assert line.index("running") == ID_W + 2 + 20 + 2
 
 
@@ -500,11 +501,11 @@ def test_updated_is_final_column_no_trailing_whitespace():
 
 
 def test_overview_widths_caps_name_at_name_cap(monkeypatch):
-    from imp.cli.quest_row import NAME_CAP, overview_widths
+    from imp.cli.quest_row import TITLE_CAP, overview_widths
     _term(monkeypatch, 200)
-    # region = 200 - 19 = 181; STATUS takes its 50-col content and NAME stops at the cap.
-    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 80)])
-    assert name_w == NAME_CAP == 70
+    # region = 200 - 19 = 181; STATUS takes its 50-col content and TITLE stops at the cap.
+    status_w, title_w = overview_widths([("running", "x" * 40, "y" * 80)])
+    assert title_w == TITLE_CAP == 70
     assert status_w == 50
 
 
@@ -533,21 +534,21 @@ def test_fallback_intent_returns_text_unflattened():
 def test_overview_row_has_no_padding_gap(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    status_w, name_w = overview_widths([("running", "l" * 60, "Fix the login button")])
-    assert header_line(color=False, name_width=name_w, status_width=status_w) == (
-        "ID      NAME                  STATUS" + " " * 37 + "UPDATED")
+    status_w, title_w = overview_widths([("running", "l" * 60, "Fix the login button")])
+    assert header_line(color=False, title_width=title_w, status_width=status_w) == (
+        "ID      TITLE                 STATUS" + " " * 37 + "UPDATED")
     line = format_quest_line(
         quest_id="abc123", title="Fix the login button", status="running", step="x",
         step_label="l" * 60, last_iso="2026-06-11T11:59:58+00:00", now=_NOW,
-        color=False, name_width=name_w, status_width=status_w)
+        color=False, title_width=title_w, status_width=status_w)
     assert line == "abc123  Fix the login button  running (" + "l" * 30 + "…)  2s"
 
 
 def test_overview_clips_long_name_at_cap_on_wide_terminal(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 200)
-    status_w, name_w = overview_widths([("running", None, "y" * 80)])
-    line = format_quest_line(**_row(title="y" * 80, step="-", name_width=name_w,
+    status_w, title_w = overview_widths([("running", None, "y" * 80)])
+    line = format_quest_line(**_row(title="y" * 80, step="-", title_width=title_w,
                                     status_width=status_w), color=False)
     assert "  " + "y" * 69 + "…  running  15m" in line
 
@@ -557,14 +558,14 @@ def test_overview_header_status_aligns_with_row_status(monkeypatch, cols):
     from imp.cli.quest_row import ID_W, overview_widths
     _term(monkeypatch, cols)
     specs = [("running", "s" * 40, "y" * 80), ("waiting", None, "short")]
-    status_w, name_w = overview_widths(specs)
-    col = ID_W + 2 + name_w + 2
-    assert header_line(color=False, name_width=name_w,
+    status_w, title_w = overview_widths(specs)
+    col = ID_W + 2 + title_w + 2
+    assert header_line(color=False, title_width=title_w,
                        status_width=status_w)[col:].startswith("STATUS")
     for status, label, name in specs:
         line = format_quest_line(**_row(title=name, status=status,
                                         step="x" if label else "-",
-                                        name_width=name_w, status_width=status_w),
+                                        title_width=title_w, status_width=status_w),
                                  step_label=label, color=False)
         assert line[col:].startswith(status)
         assert "(…" not in line          # never an empty cut
@@ -605,14 +606,14 @@ def test_fit_label_whole_label_and_none_unchanged():
 def test_overview_120col_truncates_status_under_capped_name(monkeypatch):
     from imp.cli.quest_row import ID_W, overview_widths
     _term(monkeypatch, 120)
-    # region = 101; NAME capped at 70 leaves STATUS 31 — the 36-col cell truncates.
-    status_w, name_w = overview_widths([("paused", _SPEC_LABEL, "y" * 80)])
-    assert (status_w, name_w) == (31, 70)
-    col = ID_W + 2 + name_w + 2
-    assert header_line(color=False, name_width=name_w,
+    # region = 101; TITLE capped at 70 leaves STATUS 31 — the 36-col cell truncates.
+    status_w, title_w = overview_widths([("paused", _SPEC_LABEL, "y" * 80)])
+    assert (status_w, title_w) == (31, 70)
+    col = ID_W + 2 + title_w + 2
+    assert header_line(color=False, title_width=title_w,
                        status_width=status_w)[col:].startswith("STATUS")
     line = format_quest_line(**_row(title="y" * 80, status="paused", step="review-spec",
-                                    name_width=name_w, status_width=status_w),
+                                    title_width=title_w, status_width=status_w),
                              step_label="reviewing spec", phase_label="spec phase",
                              color=False)
     assert line[col:].startswith("paused (spec phase · reviewin…)  15m")

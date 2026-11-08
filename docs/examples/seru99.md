@@ -59,7 +59,7 @@ seru99 · JSON output for imp list
 
   Should we go with the flat array tagged by zone?
 
-• Set name to "JSON output for imp list"
+• Set title to "JSON output for imp list"
 
 > ok
 

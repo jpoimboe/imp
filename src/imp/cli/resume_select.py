@@ -46,7 +46,7 @@ class ResumePicker:
 
     def render(self) -> str:
         out = []
-        status_w, name_w = quest_row.overview_widths(
+        status_w, title_w = quest_row.overview_widths(
             [(c.status, quest_row.compose_status_label(c.step, c.step_label, c.phase_label),
               quest_row.resolve_display_name(c.title, c.intent).text)
              for c in self.candidates],
@@ -58,7 +58,7 @@ class ResumePicker:
                     quest_id=c.quest_id, title=c.title,
                     status=c.status, step=c.step, step_label=c.step_label,
                     phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
-                    now=self.now, color=False, name_width=name_w,
+                    now=self.now, color=False, title_width=title_w,
                     status_width=status_w)
                 out.append(pal.ansi(inner, "reverse", enabled=self.color))
             else:
@@ -66,7 +66,7 @@ class ResumePicker:
                     quest_id=c.quest_id, title=c.title,
                     status=c.status, step=c.step, step_label=c.step_label,
                     phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
-                    now=self.now, color=self.color, name_width=name_w,
+                    now=self.now, color=self.color, title_width=title_w,
                     status_width=status_w))
         return "\n".join(out)
 

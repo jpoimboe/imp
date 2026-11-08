@@ -536,7 +536,7 @@ def test_set_depends_on_rewrites_quest_json(tmp_path: Path) -> None:
 def test_materialize_raises_on_empty_title_and_creates_nothing(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="   ", quest_id="ttl1", base_branch="main")
-    with pytest.raises(ValueError, match="rename_quest"):
+    with pytest.raises(ValueError, match="call rename_quest to title it before going live"):
         ch.materialize()
     # Nothing was created and the change stays un-materialized.
     assert ch.materialized is False

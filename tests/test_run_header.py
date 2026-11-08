@@ -130,10 +130,10 @@ def test_titleless_intent_is_flattened_and_rides_the_dim_tail() -> None:
 
 
 def test_titleless_intent_clips_at_name_cap() -> None:
-    from imp.cli.quest_row import NAME_CAP
+    from imp.cli.quest_row import TITLE_CAP
     line = _run_header_line("bedo08", "", "resuming", color=False, intent=_LONG)
     name = line.removeprefix("bedo08 · ").removesuffix(" · resuming")
-    assert len(name) == NAME_CAP
+    assert len(name) == TITLE_CAP
     assert name.endswith("…")
     assert _LONG.startswith(name[:-1])
 
@@ -180,10 +180,10 @@ def test_log_header_names_a_titleless_quest_by_its_opening(
 
 
 def test_log_header_clips_a_long_opening_at_name_cap(tmp_path, monkeypatch, capsys) -> None:
-    from imp.cli.quest_row import NAME_CAP
+    from imp.cli.quest_row import TITLE_CAP
     _titleless_quest(tmp_path, "bedo08", intent=_LONG, seed=None)
     name = _log_header(tmp_path, monkeypatch, capsys, "bedo08").removeprefix("bedo08 · ")
-    assert len(name) == NAME_CAP and name.endswith("…")
+    assert len(name) == TITLE_CAP and name.endswith("…")
 
 
 def test_log_header_names_an_unstarted_draft_by_its_prompt(

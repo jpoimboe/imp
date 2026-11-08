@@ -179,7 +179,7 @@ async def test_cancel_at_opening_prompt_emits_discarded_spine(
     stub_new, monkeypatch, capsys, exc,
 ) -> None:
     # No exchange at the opening prompt (Ctrl-D/Ctrl-C) -> the discarded spine
-    # `<id> · (unnamed) · discarded`, one trailing blank, no caret line, exit 130.
+    # `<id> · (untitled) · discarded`, one trailing blank, no caret line, exit 130.
     # stub_new forces should_use_color -> False, so the spine renders plain.
     m = stub_new
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
@@ -197,7 +197,7 @@ async def test_cancel_at_opening_prompt_emits_discarded_spine(
 
     assert rc == 130
     out = capsys.readouterr().out
-    assert out.endswith("z9y8x7 · (unnamed) · discarded\n\n")
+    assert out.endswith("z9y8x7 · (untitled) · discarded\n\n")
     assert not out.endswith("discarded\n\n\n")   # exactly one trailing blank
     assert "> " not in out                       # no bare caret line
     assert "cancelled" not in out
@@ -233,7 +233,7 @@ async def test_leave_signal_at_opening_prompt_discards_like_ctrl_d(
     assert rc == 130
     assert discarded == ["z9y8x7"]
     out = capsys.readouterr().out
-    assert out.endswith("z9y8x7 · (unnamed) · discarded\n\n")
+    assert out.endswith("z9y8x7 · (untitled) · discarded\n\n")
     assert not out.endswith("discarded\n\n\n")
     assert "paused" not in out
     assert "SIGTERM" not in out and "SIGHUP" not in out
@@ -327,11 +327,11 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
     class _FakeTitle:
         def __init__(
-            self, stream: object, cid: str, name: str, initial: str = "busy",
+            self, stream: object, cid: str, quest_title: str, initial: str = "busy",
             *, project: str = "",
         ) -> None:
             self._quest_id = cid
-            self._name = name
+            self._title = quest_title
 
         def busy(self) -> None: ...
         def idle(self) -> None: ...

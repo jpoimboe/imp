@@ -270,12 +270,23 @@ def test_rename_by_user_emits_user_renamed(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="orig", quest_id="aaa113", base_branch="main")
-    ch.rename("Mine", by="user", log=ch.event_log())
+    ch.rename(title="Mine", by="user", log=ch.event_log())
     renames = [e for e in ch.event_log().read()
                if e["type"] in ("quest_renamed", "user_renamed")]
     assert [e["type"] for e in renames] == ["user_renamed"]
     assert renames[0]["payload"] == {
         "id": "aaa113", "old_title": "orig", "new_title": "Mine"}
+
+
+def test_set_title_writes_quest_json_without_an_event(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="orig", quest_id="aaa115", base_branch="main")
+    ch.set_title(title="New")
+    assert ch.title == "New"
+    assert json.loads((ch.quest_dir / "quest.json").read_text())["title"] == "New"
+    assert not [e for e in ch.event_log().read()
+                if e["type"] in ("quest_renamed", "user_renamed")]
 
 
 def test_rename_to_current_title_is_a_no_op(tmp_path: Path) -> None:

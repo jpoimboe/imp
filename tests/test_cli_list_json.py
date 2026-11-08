@@ -21,7 +21,7 @@ from tests.test_cli_list_filters import _archive_status
 from tests.test_inflight_sort import _seed_inflight
 
 # A 92-character, two-line opening prompt: longer than the board's 70-column
-# NAME_CAP and carrying a newline the board would collapse to a space.
+# TITLE_CAP and carrying a newline the board would collapse to a space.
 _ARCHIVED_INTENT_TEXT = (
     "teach the poller a retry budget\n"
     "then wire it through the config so a restart keeps the tally")

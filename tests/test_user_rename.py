@@ -27,7 +27,7 @@ from tests.test_narrative_resume_marker import (
 )
 
 Events = list[dict[str, Any]]
-LINE = 'renamed to "X" · by you'
+LINE = 'title set to "X" · by you'
 
 
 def _user_rename(eid: str, new: str, *, old: str = "x", at: float = 60) -> dict[str, Any]:
@@ -54,7 +54,7 @@ def test_user_rename_during_pause_renders_before_the_resume_marker(
     lines = _stripped(_during_pause(events, _user_rename("r", "X")))
     i = lines.index(LINE)
     assert lines[i + 1] == "" and lines[i + 2] == marker
-    assert not any("Set name to" in ln for ln in lines)
+    assert not any("Set title to" in ln for ln in lines)
 
 
 def test_user_rename_line_has_one_blank_line_each_side() -> None:
@@ -62,7 +62,7 @@ def test_user_rename_line_has_one_blank_line_each_side() -> None:
     i = lines.index(LINE)
     assert lines[i - 1] == "" and lines[i - 2] != ""
     assert lines[i + 1] == "" and lines[i + 2] != ""
-    node = nv.UserRenameNode(name="X")
+    node = nv.UserRenameNode(title="X")
     assert rt.spaces_before(node) and rt.spaces_after(node, full=False)
 
 
@@ -70,8 +70,8 @@ def test_successive_user_renames_each_render_in_order() -> None:
     events = _during_pause(_agent_run(CTRL_D), _user_rename("r1", "First"),
                            _user_rename("r2", "Second", old="First", at=70))
     lines = _stripped(events)
-    assert (lines.index('renamed to "First" · by you')
-            < lines.index('renamed to "Second" · by you'))
+    assert (lines.index('title set to "First" · by you')
+            < lines.index('title set to "Second" · by you'))
     assert nv.build_tree(events).root.title == "Second"
 
 
@@ -100,7 +100,7 @@ def test_held_agent_rename_renders_before_a_following_user_rename() -> None:
         agent_text("4", "prose", agent_id=AID),
     ]
     lines = _stripped(events)
-    assert lines.index('• Set name to "A"') < lines.index('renamed to "B" · by you')
+    assert lines.index('• Set title to "A"') < lines.index('title set to "B" · by you')
     assert nv.build_tree(events).root.title == "B"
 
 
@@ -119,7 +119,7 @@ def test_live_equals_batch_with_a_user_rename(events: Events) -> None:
 
 
 def test_user_rename_line_uses_the_lifecycle_color_of_the_resume_marker() -> None:
-    node = nv.UserRenameNode(name="X")
+    node = nv.UserRenameNode(title="X")
     colored = list(rt._render(node, depth=0, color=True, width=80))
     assert colored == [pal.ansi(LINE, *pal.NODE_COLORS["lifecycle"], enabled=True)]
     marker = list(rt._render(nv.ResumeMarkerNode(gap_s=120), depth=0, color=True, width=80))
@@ -128,9 +128,9 @@ def test_user_rename_line_uses_the_lifecycle_color_of_the_resume_marker() -> Non
 
 
 def test_user_rename_title_control_bytes_are_caret_escaped() -> None:
-    node = nv.UserRenameNode(name="my\x07name")
+    node = nv.UserRenameNode(title="my\x07name")
     assert list(rt._render(node, depth=0, color=False, width=80)) == [
-        'renamed to "my^Gname" · by you']
+        'title set to "my^Gname" · by you']
 
 
 _PAUSED_WITH_RENAME = [
@@ -158,7 +158,7 @@ def _resumed(events: Events, *, cut: int) -> str:
 
 def test_replayed_user_rename_is_not_reprinted_on_resume() -> None:
     out = _resumed([*_PAUSED_WITH_RENAME, _GATE], cut=len(_PAUSED_WITH_RENAME))
-    assert "renamed to" not in out
+    assert "title set to" not in out
 
 
 def test_live_user_rename_after_the_boundary_prints_once() -> None:
@@ -170,7 +170,12 @@ def test_markdown_export_renders_user_rename_bold_with_escaped_title() -> None:
     from imp.cli.render_markdown import render_markdown
 
     root = nv.WorkflowNode(title="d")
-    root.children = [nv.UserRenameNode(name="X"), nv.UserRenameNode(name="a <b>")]
+    root.children = [nv.UserRenameNode(title="X"), nv.UserRenameNode(title="a <b>")]
     out = render_markdown(nv.NarrativeTree(root=root), full=False)
-    assert '**renamed to "X" · by you**' in out
-    assert '**renamed to "a &lt;b&gt;" · by you**' in out
+    assert '**title set to "X" · by you**' in out
+    assert '**title set to "a &lt;b&gt;" · by you**' in out
+
+
+def test_structural_repr_carries_the_user_rename_title() -> None:
+    assert nv.structural_repr(nv.UserRenameNode(title="X")) == {
+        "t": "UserRenameNode", "title": "X"}

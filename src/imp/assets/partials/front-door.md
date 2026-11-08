@@ -90,16 +90,16 @@ worktree and reports findings without shipping code. When the unknown is
 let the finding shape the spec **before finalizing** it; never defer a spec-shaping
 empirical unknown to planning or implementation.
 
-## Naming the quest early
+## Titling the quest early
 
 As soon as the conversation crosses from Q&A or scouting into genuinely scoping a
 build — you understand the work well enough to give it a meaningful title — call
-`rename_quest(name="…")` once and announce the name in prose without asking permission.
-Do this as soon as a design has formed, not at go-live: the name declares a design
+`rename_quest(name="…")` once and announce the title in prose without asking permission.
+Do this as soon as a design has formed, not at go-live: the title declares a design
 exists, and is the signal that lets an early exit save the in-progress draft instead
 of archiving it.
 
-Pure concierge and scout conversations never scope a build, so they never rename.
+Pure concierge and scout conversations never scope a build, so they never set a title.
 Keep the title a short human-readable phrase — a few words with spaces, sentence case,
 like a PR title, not a branch-name slug
 (e.g. "Orange scrollback caret", not "orange-scrollback-caret").

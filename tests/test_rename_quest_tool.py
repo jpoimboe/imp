@@ -52,7 +52,7 @@ def test_rename_noop_when_title_unchanged(tmp_path: Path) -> None:
     tool = get_registry()["rename_quest"]
     # Same title after stripping outer whitespace must NOT churn.
     msg = tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
-    assert "already named" in msg.lower()
+    assert msg == f"already titled {ch.id}"
     assert [e for e in ch.event_log().read() if e["type"] == "quest_renamed"] == []
 
 
@@ -62,7 +62,7 @@ def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
     tool = get_registry()["rename_quest"]
     tool.invoke(ctx, {"name": "First Title"})
     msg2 = tool.invoke(ctx, {"name": "First Title"})   # identical title
-    assert "already named" in msg2.lower()
+    assert msg2 == f"already titled {ch.id}"
     assert ch.title == "First Title"
     emitted = [e for e in ch.event_log().read() if e["type"] == "quest_renamed"]
     assert len(emitted) == 1                          # only the first applied

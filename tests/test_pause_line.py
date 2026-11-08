@@ -20,7 +20,7 @@ def test_pause_lines_named_reasonless_pause_uses_paused_headline() -> None:
 def test_pause_lines_titleless_pause_shows_bare_id() -> None:
     lines = _pause_lines("dufa26", "dufa26", color=False)
     assert lines == ["paused", "dufa26", "resume: imp resume dufa26"]
-    assert "(unnamed)" not in "\n".join(lines)
+    assert "(untitled)" not in "\n".join(lines)
 
 
 def test_pause_lines_reason_becomes_the_headline_no_at_locator_no_parens() -> None:

@@ -90,7 +90,7 @@ vida80 · Fix Codex re-prompt crash
   parallel: a throwaway reproduction to find which check actually fires, and a
   code map of how "unknown" errors are recorded and shown.
 
-• Set name to "Fix Codex re-prompt crash"
+• Set title to "Fix Codex re-prompt crash"
 
   spiker · claude-opus-5-5 · 8m 11s
 

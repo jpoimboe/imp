@@ -66,7 +66,7 @@ def test_front_door_allows_worktree_and_keeps_naming_parking_and_scouting() -> N
     tools = _wf().agents["front-door"].tools
     assert "create_and_enter_worktree" in tools   # forks the worktree on go-live
     assert "save_and_exit" in tools               # parking stays available
-    assert "rename_quest" in tools                # it names the quest
+    assert "rename_quest" in tools                # it titles the quest
     assert "sub_agent" in tools                   # explorer/researcher/spiker
 
 
@@ -77,6 +77,14 @@ def test_front_door_body_includes_partials_and_goes_live_in_worktree() -> None:
     assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in body
     # The stale in-place framing is gone.
     assert "in place on the current branch" not in body
+
+
+def test_front_door_go_live_titles_the_quest() -> None:
+    body = " ".join(_wf().agents["front-door"].prompt_template_source.split())
+    assert "**Title the quest if it is still untitled.**" in body
+    assert "announce the title in prose without asking permission" in body
+    assert 'titled as under "Titling the quest early"' in body
+    assert "Naming" not in body
 
 
 def test_front_door_renders_full_include_closure() -> None:

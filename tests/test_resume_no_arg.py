@@ -64,7 +64,7 @@ async def test_multiple_non_interactive_lists_candidates_and_exits_2(
     rc = await m._pick_resume_target(tmp_path, non_interactive=False)
     err = capsys.readouterr().err
     assert rc == 2
-    assert "NAME" in err                          # shared header rendered
+    assert "TITLE" in err                          # shared header rendered
     assert "aaa111" in err and "bbb222" in err    # both candidate tokens listed
 
 

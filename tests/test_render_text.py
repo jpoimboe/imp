@@ -2117,12 +2117,12 @@ def test_error_message_and_detail_control_bytes_escaped() -> None:
 
 
 def test_rename_title_control_bytes_escaped() -> None:
-    node = nv.RenameNode(name="my\x07change\x00")
+    node = nv.RenameNode(title="my\x07change\x00")
     out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
     assert "\x07" not in out
     assert "\x00" not in out
     assert "^G" in out and "^@" in out
-    assert "Set name to" in out             # imp's framing stays intact, unescaped
+    assert "Set title to" in out             # imp's framing stays intact, unescaped
 
 
 def test_breadcrumb_extras_control_bytes_escaped() -> None:

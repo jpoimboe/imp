@@ -16,9 +16,9 @@ an isolated worktree on `imp/{{ quest.id }}`; the change is built and committed 
 leaving the commits on that branch for the user to integrate manually. When the user
 wants to build, do these in one turn:
 
-1. **Name the quest if it is still unnamed.** Call `rename_quest(name="…")` once the
-   intent is clear and announce the name in prose without asking permission (titled as
-   under "Naming the quest early").
+1. **Title the quest if it is still untitled.** Call `rename_quest(name="…")` once the
+   intent is clear and announce the title in prose without asking permission (titled as
+   under "Titling the quest early").
 2. **Write the final spec.** Write the complete, build-ready specification — Goal, and
    Scope / Decisions / Acceptance criteria as far as the change warrants — to
    `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. There is **no separate finalizer

@@ -476,13 +476,13 @@ class LeaveMarkerNode:
 
 @dataclass
 class RenameNode:
-    name: str
+    title: str
     collapsible = False
 
 
 @dataclass(frozen=True)
 class UserRenameNode:
-    name: str
+    title: str
     collapsible = False
 
 
@@ -1434,7 +1434,7 @@ def _h_quest_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
         return
     self._root.title = new_title
     # Stash the rename; flushed after the narration or at the next boundary; latest title wins.
-    self._pending_rename = RenameNode(name=new_title)
+    self._pending_rename = RenameNode(title=new_title)
 
 
 NarrativeBuilder._HANDLERS["quest_renamed"] = _h_quest_renamed
@@ -1445,7 +1445,7 @@ def _h_user_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._root.title = p["new_title"]
     self._flush_pending_rename()
     self._flush_burst()
-    _place_beside_held_step(self, UserRenameNode(name=p["new_title"]))
+    _place_beside_held_step(self, UserRenameNode(title=p["new_title"]))
 
 
 NarrativeBuilder._HANDLERS["user_renamed"] = _h_user_renamed
@@ -2983,7 +2983,7 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, ResumeMarkerNode):
         return {"t": t, "gap_s": node.gap_s}
     if isinstance(node, UserRenameNode):
-        return {"t": t, "name": node.name}
+        return {"t": t, "title": node.title}
     if isinstance(node, LeaveMarkerNode):
         return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):

@@ -240,7 +240,7 @@ async def run_terminal_client(
                 title.idle()
         elif etype in _RENAME_TYPES and not replay:
             if title is not None:
-                title.update_name((event.get("payload") or {})["new_title"])
+                title.update_title((event.get("payload") or {})["new_title"])
         elif (title is not None and not replay
                 and etype not in INTERRUPT_EVENT_TYPES):
             title.busy()

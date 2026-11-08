@@ -775,7 +775,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     title = captured["title"]
     assert isinstance(title, TerminalTitle)
-    assert title._name == "T"
+    assert title._title == "T"
     assert title._quest_id == "2026-06-15-title"
     assert title._project == quest.control_root.name == tmp_path.name
     assert rc == 0
@@ -821,10 +821,10 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     reset_calls: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, quest_id: str, quest_name: str,
+        def __init__(self, stream: object, quest_id: str, quest_title: str,
                      *, project: str = "") -> None:
             self._quest_id = quest_id
-            self._name = quest_name
+            self._title = quest_title
 
         def working(self) -> None: ...
         def waiting(self) -> None: ...
@@ -913,7 +913,7 @@ async def test_run_session_client_reuses_passed_in_title(
     class _SentinelTitle:
         def __init__(self) -> None:
             self._quest_id = "sentinel"
-            self._name = "sentinel"
+            self._title = "sentinel"
 
         def working(self) -> None: ...
         def waiting(self) -> None: ...

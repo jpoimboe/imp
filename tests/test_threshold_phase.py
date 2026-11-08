@@ -84,8 +84,17 @@ def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
     assert "rename_quest" in fd                        # names the change
     assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in fd
     assert "never surface these internal terms" in low
-    assert "announce the name in prose without asking permission" in fd
+    assert "announce the title in prose without asking permission" in fd
     assert '{% include "partials/go-live-worktree.md" %}' in body  # go-live step stays in the tail
+
+
+def test_threshold_go_live_fallback_titles_the_quest() -> None:
+    body = " ".join(_wf().agents["threshold"].prompt_template_source.split())
+    assert "**Title the quest if it is still untitled**" in body
+    assert 'you normally title it earlier; see "Titling the quest early"' in body
+    assert "announce the title in prose without asking permission" in body
+    assert 'titled as under "Titling the quest early"' in body
+    assert "Naming" not in body
 
 
 def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None:
@@ -153,7 +162,7 @@ def test_front_door_carries_the_workflow_agnostic_body() -> None:
                 "memory-authoring", "sandbox-limits"):
         assert f'{{% include "partials/{inc}.md" %}}' in fd, inc
     for heading in ("## Orienting before you offer", "## Acting on imp",
-                    "## Speak plainly", "## Naming the quest early",
+                    "## Speak plainly", "## Titling the quest early",
                     "## When the work depends on another quest"):
         assert heading in fd, heading
     # workflow-specific tail sections must NOT leak into the shared body.

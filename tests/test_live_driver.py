@@ -305,7 +305,7 @@ def test_empty_thinking_dropped_in_live_path() -> None:
 def test_no_slug_title_header_emitted() -> None:
     # The slug/title banner is gone: quest_created (and a later quest_renamed)
     # emit no `#slug  title` line — the transcript opens on the first turn.
-    # A rename DOES emit a `• Set name to …` aside (tested in test_rename_line.py).
+    # A rename DOES emit a `• Set title to …` aside (tested in test_rename_line.py).
     drv, out = _driver()
     drv.on_event(ev("1", "quest_created", title="add auth"))
     drv.on_event(ev("2", "quest_renamed", id="ch1", old_title="add auth",
@@ -3890,7 +3890,7 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
     screen = TerminalScreen(80, 16, history=200, ratio=0.5)
     pyte.ByteStream(screen).feed(out.getvalue().encode())
     rows = screen_lines(screen)
-    spine = "2026-06-12-run-x · (unnamed) · merged into master as 83e4cf23"
+    spine = "2026-06-12-run-x · (untitled) · merged into master as 83e4cf23"
     c = next(i for i, r in enumerate(rows) if r.strip() == spine)
     assert rows[c - 1].strip() == ""            # exactly one blank directly above the block
     assert rows[c - 2].strip() != ""            # …and not two — the row above the blank has content
@@ -3998,9 +3998,9 @@ def test_finish_counts_a_terminal_node_blank_as_the_tail(node: object) -> None:
     (ev("6", "quest_merged", base="main", commit="83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f",
         quest_id="2026-06-12-run-x"),
      ("main", "83e4cf2345a1b2c3d4e5f60718293a4b5c6d7e8f"),
-     "2026-06-12-run-x · (unnamed) · merged into main as 83e4cf23"),
+     "2026-06-12-run-x · (untitled) · merged into main as 83e4cf23"),
     (ev("6", "workflow_completed", quest_id="2026-06-12-run-x"), None,
-     "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x"),
+     "2026-06-12-run-x · (untitled) · completed · commits on imp/2026-06-12-run-x"),
 ], ids=["merged", "completed"])
 def test_landing_block_has_one_blank_above_it(
     landing: dict, merge_fields: tuple[str, str] | None, head: str,

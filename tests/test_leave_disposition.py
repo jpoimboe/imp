@@ -217,7 +217,7 @@ def test_leave_disposition_titleless_archived_shows_prompt_fallback(
     assert rc == 130
     out = capsys.readouterr().out
     assert "tl1 · when I hit save it crashed · archived" in out
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
@@ -229,7 +229,7 @@ def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
     assert rc == 130
     out = capsys.readouterr().out
     assert "tl3 · make dark mode work · abandoned" in out
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
@@ -241,7 +241,7 @@ def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
     assert rc == 130
     out = capsys.readouterr().out
     assert "tl4 · fix the login crash · left running" in out
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_leave_disposition_titleless_no_prompt_shows_unnamed(
@@ -252,8 +252,8 @@ def test_leave_disposition_titleless_no_prompt_shows_unnamed(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 130
     out = capsys.readouterr().out
-    assert "tl2 · (unnamed) · paused" in out
-    assert "> (unnamed)" not in out
+    assert "tl2 · (untitled) · paused" in out
+    assert "> (untitled)" not in out
 
 
 def test_leave_disposition_renders_the_intent_it_is_handed(

@@ -204,7 +204,7 @@ def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -
     assert lines[0] == "interrupt"  # gold headline, own line (plain here)
     assert lines[1] == "2026-06-12-run-x"                      # identity, bare id (untitled)
     assert lines[2] == "resume: imp resume 2026-06-12-run-x"   # resume line kept
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
     assert "· interrupt" not in out                            # no crammed spine tail
     assert not out.startswith("\n")                            # no leading blank
     assert out.endswith("\n\n")
@@ -247,13 +247,13 @@ def test_status_spine_prompt_fallback_dim_and_unprefixed_color() -> None:
     # the opening-prompt fallback is the dim, unprefixed middle segment
     assert pal.ansi("add a dark mode toggle", "dim") in line
     assert "> " not in line
-    assert "(unnamed)" not in line
+    assert "(untitled)" not in line
 
 
 def test_status_spine_prompt_fallback_flattens_and_caps_at_70() -> None:
     line = main._status_spine("z1", "   ", "archived", "wordmark", color=False,
                               intent="add a\n   dark   mode\ttoggle " + "y" * 80)
-    # flattened to single spaces, then 69 chars + "…" = 70 display cols (NAME_CAP)
+    # flattened to single spaces, then 69 chars + "…" = 70 display cols (TITLE_CAP)
     body = "add a dark mode toggle " + "y" * 80
     assert "z1 · " + body[:69] + "… · archived" == line
 
@@ -261,8 +261,8 @@ def test_status_spine_prompt_fallback_flattens_and_caps_at_70() -> None:
 def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
     line = main._status_spine("z1", "", "archived", "wordmark", color=False,
                               intent=None)
-    assert line == "z1 · (unnamed) · archived"
-    assert "> (unnamed)" not in line
+    assert line == "z1 · (untitled) · archived"
+    assert "> (untitled)" not in line
 
 
 def test_status_spine_title_unchanged_when_intent_present() -> None:
@@ -289,8 +289,8 @@ def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
 
 def test_status_spine_titleless_renders_unnamed_middle_segment() -> None:
     line = main._status_spine("vahi04", "", "completed", "green", color=False)
-    assert line == "vahi04 · (unnamed) · completed"
-    # exactly two separators now: id · (unnamed) · tail
+    assert line == "vahi04 · (untitled) · completed"
+    # exactly two separators now: id · (untitled) · tail
     assert line.count(" · ") == 2
 
 
@@ -404,10 +404,10 @@ def test_emit_completed_untitled_and_intentless_shows_the_unnamed_placeholder(
     monkeypatch, capsys,
 ) -> None:
     """Neither a title nor an opening intent: the middle segment is the dim
-    `(unnamed)` placeholder — never a bare id with no ` · `."""
+    `(untitled)` placeholder — never a bare id with no ` · `."""
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(_quest(title=""), merge=_MERGE)
-    assert capsys.readouterr().out == "soro82 · (unnamed) · merged into master as 83e4cf23\n\n"
+    assert capsys.readouterr().out == "soro82 · (untitled) · merged into master as 83e4cf23\n\n"
 
 
 def test_emit_completed_merged_prints_the_gold_spine_never_green(
@@ -454,7 +454,7 @@ def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
     assert quest.materialized is False                          # the real render seam
     main._emit_completed(quest, merge=None)
     out = capsys.readouterr().out
-    # The tail names the quest branch imp/<id>, NOT the base branch, even though the
+    # The tail cites the quest branch imp/<id>, NOT the base branch, even though the
     # client quest object is still materialized=False.
     assert out.split("\n")[0] == (
         f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
@@ -486,7 +486,7 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
                          intent="add a dark mode toggle")
     out = capsys.readouterr().out
     assert out.split("\n")[0] == "soro82 · add a dark mode toggle · merged into master as 83e4cf23"
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
     assert "\x1b[" not in out
 
 
@@ -499,7 +499,7 @@ def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "merge blocked: uncommitted work in the worktree" in out
     assert "2026-06-12-run-x · fix the crash" in out   # identity line, prompt fallback
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
@@ -518,7 +518,7 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
     assert lines[0] == "interrupt"                                    # gold headline, own line
     assert lines[1] == "2026-06-12-run-x · add a dark mode toggle"  # identity, prompt fallback
     assert lines[2] == "resume: imp resume 2026-06-12-run-x"         # resume line kept
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_a_non_leave_pause_prints_no_caret(monkeypatch, capsys) -> None:
@@ -615,7 +615,7 @@ def test_exactly_one_blank_between_narrative_and_the_spine(
     monkeypatch.setenv("NO_COLOR", "1")
     raw = _end_of_run_output(warnings, tty=tty)
     rows = _screen_rows(raw, tty=tty)
-    spine = "2026-06-12-run-x · (unnamed) · merged into master as 83e4cf23"
+    spine = "2026-06-12-run-x · (untitled) · merged into master as 83e4cf23"
     h = next(i for i, r in enumerate(rows) if r.strip() == spine)
     assert rows[h - 1].strip() == ""      # exactly one blank directly above the spine
     assert rows[h - 2].strip() != ""      # …and not two
@@ -640,7 +640,7 @@ def test_the_closing_block_prints_the_commits_recorded_on_the_merge(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "2026-06-12-run-x · (unnamed) · merged into master as ffffffff\n"
+        "2026-06-12-run-x · (untitled) · merged into master as ffffffff\n"
         "  4091ab6d  first\n"
         "  832c04d7  second\n"
         "\n")
@@ -657,7 +657,7 @@ def test_the_closing_block_prints_the_commits_recorded_on_a_plain_done(
         coord=_NO_LEAVE, leave_state={})
     assert rc == 0
     assert capsys.readouterr().out == (
-        "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x\n"
+        "2026-06-12-run-x · (untitled) · completed · commits on imp/2026-06-12-run-x\n"
         "  832c04d7  only\n"
         "\n")
 
@@ -696,7 +696,7 @@ def test_a_terminal_event_with_no_commits_key_renders_like_an_empty_list(
         coord=_NO_LEAVE, leave_state={}) == 0
     assert capsys.readouterr().out == no_key
     assert no_key == (
-        "2026-06-12-run-x · (unnamed) · completed · commits on imp/2026-06-12-run-x\n"
+        "2026-06-12-run-x · (untitled) · completed · commits on imp/2026-06-12-run-x\n"
         "\n")
 
 
@@ -725,7 +725,7 @@ def test_titleless_quest_with_no_intent_is_named_by_its_seed_opening(
     emit(q)
     out = capsys.readouterr().out
     assert "2026-06-12-run-x · summarize foo.py" in out
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_a_handed_intent_wins_over_seed_opening(monkeypatch, capsys) -> None:

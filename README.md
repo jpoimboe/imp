@@ -512,7 +512,7 @@ You can also see all in-progress, backlog, and completed quests:
 
 ```console
 $ imp list
-ID      NAME                                                   STATUS    UPDATED
+ID      TITLE                                                  STATUS    UPDATED
 fego87  README that shows imp working                          running   0s
 
 backlog:

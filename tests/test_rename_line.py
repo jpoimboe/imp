@@ -13,7 +13,7 @@ def test_quest_renamed_appends_a_rename_node_with_the_title() -> None:
     ])
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
     assert len(renames) == 1
-    assert renames[0].name == "Add version flag"
+    assert renames[0].title == "Add version flag"
     assert tree.root.title == "Add version flag"
 
 
@@ -33,7 +33,7 @@ def test_rename_line_renders_agent_aside_with_set_name() -> None:
            new_title="Add version flag"),
     ])
     body = list(render_tree(tree, full=False, color=False, width=80))
-    assert any(ln.strip() == '• Set name to "Add version flag"' for ln in body)
+    assert any(ln.strip() == '• Set title to "Add version flag"' for ln in body)
 
 
 def test_rename_line_color_bullet_and_name_yellow() -> None:
@@ -43,7 +43,7 @@ def test_rename_line_color_bullet_and_name_yellow() -> None:
            new_title="Add version flag"),
     ])
     body = list(render_tree(tree, full=False, color=True, width=80))
-    row = next(ln for ln in body if "Set name to" in ln)
+    row = next(ln for ln in body if "Set title to" in ln)
     assert "\x1b[33m• \x1b[0m" in row                          # yellow turn bullet
     assert "\x1b[33mAdd version flag\x1b[0m" in row           # name non-bold yellow
 
@@ -60,7 +60,7 @@ def test_rename_line_bullet_and_name_are_wordmark_under_dark_theme() -> None:
         body = list(render_tree(tree, full=False, color=True, width=80))
     finally:
         pal.set_theme("ansi")
-    row = next(ln for ln in body if "Set name to" in ln)
+    row = next(ln for ln in body if "Set title to" in ln)
     wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
     yellow = pal.theme_escapes("dark")["yellow"]        # \x1b[38;2;199;151;106m
     assert wordmark + "• " in row                       # bullet painted wordmark
@@ -112,7 +112,7 @@ def test_rename_without_narration_flushes_at_step_boundary() -> None:
     step = tree.root.children[0].children[0]
     renames = [c for c in step.children if isinstance(c, nv.RenameNode)]
     assert len(renames) == 1
-    assert renames[0].name == "Renamed early"
+    assert renames[0].title == "Renamed early"
 
 
 def test_two_renames_before_flush_coalesce_to_latest() -> None:
@@ -126,5 +126,5 @@ def test_two_renames_before_flush_coalesce_to_latest() -> None:
     ])
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
     assert len(renames) == 1
-    assert renames[0].name == "Second"
+    assert renames[0].title == "Second"
     assert tree.root.title == "Second"

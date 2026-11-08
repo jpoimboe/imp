@@ -59,7 +59,7 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
     err = capsys.readouterr().err
     assert "imp: " in err
     assert "is ambiguous" in err
-    assert "NAME" in err                          # shared header row
+    assert "TITLE" in err                          # shared header row
     assert "paused" in err                        # STATUS via card.status
     assert "aaa111" in err and "bbb222" in err    # resume tokens, one row each
 
@@ -82,7 +82,7 @@ def test_exit_ambiguous_names_titleless_candidates_by_their_opening(
     lines = err.splitlines()
     assert "summarize foo.py" in next(ln for ln in lines if ln.startswith("amb001"))
     assert "fix the login crash" in next(ln for ln in lines if ln.startswith("amb002"))
-    assert "(unnamed)" not in err
+    assert "(untitled)" not in err
 
 
 def test_exit_ambiguous_sizes_columns_to_content(
@@ -110,7 +110,7 @@ def test_exit_ambiguous_sizes_columns_to_content(
     with pytest.raises(SystemExit):
         m._exit_ambiguous("a", ["aaa111", "abb222"], tmp_path)
     lines = capsys.readouterr().err.splitlines()
-    assert lines[1] == "ID      NAME        STATUS         UPDATED"
+    assert lines[1] == "ID      TITLE       STATUS         UPDATED"
     assert re.fullmatch(r"aaa111  Title 111   paused \(plan\)  \d+[smhd]", lines[2])
     assert re.fullmatch(r"abb222  Title 222   paused \(plan\)  \d+[smhd]", lines[3])
 
@@ -147,7 +147,7 @@ def test_exit_ambiguous_sizes_around_missing_and_titleless_cards(
     with pytest.raises(SystemExit):
         m._exit_ambiguous("a", ["aaa111", "abb222", "acc333"], tmp_path)
     lines = capsys.readouterr().err.splitlines()
-    assert lines[1] == "ID      NAME                      STATUS         UPDATED"
+    assert lines[1] == "ID      TITLE                     STATUS         UPDATED"
     assert re.fullmatch(
         r"aaa111  Title 111                 paused \(plan\)  \d+[smhd]", lines[2])
     assert re.fullmatch(

@@ -66,7 +66,7 @@ spec-writer · opus
   `PackageNotFoundError` (still exit 0), and tests covering both the success and
   fallback paths.
 
-• Set name to "add-version-flag"
+• Set title to "add-version-flag"
 
 spec-writer · complete · 1m 23s
 

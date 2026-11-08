@@ -85,10 +85,10 @@ def test_summary_header_takes_a_titleless_name_from_the_seed_opening():
     assert hdr.name == quest_row.ResolvedName("seed text", quest_row.NameKind.PROMPT)
 
 
-def test_summary_header_without_a_card_is_unnamed_with_unknown_status():
+def test_summary_header_without_a_card_is_untitled_with_unknown_status():
     from imp.cli import quest_row
     hdr = m._summary_header("q", None, [])
-    assert hdr.name.kind is quest_row.NameKind.UNNAMED
+    assert hdr.name.kind is quest_row.NameKind.UNTITLED
     assert hdr.status == "?"
 
 
