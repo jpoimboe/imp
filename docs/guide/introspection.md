@@ -87,14 +87,14 @@ finished); do not invent quests that the commands did not list.
 ## Detail on one quest
 
 `imp show <id>` — the overview detail card: id, title, status, timing,
-dependencies, opening intent, the summary inlined, and the run ledger. A quest
-with recorded steps carries a `run:` line — work time, tokens in and out, and
-the charge (its share of its week's quota, or the dollar cost when no gauge
-readings exist for that week) — then a `workflow:` line naming the workflow it
-ran under, and last on the card a `ledger:` section holding the per-step table,
-minus steps that finished instantly with nothing to report. A quest that has
-not run a step yet shows none of the three, and neither does one still in the
-backlog.
+dependencies, opening intent, the summary inlined, the saved files (`files:`),
+and the run ledger. A quest with recorded steps carries a `run:` line — work
+time, tokens in and out, and the charge (its share of its week's quota, or the
+dollar cost when no gauge readings exist for that week) — then a `workflow:`
+line naming the workflow it ran under, and last on the card a `ledger:` section
+holding the per-step table, minus steps that finished instantly with nothing to
+report. A quest that has not run a step yet shows none of the three, and neither
+does one still in the backlog.
 A quest that completed with a recorded merge SHA also shows a `merge_commit:`
 line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
 when the quest has none). A quest halted as paused or error shows a
@@ -110,11 +110,18 @@ holding the value verbatim — after `summary:` on a quest card, after
 `intent:` on a backlog card. A quest's `--json` carries its full effective
 set under a `vars` key — workflow defaults, config overrides, and vars the
 engine sets as it runs — and a backlog quest's carries its filed values.
-Add a subcommand to narrow to one facet:
-`imp show <id> spec` for the raw spec and `imp show <id> verify` for the last
-failing test-gate run, or add `--json` to get the overview card as a structured
-object. For the event timeline, use `imp events <id>` (below). Read the facet
-the user asked about and answer from it.
+A quest with saved files lists them in a `files:` section just before
+`ledger:` — one path per line, alphabetical; `--json` carries them as `files`
+(`[]` when none).
+Name a saved file to print just that: `imp show <id> <name>` takes a path from
+`files:` or a folder. A folder holding one file prints it —
+`imp show <id> spec` for the raw spec, `imp show <id> verify` for the last
+failing test-gate run — and a folder holding several lists their paths
+(`imp show <id> plans`). It reads the live quest files while a quest is in
+flight and the copy saved in git once it is finished. Or add `--json` to get
+the overview card as a structured object. For the event timeline, use
+`imp events <id>` (below). Read the facet the user asked about and answer from
+it.
 
 ## Reading an event timeline — three tiers
 
@@ -211,10 +218,11 @@ answers them — not the sandbox floor:
 
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
   read: the quest's detail card (id, title, status, why it halted, timing, dependencies, the
-  opening intent, the summary inlined, and the run ledger — a `run:` totals line
-  and the per-step `ledger:` table minus idle steps). Add `spec` for the raw spec,
-  `verify` for the last failing gate run, or `--json` for the card as a structured object
-  (which carries no ledger).
+  opening intent, the summary inlined, the saved files (`files:`), and the run
+  ledger — a `run:` totals line and the per-step `ledger:` table minus idle
+  steps). Add `spec` for the raw spec, `verify` for the last failing gate run,
+  any other saved file or folder named in `files:` (`plans` lists the plans), or
+  `--json` for the card as a structured object (which carries no ledger).
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`

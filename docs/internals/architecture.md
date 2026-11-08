@@ -381,7 +381,7 @@ These are dispatched via `subagents:` frontmatter and are **never** a workflow s
 
 ### Data files
 
-These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. `artifacts/` means committed: everything under it is journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*), which is what keeps it readable after the worktree is pruned. Throwaway spiker evidence is deliberately outside that boundary, in the sibling `spike/`, which the engine never journals — it dies with the quest home.
+These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. `artifacts/` means committed: everything under it is journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*), which is what keeps it readable after the worktree is pruned. `imp show <id> <name>` prints any file under `artifacts/`, from the live quest home or from that ref. Throwaway spiker evidence is deliberately outside that boundary, in the sibling `spike/`, which the engine never journals — it dies with the quest home.
 
 The columns list the **principal** writers and readers, not an exhaustive census —
 `deferred.md` in particular is appended to by many agents (any agent may file a
@@ -389,8 +389,8 @@ The columns list the **principal** writers and readers, not an exhaustive census
 
 | File (relative to the quest home) | Written by | Read by |
 |---|---|---|
-| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |
-| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer |
+| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases, `imp show` |
+| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |
 | `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` step (merge commit body), `imp show` |
 | `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
