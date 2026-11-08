@@ -71,6 +71,29 @@ def test_edit_zone_rejected_for_materialized(
     assert Quest.load(tmp_path, "2026-06-24-edit04").origin == "draft"
 
 
+@pytest.mark.parametrize(("backlog", "active", "origin"), [
+    (True, False, "draft"),
+    (False, True, "backlog"),
+])
+def test_apply_edit_zone_rejected_for_materialized_exact_message(
+        tmp_path: Path, monkeypatch, backlog: bool, active: bool,
+        origin: str) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit0z", origin=origin)
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit0z", title=None, backlog=backlog,
+        active=active, depends_on=None, clear_deps=False, append_intent=None,
+        base=None)
+    assert (rc, msg) == (2, "imp: 2026-06-24-edit0z has already started building, "
+                            "so it can't move between the active list and the backlog")
+    assert Quest.load(tmp_path, "2026-06-24-edit0z").origin == origin
+
+
 def test_edit_depends_on_replaces_list(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -421,7 +444,8 @@ def test_apply_edit_depends_on_rejected_for_materialized(
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit40", title=None, backlog=False,
         active=False, depends_on=["B"], clear_deps=False, append_intent=None, base=None)
-    assert (rc, msg) == (2, "imp: cannot change dependencies once a quest is built")
+    assert (rc, msg) == (2, "imp: 2026-06-24-edit40 has already started building, "
+                            "so its dependencies can't change")
     # The rejected edit must not have mutated the dependency list.
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit40"))["depends_on"] == ["A"]
 
@@ -439,7 +463,8 @@ def test_apply_edit_clear_deps_rejected_for_materialized(
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit41", title=None, backlog=False,
         active=False, depends_on=None, clear_deps=True, append_intent=None, base=None)
-    assert (rc, msg) == (2, "imp: cannot change dependencies once a quest is built")
+    assert (rc, msg) == (2, "imp: 2026-06-24-edit41 has already started building, "
+                            "so its dependencies can't change")
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit41"))["depends_on"] == ["A"]
 
 
@@ -455,7 +480,8 @@ def test_edit_deps_rejected_for_materialized_via_cmd(
         json.dumps(meta, indent=2, sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit42", depends_on=["B"]))
     assert rc == 2
-    assert "cannot change dependencies once a quest is built" in capsys.readouterr().err
+    assert ("imp: 2026-06-24-edit42 has already started building, so its "
+            "dependencies can't change") in capsys.readouterr().err
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit42"))["depends_on"] == ["A"]
 
 
@@ -531,7 +557,8 @@ def test_edit_base_rejected_for_materialized(
         json.dumps(before, indent=2, sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit51", base="release-2.0"))
     assert rc == 2
-    assert "cannot change the base once a quest is built" in capsys.readouterr().err
+    assert ("imp: 2026-06-24-edit51 has already started building, so its "
+            "base branch can't change") in capsys.readouterr().err
     after = _meta(Quest.load(tmp_path, "2026-06-24-edit51"))
     assert after["base_branch"] == before["base_branch"]
     assert after["orig_base_head"] == before["orig_base_head"]

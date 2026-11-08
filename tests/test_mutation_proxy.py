@@ -98,7 +98,8 @@ def test_run_mutation_edit_rejects_materialized_deps(tmp_path: Path) -> None:
         "token": "mut15", "title": None, "backlog": False, "active": False,
         "depends_on": ["B"], "clear_deps": False, "append_intent": None, "base": None})
     assert result["returncode"] == 2
-    assert result["message"] == "imp: cannot change dependencies once a quest is built"
+    assert result["message"] == ("imp: 2026-06-24-mut15 has already started building, "
+                                 "so its dependencies can't change")
     assert _meta(tmp_path, "2026-06-24-mut15")["depends_on"] == ["A"]
 
 
