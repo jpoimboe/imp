@@ -154,7 +154,7 @@ def test_search_list_line_flattens_and_clips_a_long_fallback_at_name_cap() -> No
     opening = "summarize\n  " + "y" * 100
     hit = _SearchHit("abc", "", "history", "", None, opening)
     line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
-    # NAME_CAP is 70: 69 text columns + "…"
+    # TITLE_CAP is 70: 69 text columns + "…"
     assert line == "abc · summarize " + "y" * 59 + "… · history · -"
 
 

@@ -1750,7 +1750,7 @@ def test_the_reference_after_state_renders_verbatim():
     hdr = SummaryHeader(title="", quest_id="zita45",
                         status="completed", total_seconds=3120.0)
     assert render_summary(rows, header=hdr, color=False, width=80) == [
-        "zita45  ·  (unnamed)  ·  completed",
+        "zita45  ·  (untitled)  ·  completed",
         "                                       time      in    out    cost",
         "scoping phase",
         "  threshold                          12m 0s  163.0k   3.0k  $0.27*",
@@ -2053,9 +2053,9 @@ def test_short_opening_message_is_not_truncated():
     assert _header(intent="fix it") == "kole14  ·  fix it  ·  paused"
 
 
-def test_header_with_no_title_or_intent_reads_unnamed_and_dim():
-    assert _header() == "kole14  ·  (unnamed)  ·  paused"
-    dim = pal.ansi("(unnamed)", "dim", enabled=True)
+def test_header_with_no_title_or_intent_reads_untitled_and_dim():
+    assert _header() == "kole14  ·  (untitled)  ·  paused"
+    dim = pal.ansi("(untitled)", "dim", enabled=True)
     assert _header(color=True) == f"{_GOLD_ID}  ·  {dim}  ·  paused"
 
 

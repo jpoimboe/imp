@@ -201,7 +201,7 @@ def test_leave_signal_at_opening_prompt_discards_the_draft(tmp_path: Path, sig: 
         s.send_signal(sig)
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
         assert rc == 130, "\n".join(s.lines())        # a clean leave, not death by signal
-        assert_screen(s, contains=(f"{qid} · (unnamed) · discarded",),
+        assert_screen(s, contains=(f"{qid} · (untitled) · discarded",),
                       excludes=("Traceback",))
 
     listed = subprocess.run(
@@ -233,7 +233,7 @@ def test_ctrl_c_hint_then_ctrl_d_at_opening_prompt_leaves_a_blank_above_the_spin
         rows = s.lines()
         assert rc == 130, "\n".join(rows)
         at = rows.index(hint)
-        assert rows[at + 1:at + 3] == ["", f"{qid} · (unnamed) · discarded"], "\n".join(rows)
+        assert rows[at + 1:at + 3] == ["", f"{qid} · (untitled) · discarded"], "\n".join(rows)
 
 
 def test_sigint_hint_at_opening_prompt_under_a_non_exec_wrapper(tmp_path: Path) -> None:
@@ -267,7 +267,7 @@ def test_sigint_hint_at_opening_prompt_under_a_non_exec_wrapper(tmp_path: Path) 
         rows = s.lines()
         assert rc == 130, "\n".join(rows)
         at = rows.index(hint)
-        assert rows[at + 1:at + 3] == ["", f"{qid} · (unnamed) · discarded"], "\n".join(rows)
+        assert rows[at + 1:at + 3] == ["", f"{qid} · (untitled) · discarded"], "\n".join(rows)
 
 
 def _quest_events(root: Path) -> list[dict]:

@@ -146,7 +146,7 @@ async def test_run_cleared_session_cancel_emits_discarded_spine(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Ctrl-D at the /clear-reopened prompt with no exchange -> the discarded spine
-    # `<id> · (unnamed) · discarded`, one trailing blank, no caret, exit 130.
+    # `<id> · (untitled) · discarded`, one trailing blank, no caret, exit 130.
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
@@ -164,7 +164,7 @@ async def test_run_cleared_session_cancel_emits_discarded_spine(
 
     assert rc == 130
     out = capsys.readouterr().out
-    assert out.endswith("· (unnamed) · discarded\n\n")   # real random id, plain tail
+    assert out.endswith("· (untitled) · discarded\n\n")   # real random id, plain tail
     assert not out.endswith("discarded\n\n\n")           # exactly one trailing blank
     assert not out.endswith("> \n\n")                    # no bare caret line
     assert "cancelled" not in out
@@ -199,7 +199,7 @@ async def test_run_cleared_session_leave_signal_discards_like_ctrl_d(
 
     assert rc == 130
     out = capsys.readouterr().out
-    assert out.endswith("· (unnamed) · discarded\n\n")
+    assert out.endswith("· (untitled) · discarded\n\n")
     assert not out.endswith("discarded\n\n\n")
     assert "paused" not in out
     assert "SIGTERM" not in out and "SIGHUP" not in out
@@ -574,7 +574,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 0
-    # The idle escape for the freshly minted (unnamed) draft is already written:
+    # The idle escape for the freshly minted (untitled) draft is already written:
     # this pre-attach opening prompt is blocked on the user, so it shows the idle glyph.
     assert (f"\x1b]2;ѱ {tmp_path.name} · {captured['change'].id}\x07"
             in at_prompt["value"])

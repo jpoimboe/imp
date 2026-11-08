@@ -121,7 +121,7 @@ async def test_non_tty_resume_candidates_name_an_unstarted_draft_by_its_prompt(
     err = capsys.readouterr().err
     row = next(ln for ln in err.splitlines() if ln.startswith(qid))
     assert "summarize foo.py" in row
-    assert "(unnamed)" not in err
+    assert "(untitled)" not in err
 
 
 @pytest.mark.anyio

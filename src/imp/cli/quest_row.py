@@ -14,7 +14,7 @@ class NameKind(Enum):
     """Which of the three display-name cases a resolved name is."""
     TITLE = "title"        # a real title: plain default foreground
     PROMPT = "prompt"      # titleless, falls back to the opening message: dim
-    UNNAMED = "unnamed"    # titleless with no prompt: the dim `(unnamed)` placeholder
+    UNTITLED = "untitled"  # titleless with no prompt: the dim `(untitled)` placeholder
 
 
 class ResolvedName(NamedTuple):
@@ -30,7 +30,7 @@ def resolve_display_name(title: str | None, intent: str | None) -> ResolvedName:
     flat = " ".join(intent.split()) if intent else ""
     if flat:
         return ResolvedName(flat, NameKind.PROMPT)
-    return ResolvedName("(unnamed)", NameKind.UNNAMED)
+    return ResolvedName("(untitled)", NameKind.UNTITLED)
 
 
 def fallback_intent(intent: str | None, seed_opening: str | None) -> str | None:
@@ -72,8 +72,8 @@ def format_timestamp(iso: str | None) -> str:
 
 ID_W = 6        # bare 6-char quest id
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
-NAME_MIN = 10   # never shrink the trailing NAME column below this
-NAME_CAP = 70   # cap a long name/intent's pull on the shared width so STATUS keeps its content
+TITLE_MIN = 10   # never shrink the trailing TITLE column below this
+TITLE_CAP = 70   # cap a long title/intent's pull on the shared width so STATUS keeps its content
 
 # Meaning-based palette keyed by the resolved word: bold weight for
 # waiting / error / merge_blocked; every other status renders plain.
@@ -97,20 +97,20 @@ def _truncate(text: str, width: int) -> str:
 
 def overview_widths(rows: list[tuple[str, str | None, str]], *,
                     indent: int = 0) -> tuple[int, int]:
-    """(status_width, name_width) sized to what (raw status, label, name) `rows` print."""
+    """(status_width, title_width) sized to what (raw status, label, name) `rows` print."""
     cols = shutil.get_terminal_size((80, 24)).columns
     region = cols - (ID_W + AGE_W + 6) - indent     # three 2-space gaps
     status_floor = max([len("STATUS")] + [len(display_word(s)) for s, _, _ in rows])
-    name_content = max(NAME_MIN, min(NAME_CAP, max([0] + [len(n) for _, _, n in rows])))
-    name_width = max(NAME_MIN, min(name_content, region - status_floor))
-    budget = max(status_floor, region - name_width)
+    title_content = max(TITLE_MIN, min(TITLE_CAP, max([0] + [len(n) for _, _, n in rows])))
+    title_width = max(TITLE_MIN, min(title_content, region - status_floor))
+    budget = max(status_floor, region - title_width)
     status_width = max([len("STATUS")]
                        + [len(_fit_label(display_word(s), lbl, budget)) for s, lbl, _ in rows])
-    return status_width, name_width
+    return status_width, title_width
 
 
-def header_line(*, color: bool, name_width: int, status_width: int) -> str:
-    text = (f"{'ID':<{ID_W}}  {'NAME':<{name_width}}  "
+def header_line(*, color: bool, title_width: int, status_width: int) -> str:
+    text = (f"{'ID':<{ID_W}}  {'TITLE':<{title_width}}  "
             f"{'STATUS':<{status_width}}  UPDATED")
     return pal.ansi(text, "dim", enabled=color)
 
@@ -147,7 +147,7 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                        step_label: str | None = None,
                        phase_label: str | None = None,
                        last_iso: str | None, now: datetime,
-                       color: bool, name_width: int = 80,
+                       color: bool, title_width: int = 80,
                        status_width: int, dim: bool = False,
                        intent: str | None = None) -> str:
     id_pad = f"{quest_id:<{ID_W}}"
@@ -157,8 +157,8 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
     status_pad = f"{visible:<{status_width}}"
     age_text = relative_age(last_iso, now=now)   # final column, emitted bare
     resolved = resolve_display_name(title, intent)
-    name_text = _truncate(resolved.text, name_width)
-    name_pad = " " * (name_width - len(name_text))   # right-pad NAME so STATUS aligns
+    name_text = _truncate(resolved.text, title_width)
+    name_pad = " " * (title_width - len(name_text))   # right-pad TITLE so STATUS aligns
     is_fallback = resolved.kind is not NameKind.TITLE
     if dim:
         line = f"{id_pad}  {name_text}{name_pad}  {status_pad}  {age_text}"

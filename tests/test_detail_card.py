@@ -661,7 +661,7 @@ def test_quest_card_titles_a_titleless_quest_by_its_opening(
     _titleless_with_intent(tmp_path, "2026-06-20-tl001", opening)
     lines = main._detail_card(tmp_path, "2026-06-20-tl001", now=_NOW, color=False)
     assert _title_row(lines) == "title:" + " " * 9 + opening
-    assert "(unnamed)" not in "\n".join(lines)
+    assert "(untitled)" not in "\n".join(lines)
 
 
 def test_quest_card_dims_the_fallback_title(
@@ -731,7 +731,7 @@ def test_quest_card_unnamed_placeholder_is_dim(tmp_path: Path) -> None:
     Quest.create(tmp_path, title="", quest_id="2026-06-20-un001", base_branch="main")
     lines = main._detail_card(tmp_path, "2026-06-20-un001", now=_NOW, color=True)
     assert _title_row(lines) == (
-        pal.ansi("title:", "dim") + " " * 9 + pal.ansi("(unnamed)", "dim"))
+        pal.ansi("title:", "dim") + " " * 9 + pal.ansi("(untitled)", "dim"))
 
 
 def test_backlog_card_titles_a_titleless_brief_by_its_seed(

@@ -16,7 +16,7 @@ from tests.test_journal_read_cli import _complete_and_archive
 _NOW = datetime(2026, 6, 28, tzinfo=UTC)
 
 
-def _archive_unnamed(control: Path, cid: str, *, prompt: str | None) -> None:
+def _archive_untitled(control: Path, cid: str, *, prompt: str | None) -> None:
     """Archive a title-less completed quest, optionally with an opening prompt."""
     ch = Quest.create(control, title="", quest_id=cid, base_branch="main")
     if prompt is not None:
@@ -30,21 +30,21 @@ def _archive_unnamed(control: Path, cid: str, *, prompt: str | None) -> None:
     _complete_and_archive(control, cid)
 
 
-def test_list_all_unnamed_archived_shows_opening_prompt(tmp_path: Path) -> None:
+def test_list_all_untitled_archived_shows_opening_prompt(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_unnamed(tmp_path, "unn001", prompt="add retry budget")
+    _archive_untitled(tmp_path, "unn001", prompt="add retry budget")
     lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
     row = next(ln for ln in lines if ln.startswith("unn001"))
     assert "add retry budget" in row
-    assert "(unnamed)" not in row
+    assert "(untitled)" not in row
 
 
-def test_list_all_promptless_archived_still_unnamed(tmp_path: Path) -> None:
+def test_list_all_promptless_archived_still_untitled(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _archive_unnamed(tmp_path, "unn002", prompt=None)
+    _archive_untitled(tmp_path, "unn002", prompt=None)
     lines = m._overview_lines(tmp_path, show_all=True, now=_NOW, color=False)
     row = next(ln for ln in lines if ln.startswith("unn002"))
-    assert "(unnamed)" in row
+    assert "(untitled)" in row
 
 
 def test_list_all_titled_archived_shows_title(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_list_names_an_unstarted_draft_by_its_prompt(tmp_path: Path) -> None:
     q = create_draft_quest(tmp_path, "summarize\n  foo.py")
     row = _overview_row(tmp_path, q.id)
     assert "summarize foo.py" in row
-    assert "(unnamed)" not in row
+    assert "(untitled)" not in row
 
 
 def test_list_dims_the_seed_fallback_name(tmp_path: Path) -> None:
@@ -81,7 +81,7 @@ def test_list_names_a_titleless_backlog_quest_by_its_brief(tmp_path: Path) -> No
                        origin="idea", seed_opening="Brief one\n\nmore body")
     row = _overview_row(tmp_path, "bk0001")
     assert "Brief one more body" in row
-    assert "(unnamed)" not in row
+    assert "(untitled)" not in row
 
 
 def test_list_names_a_homeless_archived_quest_by_its_seed_opening(tmp_path: Path) -> None:
@@ -93,7 +93,7 @@ def test_list_names_a_homeless_archived_quest_by_its_seed_opening(tmp_path: Path
     shutil.rmtree(project_state_dir(tmp_path) / "quests" / "arc002")
     row = _overview_row(tmp_path, "arc002")
     assert "seeded only" in row
-    assert "(unnamed)" not in row
+    assert "(untitled)" not in row
 
 
 def test_list_json_keeps_events_only_intent_for_seeded_quests(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ def test_list_caps_name_column_on_wide_terminal(tmp_path, monkeypatch):
     with redirect_stdout(buf):
         assert main(["list"]) == 0
     out = buf.getvalue()
-    assert "L" * 69 + "…" in out       # NAME capped at 70 -> 69 chars + ellipsis
+    assert "L" * 69 + "…" in out       # TITLE capped at 70 -> 69 chars + ellipsis
     assert "L" * 80 not in out          # the full 80-char title is never printed
 
 

@@ -97,7 +97,7 @@ def test_list_shows_intent_for_empty_title(tmp_path: Path, monkeypatch, capsys) 
                                    "content": [{"type": "text", "text": "add a dark mode toggle"}]})
     out = _list_out(tmp_path, monkeypatch, capsys)
     assert "add a dark mode toggle" in out
-    assert "(unnamed)" not in out
+    assert "(untitled)" not in out
 
 
 def test_list_intent_falls_back_to_user_message(tmp_path: Path, monkeypatch, capsys) -> None:

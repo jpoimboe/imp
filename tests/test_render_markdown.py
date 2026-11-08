@@ -1605,8 +1605,8 @@ def test_summary_markdown_heading_truncates_a_titleless_opening_message() -> Non
     assert _md_head(intent=opening)[0] == f"# kole14 — {opening[:69]}…"
 
 
-def test_summary_markdown_heading_reads_unnamed_without_title_or_intent() -> None:
-    assert _md_head()[0] == "# kole14 — (unnamed)"
+def test_summary_markdown_heading_reads_untitled_without_title_or_intent() -> None:
+    assert _md_head()[0] == "# kole14 — (untitled)"
 
 
 def test_summary_markdown_status_line_uses_the_display_word() -> None:

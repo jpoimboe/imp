@@ -104,7 +104,7 @@ missing symbol can't break unrelated scenes):
 import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).parent)); import data
 from imp.cli import quest_row            # a new module → only resolves in the after tree
 def scene_status():
-    rows = [quest_row.header_line(color=True, name_width=48, status_width=35)]
+    rows = [quest_row.header_line(color=True, title_width=48, status_width=35)]
     for cid, title, st, step, age in data.ROWS:
         rows.append(quest_row.format_quest_line(quest_id=cid, title=title,
             status=st, step=step, last_iso=data.iso(age), now=data.NOW, color=True,
@@ -124,7 +124,7 @@ goal is a faithful old rendering, by whatever path the old code offered.
 > only reachable through the live CLI (a prompt_toolkit widget), reproduce its text
 > with the same helper the widget uses (`_prompt_message_text`, `pal.caret`, …).
 > Cover the spread: include a `paused`, `errored`, `merge_blocked`, an empty title
-> (`(unnamed)`), and a legacy descriptive id so every code path shows.
+> (`(untitled)`), and a legacy descriptive id so every code path shows.
 
 ## 4. Render each scene to PNG
 
@@ -144,7 +144,7 @@ PNGs with the Read tool and check truncation, colour, and alignment before movin
 > **Offline render vs live impty — pick deliberately.**
 > - **Offline `render_png.py`** rewrites dim (SGR 2) text into a visible gray, so it
 >   is the right tool for any dim-heavy surface — the `wait_for_user` question label,
->   `(unnamed)`, dim markers, the `past changes` section.
+>   `(untitled)`, dim markers, the `past changes` section.
 > - **Live impty MCP** (`mcp__impty__start` → `wait` → `snapshot`) is the authentic
 >   path for an *interactive* widget you want to prove actually runs (the arrow-key
 >   resume picker). But its `snapshot` **discards dim text** — anything dim vanishes.
