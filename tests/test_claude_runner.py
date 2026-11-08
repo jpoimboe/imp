@@ -1657,6 +1657,46 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
     assert "label" not in calls[1]["payload"]
 
 
+@pytest.mark.anyio
+async def test_task_tool_call_records_title_in_input(tmp_path, monkeypatch) -> None:
+    from imp.agents.tools.context import ToolContext
+    from imp.providers import claude as cc
+
+    async def _fake_dispatch(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return "sub done"
+
+    async def _noop_sweep(ctx):
+        return None
+
+    monkeypatch.setattr(cc, "dispatch_task", _fake_dispatch)
+    monkeypatch.setattr(cc._bg, "_sweep_bg", _noop_sweep)
+
+    log = InMemoryEventLog()
+    explorer = replace(_agent_def(), name="explorer", label="exploring codebase")
+    ctx = ToolContext(
+        project_root=tmp_path, events_path=tmp_path / "e.jsonl",
+        subagent_defs={"explorer": explorer}, event_log=log)
+    state = cc._RunState(agent_id="step:p/s")
+
+    class _StubTool:
+        description = ""
+        input_schema: ClassVar[dict] = {}
+
+    def _fake_sdk_tool(name, desc, schema, annotations=None):
+        def deco(fn):
+            return fn
+        return deco
+
+    impl = cc._wrap_one("sub_agent", _StubTool(), ctx, state, _fake_sdk_tool)
+    await impl({"subagent_name": "explorer", "title": "map ledger time totals",
+                "task_description": "go"})
+
+    call = next(e for e in log.read() if e["type"] == "tool_call")
+    assert call["payload"]["input"] == {
+        "subagent_name": "explorer", "title": "map ledger time totals",
+        "task_description": "go"}
+
+
 def test_build_options_carries_session_store_and_id(tmp_path: Path) -> None:
     runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5")
     store = session_store_for(tmp_path)

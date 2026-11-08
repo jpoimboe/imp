@@ -250,6 +250,33 @@ async def test_task_handler_owns_canonical_lifecycle_in_both_arrival_orders(
 
 
 @pytest.mark.anyio
+async def test_task_handler_records_title_in_tool_call_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100, agent_id="step:parent")
+    proc_state: dict[str, Any] = {}
+    args = {"subagent_name": "impl", "title": "map ledger time totals",
+            "task_description": "x"}
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        return '{"status":"Success"}'
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state, arguments=args)
+        assert await call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=args) == '{"status":"Success"}'
+
+    call = next(e for e in elog.read() if e["type"] == "tool_call")
+    assert call["payload"]["input"] == {
+        "subagent_name": "impl", "title": "map ledger time totals", "task_description": "x"}
+
+
+@pytest.mark.anyio
 async def test_invalid_request_releases_ticket_and_consumes_its_late_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

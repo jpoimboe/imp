@@ -543,6 +543,30 @@ async def test_batch_stamps_subagent_label_on_task_tool_call(tmp_path: Path) -> 
 
 
 @pytest.mark.anyio
+async def test_batch_records_title_in_task_tool_call_input(tmp_path: Path) -> None:
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        ctx.subagent_defs = {"explorer": _agent("explorer")}
+        elog = InMemoryEventLog()
+        state = TurnState(tool_calls_used=0)
+        tu = ToolUseBlock(id="t1", name="sub_agent", input={
+            "subagent_name": "explorer", "title": "map ledger time totals",
+            "task_description": "go"})
+        [ev async for ev in dispatch_task_batch(
+            ctx=ctx, elog=elog, aid="step:p/s", task_tus=[tu],
+            tool_results=[], state=state, ceiling=None)]
+        call = next(e for e in elog.read() if e["type"] == "tool_call")
+        assert call["payload"]["input"]["title"] == "map ledger time totals"
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+
+
+@pytest.mark.anyio
 async def test_inline_stamps_subagent_label_on_task_tool_call(tmp_path: Path) -> None:
     async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return json.dumps({"status": "Success"})
@@ -561,6 +585,29 @@ async def test_inline_stamps_subagent_label_on_task_tool_call(tmp_path: Path) ->
             tool_results=[], state=TurnState(tool_calls_used=0), ceiling=None)
         call = next(e["payload"] for e in elog.read() if e["type"] == "tool_call")
         assert call["label"] == "exploring codebase"
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+
+
+@pytest.mark.anyio
+async def test_inline_records_title_in_task_tool_call_input(tmp_path: Path) -> None:
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        ctx.subagent_defs = {"explorer": _agent("explorer")}
+        elog = InMemoryEventLog()
+        tu = ToolUseBlock(id="t1", name="sub_agent", input={
+            "subagent_name": "explorer", "title": "map ledger time totals",
+            "task_description": "go"})
+        await _dispatch_one_task_inline(
+            ctx=ctx, elog=elog, aid="step:p/s", tu=tu,
+            tool_results=[], state=TurnState(tool_calls_used=0), ceiling=None)
+        call = next(e for e in elog.read() if e["type"] == "tool_call")
+        assert call["payload"]["input"]["title"] == "map ledger time totals"
     finally:
         dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
 

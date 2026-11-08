@@ -227,6 +227,7 @@ async def dispatch_tool(
             raise RuntimeError("sub_agent dispatch requires an admitted request ticket")
         task_input = {
             "subagent_name": args["subagent_name"],
+            "title": args["title"],
             "task_description": args["task_description"],
         }
         if args.get("tier") is not None:
