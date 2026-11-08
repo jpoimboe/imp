@@ -158,7 +158,6 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
 ) -> None:
     # The 100ms footer tick would paint over an unsuspended block, and the
     # suspend must still be held when the digit is read.
-    from imp.cli.provider_command import render_picker
     from imp.cli.session_run import build_provider_picker
     from tests.test_provider_reconcile import _seed
 
@@ -189,7 +188,17 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
         trace.append("read")
 
     assert choices == [None, "codex"]        # the resolved vendor arms nothing
-    block = render_picker("claude", ["claude", "codex"])
+    block = [
+        "switch provider — the rest of this quest runs on your pick",
+        "takes effect right away — this step is waiting to retry",
+        "",
+        "configured",
+        "  1  claude   current",
+        "also installed",
+        "  2  codex",
+        "",
+        "press a number, or esc to cancel",
+    ]
     assert trace == ["enter", "emit", *block, "read", "exit"]
 
 
@@ -343,6 +352,39 @@ def test_an_empty_roster_is_not_read_as_a_shut_gate(
     assert status.entered == 1
     assert _PICKER_TOP in out.getvalue()
     assert "press a number, or esc to cancel" in out.getvalue()
+
+
+def test_the_seam_tags_the_pinned_vendor_as_current(
+    tmp_path: Path, floor_availability,
+) -> None:
+    from imp.cli.session_run import build_provider_picker
+
+    quest = _quest(tmp_path, floor_availability)
+    quest.set_provider("codex")
+    drv, out = _gate_driver("rate_limit")
+    opened = build_provider_picker(quest, drv, _RecordingStatus())()
+    assert opened is not None
+    with opened as choices:
+        assert choices == ["claude", None]
+    assert "  2  codex   current" in out.getvalue()
+
+
+def test_the_seam_numbers_in_the_quests_configured_order(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # The digit map must follow the displayed (configured) order, not floor order.
+    from imp.cli.session_run import build_provider_picker
+    from imp.paths import project_state_dir
+
+    quest = _quest(tmp_path, floor_availability)
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
+        "providers: [codex, claude]\n")
+    drv, out = _gate_driver("rate_limit")
+    opened = build_provider_picker(quest, drv, _RecordingStatus())()
+    assert opened is not None
+    with opened as choices:
+        assert choices == ["codex", None]       # resolved claude is slot 2
+    assert "also installed" not in out.getvalue()
 
 
 @_needs_pty

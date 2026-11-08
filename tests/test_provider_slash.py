@@ -73,8 +73,16 @@ def test_bare_provider_prints_the_roster_and_switches_nothing(
 
     assert handle_slash_line("/provider", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert "Current: claude   (this quest)" in out
-    assert "  codex" in out
+    assert out[-8:] == [
+        "Current: claude (this quest)",
+        "",
+        "Configured:",
+        "  claude",
+        "Also installed:",
+        "  codex",
+        "",
+        "Switch with /provider <name> — the rest of this quest runs on it.",
+    ]
     assert _pin_on_disk(quest) is None
 
 
@@ -89,7 +97,7 @@ def test_bare_provider_pre_session_needs_no_state(
 
     assert handle_slash_line("/provider", quest=quest, output_fn=out.append,
                              pre_session=True) is REPROMPT
-    assert "Current: claude   (this quest)" in out
+    assert "Current: claude (this quest)" in out
 
 
 def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
