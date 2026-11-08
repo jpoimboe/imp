@@ -188,10 +188,15 @@ A correct imp does **all** of:
 > script step instead re-runs the gate on resume, with no hold prompt first. Ctrl-D's phase-0
 > disposition is discard / save / archive by leave-mode × exchange; on a materialized quest,
 > Ctrl-D at the hold prompt detaches (rc 130, paused, resume_target = "prompt-paused") and
-> `imp resume` lands on that same hold prompt. Mid-run Ctrl-D (either regime) suspends the agent and
-> detaches immediately (rc 130, paused, resume_target = None); its guaranteed on-exit print is
-> the three-part `_pause_lines` block (`paused · Ctrl-D` head, `<id> · <name>` identity line, `resume: imp resume <id>`, `main.py`), not the `⏸ paused (ctrl-d)` glyph. If any provider/point does
-> something else, record exactly what it did.
+> `imp resume` lands on that same hold prompt. A leave from a prompt already under an open pause
+> (the hold prompt after a Ctrl-C or gate pause, before any `imp resume`) records
+> `interrupt_requested` (`source: "ctrl-d"`) but no second `workflow_paused` — the open-pause
+> dedup in `pause_and_exit` (`signals.py`); expected, not a defect. Mid-run Ctrl-D (either
+> regime) suspends the agent and detaches immediately (rc 130, paused, resume_target = None);
+> its guaranteed on-exit print is the three-part `_pause_lines` block (`paused · Ctrl-D` head,
+> `<id> · <name>` identity line, `resume: imp resume <id>`, `main.py`), not the
+> `⏸ paused (ctrl-d)` glyph. If any provider/point does something else, record exactly what
+> it did.
 
 ---
 
