@@ -16,7 +16,7 @@ class _FakeStore:
         return self._events
 
     def quest_card(self, quest_id: str):
-        return SimpleNamespace(status=self._status, workflow="imp")
+        return SimpleNamespace(status=self._status, title="A", intent=None, seed_opening=None)
 
     def completed_rows(self):
         return []
@@ -85,20 +85,19 @@ class _CardlessStore(_FakeStore):
 @pytest.mark.parametrize(
     "argv,expected",
     [
-        (["log", "alpha", "-s", "--no-pager"], "imp  ·  alpha  ·  ?"),
-        (["log", "alpha", "-s", "--md=-"], "# imp — alpha"),
+        (["log", "alpha", "-s", "--no-pager"], "alpha  ·  (unnamed)  ·  ?"),
+        (["log", "alpha", "-s", "--md=-"], "# alpha — (unnamed)"),
     ],
     ids=["terminal", "md"],
 )
-def test_a_missing_card_heads_with_the_project_default_workflow(
+def test_a_missing_card_heads_unnamed(
     argv: list[str],
     expected: str,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """No card to source a workflow from: the project default is the only honest
-    answer, and `_seed_control` pins it to `imp`."""
+    """No card to source a name from: the header reads `(unnamed)`."""
     import imp.cli.main as m
     import imp.cli.store as s
     from imp.engine.quest import Quest

@@ -39,7 +39,7 @@ class _QuotaStore:
 
     def quest_card(self, quest_id: str) -> Any:
         return SimpleNamespace(status=self._status, title=quest_id,
-                               workflow="default")
+                               intent=None, seed_opening=None)
 
     def scan_homes(self) -> list[Any]:
         return []
@@ -352,7 +352,7 @@ async def test_local_and_proxied_neighbours_render_the_same_bytes(
         rows = build_summary(events)
         view = m._attribute_quota(store, SUBJECT_ID, events, rows)
         assert not isinstance(view, int)
-        header = SummaryHeader(workflow="default", quest_id=SUBJECT_ID,
+        header = SummaryHeader(title="default", quest_id=SUBJECT_ID,
                                status="completed",
                                total_seconds=summary_total(events),
                                exclusions=exclusion_spans(events))

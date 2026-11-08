@@ -2062,16 +2062,14 @@ def _run_field(summary: list[StepRow], header: SummaryHeader,
 
 def _summary_header(quest_id: str, card: QuestCard | None,
                     events: list[dict[str, Any]]) -> SummaryHeader:
-    """A missing card has no quest to source a workflow from, so the project
-    default is the only honest answer."""
     from imp.cli.render_summary import SummaryHeader, exclusion_spans, summary_total
-    from imp.providers.effective import resolve_default_workflow
     return SummaryHeader(
-        workflow=(card.workflow if card is not None
-                  else resolve_default_workflow(control_root=_control_root())),
         quest_id=quest_id,
+        title=card.title if card is not None else "",
         status=card.status if card is not None else "?",
         total_seconds=summary_total(events),
+        intent=(quest_row.fallback_intent(card.intent, card.seed_opening)
+                if card is not None else None),
         exclusions=exclusion_spans(events))
 
 
