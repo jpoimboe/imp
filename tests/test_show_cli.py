@@ -1252,36 +1252,16 @@ _LOG_WITH_INNER_WHEN = (
 )
 
 
-def test_show_verify_renders_header_when_in_local_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
+@pytest.mark.parametrize("name", ["spec", "verify"])
+def test_show_prints_saved_file_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None, name: str,
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    verify = ch.quest_dir / "artifacts" / "verify"
-    verify.mkdir(parents=True)
-    (verify / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
+    folder = ch.quest_dir / "artifacts" / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
 
-    out = _run(monkeypatch, tmp_path, "show", _ID, "verify")
-
-    assert out.splitlines() == [
-        "# Gate failure — fast",
-        "",
-        "- command: make check",
-        "- exit: 2",
-        "- when: 2026-09-04 13:22:31",
-        "",
-        _FAILURE_LINE,
-        "- when: 2026-01-01T00:00:00Z",   # gate output is never rewritten
-    ]
-
-
-def test_show_spec_does_not_rewrite_timestamps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    (ch.quest_dir / "artifacts" / "spec" / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
-
-    out = _run(monkeypatch, tmp_path, "show", _ID, "spec")
+    out = _run(monkeypatch, tmp_path, "show", _ID, name)
 
     assert out == _LOG_WITH_INNER_WHEN

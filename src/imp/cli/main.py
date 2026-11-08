@@ -2303,17 +2303,6 @@ _SHOW_ARTIFACTS = {
 }
 
 
-def _localize_verify_when(lines: list[str]) -> list[str]:
-    # The header ends at the first blank line after the title; gate output follows it.
-    for i in range(2, len(lines)):
-        if not lines[i]:
-            break
-        if lines[i].startswith("- when: "):
-            lines[i] = "- when: " + quest_row.format_timestamp(lines[i].removeprefix("- when: "))
-            break
-    return lines
-
-
 def _cmd_show(args: argparse.Namespace) -> int:
     from imp.cli.store import make_store
     token = args.token
@@ -2362,8 +2351,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
         _emit_cli_error(f"{_SHOW_ARTIFACTS[artifact].absent} {quest_id!r}")
         return 2
     lines = data.decode("utf-8", errors="replace").splitlines()
-    if artifact == "verify":
-        lines = _localize_verify_when(lines)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
