@@ -219,7 +219,7 @@ def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
                         usage=_usage(100_000, 2_000),
                         charge=_pts("claude", 0.15)),
             SubagentRow(name="coder", start_ts="2026-01-01T00:00:05+00:00",
-                        end_ts="2026-01-01T00:00:55+00:00", errored=True,
+                        end_ts="2026-01-01T00:00:55+00:00", stop="failed",
                         usage=_usage(50_000, 1_000),
                         charge=_pts("claude", 0.07))]
     rows = [_row("task-lead", 90, _usage(), _pts("claude", 0.9), subs)]

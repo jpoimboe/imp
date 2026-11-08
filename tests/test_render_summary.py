@@ -447,7 +447,7 @@ def test_subagent_row_wall_seconds_and_defaults():
                       end_ts="2026-01-01T00:00:45+00:00")
     assert sub.wall_seconds == 45.0
     assert sub.label is None
-    assert sub.errored is False
+    assert sub.stop is None
     assert sub.usage == RowUsage()
 
 
@@ -531,8 +531,8 @@ def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
 
 
 def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False, *,
-               stamped: bool = True) -> dict:
-    payload: dict = {"id": block_id, "error": error}
+               stamped: bool = True, **extra: object) -> dict:
+    payload: dict = {"id": block_id, "error": error, **extra}
     if stamped:
         payload["id_ns"] = "block"
     return {"type": "tool_result", "agent_id": agent_id, "timestamp": ts,
@@ -649,7 +649,7 @@ def test_subagent_captured_with_name_label_and_duration():
     assert sub.name == "explorer"
     assert sub.label == "map the repo"
     assert sub.wall_seconds == 45.0
-    assert sub.errored is False
+    assert sub.stop is None
 
 
 def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
@@ -672,7 +672,7 @@ def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
     assert rows[0].usage == RowUsage()
 
 
-def test_subagent_errored_from_tool_result_error_flag():
+def test_subagent_failed_from_tool_result_error_flag():
     rows = build_summary([
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         _context("lead1", "2026-01-01T00:00:01+00:00"),
@@ -680,7 +680,43 @@ def test_subagent_errored_from_tool_result_error_flag():
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", error=True),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
     ])
-    assert rows[0].subagents[0].errored is True
+    assert rows[0].subagents[0].stop == "failed"
+
+
+_STOPPED_RESULTS = [
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was interrupted before "
+                             "finishing — the run was paused. [interrupted]"},
+                 "interrupted", "interrupted", id="interrupted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config) [stalled]"},
+                 "stalled", "stalled", id="stalled"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' reached its context limit "
+                             "and stopped before finishing. [context_exhausted]"},
+                 "context_exhausted", "context exhausted", id="context-exhausted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was suspended before "
+                             "finishing — its provider or retry budget ran out. [suspended]"},
+                 "suspended", "suspended", id="suspended"),
+    pytest.param({"content": "whatever", "kind": "interrupted"},
+                 "interrupted", "interrupted", id="explicit-kind"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config)"},
+                 "failed", "failed", id="plain-failure"),
+]
+
+
+def _stopped_subagent(**extra: object) -> list[StepRow]:
+    """A closed task-lead whose explorer (map repo) ran 13s and ended with an error result."""
+    return build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00",
+                 "explorer", label="map repo"),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:23+00:00", error=True, **extra),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+
+
+@pytest.mark.parametrize(("extra", "stop", "_word"), _STOPPED_RESULTS)
+def test_subagent_stop_comes_from_its_tool_result(extra, stop, _word):
+    assert _stopped_subagent(**extra)[0].subagents[0].stop == stop
 
 
 def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
@@ -1263,7 +1299,7 @@ def test_errored_subagent_duration_follows_error_color():
                    start_ts="2026-01-01T00:00:00+00:00",
                    end_ts="2026-01-01T00:01:00+00:00",
                    subagents=[SubagentRow(
-                       name="coder", errored=True,
+                       name="coder", stop="failed",
                        start_ts="2026-01-01T00:00:05+00:00",
                        end_ts="2026-01-01T00:00:50+00:00")])
     out = render_summary([step], header=_HDR, color=True, width=80)

@@ -58,8 +58,8 @@ def test_overlay_spans_adopts_whole_log_end_of_span() -> None:
     overlay_spans(rows, build_summary(_EVENTS))
     [build] = rows
     assert (build.dur_cell("open"), build.errored) == ("~50s", True)
-    assert [(sub.name, sub.dur_cell("open"), sub.errored) for sub in build.subagents] == [
-        ("explorer", "1m 15s", False), ("scout", "48s", True)]
+    assert [(sub.name, sub.dur_cell("open"), sub.stop) for sub in build.subagents] == [
+        ("explorer", "1m 15s", None), ("scout", "48s", "failed")]
 
 
 def test_overlay_spans_adopts_inferred_subagent_end() -> None:

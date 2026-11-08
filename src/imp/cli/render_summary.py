@@ -20,8 +20,10 @@ from imp.cli.narrative import (
     INERT_EVENTS,
     Exclusions,
     ExclusionTracker,
+    SubagentStop,
     elapsed_seconds,
     fmt_seconds,
+    subagent_result_stop,
 )
 from imp.cli.quest_row import (
     STATUS_COLORS,
@@ -72,7 +74,7 @@ class SubagentRow:
     start_ts: str | None = None
     end_ts: str | None = None
     end_inferred: bool = False
-    errored: bool = False
+    stop: SubagentStop | None = None
     usage: RowUsage = field(default_factory=RowUsage)
     charge: Charge = NO_CHARGE
     agent_id: str = ""
@@ -322,7 +324,7 @@ def build_summary(events: Iterable[dict[str, Any]],
                 sub = open_subs.pop((id_ns == "block", str(p.get("id", ""))), None)
                 if sub is not None:
                     sub.end_ts = ts
-                    sub.errored = bool(p.get("error", False))
+                    sub.stop = subagent_result_stop(p)
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
@@ -432,8 +434,8 @@ def overlay_spans(summary: list[StepRow], full: list[StepRow]) -> None:
         for sub in row.subagents:
             src = subs.get(sub.key)
             if src is not None:
-                sub.end_ts, sub.end_inferred, sub.errored = (
-                    src.end_ts, src.end_inferred, src.errored)
+                sub.end_ts, sub.end_inferred, sub.stop = (
+                    src.end_ts, src.end_inferred, src.stop)
 
 
 def summary_totals(
@@ -562,7 +564,7 @@ def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
 
 def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int,
               out_w: int, last_w: int, color: bool, open_label: str) -> str:
-    errored = sub.errored
+    errored = sub.stop is not None
     codes = pal.NODE_COLORS["error"] if errored else pal.NODE_COLORS["subagent"]
     # The name keeps its magenta; the duration joins the numbers in receding,
     # except on an error, where the signal outranks the recession.
