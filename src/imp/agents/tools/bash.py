@@ -2,10 +2,12 @@
 # Copyright 2026 Josh Poimboeuf
 """bash tool (spec §6.6 + §6.15).
 
-Runs a shell command via anyio.run_process in its own session (POSIX), so the
-process group can be SIGTERM/SIGKILL'd from the runner's interrupt path. The
-process is registered on ctx.running_processes for the duration; the runner's
-terminate_running_processes() walks the registry on interrupt.
+Runs a shell command via the shared file-backed spawn (bg._spawn_to_files, over
+anyio.open_process) in its own session (POSIX), so the process group can be
+SIGTERM/SIGKILL'd from the runner's interrupt path. The process is registered on
+ctx.running_processes for the duration; the runner's terminate_running_processes()
+walks the registry on interrupt, and a call whose spawn overlapped that teardown
+kills its own command.
 
 No FS permission gate (shell access is total at OS-user privilege; see spec
 §6.7 "bash bypasses FS permissions").
@@ -29,6 +31,7 @@ from imp.agents.tools.context import (
     emit_spawn_retry_warning,
     ensure_tool_namespace,
     kill_process_tree,
+    terminate_processes,
     tool_engine_env,
     tool_quest_dir,
 )
@@ -219,10 +222,14 @@ async def bash(
     stem = f"fg-{uuid4().hex}"
     out_path = d / f"{stem}.out"
     err_path = d / f"{stem}.err"
+    # Read after ensure_tool_namespace: its rebuild branch tears down from inside this call.
+    epoch = ctx.teardown_epoch
     proc = await _spawn_to_files(
         argv, out_path=out_path, err_path=err_path, cwd=spawn_cwd, env=env,
         pass_fds=pass_fds)
     ctx.running_processes.append(proc)
+    # No await since the append: a teardown either drained proc or ran during the spawn.
+    overlapped_teardown = ctx.teardown_epoch != epoch
 
     # Decision 10 ticker: sweeps the background registry while THIS foreground call
     # blocks the loop — the only coverage for a long QUIET command. Own
@@ -285,19 +292,24 @@ async def bash(
     reaped_by_teardown = False
     try:
         try:
-            with anyio.fail_after(_effective_foreground_timeout(timeout)):
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(_own_cap_poller)
-                    if has_bg:
-                        tg.start_soon(_bg_ticker)
-                    if coordinator is not None:
-                        tg.start_soon(_pause_poller)
-                    await proc.wait()
-                    capcheck_scope.cancel()
-                    if has_bg:
-                        ticker_scope.cancel()
-                    if coordinator is not None:
-                        pause_scope.cancel()
+            if overlapped_teardown:
+                ctx.running_processes.remove(proc)
+                reaped_by_teardown = True
+                await terminate_processes([proc])
+            else:
+                with anyio.fail_after(_effective_foreground_timeout(timeout)):
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(_own_cap_poller)
+                        if has_bg:
+                            tg.start_soon(_bg_ticker)
+                        if coordinator is not None:
+                            tg.start_soon(_pause_poller)
+                        await proc.wait()
+                        capcheck_scope.cancel()
+                        if has_bg:
+                            ticker_scope.cancel()
+                        if coordinator is not None:
+                            pause_scope.cancel()
         except TimeoutError:
             # Deadline exceeded: PROMOTE, don't kill. Seed the counter, allocate a
             # canonical bgN, and same-dir rename the fg-<uuid> scratch files to

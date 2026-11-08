@@ -1497,3 +1497,59 @@ def test_a_joined_spawn_takes_no_host_cwd_where_a_bare_one_does(
         (None, expected_cwd),
         (expected_cwd, None),
     ]
+
+
+def test_bash_kills_a_command_whose_spawn_overlapped_a_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A teardown landing between spawn and registration sees an empty registry;
+    the bash call itself must then kill its command, trap grace included."""
+    from imp.agents.tools import bg
+    from imp.agents.tools.context import terminate_running_processes
+
+    ctx = _ctx(tmp_path)
+    ready = tmp_path / "ready"
+    marker = tmp_path / "trap-ran"
+    real_spawn = bg._spawn_to_files
+    signalled: list[list] = []
+
+    # bash imports _spawn_to_files function-locally, so the bg attribute is the seam.
+    async def _spawn_then_teardown(*args, **kwargs):
+        proc = await real_spawn(*args, **kwargs)
+        await wait_until(ready.exists)  # the trap is installed
+        signalled.append(await terminate_running_processes(ctx))
+        return proc
+
+    monkeypatch.setattr(bg, "_spawn_to_files", _spawn_then_teardown)
+    # The trap re-raises TERM on the shell itself, so the exit is signal-negative.
+    command = (
+        f"trap 'touch {shlex.quote(str(marker))}; trap - TERM; kill -TERM $$' TERM; "
+        f"touch {shlex.quote(str(ready))}; while :; do sleep 0.1; done")
+
+    async def _scenario() -> dict:
+        with anyio.fail_after(50):  # hang-catcher: unfixed, the call never returns
+            return json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": command}))
+
+    out = anyio.run(_scenario)
+    assert signalled == [[]]        # the teardown found nothing registered
+    assert marker.exists()          # SIGTERM grace came before any SIGKILL
+    assert out["returncode"] == -15  # negative: imp's kill, not the command's
+    assert ctx.running_processes == []
+    assert out.get("status") != "running"  # not promoted to the background
+    assert ctx.background_processes == {}
+
+
+def test_bash_after_a_finished_teardown_runs_to_completion(tmp_path: Path) -> None:
+    from imp.agents.tools.context import terminate_running_processes
+
+    ctx = _ctx(tmp_path)
+
+    async def _scenario() -> dict:
+        await terminate_running_processes(ctx)
+        return json.loads(await get_registry()["bash"].async_invoke(
+            ctx, {"command": "sleep 0.2; echo done"}))
+
+    out = anyio.run(_scenario)
+    assert out["returncode"] == 0
+    assert out["stdout"] == "done\n"
