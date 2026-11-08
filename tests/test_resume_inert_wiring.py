@@ -376,7 +376,7 @@ async def test_inert_ask_line_rejects_session_verb_and_reprompts(
 
     assert line == "real answer"
     from imp.cli.slash import PRE_SESSION_LEAVE_REDIRECT
-    assert PRE_SESSION_LEAVE_REDIRECT in capsys.readouterr().out
+    assert PRE_SESSION_LEAVE_REDIRECT in " ".join(capsys.readouterr().out.split())
 
 
 @pytest.mark.anyio

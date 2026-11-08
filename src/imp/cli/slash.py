@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import textwrap
 from collections.abc import Callable
 from typing import Any
 
@@ -87,6 +88,7 @@ def _is_materialized(quest: Any) -> bool:
 def handle_slash_line(
     text: str, *, quest: Any, output_fn: Callable[[str], None],
     color: bool = False, unsandboxed: bool = False, pre_session: bool = False,
+    width: int = 80,
 ) -> object | str | SkillRequest:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
     print usage (each prints via output_fn). Returns a SkillRequest(name, args)
@@ -96,6 +98,12 @@ def handle_slash_line(
     REPROMPT; a path-shaped token (holds a / or .) is returned verbatim (str) and
     submitted as ordinary input, so a pasted path like `/home/user/foo.py` is not
     misread as a command."""
+    def notice(msg: str) -> None:
+        for line in msg.split("\n"):
+            for row in textwrap.wrap(line, width, break_long_words=False,
+                                     break_on_hyphens=False) or [""]:
+                output_fn(row)
+
     tokens = text.lstrip().lstrip("/").split(None, 1)
     cmd = tokens[0] if tokens else ""
     args = tokens[1].strip() if len(tokens) > 1 else ""
@@ -113,17 +121,17 @@ def handle_slash_line(
     if cmd == "compact":
         if pre_session:
             _echo_command(text, output_fn, color=color)
-            output_fn(PRE_SESSION_COMPACT_REDIRECT)
+            notice(PRE_SESSION_COMPACT_REDIRECT)
             return REPROMPT
         return "/compact"
     if cmd in ("pause", "archive", "clear"):
         if pre_session:
             _echo_command(text, output_fn, color=color)
-            output_fn(PRE_SESSION_LEAVE_REDIRECT)
+            notice(PRE_SESSION_LEAVE_REDIRECT)
             return REPROMPT
         if cmd != "pause" and _is_materialized(quest):
             _echo_command(text, output_fn, color=color)
-            output_fn(MATERIALIZED_LEAVE_REDIRECT.format(qid=quest.id))
+            notice(MATERIALIZED_LEAVE_REDIRECT.format(qid=quest.id))
             return REPROMPT
         return f"/{cmd}"
     if cmd == "model":
@@ -132,7 +140,7 @@ def handle_slash_line(
             try:
                 print_model_roster(quest=quest, output_fn=output_fn)
             except (LoadError, LoadErrors) as exc:
-                output_fn(str(exc))
+                notice(str(exc))
             return REPROMPT
         try:
             err = validate_model_arg(args, quest=quest)
@@ -140,7 +148,7 @@ def handle_slash_line(
             err = str(exc)
         if err is not None:
             _echo_command(text, output_fn, color=color)
-            output_fn(err)
+            notice(err)
             return REPROMPT
         return f"/model {args}"
     if cmd == "provider":
@@ -166,51 +174,51 @@ def handle_slash_line(
             try:
                 print_provider_roster(quest=quest, output_fn=output_fn)
             except (LoadError, LoadErrors) as exc:
-                output_fn(str(exc))
+                notice(str(exc))
         elif err is not None:
-            output_fn(err)
+            notice(err)
         elif redundant:
-            output_fn(PROVIDER_ALREADY.format(name=args))
+            notice(PROVIDER_ALREADY.format(name=args))
         else:
             # Pre-session: create_draft already wrote quest.json, so the durable
             # arm is the whole gesture — there is nothing to sink.
             quest.set_provider(args)
-            output_fn(PROVIDER_PINNED.format(name=args))
+            notice(PROVIDER_PINNED.format(name=args))
         return REPROMPT
     if cmd == "sandbox":
         if pre_session:
             _echo_command(text, output_fn, color=color)
             if args == "off":
-                output_fn(SANDBOX_STATE_OFF)
+                notice(SANDBOX_STATE_OFF)
                 return "/sandbox off"
             if args == "on":
                 if unsandboxed:
-                    output_fn(SANDBOX_STATE_ON)
+                    notice(SANDBOX_STATE_ON)
                     return "/sandbox on"
-                output_fn(SANDBOX_ALREADY_ON)
+                notice(SANDBOX_ALREADY_ON)
                 return REPROMPT
             if args == "":
-                output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+                notice(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
                 return REPROMPT
-            output_fn(SANDBOX_USAGE)
+            notice(SANDBOX_USAGE)
             return REPROMPT
         if args == "on":
             if not unsandboxed:
                 _echo_command(text, output_fn, color=color)
-                output_fn(SANDBOX_ALREADY_ON)
+                notice(SANDBOX_ALREADY_ON)
                 return REPROMPT
             return "/sandbox on"
         if args == "off":
             if unsandboxed:
                 _echo_command(text, output_fn, color=color)
-                output_fn(SANDBOX_ALREADY_OFF)
+                notice(SANDBOX_ALREADY_OFF)
                 return REPROMPT
             return "/sandbox off"
         _echo_command(text, output_fn, color=color)
         if args == "":
-            output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+            notice(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
             return REPROMPT
-        output_fn(SANDBOX_USAGE)
+        notice(SANDBOX_USAGE)
         return REPROMPT
     known = {name for name, _ in list_user_skills(quest.workflow_dir / "skills")}
     if cmd in known:
@@ -218,7 +226,7 @@ def handle_slash_line(
     if _COMMAND_SHAPED.match(cmd):
         # A command-shaped typo like `/list`: a real error, not model input.
         _echo_command(text, output_fn, color=color)
-        output_fn(f"Unknown command: /{cmd} — /help for the list")
+        notice(f"Unknown command: /{cmd} — /help for the list")
         return REPROMPT
     # Path-shaped (first token holds a `/` or `.`): submit the line verbatim, so a
     # pasted absolute path like `/home/user/foo.py` reaches the agent unchanged.
@@ -469,7 +477,7 @@ async def ask_line_with_slash(
             current_unsandboxed = bool(getattr(driver, "unsandboxed", False))
         return handle_slash_line(
             line, quest=quest, output_fn=out, color=color,
-            unsandboxed=current_unsandboxed, pre_session=pre_session)
+            unsandboxed=current_unsandboxed, pre_session=pre_session, width=width)
 
     result = await solicit_line(
         prompt, status, dispatch=_dispatch, toolbar_fn=_toolbar, coord=coord,

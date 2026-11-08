@@ -126,7 +126,7 @@ async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
     assert reply == "real intent"        # the leave-verb did not become the draft intent
     out = capsys.readouterr().out
     assert ("/pause, /archive, and /clear apply once the conversation is running — "
-            "send a message first.") in out
+            "send a message first.") in " ".join(out.split())
     assert "keep this quest as a draft" not in out
 
 
