@@ -61,6 +61,12 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture
+def no_leave_listen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon here never answers a leave frame: skip the listen for its verdict."""
+    monkeypatch.setattr("imp.cli.session_terminal._LEAVE_LISTEN_SECONDS", 0.0)
+
+
 @pytest.mark.anyio
 async def test_terminal_client_renders_events_and_answers_one_gate(
     tmp_path: Path,
@@ -409,6 +415,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
     assert survived == [True]
 
 
+@pytest.mark.usefixtures("no_leave_listen")
 @pytest.mark.anyio
 async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
     tmp_path: Path,
@@ -1867,6 +1874,7 @@ async def test_rename_invokes_on_title_even_on_replay(tmp_path: Path, etype: str
     assert seen == ["First", "Second"]
 
 
+@pytest.mark.usefixtures("no_leave_listen")
 @pytest.mark.anyio
 async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
     tmp_path: Path,
@@ -1943,6 +1951,7 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
     assert finishes == [True]
 
 
+@pytest.mark.usefixtures("no_leave_listen")
 @pytest.mark.anyio
 async def test_sighup_detaches_client_as_a_leave_and_run_survives(
     tmp_path: Path,
@@ -2012,6 +2021,7 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
     assert survived == [True]
 
 
+@pytest.mark.usefixtures("no_leave_listen")
 @pytest.mark.anyio
 async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")

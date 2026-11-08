@@ -9,9 +9,11 @@ injected attach thunk), streams the daemon's events into a live event renderer
 (SessionControls, without killing the client), and answers each bare-turn-end
 gate by soliciting one reply and sending it back as an input frame. It returns the
 StreamEnding its receive loop observed — ENDED when the daemon's end-of-run frame
-arrived, else CUT (the stream closed or faulted, or a deliberate leave cancelled
-the loop, with no end frame seen) — paired with the RunWitness folded from every
-event it rendered, which is what the caller's closing block is selected from.
+arrived, else CUT (the stream closed or faulted, or teardown cancelled the loop,
+with no end frame seen) — paired with the RunWitness folded from every event it
+received, which is what the caller's closing block is selected from. A mid-run
+leave listens briefly after its leave frame for the daemon's verdict, folding
+what arrives without rendering it.
 The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
 and the solicit callback, and replaces the in-process run_quest call in
@@ -20,6 +22,7 @@ and the solicit callback, and replaces the in-process run_quest call in
 from __future__ import annotations
 
 import contextlib
+import enum
 import functools
 import math
 import signal
@@ -60,6 +63,25 @@ _TERMINAL_EVENT_TYPES: frozenset[str] = frozenset(
     {"quest_merged", "workflow_completed", "merge_blocked"})
 
 _RENAME_TYPES = ("quest_renamed", "user_renamed")
+
+
+# How long a mid-run leave listens for the daemon's verdict before it closes.
+_LEAVE_LISTEN_SECONDS = 2.0
+
+# Live frames that settle a leave either way: the pause latched, the run yielded or
+# paused, or the run ended.
+_LEAVE_VERDICT_TYPES: frozenset[str] = frozenset(
+    {"interrupt_requested", "awaiting_user_input", "workflow_paused"}
+) | _TERMINAL_EVENT_TYPES
+
+
+class _Phase(enum.Enum):
+    """LIVE renders each frame; QUIET (teardown begun) only folds it; LISTENING also
+    ends the post-leave listen on a verdict."""
+
+    LIVE = enum.auto()
+    QUIET = enum.auto()
+    LISTENING = enum.auto()
 
 
 @dataclass(frozen=True)
@@ -193,13 +215,26 @@ async def run_terminal_client(
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
         max_buffer_size=math.inf)
-    gate_state: dict[str, Any] = {"scope": None, "elsewhere": False}
+    gate_state: dict[str, Any] = {"scope": None, "elsewhere": False, "open": False}
     witness = RunWitness()
+    phase = _Phase.LIVE
+    stream_over = anyio.Event()
+    verdict = anyio.Event()
 
     def _on_event(event: dict[str, Any]) -> None:
         witness.note(event)
+        live = not event.get("_replay")
+        if live and event.get("type") == "awaiting_user_input":
+            gate_state["open"] = True
+        elif live and event.get("type") == "user_input_resolved":
+            gate_state["open"] = False
+        if phase is not _Phase.LIVE:
+            if (phase is _Phase.LISTENING and live
+                    and event.get("type") in _LEAVE_VERDICT_TYPES):
+                verdict.set()
+            return
         if event.get("type") == "user_input_resolved":
-            if not event.get("_replay"):
+            if live:
                 resolved_send.send_nowait(None)
             return
         if event.get("type") == "provider_marker":
@@ -252,18 +287,30 @@ async def run_terminal_client(
     # any time, including mid-grind with no prompt up. open_signal_receiver is a
     # sync context manager that installs the loop handler on enter (replacing
     # SIGQUIT's core-dump default) and restores it on exit.
-    # Only receive_events overwrites this: on ctrl-d / ctrl-\ / SIGTERM / SIGHUP
-    # _watch_force_quit cancels the group and it never returns — a cancelled loop
-    # observed no end frame, which is exactly CUT.
+    # Only the reader overwrites this; a reader cancelled at teardown observed no
+    # end frame, which is exactly CUT.
     ending = StreamEnding.CUT
     sigquit = getattr(signal, "SIGQUIT", None)
-    with contextlib.ExitStack() as stack:
+    async with contextlib.AsyncExitStack() as stack:
         sigquit_signals = (
             stack.enter_context(anyio.open_signal_receiver(sigquit))
             if sigquit is not None else None)
         client = await attach(_on_event)
         stack.enter_context(
             watch_terminal(stream, functools.partial(terminal_gone, client)))
+
+        async def _read() -> None:
+            nonlocal ending
+            try:
+                ending = await client.receive_events(on_end=witness.note_end)
+            finally:
+                stream_over.set()
+                verdict.set()   # an end frame or a cut settles a listening leave too
+
+        # Its own task group, outliving the one escalation cancels, so teardown never
+        # cancels the reader mid-frame.
+        reader_tg = await stack.enter_async_context(anyio.create_task_group())
+        reader_tg.start_soon(_read)
         # Snapshot should_pause AFTER attach but BEFORE binding the runner.
         # An interrupt that arrived during attach() found fn=None in signal_pause
         # and wasn't forwarded to the daemon. Detect it here so the flush task
@@ -339,6 +386,7 @@ async def run_terminal_client(
                                     f"/{reply.name} {reply.args}".rstrip())
                                 if local_echo is not None:
                                     local_echo(cmd_line)
+                                gate_state["open"] = False
                                 await client.send_skill_request(
                                     reply.name, reply.args)
                                 continue
@@ -395,6 +443,8 @@ async def run_terminal_client(
                                 continue
                             if local_echo is not None and reply.strip():
                                 local_echo(reply)
+                            # Before the send: the next gate it leads to may beat it back.
+                            gate_state["open"] = False
                             await client.send_input(reply)
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
@@ -404,8 +454,10 @@ async def run_terminal_client(
                         coord.escalation_event.set()
 
                 async def _watch_force_quit() -> None:
+                    nonlocal phase
                     # cancel scope → finally → client.aclose; daemon detaches and runs on
                     await coord.escalation_event.wait()
+                    phase = _Phase.QUIET
                     tg.cancel_scope.cancel()
 
                 async def _watch_sigquit() -> None:
@@ -434,9 +486,10 @@ async def run_terminal_client(
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
                 tg.start_soon(_flush_pending_provider)
-                ending = await client.receive_events(on_end=witness.note_end)
+                await stream_over.wait()
                 tg.cancel_scope.cancel()
         finally:
+            phase = _Phase.QUIET
             coord.detach_runner()
             coord.set_escalation_hook(None)
             await gate_send.aclose()
@@ -456,39 +509,55 @@ async def run_terminal_client(
             # CONTROL_INTERRUPT_LEAVE so workflow_paused records the truth rather
             # than the lease-drop "detached". Abandon has its own frame path and
             # never sets the escalation event; a natural completion leaves it unset.
-            if leaving:
-                action = None
-                intent = (
-                    leave_state.get("intent") if leave_state is not None
-                    else None)
-                # A bare interrupt-pause (mid-run SIGINT with no leave gesture) trips
-                # escalation via the headless detach but sets no leave_reason: it must
-                # pause, not resolve a save/archive disposition. Resolve only for a
-                # genuine leave (leave_reason set) or an explicit /pause|/archive|/clear.
-                if (leave_state is not None and control_root is not None
-                        and (intent is not None
-                             or coord.leave_reason is not None)):
-                    action = resolve_leave_action(
-                        control_root, quest_id, leave_mode, intent)
-                if action is not None and leave_state is not None:
-                    _sent = False
-                    with contextlib.suppress(
-                        RuntimeError, anyio.BrokenResourceError,
-                        anyio.ClosedResourceError,
-                    ):
-                        await client.send_control(action, coord.leave_reason)
-                        leave_state["disposition"] = action
-                        _sent = True
-                    if not _sent:
-                        leave_state["send_failed"] = "1"
-                elif coord.leave_reason is not None:
-                    # Single choke point for the leave frame; best-effort — a dead
-                    # daemon must never block the leave.
-                    with contextlib.suppress(
-                        RuntimeError, anyio.BrokenResourceError,
-                        anyio.ClosedResourceError,
-                    ):
-                        await client.send_control(
-                            CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
-            await client.aclose()
+            try:
+                if leaving:
+                    action = None
+                    intent = (
+                        leave_state.get("intent") if leave_state is not None
+                        else None)
+                    # A bare interrupt-pause (mid-run SIGINT with no leave gesture) trips
+                    # escalation via the headless detach but sets no leave_reason: it must
+                    # pause, not resolve a save/archive disposition. Resolve only for a
+                    # genuine leave (leave_reason set) or an explicit /pause|/archive|/clear.
+                    if (leave_state is not None and control_root is not None
+                            and (intent is not None
+                                 or coord.leave_reason is not None)):
+                        action = resolve_leave_action(
+                            control_root, quest_id, leave_mode, intent)
+                    if action is not None and leave_state is not None:
+                        _sent = False
+                        with contextlib.suppress(
+                            RuntimeError, anyio.BrokenResourceError,
+                            anyio.ClosedResourceError,
+                        ):
+                            await client.send_control(action, coord.leave_reason)
+                            leave_state["disposition"] = action
+                            _sent = True
+                        if not _sent:
+                            leave_state["send_failed"] = "1"
+                    elif coord.leave_reason is not None:
+                        # An open gate blocks the run on its reply, so it cannot complete;
+                        # a terminal event already heard needs no verdict.
+                        listen = not gate_state["open"] and witness.terminal() is None
+                        if listen:
+                            # Armed before the send: the verdict can beat it back.
+                            phase = _Phase.LISTENING
+                        # Single choke point for the leave frame; best-effort — a dead
+                        # daemon must never block the leave.
+                        sent = False
+                        with contextlib.suppress(
+                            RuntimeError, anyio.BrokenResourceError,
+                            anyio.ClosedResourceError,
+                        ):
+                            await client.send_control(
+                                CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
+                            sent = True
+                        if listen and sent:
+                            with anyio.move_on_after(_LEAVE_LISTEN_SECONDS):
+                                await verdict.wait()
+            finally:
+                reader_tg.cancel_scope.cancel()
+                # Shielded: a reader crash cancels this scope, and the socket must still close.
+                with anyio.CancelScope(shield=True):
+                    await client.aclose()
     return ending, witness

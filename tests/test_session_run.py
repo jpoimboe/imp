@@ -2203,8 +2203,8 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
     import imp.cli.session_run as session_run
 
     monkeypatch.setenv("NO_COLOR", "1")
-    # The daemon writes its own pause after this client departs, so the client's
-    # trigger is the fresher truth: the leave row must sit above the pause row.
+    # A deliberate leave outranks a witnessed pause, but never a completion seen on
+    # the stream or on disk: the leave row sits above the pause row.
     quest = _paused_quest(tmp_path, "2026-09-20-leave-over-pause")
     monkeypatch.setattr(
         session_run, "run_terminal_client",
@@ -2222,6 +2222,163 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "loop limit" not in out
+
+
+_LEAVE_SHA_A = "4091ab6d" + "1" * 32
+_LEAVE_SHA_B = "832c04d7" + "2" * 32
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("trigger", ["sigterm", "ctrl-d"])
+async def test_a_leave_that_raced_a_merge_renders_the_merged_block_from_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], trigger: str,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The leave landed as merge-to-base ran; the daemon merged anyway and the
+    # client witnessed nothing terminal before it departed.
+    quest = _make_quest(tmp_path, f"2026-11-08-leave-merged-{trigger}")
+    State(id=quest.id, step=None, step_attempt=0, status="completed",
+          merge_commit="edacccfd" + "0" * 32).save(quest.state_dir)
+    quest.event_log().append(
+        agent_id=None, type="quest_merged",
+        payload={"base": "main", "commit": "edacccfd" + "0" * 32,
+                 "commits": [{"sha": _LEAVE_SHA_A, "subject": "add RACE.txt"}]})
+    monkeypatch.setattr(session_run, "run_terminal_client", _leaving(trigger))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (
+        f"{quest.id} · T · merged into main as edacccfd\n"
+        "  4091ab6d  add RACE.txt\n"
+        "\n")
+    assert "paused" not in out
+    assert "resume:" not in out
+
+
+@pytest.mark.anyio
+async def test_a_leave_that_raced_an_unmerged_completion_renders_the_completed_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-11-08-leave-done")
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+        quest.state_dir)
+    quest.event_log().append(
+        agent_id=None, type="workflow_completed",
+        payload={"commits": [{"sha": _LEAVE_SHA_B, "subject": "only"}]})
+    monkeypatch.setattr(session_run, "run_terminal_client", _leaving("sigterm"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == (
+        f"{quest.id} · T · completed · commits on imp/{quest.id}\n"
+        "  832c04d7  only\n"
+        "\n")
+    assert "paused" not in out
+
+
+@pytest.mark.anyio
+async def test_a_leave_that_raced_a_merge_and_reap_renders_the_merged_block_from_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The home was already reaped by the time the client printed: only the archive answers.
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-11-08-leave-reaped", status="completed",
+        events=_MERGED_EVENT_LINE, merge_commit="c0ffee12" + "3" * 32)
+    monkeypatch.setattr(session_run, "run_terminal_client", _leaving("sigterm"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == f"{quest.id} · T · merged into main as c0ffee12\n\n"
+    assert "resume:" not in out
+
+
+def _intent_event(text: str) -> dict[str, Any]:
+    return {"type": "user_message",
+            "payload": {"subtype": "intent", "content": [{"type": "text", "text": text}]}}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("slug", "disk_intent", "expected"), [
+    ("disk", "from disk", "from disk"),     # the settled intent outranks the witnessed one
+    ("stream", None, "from stream"),        # …and the witnessed one fills in when disk has none
+])
+async def test_a_leave_rendered_completed_from_disk_names_a_titleless_quest_by_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], slug: str, disk_intent: str | None, expected: str,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, f"2026-11-08-leave-intent-{slug}")
+    quest.title = ""
+    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+        quest.state_dir)
+    if disk_intent is not None:
+        event = _intent_event(disk_intent)
+        quest.event_log().append(agent_id=None, type=event["type"], payload=event["payload"])
+    quest.event_log().append(agent_id=None, type="workflow_completed", payload={})
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving("ctrl-d", witnessed=(_intent_event("from stream"),)))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.split("\n")[0] == (
+        f"{quest.id} · {expected} · completed · commits on imp/{quest.id}")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("disk", ["running", "nothing-persisted"])
+async def test_a_leave_with_no_completion_on_disk_still_renders_its_pause_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], disk: str,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, f"2026-11-08-leave-{disk}")
+    if disk == "running":
+        (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+        State(id=quest.id, step="merge-to-base", step_attempt=0, status="new").save(
+            quest.state_dir)
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving("sigterm", witnessed=(
+            {"type": "workflow_paused", "payload": {"reason": "interrupt"}},)))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 130
+    assert out == (
+        "paused · SIGTERM\n"
+        f"{quest.id} · T\n"
+        f"resume: imp resume {quest.id}\n"
+        "\n")
 
 
 @pytest.mark.anyio
