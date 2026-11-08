@@ -2154,7 +2154,7 @@ def test_init_help_documents_providers_and_drops_provider_free(
             "the picker. Defaults to all four — the first authenticated one is "
             "used.") in help_text
     assert ("Non-interactive setup: write imp/config.yaml with the default "
-            "workflow, resolved integration branch, and teaching hints — no "
-            "model call, works in CI with no credentials.") in help_text
+            "workflow, resolved integration branch, and explanatory comments — "
+            "no model call, works in CI with no credentials.") in help_text
     # init no longer skips providers on the non-interactive path
     assert "provider-free" not in help_text

@@ -60,7 +60,7 @@ def test_edit_has_description() -> None:
 def test_edit_documents_base_flag() -> None:
     sp = _subparser("edit")
     help_text = " ".join(sp.format_help().split())
-    assert ("Re-base an un-materialized quest on an existing BRANCH. Rejected "
+    assert ("Re-base a quest on an existing BRANCH. Rejected "
             "once the quest has been built.") in help_text
     assert sp.description is not None and "base branch" in sp.description
     # The subparser's own one-line help (as `imp --help` lists it) names it too.
@@ -78,8 +78,8 @@ def test_show_documents_the_verify_artifact() -> None:
     sp = _subparser("show")
     assert " ".join((sp.description or "").split()) == (
         "Print a quest's detail card, or name an artifact to print just that: "
-        "spec for the spec, verify for the last failing test-gate run. Reads "
-        "the live quest files while a quest is in flight and falls back to the "
-        "archive once it is finished."
+        "spec for the spec, verify for the output of the last failed test run. "
+        "Reads the live quest files while a quest is in flight and falls back "
+        "to the archive once it is finished."
     )
     assert "{spec,verify}" in sp.format_help()

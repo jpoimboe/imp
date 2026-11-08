@@ -2255,7 +2255,7 @@ class _ShowArtifact(NamedTuple):
 # absent-artifact message and the noun the backlog path names it by.
 _SHOW_ARTIFACTS = {
     "spec": _ShowArtifact("no spec for", "spec"),
-    "verify": _ShowArtifact("no failing gate output recorded for", "failing gate output"),
+    "verify": _ShowArtifact("no failed test run recorded for", "failed test run"),
 }
 
 
@@ -3445,15 +3445,15 @@ def apply_edit(
                    "--depends-on/--clear-deps, --base, or --append-intent")
 
     if zone_change and quest.materialized:
-        return 2, (f"imp: {quest_id} is already built; zone moves apply to "
-                   "un-materialized quests only (use abandon/pause instead)")
+        return 2, (f"imp: {quest_id} is already built; --backlog/--active only "
+                   "apply before a quest is built")
 
     if dep_change and quest.materialized:
-        return 2, "imp: cannot set dependencies on a materialized quest"
+        return 2, "imp: cannot change dependencies once a quest is built"
 
     if base is not None:
         if quest.materialized:
-            return 2, "imp: cannot change the base of a materialized quest"
+            return 2, "imp: cannot change the base once a quest is built"
         if not worktree.branch_exists(control, base):
             return 2, f"imp: --base {base!r} does not name an existing branch"
 
@@ -4420,8 +4420,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
         help="Non-interactive setup: write imp/config.yaml with the default "
-             "workflow, resolved integration branch, and teaching hints — no "
-             "model call, works in CI with no credentials.")
+             "workflow, resolved integration branch, and explanatory comments — "
+             "no model call, works in CI with no credentials.")
     p_init.add_argument(
         "--providers", metavar="CSV", default=None,
         help="Comma-separated providers to enable, in preference order; skips "
@@ -4462,9 +4462,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run headless: no live prompt; supply the opening "
                             "message via the positional argument or --message.")
     p_new.add_argument("--autonomous", action="store_true",
-                       help="Auto-take the recommendation at recommendation-bearing "
-                            "gates instead of confirming each; genuine intent-forks "
-                            "still pause for a human. Independent of --headless.")
+                       help="Take imp's recommendation at routine decision points "
+                            "instead of asking you; questions only you can answer "
+                            "still pause for you. Independent of --headless.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Alias for the positional opening message (seeds the "
                             "opening step); convenient for headless/remote callers.")
@@ -4520,9 +4520,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Headless: no live prompt; supply the opening message "
                              "via the positional argument or --message.")
     p_chat.add_argument("--autonomous", action="store_true",
-                        help="Auto-take the recommendation at recommendation-bearing "
-                             "gates instead of confirming each; genuine intent-forks "
-                             "still pause for a human. Independent of --headless.")
+                        help="Take imp's recommendation at routine decision points "
+                             "instead of asking you; questions only you can answer "
+                             "still pause for you. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Alias for the positional opening message.")
     p_chat.add_argument("--provider", metavar="NAME", default=None,
@@ -4543,12 +4543,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
-                          help="Auto-take the recommendation at recommendation-bearing "
-                               "gates instead of confirming each; genuine intent-forks "
-                               "still pause for a human. Independent of --headless.")
+                          help="Take imp's recommendation at routine decision points "
+                               "instead of asking you; questions only you can answer "
+                               "still pause for you. Independent of --headless.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
-                          help="Headless reply consumed by the first bare-turn-end prompt; "
-                               "pause+resume with another --message. "
+                          help="Headless reply to the question the quest is waiting "
+                               "on (or the next one it asks); answer a later question "
+                               "by resuming again with another --message. "
                                "Requires --headless.")
     p_resume.add_argument("--provider", metavar="NAME", default=None,
                           help="Switch the quest to NAME for its remaining "
@@ -4737,8 +4738,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
             "Print a quest's detail card, or name an artifact to print just "
-            "that: spec for the spec, verify for the last failing test-gate "
-            "run. Reads the live quest files while a quest is in flight and "
+            "that: spec for the spec, verify for the output of the last failed "
+            "test run. Reads the live quest files while a quest is in flight and "
             "falls back to the archive once it is finished."),
     )
     p_show.add_argument(
@@ -4838,8 +4839,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "abandon",
         help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
-            "Tear down a materialized quest — its worktree, branch, and state — "
-            "or discard a pure backlog idea. With no token, pick from a list. "
+            "Tear down a built quest — its worktree, branch, and state — "
+            "or discard a backlog idea. With no token, pick from a list. "
             "On a terminal, confirm before tearing down a quest that has a "
             "worktree; pass --yes to skip."),
     )
@@ -4858,8 +4859,8 @@ def _build_parser() -> argparse.ArgumentParser:
               "or opening intent."),
         description=(
             "Edit a quest's title, backlog membership, dependencies, or base branch, "
-            "or append to its opening intent. Zone moves (--backlog/--active) and "
-            "base changes apply to un-materialized quests only."))
+            "or append to its opening intent. --backlog/--active, "
+            "--depends-on/--clear-deps, and --base work only before a quest is built."))
     p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the quest title.")
@@ -4869,10 +4870,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized quest to the backlog zone (origin=backlog).")
+        help="Move a quest that isn't built yet to the backlog.")
     p_edit_zone.add_argument(
         "--active", action="store_true",
-        help="Return an un-materialized quest to the Active zone (origin=draft).")
+        help="Return a quest that isn't built yet from the backlog to the active list.")
     p_edit_deps = p_edit.add_mutually_exclusive_group()
     p_edit_deps.add_argument(
         "--depends-on", metavar="ID", action="append", default=None,
@@ -4882,7 +4883,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Empty the dependency list.")
     p_edit.add_argument(
         "--base", metavar="BRANCH", default=None,
-        help="Re-base an un-materialized quest on an existing BRANCH. Rejected "
+        help="Re-base a quest on an existing BRANCH. Rejected "
              "once the quest has been built.")
     p_edit.set_defaults(func=_cmd_edit)
 
