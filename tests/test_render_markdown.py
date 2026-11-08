@@ -325,6 +325,11 @@ def test_subagent_status_label_is_raw_and_unprefixed() -> None:
     assert _subagent_status_label(_make_subagent(subagent_name="<x>")) == "<x>"
 
 
+def test_subagent_status_label_tags_suspended() -> None:
+    sub = _make_subagent(terminal_state="suspended", is_error=True)
+    assert _subagent_status_label(sub) == "reviewer (suspended)"
+
+
 def test_escape_all_strips_sgr_caret_escapes_and_html_escapes() -> None:
     assert _escape_all("\x1b[1;33m<b>&\x00") == "&lt;b&gt;&amp;^@"
 

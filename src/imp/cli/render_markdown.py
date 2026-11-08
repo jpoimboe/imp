@@ -173,6 +173,8 @@ def _subagent_status_label(sub: nv.SubagentFold) -> str:
         label += " (interrupted)"
     elif sub.terminal_state == "context_exhausted":
         label += " (context exhausted)"
+    elif sub.terminal_state == "suspended":
+        label += " (suspended)"
     elif sub.is_error:
         label += " (failed)"
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)

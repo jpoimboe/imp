@@ -139,13 +139,13 @@ def _make_live_quest(control: Path, cid: str, events: list[dict]) -> None:
 
 
 def _capture_build_tree(monkeypatch) -> dict:
-    """Patch narrative.build_tree to record the event list it receives."""
+    """Patch narrative.build_tree to record each event list it receives, in call order."""
     import imp.cli.narrative as nv
     real = nv.build_tree
-    captured: dict = {}
+    captured: dict = {"calls": []}
 
     def fake(events):
-        captured["events"] = list(events)
+        captured["calls"].append(list(events))
         return real([])
 
     monkeypatch.setattr(nv, "build_tree", fake)
@@ -166,7 +166,23 @@ def test_log_no_filters_passes_all_events(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01")
     assert rc == 0
-    assert len(cap["events"]) == 6
+    assert len(cap["calls"][0]) == 6
+
+
+def test_log_unfiltered_builds_tree_once(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "logf01", _LOG_EVENTS)
+    cap = _capture_build_tree(monkeypatch)
+    rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01")
+    assert rc == 0
+    assert len(cap["calls"]) == 1
+
+
+def test_log_filtered_also_builds_full_log(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "logf01", _LOG_EVENTS)
+    cap = _capture_build_tree(monkeypatch)
+    rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "1-2")
+    assert rc == 0
+    assert [len(events) for events in cap["calls"]] == [2, 6]
 
 
 def test_log_step_filter_scopes_narrative(tmp_path, monkeypatch) -> None:
@@ -174,9 +190,9 @@ def test_log_step_filter_scopes_narrative(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "--step", "spec")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == [
+    assert [e["type"] for e in cap["calls"][0]] == [
         "step_started", "agent_message", "step_completed"]
-    assert all(e.get("agent_id") != "step:build/plan" for e in cap["events"])
+    assert all(e.get("agent_id") != "step:build/plan" for e in cap["calls"][0])
 
 
 def test_log_positional_range_scopes_narrative(tmp_path, monkeypatch) -> None:
@@ -184,7 +200,7 @@ def test_log_positional_range_scopes_narrative(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "1-2")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == ["step_started", "agent_message"]
+    assert [e["type"] for e in cap["calls"][0]] == ["step_started", "agent_message"]
 
 
 def test_log_limit_keeps_last_n(tmp_path, monkeypatch) -> None:
@@ -192,7 +208,7 @@ def test_log_limit_keeps_last_n(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "--limit", "2")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == [
+    assert [e["type"] for e in cap["calls"][0]] == [
         "agent_message", "step_completed"]
 
 
@@ -201,7 +217,7 @@ def test_log_agent_filter_keeps_matching_author(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "--agent", "plan")
     assert rc == 0
-    assert [e.get("agent_id") for e in cap["events"]] == ["step:build/plan"]
+    assert [e.get("agent_id") for e in cap["calls"][0]] == ["step:build/plan"]
 
 
 def test_log_unknown_step_errors(tmp_path, monkeypatch) -> None:
@@ -217,7 +233,7 @@ def test_log_md_export_honors_filters(tmp_path, monkeypatch) -> None:
     rc, _out, _err = _run_log(
         monkeypatch, tmp_path, "logf01", "--step", "spec", "--md", "-")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == [
+    assert [e["type"] for e in cap["calls"][0]] == [
         "step_started", "agent_message", "step_completed"]
 
 
@@ -241,7 +257,7 @@ def test_log_html_export_honors_filters(tmp_path, monkeypatch) -> None:
     rc, _out, _err = _run_log(
         monkeypatch, tmp_path, "logf01", "--step", "spec", "--html", "-")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == [
+    assert [e["type"] for e in cap["calls"][0]] == [
         "step_started", "agent_message", "step_completed"]
 
 

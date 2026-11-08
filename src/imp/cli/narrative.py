@@ -595,7 +595,7 @@ def deferred_leaf(node: StepNode) -> bool:
 
 
 # ── builder ──────────────────────────────────────────────────────────────────
-from collections.abc import Iterable  # noqa: E402  (kept near builder for clarity)
+from collections.abc import Iterable, Iterator  # noqa: E402  (kept near builder for clarity)
 
 _RESUMES_WAIT = frozenset({
     "user_message", "agent_message", "thinking", "tool_call",
@@ -1334,6 +1334,32 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
         b.add(e)
     b.finalize()
     return b.tree
+
+
+def _subagent_folds(children: list[Any]) -> Iterator[SubagentFold]:
+    for node in children:
+        if isinstance(node, SubagentFold):
+            yield node
+            yield from _subagent_folds(node.tree.root.children)
+        elif isinstance(node, (WorkflowNode, PhaseNode, StepNode)):
+            yield from _subagent_folds(node.children)
+
+
+def overlay_subagent_state(sliced: NarrativeTree, full: NarrativeTree) -> None:
+    """Give every fold in `sliced` the final state its dispatch reached in `full`."""
+    # Flat: a fold nested in `full` sits top-level in `sliced` when its opener is cut off.
+    final = {fold.event_id: fold for fold in _subagent_folds(full.root.children)}
+    for fold in _subagent_folds(sliced.root.children):
+        src = final.get(fold.event_id)
+        if src is None:
+            continue
+        fold.running = src.running
+        fold.end_ts = src.end_ts
+        fold.is_error = src.is_error
+        fold.outcome = src.outcome
+        fold.terminal_state = src.terminal_state
+        fold.nested._backoff_wait_accum = src.nested._backoff_wait_accum
+        fold.nested._backoff_wait_start = src.nested._backoff_wait_start
 
 
 # Handlers populate this in subsequent tasks; quest_created lives here so the
