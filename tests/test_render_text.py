@@ -1581,7 +1581,7 @@ def test_interrupt_renders_interrupted_not_complete_pause() -> None:
     assert "⏸" not in out
 
 
-def test_human_interrupt_reasons_suppress_pause_line_but_keep_digest() -> None:
+def test_manual_stop_reasons_draw_no_pause_node_but_keep_digest() -> None:
     for reason in ("ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit", "pause"):
         tree = nv.build_tree([
             _ev("1", "step_started", step="build", kind="agent", phase="implement",

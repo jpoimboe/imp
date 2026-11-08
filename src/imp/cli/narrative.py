@@ -465,6 +465,13 @@ class ResumeMarkerNode:
     collapsible = False
 
 
+@dataclass(frozen=True)
+class LeaveMarkerNode:
+    """The history ends on this unresumed manual stop (batch-only: live owns the leave block)."""
+    reason: str
+    collapsible = False
+
+
 @dataclass
 class RenameNode:
     name: str
@@ -1345,6 +1352,11 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     for e in events:
         b.add(e)
     b.finalize()
+    # Batch-only: the live view prints its own leave block in this slot.
+    stop = b._open_pause
+    if (b._root.status == "paused" and stop is not None and stop.reason is not None
+            and stop.reason in MANUAL_STOP_LABELS):
+        b._root.children.append(LeaveMarkerNode(reason=stop.reason))
     return b.tree
 
 
@@ -2692,6 +2704,10 @@ def resume_marker_text(node: ResumeMarkerNode) -> str:
     return f"paused · resumed {duration} later"
 
 
+def leave_marker_text(node: LeaveMarkerNode) -> str:
+    return f"paused · {MANUAL_STOP_LABELS[node.reason]}"
+
+
 _RETRY_VERB: dict[str, str] = {
     "rate_limit": "waiting for limit reset",
     "auth": "waiting for re-authentication",
@@ -2938,6 +2954,8 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "gap_s": node.gap_s}
     if isinstance(node, UserRenameNode):
         return {"t": t, "name": node.name}
+    if isinstance(node, LeaveMarkerNode):
+        return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):

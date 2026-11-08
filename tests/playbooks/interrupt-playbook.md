@@ -94,6 +94,11 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 > No leave echoes a caret line of its own; a typed `/pause` keeps its ordinary `> /pause` echo.
 > On a terminal, the closing block has exactly one blank row above it.
 
+> **`imp log` tail.** When the history ends on an unresumed manual stop, `imp log` (and
+> `--md`/`--html`) ends with one blank line then the same `paused · <Display>` label in the
+> lifecycle colour, with no `⏸`. The live view and `imp log -f` never print it, and a resumed stop
+> keeps only its `paused · resumed … later` marker.
+
 ### 0b. The bar for "correct" (every interrupt point, unless stated otherwise)
 
 A correct imp does **all** of:

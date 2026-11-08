@@ -766,8 +766,8 @@ def spaces_before(node: Any) -> bool:
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
         or isinstance(node, (nv.PhaseNode, nv.StepHeaderNode, nv.ErrorNode, nv.PauseNode,
-                             nv.ResumeMarkerNode, nv.RenameNode, nv.UserRenameNode,
-                             nv.MergedNode,
+                             nv.ResumeMarkerNode, nv.LeaveMarkerNode, nv.RenameNode,
+                             nv.UserRenameNode, nv.MergedNode,
                              nv.WarningsSummaryNode, nv.CompletedNode))
     )
 
@@ -1215,6 +1215,11 @@ def _render(node: Any, *, depth: int, full: bool = False,
 
     if isinstance(node, nv.ResumeMarkerNode):
         yield _line(nv.resume_marker_text(node), depth, color,
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        return
+
+    if isinstance(node, nv.LeaveMarkerNode):
+        yield _line(nv.leave_marker_text(node), depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
