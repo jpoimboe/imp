@@ -293,6 +293,15 @@ def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
     assert pal.toolbar_bg_open(enabled=False) == ""     # color off
 
 
+@pytest.mark.parametrize("theme", pal.THEMES)
+@pytest.mark.parametrize("enabled", [True, False])
+def test_status_separator_is_a_band_width_gray_rule_only_under_ansi_with_color(
+        theme: str, enabled: bool) -> None:
+    pal.set_theme(theme)
+    expected = ("\x1b[90m" + "─" * 8 + "\x1b[0m") if (theme == "ansi" and enabled) else ""
+    assert pal.status_separator(10, enabled=enabled) == expected
+
+
 def test_reverse_attr_wraps_with_sgr_7() -> None:
     assert pal._ATTRS["reverse"] == "\x1b[7m"
     assert pal.ansi("hi", "reverse", enabled=True) == "\x1b[7mhi\x1b[0m"
