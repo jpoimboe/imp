@@ -2177,7 +2177,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
     if card.files:
         lines.append("")
         lines.append(pal.ansi("files:", "dim", enabled=color))
-        lines.extend(card.files)
+        lines.extend(_display_name(f) for f in card.files)
     if ledger is not None:
         lines.append("")
         lines.append(pal.ansi("ledger:", "dim", enabled=color))
@@ -2302,6 +2302,10 @@ def _saved_file_matches(files: list[str], name: str) -> list[str]:
     return [f for f in files if f.startswith(f"{key}/")]
 
 
+def _display_name(name: str) -> str:
+    return name.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     from imp.cli.store import make_store
     token = args.token
@@ -2347,7 +2351,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
     store = make_store(control)
     matches = _saved_file_matches(store.saved_files(quest_id), name)
     if len(matches) > 1:
-        _page_or_print(matches, no_pager=args.no_pager, trailing_blank=True)
+        shown = [_display_name(m) for m in matches]
+        _page_or_print(shown, no_pager=args.no_pager, trailing_blank=True)
         return 0
     data = store.read_saved_file(quest_id, matches[0]) if matches else None
     if data is None:

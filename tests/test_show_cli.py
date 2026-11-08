@@ -253,6 +253,33 @@ def test_show_card_and_json_list_every_saved_file(
         "files"] == saved
 
 
+def test_show_renders_an_undecodable_saved_file_name_on_a_strict_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Feat", quest_id=_ID, base_branch="main")
+    folder = ch.quest_dir / "artifacts" / "odd"
+    folder.mkdir(parents=True)
+    for leaf in (b"bad\xff.md", b"ok.md"):
+        with open(os.path.join(os.fsencode(folder), leaf), "wb") as fh:
+            fh.write(b"x\n")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    def show(*argv: str) -> bytes:
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="utf-8", errors="strict")
+        with redirect_stdout(out):
+            assert main(["show", _ID, *argv]) == 0
+        out.flush()
+        return raw.getvalue()
+
+    card = show().decode("utf-8").splitlines()
+    assert _block(card, "files:") == ["files:", "odd/bad\ufffd.md", "odd/ok.md"]
+    assert show("odd").decode("utf-8") == "odd/bad\ufffd.md\nodd/ok.md\n"
+
+
 def test_show_card_omits_files_when_nothing_is_saved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
