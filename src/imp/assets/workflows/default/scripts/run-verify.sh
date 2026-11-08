@@ -115,7 +115,7 @@ if (( rc != 0 )); then
       "" \
       "- command: $cmd" \
       "- exit: $rc" \
-      "- when: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+      "- when: $(date '+%Y-%m-%d %H:%M:%S %Z')" \
       "" \
       "$out"
   } > "$log_path" || true
