@@ -1304,12 +1304,15 @@ async def _route_script(
     slot_fd: int | None = None
     try:
         if step.acquire == "test-lane":
-            slot_fd = _test_lane.try_acquire(quest.control_root, max_parallel_test_runs)
+            priority = state.held_lane is not None
+            slot_fd = _test_lane.try_acquire(quest.control_root, max_parallel_test_runs,
+                                             priority=priority)
             if slot_fd is None:
                 _emit(log, "waiting_for_test_lane", {"step": step.name})
                 slot_fd = await anyio.to_thread.run_sync(
                     functools.partial(_test_lane.acquire_blocking,
-                                      quest.control_root, max_parallel_test_runs))
+                                      quest.control_root, max_parallel_test_runs,
+                                      priority=priority, abort=abort))
                 _emit(log, "test_lane_acquired", {"step": step.name})
         def _emit_spawn_retry(next_attempt: int, detail: str) -> None:
             # open() fires this on the anyio WORKER thread; from_thread hops it back
@@ -1349,7 +1352,7 @@ async def _route_script(
                     "step": step.name, "exit": out["exit"],
                     "stdout": out["stdout"], "stderr": str(e)})
                 return Pause(reason="script_blocked"), str(e), {}
-    except ScriptInterrupted:
+    except (ScriptInterrupted, _test_lane.WaitAborted):
         return Pause(interrupt=True), None, {}
     except SandboxOpenFailed:
         # The budget is exhausted and NO command was spawned, so this exit is

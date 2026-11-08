@@ -194,7 +194,7 @@ class Step:
     timeout_seconds: int | None = None
     position_label: bool = False  # label is a position counter, not an activity verb
     label: str | None = None
-    acquire: str | None = None  # "merge-lane" (branch FIFO) or "test-lane" (counting semaphore)
+    acquire: str | None = None  # "merge-lane" (branch FIFO) or "test-lane" (priority semaphore)
     release: str | None = None  # "merge-lane"; runs before step body; agent steps only
     glyph: str | None = None  # merge-lane hold title glyph; loader-guarded to acquire: merge-lane
     phase_label: str | None = None  # owning phase's label template, stamped at load

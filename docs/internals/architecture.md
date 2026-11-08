@@ -283,17 +283,18 @@ flowchart TD
 ### Phase integrate
 
 The FIFO merge queue. `wait-for-head` acquires the merge lane and normally holds it for
-the rest of the phase. `integrate-rebase` routes on four outcomes: base unmoved with the
-tree already cleared skips straight to `summarizer` with no re-review; a clean rebase or
-an uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; a bad
-base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
-validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
-**both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
-rather than pausing. `check-cleared` then re-asks the shared clearance predicate at the
-merge door: a tree the slow gate never passed — an environmental failure the reviewer
-repaired, say — routes back to `integration-verify` instead of reaching the human.
-`finalize` is the human gate; a rework releases the merge lane on its way back to
-`plan-writer`.
+the rest of the phase. A quest holding the merge lane takes the next free test-lane slot
+ahead of other waiting verify gates. `integrate-rebase` routes on four outcomes: base
+unmoved with the tree already cleared skips straight to `summarizer` with no re-review; a
+clean rebase or an uncleared tree goes to `validate-memory`; a conflict hands off to
+`reconciler`; a bad base ref or dirty tree pauses. `validate-memory` re-runs imp's own
+load-time memory validation over the merged tree. `integration-verify` routes to
+`integration-reviewer` on **both** pass and failure — a failure asks the reviewer to
+adjudicate fix-vs-tolerate rather than pausing. `check-cleared` then re-asks the shared
+clearance predicate at the merge door: a tree the slow gate never passed — an
+environmental failure the reviewer repaired, say — routes back to `integration-verify`
+instead of reaching the human. `finalize` is the human gate; a rework releases the merge
+lane on its way back to `plan-writer`.
 
 A failure pause inside the phase evicts the merge lane rather than leaving a stalled
 quest holding it — another quest's merge must never wait on a paused one — and rewinds
