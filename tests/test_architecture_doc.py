@@ -906,3 +906,15 @@ def test_architecture_documents_lane_eviction_and_restore() -> None:
     assert "normally holds it" in low
     # a run that died holding the lane replays instead of restoring
     assert "replays the phase" in low
+
+
+def test_operator_notes_explain_the_context_handoff_limit_pause() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    section = text.split("## Unblocking a paused quest", 1)[1].split("\n## ", 1)[0]
+    flat = " ".join(section.split())
+    assert (
+        "A step that uses up its context handoffs pauses as `context handoff "
+        "limit`. `imp resume <id>` continues it in a fresh session from its last "
+        "handoff note; raise `context.max_reincarnations` if a step routinely "
+        "needs more."
+    ) in flat

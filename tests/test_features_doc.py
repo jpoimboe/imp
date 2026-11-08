@@ -54,3 +54,12 @@ def test_zones_prose_names_the_history_zone(path: str) -> None:
     assert "searchable **history** of finished, abandoned, or archived work" in flat
     assert "searchable archive of" not in flat
     assert "an **archive** of" not in flat
+
+
+def test_features_says_resume_after_the_cap_starts_fresh() -> None:
+    section = DOC.read_text().split("## Context handoff", 1)[1].split("\n## ", 1)[0]
+    flat = " ".join(section.split())
+    assert (
+        "Resuming after that pause continues the step in a fresh session from "
+        "its last handoff note, with a fresh budget."
+    ) in flat

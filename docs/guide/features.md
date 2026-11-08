@@ -23,7 +23,9 @@ measures occupancy against that point rather than against the window, so a full
 bar means a handoff is imminent on every provider and model. On crossing, the
 agent writes a handoff note and a fresh session resumes from it — no silent
 compaction, no lost work. `context.max_reincarnations` (default 2) caps how many
-times this may happen within one step before imp pauses to you.
+times this may happen within one step before imp pauses to you. Resuming after
+that pause continues the step in a fresh session from its last handoff note,
+with a fresh budget.
 
 ## Per-role, multi-vendor model selection
 
