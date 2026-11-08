@@ -150,6 +150,25 @@ def test_terminate_running_processes_drains(tmp_path):
     anyio.run(_spawn_and_kill)
 
 
+def test_terminate_running_processes_bumps_the_epoch_on_every_call(tmp_path: Path) -> None:
+    """Even an empty-registry teardown bumps the epoch: a bash call mid-spawn has
+    not registered yet, and the epoch is the only thing it can see."""
+    from imp.agents.tools.context import terminate_running_processes
+
+    ctx = _ctx(tmp_path)
+    assert ctx.teardown_epoch == 0
+
+    async def _scenario() -> None:
+        assert await terminate_running_processes(ctx) == []
+        assert ctx.teardown_epoch == 1
+        proc = await anyio.open_process(["sh", "-c", "sleep 5"], start_new_session=True)
+        ctx.running_processes.append(proc)
+        assert await terminate_running_processes(ctx, timeout=0.5) == [proc]
+        assert ctx.teardown_epoch == 2
+
+    anyio.run(_scenario)
+
+
 def test_terminate_kills_process_group(tmp_path):
     """A shell that spawns a child: killpg must reap the WHOLE group, not just
     the shell pid. The child writes a marker file; after teardown it must stop.
