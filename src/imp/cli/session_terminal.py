@@ -9,9 +9,11 @@ injected attach thunk), streams the daemon's events into a live event renderer
 (SessionControls, without killing the client), and answers each bare-turn-end
 gate by soliciting one reply and sending it back as an input frame. It returns the
 StreamEnding its receive loop observed — ENDED when the daemon's end-of-run frame
-arrived, else CUT (the stream closed or faulted, or a deliberate leave cancelled
-the loop, with no end frame seen) — paired with the RunWitness folded from every
-event it rendered, which is what the caller's closing block is selected from.
+arrived, else CUT (the stream closed or faulted, or teardown cancelled the loop,
+with no end frame seen) — paired with the RunWitness folded from every event it
+received, which is what the caller's closing block is selected from. A mid-run
+leave listens briefly after its leave frame for the daemon's verdict, folding
+what arrives without rendering it.
 The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
 and the solicit callback, and replaces the in-process run_quest call in
@@ -63,11 +65,23 @@ _TERMINAL_EVENT_TYPES: frozenset[str] = frozenset(
 _RENAME_TYPES = ("quest_renamed", "user_renamed")
 
 
+# How long a mid-run leave listens for the daemon's verdict before it closes.
+_LEAVE_LISTEN_SECONDS = 2.0
+
+# Live frames that settle a leave either way: the pause latched, the run yielded or
+# paused, or the run ended.
+_LEAVE_VERDICT_TYPES: frozenset[str] = frozenset(
+    {"interrupt_requested", "awaiting_user_input", "workflow_paused"}
+) | _TERMINAL_EVENT_TYPES
+
+
 class _Phase(enum.Enum):
-    """LIVE renders each frame; QUIET (teardown begun) only folds it."""
+    """LIVE renders each frame; QUIET (teardown begun) only folds it; LISTENING also
+    ends the post-leave listen on a verdict."""
 
     LIVE = enum.auto()
     QUIET = enum.auto()
+    LISTENING = enum.auto()
 
 
 @dataclass(frozen=True)
@@ -201,17 +215,26 @@ async def run_terminal_client(
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
         max_buffer_size=math.inf)
-    gate_state: dict[str, Any] = {"scope": None, "elsewhere": False}
+    gate_state: dict[str, Any] = {"scope": None, "elsewhere": False, "open": False}
     witness = RunWitness()
     phase = _Phase.LIVE
     stream_over = anyio.Event()
+    verdict = anyio.Event()
 
     def _on_event(event: dict[str, Any]) -> None:
         witness.note(event)
+        live = not event.get("_replay")
+        if live and event.get("type") == "awaiting_user_input":
+            gate_state["open"] = True
+        elif live and event.get("type") == "user_input_resolved":
+            gate_state["open"] = False
         if phase is not _Phase.LIVE:
+            if (phase is _Phase.LISTENING and live
+                    and event.get("type") in _LEAVE_VERDICT_TYPES):
+                verdict.set()
             return
         if event.get("type") == "user_input_resolved":
-            if not event.get("_replay"):
+            if live:
                 resolved_send.send_nowait(None)
             return
         if event.get("type") == "provider_marker":
@@ -282,6 +305,7 @@ async def run_terminal_client(
                 ending = await client.receive_events(on_end=witness.note_end)
             finally:
                 stream_over.set()
+                verdict.set()   # an end frame or a cut settles a listening leave too
 
         # Its own task group, outliving the one escalation cancels, so teardown never
         # cancels the reader mid-frame.
@@ -362,6 +386,7 @@ async def run_terminal_client(
                                     f"/{reply.name} {reply.args}".rstrip())
                                 if local_echo is not None:
                                     local_echo(cmd_line)
+                                gate_state["open"] = False
                                 await client.send_skill_request(
                                     reply.name, reply.args)
                                 continue
@@ -418,6 +443,8 @@ async def run_terminal_client(
                                 continue
                             if local_echo is not None and reply.strip():
                                 local_echo(reply)
+                            # Before the send: the next gate it leads to may beat it back.
+                            gate_state["open"] = False
                             await client.send_input(reply)
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
@@ -509,14 +536,25 @@ async def run_terminal_client(
                         if not _sent:
                             leave_state["send_failed"] = "1"
                     elif coord.leave_reason is not None:
+                        # An open gate blocks the run on its reply, so it cannot complete;
+                        # a terminal event already heard needs no verdict.
+                        listen = not gate_state["open"] and witness.terminal() is None
+                        if listen:
+                            # Armed before the send: the verdict can beat it back.
+                            phase = _Phase.LISTENING
                         # Single choke point for the leave frame; best-effort — a dead
                         # daemon must never block the leave.
+                        sent = False
                         with contextlib.suppress(
                             RuntimeError, anyio.BrokenResourceError,
                             anyio.ClosedResourceError,
                         ):
                             await client.send_control(
                                 CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
+                            sent = True
+                        if listen and sent:
+                            with anyio.move_on_after(_LEAVE_LISTEN_SECONDS):
+                                await verdict.wait()
             finally:
                 reader_tg.cancel_scope.cancel()
                 # Shielded: a reader crash cancels this scope, and the socket must still close.

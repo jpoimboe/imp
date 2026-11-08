@@ -296,6 +296,29 @@ def test_dispatch_sigterm_fires_leave_not_pause() -> None:
     assert coord.pause_reason is None
 
 
+def test_dispatch_second_leave_signal_keeps_first_reason() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    fired = {"n": 0}
+    coord.set_escalation_hook(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord._dispatch_signal(_sig.SIGTERM)
+    coord._dispatch_signal(_sig.SIGHUP)
+
+    assert coord.leave_reason == "sigterm"
+    assert fired["n"] == 2
+
+
+def test_dispatch_leave_signal_keeps_preset_reason() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    coord.leave_reason = "ctrl-d"
+
+    coord._dispatch_signal(_sig.SIGTERM)
+
+    assert coord.leave_reason == "ctrl-d"
+
+
 def _can_pty() -> bool:
     try:
         import pty

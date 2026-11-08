@@ -922,7 +922,8 @@ class InterruptCoordinator:
         otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
         pause-to-prompt)."""
         if sig in _leave_signals():
-            self.leave_reason = _leave_reason_for_signal(sig)
+            if self.leave_reason is None:
+                self.leave_reason = _leave_reason_for_signal(sig)
             fn = self._trigger_escalation
             if fn is not None:
                 fn()
