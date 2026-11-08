@@ -81,7 +81,7 @@ def test_ask_sync_passes_handle_sigint_false() -> None:
 
 def test_empty_prompt_hint_names_pause_and_exit() -> None:
     from imp.cli.prompt import EMPTY_PROMPT_HINT
-    assert EMPTY_PROMPT_HINT == "press ctrl-d to pause & exit"
+    assert EMPTY_PROMPT_HINT == "press Ctrl-D to pause & exit"
 
 
 @pytest.mark.anyio
@@ -111,7 +111,7 @@ async def test_ctrl_c_hint_defaults_to_the_run_paths_wording(
         pipe.send_text("\x03")
         pipe.send_text("world\r")
         assert await session.prompt_async("> ") == "world"
-    assert "press ctrl-d to pause & exit" in capsys.readouterr().out
+    assert "press Ctrl-D to pause & exit" in capsys.readouterr().out
 
 
 @pytest.mark.anyio
@@ -126,7 +126,7 @@ async def test_ctrl_c_hint_goes_through_the_sessions_output_fn(
         pipe.send_text("\x03")
         pipe.send_text("world\r")
         assert await session.prompt_async("> ") == "world"
-    assert rows == ["press ctrl-d to pause & exit"]
+    assert rows == ["press Ctrl-D to pause & exit", ""]
     assert capsys.readouterr().out == ""
 
 
@@ -219,7 +219,7 @@ async def test_gate_ctrl_c_does_not_spend_the_hint(
         await _ctrl_c_then_reply(prompt, pipe, gate)
         assert capsys.readouterr().out == ""
         await _ctrl_c_then_reply(prompt, pipe, DEFAULT_HINT)
-    assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n"
+    assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n\n"
 
 
 @pytest.mark.anyio
@@ -232,7 +232,7 @@ async def test_ctrl_c_hints_once_per_prompt_at_placeholders_not_naming_ctrl_d(
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         prompt = Prompt(color=color)
         await _ctrl_c_then_reply(prompt, pipe, placeholder)
-        assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n"
+        assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n\n"
         await _ctrl_c_then_reply(prompt, pipe, placeholder)
     assert capsys.readouterr().out == ""
 
@@ -260,7 +260,7 @@ async def test_out_of_band_sigint_is_silent_at_gate_and_hints_elsewhere(
         assert capsys.readouterr().out == ""
         # Proves the feed reaches the binding, so the silence above is not vacuous.
         await _sigint_then_reply(prompt, pipe, DEFAULT_HINT)
-    assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n"
+    assert capsys.readouterr().out == f"{EMPTY_PROMPT_HINT}\n\n"
 
 
 @pytest.mark.anyio

@@ -39,6 +39,7 @@ pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 _SIGNALS = [(signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP"), (signal.SIGQUIT, "SIGQUIT")]
 _PLACEHOLDER = "type a message, or /help"
+_HINT = "press Ctrl-D to pause & exit"
 
 def _session(tmp_path: Path, turns: list[dict[str, Any]], title: str, cols: int = 80,
              ) -> TerminalSession:
@@ -107,26 +108,46 @@ def test_ctrl_c_hint_then_ctrl_d_keeps_the_hint_above_the_blank(tmp_path: Path) 
     with _session(tmp_path, _QUESTION_TURNS, "hint gate") as s:
         quest_dir = _at_the_question(s, tmp_path)
         _at_empty_prompt(s)
-        _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+        _send_and_see(s, "\x03", _HINT)
         s.send("\x04")
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, _screen(s)
         at = _assert_ctrl_d_block(s, quest_dir.name, "hint gate")
-        assert s.lines()[at - 2] == "press ctrl-d to pause & exit", _screen(s)
+        assert s.lines()[at - 2] == _HINT, _screen(s)
 
 
 def test_ctrl_c_hint_then_sigterm_keeps_the_hint_above_the_blank(tmp_path: Path) -> None:
     with _session(tmp_path, _QUESTION_TURNS, "hint gate") as s:
         quest_dir = _at_the_question(s, tmp_path)
         _at_empty_prompt(s)
-        _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+        _send_and_see(s, "\x03", _HINT)
         s.send_signal(signal.SIGTERM)
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, _screen(s)
         at = _assert_pause_block(s, "paused · SIGTERM", quest_dir.name, "hint gate")
-        assert s.lines()[at - 2] == "press ctrl-d to pause & exit", _screen(s)
+        assert s.lines()[at - 2] == _HINT, _screen(s)
+
+
+def test_ctrl_c_hint_leaves_a_blank_row_above_the_redrawn_prompt(tmp_path: Path) -> None:
+    with _session(tmp_path, _QUESTION_TURNS, "hint gap") as s:
+        _at_the_question(s, tmp_path)
+        _at_empty_prompt(s)
+        s.send("\x03")
+
+        def _prompt_redrawn_under_hint() -> bool:
+            rows = s.lines()
+            if _HINT not in rows:
+                return False
+            at = rows.index(_HINT)
+            return any(_PLACEHOLDER in row for row in rows[at + 1:])
+
+        assert _poll(_prompt_redrawn_under_hint, timeout=E2E_POLL_TIMEOUT), _screen(s)
+        rows = s.lines()
+        assert rows[rows.index(_HINT) + 1] == "", _screen(s)
+        s.send("\x04")
+        assert s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT) == 130, _screen(s)
 
 
 def test_help_reprompt_then_ctrl_d_renders_the_closing_layout(tmp_path: Path) -> None:
@@ -231,7 +252,7 @@ def test_message_after_clear_echoes_once(tmp_path: Path, hint_first: bool) -> No
         _at_empty_prompt(s)
         _send_and_see(s, "/clear\r", "ask anything, or /help")
         if hint_first:
-            _send_and_see(s, "\x03", "press ctrl-d to pause & exit")
+            _send_and_see(s, "\x03", _HINT)
         _send_and_see(s, "next thing\r", "> next thing")
 
         def _second_quest_at_its_question() -> bool:

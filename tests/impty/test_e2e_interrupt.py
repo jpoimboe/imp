@@ -203,3 +203,29 @@ def test_leave_signal_at_opening_prompt_discards_the_draft(tmp_path: Path, sig: 
         [sys.executable, "-m", "imp", "list", "--all", "--json"],
         cwd=str(tmp_path), env=env, capture_output=True, text=True, check=True)
     assert qid not in [q["id"] for q in json.loads(listed.stdout)]
+
+
+def test_ctrl_c_hint_then_ctrl_d_at_opening_prompt_leaves_a_blank_above_the_spine(
+    tmp_path: Path,
+) -> None:
+    script = {"default": [{"text": "unused", "tools": [
+        {"name": "complete_step", "input": {"status": "Success"}}]}]}
+    script_path = seed_minimal_repo(tmp_path, script=script)
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
+    hint = "press Ctrl-D to pause & exit"
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "new"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        qid = _wait_for_opening_prompt(s)
+        s.send("\x03")
+        assert _poll(lambda: hint in s.lines(), timeout=E2E_POLL_TIMEOUT), \
+            "\n".join(s.lines())
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        rows = s.lines()
+        assert rc == 130, "\n".join(rows)
+        at = rows.index(hint)
+        assert rows[at + 1:at + 3] == ["", f"{qid} · (unnamed) · discarded"], "\n".join(rows)

@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
+EMPTY_PROMPT_HINT = "press Ctrl-D to pause & exit"
 DEFAULT_HINT = "type a message, or /help"
 OPENING_HINTS = {
     "new": "describe what you want built, or /help",
@@ -97,9 +97,14 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
         if not hint_shown and "ctrl-d" not in to_plain_text(session.placeholder).lower():
             hint_shown = True
             from prompt_toolkit.application import run_in_terminal
+
+            def _print_hint() -> None:
+                output_fn(empty_hint)
+                output_fn("")
+
             # Fire-and-forget: run_in_terminal schedules via ensure_future; the
             # returned Future is intentionally not awaited from this sync handler.
-            run_in_terminal(lambda: output_fn(empty_hint))
+            run_in_terminal(_print_hint)
 
     @kb.add("c-m")
     def _(event: Any) -> None:
