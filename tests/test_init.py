@@ -499,6 +499,29 @@ def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
              output_fn=msgs.append)
     assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
+    assert (tmp_path / "imphome" / "config.yaml").is_file()
+
+
+def test_fresh_init_writes_the_machine_config_only_after_accept(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    user = tmp_path / "imphome" / "config.yaml"
+    seen: dict[str, bool] = {}
+
+    def _screen(_root, state, **_kw):
+        seen["written_before_accept"] = user.exists()
+        return initmod.ScreenAccepted(state)
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen, raising=False)
+    run_init(tmp_path, picker_fn=_picks("claude", "openai"), input_fn=_inputs("y"),
+             output_fn=lambda _m: None, detect_theme_fn=lambda: "dark")
+
+    assert seen == {"written_before_accept": False}
+    data = yaml.safe_load(user.read_text())
+    assert data["providers"] == ["claude", "openai"]
+    assert data["theme"] == "dark"
+    assert data["editing_mode"] == "emacs"
+    assert data["sandbox"] == {"allow_unsandboxed": True}
 
 
 def test_git_question_accepted_initializes_the_repo(tmp_path_factory, monkeypatch):
@@ -534,6 +557,7 @@ def test_git_question_declined_stops_before_the_screen(
     assert not (fresh / "imp" / "config.yaml").exists()
     assert not (fresh / ".git").exists()
     assert "git repository" in "\n".join(msgs).lower()
+    assert not (fresh / "imphome" / "config.yaml").exists()
 
 
 def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> None:
@@ -970,6 +994,29 @@ def test_cmd_init_ctrl_c_prints_cancelled_and_exits_user_ended(
 
     assert rc == ExitCode.USER_ENDED
     assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+
+
+def test_main_init_cancelled_at_the_screen_writes_no_machine_config(
+    tmp_path, monkeypatch, capsys,
+):
+    import imp.cli.init as initmod
+    import imp.cli.main as m
+    from imp.cli.exit_codes import ExitCode
+
+    def _cancel(_root, _state, **_kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _cancel, raising=False)
+    monkeypatch.setattr(m, "_select_headless", lambda _args: (False, False))
+    monkeypatch.setattr("imp.diagnostics.install_stack_dumper", lambda _path: None)
+    monkeypatch.chdir(tmp_path)
+
+    rc = m.main(["init", "--providers", "claude"])
+
+    assert rc == ExitCode.USER_ENDED
+    assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+    assert not (tmp_path / "imphome" / "config.yaml").exists()
+    assert not (tmp_path / "imp").exists()
 
 
 def test_init_input_ends_the_line_when_cancelled(monkeypatch, capsys):

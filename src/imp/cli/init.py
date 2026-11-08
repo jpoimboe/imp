@@ -1125,12 +1125,6 @@ def run_init(
                 "proceed without one.")
             return
 
-    # Persist the machine config before the confirmation screen so a re-run
-    # never re-asks the questions already answered.
-    if wrote_user_config:
-        _bootstrap_user_config(
-            user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
-
     output_fn("")
     if color_on:
         output_fn(splash.splash_block(
@@ -1154,6 +1148,9 @@ def run_init(
             tests=detect_test_command(project_root),
             setup=detect_worktree_setup(project_root),
             roots=detect_import_roots(project_root)))
+    if wrote_user_config:
+        _bootstrap_user_config(
+            user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
     committed = write_init_files(project_root, settings)
 
     output_fn("")
