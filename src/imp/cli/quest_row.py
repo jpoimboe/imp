@@ -74,6 +74,7 @@ ID_W = 6        # bare 6-char quest id
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 TITLE_MIN = 10   # never shrink the trailing TITLE column below this
 TITLE_CAP = 70   # cap a long title/intent's pull on the shared width so STATUS keeps its content
+TITLE_FLOOR = 30  # TITLE yields to STATUS's full content only down to this
 
 # Meaning-based palette keyed by the resolved word: bold weight for
 # waiting / error / merge_blocked; every other status renders plain.
@@ -101,8 +102,12 @@ def overview_widths(rows: list[tuple[str, str | None, str]], *,
     cols = shutil.get_terminal_size((80, 24)).columns
     region = cols - (ID_W + AGE_W + 6) - indent     # three 2-space gaps
     status_floor = max([len("STATUS")] + [len(display_word(s)) for s, _, _ in rows])
+    status_need = max([status_floor] + [len(display_word(s)) + len(lbl) + 3   # `word (lbl)`
+                                        for s, lbl, _ in rows if lbl is not None])
     title_content = max(TITLE_MIN, min(TITLE_CAP, max([0] + [len(n) for _, _, n in rows])))
-    title_width = max(TITLE_MIN, min(title_content, region - status_floor))
+    # Below TITLE_FLOOR the title still yields, so the bare status word never overflows.
+    title_width = max(TITLE_MIN, min(title_content, max(TITLE_FLOOR, region - status_need),
+                                     region - status_floor))
     budget = max(status_floor, region - title_width)
     status_width = max([len("STATUS")]
                        + [len(_fit_label(display_word(s), lbl, budget)) for s, lbl, _ in rows])

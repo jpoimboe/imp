@@ -388,12 +388,12 @@ def test_overview_widths_name_cap_protects_status(monkeypatch):
     assert status_w == 50
 
 
-def test_overview_widths_capped_name_leaves_no_room_for_label(monkeypatch):
+def test_overview_widths_capped_name_yields_to_title_floor(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; TITLE claims 54, leaving 7 — too few for the labelled cell, so the label drops.
-    status_w, title_w = overview_widths([("running", "x" * 40, "i" * 80)])
-    assert (status_w, title_w) == (7, 54)
+    # region = 61; TITLE drops from its 70 cap to the 30 floor, leaving STATUS 31: the
+    # label is cut to `running (` + 20 + `…)`, not dropped.
+    assert overview_widths([("running", "x" * 40, "i" * 80)]) == (31, 30)
 
 
 def test_overview_widths_floors_name_at_min(monkeypatch):
@@ -603,20 +603,24 @@ def test_fit_label_whole_label_and_none_unchanged():
     assert _fit_label("running", None, 35) == "running"
 
 
-def test_overview_120col_truncates_status_under_capped_name(monkeypatch):
+_IMPL_LABEL = "implementation phase · plan 1/2 · task 2/2"
+
+
+def test_overview_120col_status_full_title_clipped(monkeypatch):
     from imp.cli.quest_row import ID_W, overview_widths
     _term(monkeypatch, 120)
-    # region = 101; TITLE capped at 70 leaves STATUS 31 — the 36-col cell truncates.
-    status_w, title_w = overview_widths([("paused", _SPEC_LABEL, "y" * 80)])
-    assert (status_w, title_w) == (31, 70)
+    # region = 101; the 52-col full cell keeps its content, TITLE takes the other 49.
+    status_w, title_w = overview_widths([("running", _IMPL_LABEL, "y" * 80)])
+    assert (status_w, title_w) == (52, 49)
     col = ID_W + 2 + title_w + 2
     assert header_line(color=False, title_width=title_w,
                        status_width=status_w)[col:].startswith("STATUS")
-    line = format_quest_line(**_row(title="y" * 80, status="paused", step="review-spec",
+    line = format_quest_line(**_row(title="y" * 80, step="code",
                                     title_width=title_w, status_width=status_w),
-                             step_label="reviewing spec", phase_label="spec phase",
-                             color=False)
-    assert line[col:].startswith("paused (spec phase · reviewin…)  15m")
+                             step_label="task 2/2",
+                             phase_label="implementation phase · plan 1/2", color=False)
+    assert line[ID_W + 2:col] == "y" * 48 + "…  "
+    assert line[col:] == "running (implementation phase · plan 1/2 · task 2/2)  15m"
 
 
 def test_truncated_suffix_renders_dim_and_status_word_keeps_style():
@@ -624,3 +628,80 @@ def test_truncated_suffix_renders_dim_and_status_word_keeps_style():
                              step_label="reviewing spec", phase_label="spec phase",
                              color=True)
     assert "\x1b[1mwaiting\x1b[0m\x1b[2m (spec phase · reviewi…)\x1b[0m" in line
+
+
+def _render_all(specs, title_w, status_w):
+    lines = [header_line(color=False, title_width=title_w, status_width=status_w)]
+    for status, label, name in specs:
+        lines.append(format_quest_line(**_row(title=name, status=status,
+                                              step="x" if label else "-",
+                                              title_width=title_w, status_width=status_w),
+                                       step_label=label, color=False))
+    return lines
+
+
+def test_overview_80col_title_yields_to_floor_before_status_label(monkeypatch):
+    from imp.cli.quest_row import ID_W, overview_widths
+    _term(monkeypatch, 80)
+    # region = 61; TITLE gives way to 30, leaving STATUS 31 for the labelled cell.
+    status_w, title_w = overview_widths([("running", _SPEC_LABEL, "t" * 50)])
+    assert title_w == 30
+    line = format_quest_line(**_row(title="t" * 50, step="review-spec",
+                                    title_width=title_w, status_width=status_w),
+                             step_label="reviewing spec", phase_label="spec phase",
+                             color=False)
+    col = ID_W + 2 + title_w + 2
+    assert line[ID_W + 2:col] == "t" * 29 + "…  "
+    assert line[col:] == "running (spec phase · reviewi…)  15m"
+
+
+def test_overview_widths_no_truncation_when_everything_fits(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 120)
+    # region = 101; a 45-col TITLE and a 50-col full cell both fit at their content widths.
+    assert overview_widths([("running", "x" * 40, "y" * 45)]) == (50, 45)
+
+
+@pytest.mark.parametrize("cols", [70, 80, 100])
+def test_overview_widths_title_holds_its_floor_against_a_huge_label(monkeypatch, cols):
+    from imp.cli.quest_row import TITLE_FLOOR, overview_widths
+    _term(monkeypatch, cols)
+    status_w, title_w = overview_widths([("waiting", "z" * 100, "t" * 40)])
+    assert title_w == TITLE_FLOOR == 30
+    assert status_w == cols - 19 - 30       # STATUS takes all of the rest of the region
+
+
+@pytest.mark.parametrize("name_len, expected", [(25, 25), (4, 10)])
+def test_overview_widths_short_title_keeps_its_content_width(monkeypatch, name_len,
+                                                             expected):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 80)
+    _, title_w = overview_widths([("running", "z" * 100, "t" * name_len)])
+    assert title_w == expected               # content width, floored at TITLE_MIN
+
+
+_PICKER_ROWS = [("running", _SPEC_LABEL, "t" * 50),
+                ("merge_blocked", None, "u" * 60),
+                ("waiting", _IMPL_LABEL, "short")]
+
+
+def test_overview_picker_indent_rows_fit_80_cols(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 80)
+    status_w, title_w = overview_widths(_PICKER_ROWS, indent=2)
+    assert title_w == 30
+    assert all(len(ln) <= 78 for ln in _render_all(_PICKER_ROWS, title_w, status_w))
+
+
+_SIXTY_ROWS = [("merge_blocked", None, "t" * 50), ("running", _IMPL_LABEL, "u" * 20)]
+
+
+@pytest.mark.parametrize("indent, expected_title, limit", [(0, 28, 60), (2, 26, 58)])
+def test_overview_narrow_terminal_title_yields_below_floor(monkeypatch, indent,
+                                                           expected_title, limit):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 60)
+    # region - status_floor (13) is under TITLE_FLOOR, so TITLE gives way to keep rows in.
+    status_w, title_w = overview_widths(_SIXTY_ROWS, indent=indent)
+    assert title_w == expected_title
+    assert all(len(ln) <= limit for ln in _render_all(_SIXTY_ROWS, title_w, status_w))

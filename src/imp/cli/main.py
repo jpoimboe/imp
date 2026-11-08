@@ -3726,10 +3726,9 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
     status_width, title_width = quest_row.overview_widths(specs)
 
-    lines = [quest_row.header_line(color=color, title_width=title_width,
-                                   status_width=status_width)]
-    if inflight_notice and not inflight:
-        lines.append(pal.ansi("no active quests", "dim", enabled=color))
+    header = quest_row.header_line(color=color, title_width=title_width,
+                                   status_width=status_width)
+    lines: list[str] = []
     for r in inflight:
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3737,7 +3736,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
             title_width=title_width, status_width=status_width,
             intent=intents.get(r[0])))
     if backlog_rows:
-        if len(lines) > 1:
+        if lines:
             lines.append("")
         lines.append(pal.ansi("backlog:", "dim", enabled=color))
         for r in backlog_rows:
@@ -3747,7 +3746,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                 color=color, title_width=title_width, status_width=status_width,
                 intent=intents.get(r[0])))
     if history:
-        if len(lines) > 1:
+        if lines:
             lines.append("")
         lines.append(pal.ansi(history_label, "dim", enabled=color))
         for r in history:
@@ -3755,7 +3754,9 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                 quest_id=r[0], title=r[4], status=r[1], step="-",
                 last_iso=r[3], now=now, color=color, title_width=title_width,
                 status_width=status_width, intent=intents.get(r[0])))
-    return lines
+    if inflight_notice and not inflight:
+        return [pal.ansi("no active quests", "dim", enabled=color), "", header, *lines]
+    return [header, *lines]
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,

@@ -387,37 +387,49 @@ def _seed_backlog_and_history(tmp_path: Path) -> None:
     _archive_status(tmp_path, "cmpmrg", "completed")
 
 
+_HEADER_WORDS = ["ID", "TITLE", "STATUS", "UPDATED"]
+
+
+def _assert_notice_then_header_then(lines: list[str], first_label: str) -> None:
+    assert lines[:2] == ["no active quests", ""]
+    assert lines[2].split() == _HEADER_WORDS
+    assert lines[3] == first_label
+
+
 @pytest.mark.parametrize(("argv", "history_label"), [
     (["list"], "completed:"),
     (["list", "-a"], "history:"),
 ])
-def test_list_with_no_inflight_rows_says_so_under_the_header(
+def test_list_with_no_inflight_rows_says_so_above_the_header(
         tmp_path, monkeypatch, argv, history_label) -> None:
     _seed_backlog_and_history(tmp_path)
     lines = _run_list(tmp_path, monkeypatch, argv).splitlines()
-    assert lines[1:4] == ["no active quests", "", "backlog:"]
-    assert history_label in lines
+    _assert_notice_then_header_then(lines, "backlog:")
+    assert lines[lines.index(history_label) - 1] == ""
 
 
-def test_no_active_notice_precedes_the_history_label_when_backlog_is_empty(
+def test_no_active_notice_then_header_then_completed_when_backlog_is_empty(
         tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
     _archive_status(tmp_path, "cmpmrg", "completed")
     lines = _run_list(tmp_path, monkeypatch, ["list"]).splitlines()
-    assert lines[1:4] == ["no active quests", "", "completed:"]
+    _assert_notice_then_header_then(lines, "completed:")
 
 
 def test_no_active_notice_is_dim_under_color(tmp_path: Path) -> None:
     _seed_backlog_and_history(tmp_path)
     lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=True)
-    assert lines[1] == pal.ansi("no active quests", "dim", enabled=True)
-    assert lines[1] != "no active quests"
+    assert lines[0] == pal.ansi("no active quests", "dim", enabled=True)
+    assert lines[0] != "no active quests"
+    assert lines[1] == ""
+    assert "STATUS" in lines[2]
 
 
 def test_list_with_a_live_quest_has_no_notice(tmp_path, monkeypatch) -> None:
     _seed_backlog_and_history(tmp_path)
     Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     out = _run_list(tmp_path, monkeypatch, ["list"])
+    assert out.splitlines()[0].split() == _HEADER_WORDS
     assert "liveid" in out
     assert "no active quests" not in out
 
@@ -425,7 +437,7 @@ def test_list_with_a_live_quest_has_no_notice(tmp_path, monkeypatch) -> None:
 def test_active_filter_with_other_zone_rows_shows_the_notice(tmp_path, monkeypatch) -> None:
     _seed_backlog_and_history(tmp_path)
     lines = _run_list(tmp_path, monkeypatch, ["list", "--active", "--backlog"]).splitlines()
-    assert lines[1:4] == ["no active quests", "", "backlog:"]
+    _assert_notice_then_header_then(lines, "backlog:")
 
 
 def test_filter_without_active_never_shows_the_notice(tmp_path, monkeypatch) -> None:
@@ -468,7 +480,7 @@ def test_list_all_with_only_hidden_history_shows_it(tmp_path, monkeypatch) -> No
     _seed_control(tmp_path)
     _archive_status(tmp_path, "abnd", "abandoned")
     lines = _run_list(tmp_path, monkeypatch, ["list", "-a"]).splitlines()
-    assert lines[1:4] == ["no active quests", "", "history:"]
+    _assert_notice_then_header_then(lines, "history:")
     assert lines[4].split()[0] == "abnd"
 
 

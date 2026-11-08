@@ -212,7 +212,8 @@ def test_overview_header_aligns_with_rows(tmp_path, monkeypatch) -> None:
     assert header.index("STATUS") == row.index("running")
 
 
-def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> None:
+def test_overview_long_fallback_title_yields_to_status_no_overflow(tmp_path,
+                                                                   monkeypatch) -> None:
     import imp.cli.main as m
     _seed_control(tmp_path)
     intent = "please investigate the flaky integration test that keeps timing out on ci"
@@ -222,8 +223,10 @@ def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> No
     lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
     header = lines[0]
     row = next(ln for ln in lines if ln.startswith("subf01"))
-    assert "spec phase" not in row                    # suffix dropped
+    # TITLE gives way to its 30-col floor so STATUS keeps a clipped label, not the bare word.
+    assert intent[:29] + "…  running (spec phase · writing…)" in row
     assert "(" not in row.split("please")[0]          # no ` (…)` before TITLE
-    # TITLE starts right after ID; the fallback carries no prefix.
     assert header.index("TITLE") == row.index("please")
+    assert header.index("STATUS") == row.index("running")
     assert "> please" not in row
+    assert max(len(header), len(row)) <= 80
