@@ -96,6 +96,14 @@ _ONE_FILE_FOLDERS = {"spec": "# SPEC BODY\n", "verify": _VERIFY_LOG,
                      "summary": "SUMMARY BODY\n"}
 
 
+def _block(lines: list[str], header: str) -> list[str]:
+    """`header` and the lines under it, up to the next blank line."""
+    i = lines.index(header)
+    assert lines[i - 1] == ""
+    end = lines.index("", i) if "" in lines[i:] else len(lines)
+    return lines[i:end]
+
+
 def test_show_spec_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     _seed_with_artifacts(tmp_path, _ID, "Feat")
@@ -201,6 +209,11 @@ def test_show_never_lists_or_reads_links_out_of_the_saved_folder(
                  "plans/linkdir/inner.md"):
         assert _show_fails(monkeypatch, capsys, tmp_path, _ID, name) == \
             _no_match(_ID, name)
+    saved = [f"plans/{_ID}-plan-1.md", f"plans/{_ID}-plan-2.md", f"spec/{_ID}.md"]
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", *saved]
+    assert json.loads(_run(monkeypatch, tmp_path, "show", _ID, "--json"))[
+        "files"] == saved
 
 
 def test_show_reads_the_ref_when_the_saved_folder_is_a_link(
@@ -219,6 +232,47 @@ def test_show_reads_the_ref_when_the_saved_folder_is_a_link(
     assert _run(monkeypatch, tmp_path, "show", _ID, "spec") == "# REF SPEC\n"
     assert _show_fails(monkeypatch, capsys, tmp_path, _ID, "secret.md") == \
         _no_match(_ID, "secret.md")
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", f"spec/{_ID}.md"]
+
+
+@pytest.mark.parametrize("archived", [False, True], ids=["live", "ref-only"])
+def test_show_card_and_json_list_every_saved_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archived: bool,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_verify_log(ch, _ID)
+    if archived:
+        _archive_and_prune(tmp_path, ch, _ID)
+    saved = [f"plans/{_ID}-plan-1.md", f"plans/{_ID}-plan-2.md",
+             f"spec/{_ID}.md", f"verify/{_ID}.md"]
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", *saved]
+    assert json.loads(_run(monkeypatch, tmp_path, "show", _ID, "--json"))[
+        "files"] == saved
+
+
+def test_show_card_omits_files_when_nothing_is_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Bare", quest_id="bare01", base_branch="main")
+    assert "files:" not in _run(monkeypatch, tmp_path, "show", "bare01").splitlines()
+    assert json.loads(_run(monkeypatch, tmp_path, "show", "bare01", "--json"))[
+        "files"] == []
+
+
+def test_show_backlog_card_and_json_gain_no_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="bkfile", base_branch="main",
+        origin="backlog", seed_opening="Queued\n\nDo the thing.", defer_seed=True)
+    assert "files:" not in _run(monkeypatch, tmp_path, "show", "bkfile").splitlines()
+    assert "files" not in json.loads(
+        _run(monkeypatch, tmp_path, "show", "bkfile", "--json"))
 
 
 def test_show_spec_falls_back_after_archive(
@@ -1147,6 +1201,21 @@ def test_show_card_places_var_blocks_between_summary_and_ledger(
         "summary:", "Shipped.",
         "", "vars.notes:", "para one", "", "para two",
         "", "vars.zeta:", "y" * 81,
+        "", "ledger:", "LEDGER ROW",
+    ]
+
+
+def test_show_card_puts_files_after_var_blocks_and_before_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = _card_lines(
+        tmp_path, monkeypatch, with_ledger=True, summary=b"Shipped.\n",
+        seeded_vars={"notes": "a\nb"}, files=["plans/lng01-plan-1.md", "spec/lng01.md"])
+
+    assert lines[lines.index("summary:"):] == [
+        "summary:", "Shipped.",
+        "", "vars.notes:", "a", "b",
+        "", "files:", "plans/lng01-plan-1.md", "spec/lng01.md",
         "", "ledger:", "LEDGER ROW",
     ]
 

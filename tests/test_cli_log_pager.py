@@ -415,6 +415,7 @@ def test_main_log_invokes_pager_on_tty(
     proc.wait = MagicMock(return_value=0)
 
     with patch("imp.cli.store._show_artifact", return_value=None), \
+         patch("imp.cli.store.LocalStore.saved_files", return_value=[]), \
          patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
         rc = m.main(["log", slug])
 
@@ -445,6 +446,7 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     _fake_tty_stdout(monkeypatch, isatty=True)
 
     with patch("imp.cli.store._show_artifact", return_value=None), \
+         patch("imp.cli.store.LocalStore.saved_files", return_value=[]), \
          patch("imp.cli.main.subprocess.Popen") as popen:
         rc = m.main(["log", "--no-pager", slug])
 
@@ -470,6 +472,7 @@ def test_main_log_non_tty_prints_inline(
     _fake_tty_stdout(monkeypatch, isatty=False)
 
     with patch("imp.cli.store._show_artifact", return_value=None), \
+         patch("imp.cli.store.LocalStore.saved_files", return_value=[]), \
          patch("imp.cli.main.subprocess.Popen") as popen:
         rc = m.main(["log", slug])
 
@@ -500,6 +503,7 @@ def test_main_log_summary_routes_through_pager(
     proc.wait = MagicMock(return_value=0)
 
     with patch("imp.cli.store._show_artifact", return_value=None), \
+         patch("imp.cli.store.LocalStore.saved_files", return_value=[]), \
          patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
         rc = m.main(["log", "-s", slug])
 

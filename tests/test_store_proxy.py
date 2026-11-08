@@ -340,6 +340,9 @@ async def test_proxy_saved_files_list_and_read_only_listed_files(
             f"plans/{_OK}-plan-1.md", f"spec/{_OK}.md"]
         assert await _ask(proxy.read_saved_file, _OK, f"spec/{_OK}.md") == \
             b"# live spec\n"
+        card = await _ask(proxy.quest_card, _OK)
+        assert card is not None and card.files == [
+            f"plans/{_OK}-plan-1.md", f"spec/{_OK}.md"]
         # Links, traversal and absolute paths read nothing.
         for rel in ("leak.md", "linkdir/inner.md", "../quest.json",
                     f"../../quests/{_OK}/quest.json", "/etc/passwd",
@@ -359,6 +362,8 @@ async def test_proxy_saved_files_list_and_read_only_listed_files(
             proxy.read_saved_file, _LINKED_ROOT, f"spec/{_LINKED_ROOT}.md") == \
             b"# ref spec\n"
         assert await _ask(proxy.read_saved_file, _LINKED_ROOT, "secret.md") is None
+        card = await _ask(proxy.quest_card, _LINKED_ROOT)
+        assert card is not None and card.files == [f"spec/{_LINKED_ROOT}.md"]
 
         await session.close()
         tg.cancel_scope.cancel()

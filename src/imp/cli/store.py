@@ -64,6 +64,7 @@ class QuestCard:
     intent: str | None
     seed_opening: str | None
     summary: bytes | None
+    files: list[str]
     vars: dict[str, object]
     seeded_vars: dict[str, object]   # quest.json's --var values; `vars` is the effective state.vars
 
@@ -216,6 +217,7 @@ class LocalStore:
             intent=_resolve_intent(events),
             seed_opening=meta.get("seed_opening"),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
+            files=self.saved_files(quest_id),
             vars=dict(state.get("vars") or {}),
             seeded_vars=dict(meta.get("vars") or {}),
         )

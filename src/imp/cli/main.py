@@ -2174,6 +2174,10 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     lines.extend(_vars_blocks(card.seeded_vars, color=color))
+    if card.files:
+        lines.append("")
+        lines.append(pal.ansi("files:", "dim", enabled=color))
+        lines.extend(card.files)
     if ledger is not None:
         lines.append("")
         lines.append(pal.ansi("ledger:", "dim", enabled=color))
@@ -2216,6 +2220,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "intent": card.intent,
         "vars": dict(card.vars),
         "summary": None,
+        "files": list(card.files),
     }
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         data["step"] = {"phase": card.phase_label or None,
