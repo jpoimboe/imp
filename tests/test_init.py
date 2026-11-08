@@ -1633,6 +1633,62 @@ def test_a_provider_outside_the_floor_is_enabled_without_a_status_line(
     assert not any(m.startswith("  housecat") for m in msgs)
 
 
+_CLAUDE_CODEX_NOT_READY = [
+    "  claude — not signed in · run `claude login`",
+    "  codex — CLI not found · install it, then run `codex login`",
+]
+
+
+@pytest.mark.parametrize("source", ["picker", "flag", "machine config"])
+def test_one_blank_line_then_the_summary_whatever_chose_the_providers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, source: str,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("summary"),
+                  on_path=("claude",), keys=())
+    if source == "machine config":
+        _write_machine_config("providers: [claude, codex]\n")
+    msgs: list[str] = []
+
+    def _no_picker(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run")
+
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude", "codex") if source == "picker" else _no_picker,
+        providers_override=["claude", "codex"] if source == "flag" else None,
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    enabled = msgs.index("Enabled: claude, codex")
+    header = msgs[:enabled - 1]
+    assert header and header[0].startswith("Setting up imp in "), msgs
+    assert "" not in header, msgs
+    assert msgs[enabled - 1] == "", msgs
+    assert msgs[enabled + 1:enabled + 3] == _CLAUDE_CODEX_NOT_READY
+    assert not any(m.endswith(" — ready") for m in msgs)
+
+
+def test_the_picker_opens_one_blank_line_below_the_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    msgs: list[str] = []
+    before_picker: list[str] = []
+
+    def _pick(_available: list[str]) -> list[str]:
+        before_picker.extend(msgs)
+        return ["claude"]
+
+    run_init(project_root=tmp_path, picker_fn=_pick, input_fn=_inputs(),
+             output_fn=msgs.append)
+
+    assert before_picker[0].startswith("Setting up imp in ")
+    assert before_picker[-1] == ""
+    assert "" not in before_picker[:-1]
+
+
 _MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"
 _MY_KEY = "provider_envs: {anthropic: {env: MY_KEY}}\n"
 

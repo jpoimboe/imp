@@ -961,6 +961,7 @@ def run_init(
 
     output_fn("Setting up imp in "
               + pal.ansi(str(project_root), "wordmark", enabled=color_on))
+    output_fn("")
 
     user_path = global_config_path()
 
