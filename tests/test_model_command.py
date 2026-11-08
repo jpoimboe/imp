@@ -85,7 +85,7 @@ def test_render_roster_one_per_line_hides_bare_aliases() -> None:
         _roster("anthropic", "claude-sonnet-4-6"),
     ]
     lines = render_roster(current, rosters)
-    assert "Current: claude · claude-opus-4-8[1m]   (this step)" in lines
+    assert "Current: claude · claude-opus-4-8[1m] (this step)" in lines
     assert "  claude" in lines
     assert "  anthropic" in lines
     # one model per line, bare name, 6-space indent
@@ -226,7 +226,7 @@ def test_roster_model_names_flattens_dedups_and_keeps_aliases(
 def test_claude_catalog_renders_the_documented_layout(monkeypatch) -> None:
     rosters = _discovered(monkeypatch, "claude", cached=("claude-fable-5-1[1m]",))
     assert render_roster(ProviderModel("claude", "claude-opus-5-5"), rosters) == [
-        "Current: claude · claude-opus-5-5   (this step)",
+        "Current: claude · claude-opus-5-5 (this step)",
         "",
         "Available:",
         "  claude",
@@ -249,7 +249,7 @@ def test_claude_catalog_renders_the_documented_layout(monkeypatch) -> None:
         "      claude-haiku-5-5",
         "      claude-haiku-4-5",
         "",
-        "Switch with  /model <name>  or  /model provider:model",
+        "Switch with /model <name> or /model provider:model",
     ]
 
 
@@ -318,7 +318,7 @@ def test_a_current_provider_absent_from_the_rosters_marks_nothing() -> None:
     rosters = [_roster("anthropic", "claude-opus-5")]
     lines = render_roster(ProviderModel("claude", "claude-opus-5"), rosters)
     assert _marked(lines) == []
-    assert lines[0] == "Current: claude · claude-opus-5   (this step)"
+    assert lines[0] == "Current: claude · claude-opus-5 (this step)"
 
 
 def test_a_provider_with_no_family_table_renders_under_other() -> None:

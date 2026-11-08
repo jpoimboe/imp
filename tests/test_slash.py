@@ -658,7 +658,7 @@ def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
 
     def _fake(*, quest, output_fn):
         calls["change"] = quest
-        output_fn("Current: claude · opus   (this step)")
+        output_fn("Current: claude · opus (this step)")
 
     monkeypatch.setattr(slash, "print_model_roster", _fake)
     quest = _FakeQuest(tmp_path)

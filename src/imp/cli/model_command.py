@@ -19,7 +19,7 @@ def render_roster(
 ) -> list[str]:
     """Format bare /model: current model, per-provider roster, and switch hint. Pure."""
     lines = [
-        f"Current: {current.provider} · {current.model}   (this step)",
+        f"Current: {current.provider} · {current.model} (this step)",
         "",
         "Available:",
     ]
@@ -36,7 +36,7 @@ def render_roster(
                 lines.append(f"    {group.name}")
             lines.extend(f"      {n}   current" if n == marked else f"      {n}" for n in rows)
     lines.append("")
-    lines.append("Switch with  /model <name>  or  /model provider:model")
+    lines.append("Switch with /model <name> or /model provider:model")
     return lines
 
 
