@@ -63,10 +63,11 @@ names rather than guessing them.
   calls, tool results, agent reasoning, skill loads) rather than only their
   conversation prose — so it answers questions like which agents loaded a given
   skill, which `imp search` cannot. Searches **active**, **backlog** (matched on
-  title + intent, since drafts have no events), and **history** quests;
-  `--active` / `--backlog` / `--history` flags scope it, and `imp events`'
-  `--type` / `--agent` filters narrow which events match (`--type tool_call` for
-  "where invoked", the default for anywhere). Results stay zone-major — active →
+  title + intent, since drafts have no events), and **history** quests; the same
+  `--active` / `--backlog` / `--completed` / `--abandoned` / `--archived` flags as
+  `imp search` scope it, and `imp events`' `--type` / `--agent` filters narrow
+  which events match (`--type tool_call` for "where invoked", the default for
+  anywhere). Results stay zone-major — active →
   backlog → history — and newest-first within each zone. Default rich and `--json`
   output show the first three matched quests and the first three matching events per
   quest; `--limit N` changes only the matched-quest bound. `--list` scans every

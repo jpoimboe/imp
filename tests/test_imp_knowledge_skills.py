@@ -176,12 +176,13 @@ def test_introspection_search_entry_spans_all_zones_and_content() -> None:
         assert zone in body, zone
     assert "**archive**" not in body
     assert "conversation content" in flat.lower()   # the bullet wraps mid-phrase
-    for flag in ("--active", "--backlog", "--archived", "--history", "-l"):
+    for flag in ("--active", "--backlog", "--completed", "--abandoned", "--archived", "-l"):
         assert flag in body, flag
     assert "`--archived` meaning archived conversations only" in flat
     # the broad --archived zone flag is gone from both search entries
     assert "`--active` / `--backlog` / `--archived` flags" not in flat
-    assert "`--active` / `--backlog` / `--history` flags scope it" in flat
+    assert ("the same `--active` / `--backlog` / `--completed` / `--abandoned` / "
+            "`--archived` flags as `imp search` scope it") in flat
     assert "active → backlog → history" in flat
     assert "search the archive (completed, abandoned, and left" not in body
 
