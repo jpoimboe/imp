@@ -387,22 +387,27 @@ def summary_notes(cells: list[str],
     return notes
 
 
-def _sub_body(sub: SubagentRow) -> str:
-    """The subagent's left-column label: '↳ name (title|label)', then ' · <stop word>'."""
+def _sub_label(sub: SubagentRow) -> tuple[str, str]:
+    """The subagent's left-column label as ('↳ name (title|label)', ' · <stop word>' or '')."""
     text = f"↳ {sub.name}"
     paren = display_subagent_title(sub.title) or sub.label
     if paren:
         text += f" ({paren})"
-    if sub.stop is not None:
-        text += f" · {STOP_WORDS[sub.stop]}"
-    return text
+    return text, "" if sub.stop is None else f" · {STOP_WORDS[sub.stop]}"
+
+
+def _sub_body(sub: SubagentRow) -> str:
+    return "".join(_sub_label(sub))
+
+
+def _step_label(row: StepRow) -> tuple[str, str]:
+    """(step text, stop suffix); an open span's duration cell already names its state."""
+    ended_in_error = row.errored and row.end_ts is not None
+    return row.step_text, f" · {STOP_WORDS['failed']}" if ended_in_error else ""
 
 
 def _step_body(row: StepRow) -> str:
-    """The step's left-column label; an open span's duration cell already names its state."""
-    if row.errored and row.end_ts is not None:
-        return f"{row.step_text} · {STOP_WORDS['failed']}"
-    return row.step_text
+    return "".join(_step_label(row))
 
 
 def rows_charge(summary: list[StepRow]) -> Charge:
@@ -581,8 +586,10 @@ def _fit(text: str, width: int) -> str:
     return text if pal.display_width(text) <= width else pal.clip_display(text, width)
 
 
-def _fit_padded(text: str, width: int) -> str:
-    fitted = _fit(text, width)
+def _fit_padded(label: tuple[str, str], width: int) -> str:
+    # The stop suffix survives whole so a clipped row never loses its failure signal.
+    text, stop = label
+    fitted = _fit(_fit(text, width - pal.display_width(stop)) + stop, width)
     return fitted + " " * (width - pal.display_width(fitted))
 
 
@@ -595,7 +602,7 @@ def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else ("step",)
-    name = pal.ansi(_fit_padded(_step_body(row), name_w), *codes, enabled=color)
+    name = pal.ansi(_fit_padded(_step_label(row), name_w), *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
     return f"  {name}  {dur}  {cells}"
@@ -611,7 +618,7 @@ def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
     body_w = name_w - 2
-    body = pal.ansi(_fit_padded(_sub_body(sub), body_w), *codes, enabled=color)
+    body = pal.ansi(_fit_padded(_sub_label(sub), body_w), *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *dur_codes,
                    enabled=color)
     cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w,

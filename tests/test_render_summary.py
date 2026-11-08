@@ -2385,6 +2385,18 @@ def test_a_long_subagent_body_clips_so_every_table_line_fits_80_columns():
     assert {pal.display_width(table[i]) for i in (4, 5, 6, 8)} == {79}
 
 
+def test_a_clipped_label_keeps_its_stop_word_whole():
+    rows = _threshold_rows("map every ledger row that overflows an eighty col terminal")
+    step, sub = rows[0], rows[0].subagents[1]
+    step.label, step.errored, step.end_ts = "x" * 80, True, _at(90)
+    sub.stop = "failed"
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    assert "x… · failed  " in out[4]
+    assert "↳ explorer (map every ledger row t… · failed  " in out[6]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
 def _cjk_rows(step_label: str, sub_title: str) -> list[StepRow]:
     subs = [SubagentRow(name="explorer", title=sub_title, start_ts=_START,
                         end_ts=_at(71), usage=RowUsage(fresh_input=409_000, output=9_300),
