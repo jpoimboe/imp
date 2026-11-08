@@ -306,10 +306,11 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
 
 
 def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
+    from imp.engine import artifact_files
     from imp.engine.archive import read as archive_read
-    live = _quest_home(control, quest_id) / "artifacts" / rel
-    if live.is_file():
-        return live.read_bytes()
+    live = artifact_files.read_file(_quest_home(control, quest_id), rel)
+    if live is not None:
+        return live
     return archive_read.read_artifact(control, quest_id, rel)
 
 

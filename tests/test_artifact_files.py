@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 from pathlib import Path
 
 from imp.engine import artifact_files
+from imp.paths import project_state_dir
+from tests.conftest import _init_repo
 
 
 def _fixture(tmp_path: Path) -> Path:
@@ -120,3 +123,33 @@ def test_read_file_refuses_traversal_and_malformed_paths(tmp_path: Path) -> None
     for rel in ("../state.json", "/etc/passwd", "spec/../top.md", "./top.md",
                 "spec//q.md", "spec/", ""):
         assert artifact_files.read_file(home, rel) is None, rel
+
+
+_SRC = Path(__file__).resolve().parents[1] / "src" / "imp"
+_READER = _SRC / "engine" / "artifact_files.py"
+_ARTIFACTS_JOIN = re.compile(
+    r"""/\s*["']artifacts["']|["']artifacts["']\s*/"""
+    r"""|(?:join(?:path)?|Path)\([^)]*["']artifacts["']""")
+
+
+def test_only_the_reader_joins_a_path_with_artifacts() -> None:
+    hits = [
+        f"{p.relative_to(_SRC)}:{n}: {line.strip()}"
+        for p in sorted(_SRC.rglob("*.py")) if p != _READER
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if _ARTIFACTS_JOIN.search(line)
+    ]
+    assert hits == []
+
+
+def test_show_artifact_never_reads_a_live_link(tmp_path: Path, tmp_path_factory) -> None:
+    from imp.cli.store import _show_artifact
+    _init_repo(tmp_path)
+    outside = tmp_path_factory.mktemp("outside") / "secret.md"
+    outside.write_text("SECRET\n")
+    art = project_state_dir(tmp_path) / "quests" / "lnk1" / "artifacts"
+    (art / "spec").mkdir(parents=True)
+    (art / "spec" / "lnk1.md").write_text("# spec\n")
+    (art / "leak.md").symlink_to(outside)
+    assert _show_artifact(tmp_path, "lnk1", "spec/lnk1.md") == b"# spec\n"
+    assert _show_artifact(tmp_path, "lnk1", "leak.md") is None
