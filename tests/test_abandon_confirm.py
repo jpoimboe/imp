@@ -41,12 +41,12 @@ def test_removal_description_is_none_for_a_draft(tmp_path: Path) -> None:
 
 def test_abandon_question_matches_pinned_copy() -> None:
     assert abandon_question(
-        "feat01", "worktree and branch imp/feat01 (5 commits)",
-    ) == ("Abandon feat01? This removes its worktree and branch imp/feat01 "
-          "(5 commits). [y/N] ")
+        "feat01", "Add feature", "worktree and branch imp/feat01 (5 commits)",
+    ) == ('Abandon "feat01 · Add feature"? This removes its worktree and branch '
+          "imp/feat01 (5 commits). [y/N] ")
 
 
-_Q = abandon_question("feat01", "worktree and branch imp/feat01 (5 commits)")
+_Q = abandon_question("feat01", "Add feature", "worktree and branch imp/feat01 (5 commits)")
 
 
 async def _press(keys: str) -> bool:

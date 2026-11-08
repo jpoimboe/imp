@@ -1024,7 +1024,7 @@ def _gate_server(tmp_path: Path) -> tuple[str, SessionServer]:
 
 
 def _question(quest_id: str) -> str:
-    return (f"Abandon {quest_id}? This removes its worktree and branch "
+    return (f'Abandon "{quest_id} · B"? This removes its worktree and branch '
             f"imp/{quest_id} (no commits). [y/N] ")
 
 

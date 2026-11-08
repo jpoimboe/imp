@@ -864,7 +864,7 @@ def _fake_confirm(monkeypatch, answer: bool) -> list[str]:
     return asked
 
 
-_C_QUESTION = ("Abandon c? This removes its worktree and branch imp/c (no commits). "
+_C_QUESTION = ('Abandon "c · C"? This removes its worktree and branch imp/c (no commits). '
                "[y/N] ")
 
 

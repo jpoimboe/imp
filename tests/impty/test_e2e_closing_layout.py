@@ -92,7 +92,7 @@ def test_signal_mid_run_renders_the_closing_layout(
 
 
 def test_abandon_confirmed_keeps_the_answer_row_above_the_blank(tmp_path: Path) -> None:
-    with _session(tmp_path, _QUESTION_TURNS, "abandon gate", cols=100) as s:
+    with _session(tmp_path, _QUESTION_TURNS, "abandon gate", cols=120) as s:
         quest_dir = _at_the_question(s, tmp_path)
         _at_empty_prompt(s)
         _send_and_see(s, "/abandon\r", "[y/N]")

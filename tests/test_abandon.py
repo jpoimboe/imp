@@ -485,8 +485,9 @@ def test_abandon_summary_count_captured_before_resident_teardown(
 _FEAT_SUMMARY = "Abandoned feat · removed worktree and branch imp/feat (no commits)."
 
 
-def _question(qid: str, count: str = "no commits") -> str:
-    return f"Abandon {qid}? This removes its worktree and branch imp/{qid} ({count}). [y/N] "
+def _question(qid: str, count: str = "no commits", title: str = "x") -> str:
+    return (f'Abandon "{qid} · {title}"? This removes its worktree and branch '
+            f"imp/{qid} ({count}). [y/N] ")
 
 
 def _tty_prompt(
@@ -639,7 +640,7 @@ def test_cli_abandon_prompts_on_every_selection_route(
     monkeypatch.setattr("imp.cli.resume_select.run_picker", _picker)
     prompts = _tty_prompt(monkeypatch, "n")
     assert _run_abandon(monkeypatch, tmp_path, token) == 130
-    assert prompts == [_question(target)]
+    assert prompts == [_question(target, title=target)]
     _assert_intact(tmp_path, target)
 
 
