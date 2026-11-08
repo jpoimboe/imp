@@ -20,6 +20,7 @@ from imp.agents.skills import list_internal_skills, list_user_skills
 from imp.cli.live_driver import compose_identity_toolbar
 from imp.cli.model_command import print_model_roster, validate_model_arg
 from imp.cli.palette import caret
+from imp.engine.errors import LoadError, LoadErrors
 from imp.remote.session.protocol import SkillRequest
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
@@ -128,9 +129,15 @@ def handle_slash_line(
     if cmd == "model":
         if not args:
             _echo_command(text, output_fn, color=color)
-            print_model_roster(quest=quest, output_fn=output_fn)
+            try:
+                print_model_roster(quest=quest, output_fn=output_fn)
+            except (LoadError, LoadErrors) as exc:
+                output_fn(str(exc))
             return REPROMPT
-        err = validate_model_arg(args, quest=quest)
+        try:
+            err = validate_model_arg(args, quest=quest)
+        except (LoadError, LoadErrors) as exc:
+            err = str(exc)
         if err is not None:
             _echo_command(text, output_fn, color=color)
             output_fn(err)
@@ -143,16 +150,23 @@ def handle_slash_line(
         )
         from imp.providers import provider_choice_error
         from imp.providers.effective import load_effective_config
-        err = (provider_choice_error(
-            args, load_effective_config(control_root=quest.control_root).config)
-            if args else None)
+        try:
+            err = (provider_choice_error(
+                args,
+                load_effective_config(control_root=quest.control_root).config)
+                if args else None)
+        except (LoadError, LoadErrors) as exc:
+            err = str(exc)
         redundant = (bool(args) and err is None
                      and args == current_provider_for(quest))
         if args and err is None and not redundant and not pre_session:
             return f"/provider {args}"
         _echo_command(text, output_fn, color=color)
         if not args:
-            print_provider_roster(quest=quest, output_fn=output_fn)
+            try:
+                print_provider_roster(quest=quest, output_fn=output_fn)
+            except (LoadError, LoadErrors) as exc:
+                output_fn(str(exc))
         elif err is not None:
             output_fn(err)
         elif redundant:

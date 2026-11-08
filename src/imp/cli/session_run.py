@@ -49,10 +49,11 @@ def build_provider_picker(
         quest_provider_groups,
         render_picker,
     )
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.providers import ProviderGroups
 
     @contextlib.contextmanager
-    def _block() -> Iterator[list[str | None]]:
-        groups = quest_provider_groups(quest)
+    def _block(groups: ProviderGroups) -> Iterator[list[str | None]]:
         current = current_provider_for(quest)
         suspend = (status.suspend() if status is not None
                    else contextlib.nullcontext())
@@ -61,7 +62,17 @@ def build_provider_picker(
             yield picker_choices(current, groups)
 
     def _open() -> contextlib.AbstractContextManager[list[str | None]] | None:
-        return _block() if driver.retry_countdown_in_flight() else None
+        if not driver.retry_countdown_in_flight():
+            return None
+        try:
+            groups = quest_provider_groups(quest)
+        except (LoadError, LoadErrors) as exc:
+            suspend = (status.suspend() if status is not None
+                       else contextlib.nullcontext())
+            with suspend:
+                driver.emit_lines(str(exc).splitlines())
+            return None
+        return _block(groups)
 
     return _open
 

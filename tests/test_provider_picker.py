@@ -413,3 +413,22 @@ async def test_the_key_after_a_refused_p_is_read_as_a_fresh_keypress(
     sent, opened = await _drive(monkeypatch, b"pp2", bind_hook=True,
                                 choices=[None, "codex"], gate=gate)
     assert (sent, opened) == (["codex"], 1)
+
+
+def test_a_malformed_config_emits_the_error_and_opens_no_picker(
+    tmp_path: Path, floor_availability, monkeypatch,
+) -> None:
+    from imp.cli.session_run import build_provider_picker
+    from imp.engine.errors import LoadError
+
+    def _boom(*_a, **_k):
+        raise LoadError("bad config")
+
+    quest = _quest(tmp_path, floor_availability)
+    monkeypatch.setattr("imp.providers.effective.load_effective_config", _boom)
+    drv, out = _gate_driver("rate_limit")
+    status = _RecordingStatus()
+
+    assert build_provider_picker(quest, drv, status)() is None
+    assert "bad config" in out.getvalue()
+    assert status.entered == 1

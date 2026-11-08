@@ -222,3 +222,30 @@ async def test_pre_session_provider_resolves_the_quest_onto_that_vendor(
     assert {t: (pm.provider, pm.model) for t, pm in tiers.items()} == {
         t: ("codex", model)
         for t, model in BUILTIN_FLOOR["codex"].tier_defaults.items()}
+
+
+@pytest.fixture
+def malform_config(monkeypatch):
+    # _seed loads the config itself, so the breakage is armed after seeding.
+    from imp.engine.errors import LoadError
+
+    def _boom(*_a, **_k):
+        raise LoadError("bad config")
+
+    return lambda: monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config", _boom)
+
+
+@pytest.mark.parametrize("line", [
+    "/provider", "/provider codex", "/model", "/model codex:gpt-5"])
+def test_a_malformed_config_is_printed_not_raised(
+    tmp_path: Path, malform_config, line: str,
+) -> None:
+    quest, _state, _wf = _seed(tmp_path)
+    malform_config()
+    out: list[str] = []
+
+    assert handle_slash_line(line, quest=quest,
+                             output_fn=out.append) is REPROMPT
+    assert out.count("bad config") == 1
+    assert sum(1 for s in out if s.endswith(line)) == 1
