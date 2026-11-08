@@ -685,12 +685,11 @@ def test_check_next_plan_mid_change_advances_to_plan_writer():
     assert m.var_mutations["plan_index"] == 2
 
 
-def test_deferred_sweep_declares_converge_verify_tolerated_output() -> None:
+def test_deferred_sweep_output_schema_carries_no_toleration_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     fields = wf.agents["deferred-sweep"].output_schema.field_names()
-    assert "converge_verify_tolerated" in fields
-    assert "sweep_tolerated" not in fields
+    assert set(fields) == {"status", "summary"}
 
 
 def test_deferred_sweep_sole_rule_goes_to_wait_for_head() -> None:

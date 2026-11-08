@@ -464,53 +464,25 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     assert "review-panel" not in text
 
 
-def test_deferred_sweep_documents_verify_triage() -> None:
+def test_deferred_sweep_commit_rule_is_conditional() -> None:
     text = SWEEP.read_text()
     low = text.lower()
-    # The toleration is a Deferred Followups line sourced `converge-verify`; the
-    # separate record is retired.
-    assert "tolerated-failures.md" not in text
-    assert "DEFERRED converge-verify:" in text
-    # The single attributability judgment, against the diff.
-    assert "attributable" in low
-    assert "cur_base_head..HEAD" in text
-    # SYNCED-PAIR lockstep with task-lead: the shared judgment ban is broadened past
-    # "a single test" here too — the sweep runs no project check itself.
-    assert "you never re-run a single test" not in low   # the narrow old wording is gone
-    assert "never run the gate, the full suite, lint, or typecheck" in low
-    assert "not even to confirm a fix" in low
-    # The two-category taxonomy is gone.
-    assert "[baseline]" not in text
-    assert "[flaky]" not in text
-    assert "green at baseline" not in low
-    # Feedback-gated: a fresh entry drains the list; a resumed (converge-verify) entry
-    # does triage only and does NOT re-drain.
-    assert "injected feedback" in low
-    assert "triage only" in low
-    # The commit rule is CONDITIONAL, not unconditionally-plain: a regression in what a
-    # quest commit did folds into that commit; anything standalone — or any case without
-    # exactly one unambiguous target — is a plain new commit. Both land unfolded until the
-    # end-of-change cleanup-merge folds and stamps them.
+    # A correction to a quest commit folds into it; anything standalone — or any case
+    # without exactly one unambiguous target — is a plain new commit, both folded and
+    # stamped at the end-of-change cleanup-merge.
     assert "git commit --fixup=<SHA>" in text
-    assert 'git commit -F' in text
-    assert "Never `--fixup=HEAD` blindly" in text
-    # Both paths state the requirement and the fallback: the drain path's
-    # *Commit granularity* section and this triage bullet (AC 3).
-    assert text.count("exactly one unambiguous target") >= 2
-    # The retired unconditional instruction is gone (AC 2).
+    assert "git commit -F" in text
+    assert "exactly one unambiguous target" in text
     assert "Tell the coder to make a **plain new commit**" not in text
     assert "NOT `git commit --fixup=HEAD`" not in text
-    # The max_loops pause meaning is documented (non-converging triage).
-    assert "max_loops" in text
-    assert "non-converging" in low
-    assert "cleanup-merge" in text                  # fold/stamp deferred to the end-of-change gate
-    assert "consume the budget" not in low          # the carry-era budget wording is gone
+    assert "cleanup-merge" in text
+    assert "consume the budget" not in low
 
 
-def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
-    marker = "SYNCED PAIR (task-lead ↔ deferred-sweep)"
-    assert marker in TASK_LEAD.read_text()
-    assert marker in SWEEP.read_text()
+def test_no_synced_pair_note_survives() -> None:
+    # deferred-sweep no longer triages a gate, so task-lead's triage block has no partner.
+    for path in (TASK_LEAD, SWEEP):
+        assert "SYNCED PAIR" not in path.read_text(), path.name
 
 
 def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None:
@@ -520,9 +492,8 @@ def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None
     and the "no target you can name with confidence" fallback would swallow it."""
     text = SWEEP.read_text()
     assert "git log --oneline {{ quest.cur_base_head }}..HEAD" in text
-    # The bare field name survives ONLY at the pre-existing descriptive diff-range
-    # mention, never inside a command the agent is told to run (AC 1e).
-    assert text.count("cur_base_head..HEAD") == 1
+    # The bare field name never appears; only the rendered command carries the range.
+    assert "cur_base_head..HEAD" not in text
 
     body = load_workflow(bundled_workflow_dir("default")).agents[
         "deferred-sweep"].prompt_template_source
@@ -532,35 +503,6 @@ def test_deferred_sweep_fixup_target_range_renders_a_real_base(tmp_path) -> None
         quest_home=".imp/quests/abc", cur_base_head="BASE"),
         workflow_dir=bundled_workflow_dir("default"))
     assert "git log --oneline BASE..HEAD" in out
-
-
-def test_synced_pair_comments_name_one_shared_fix_path() -> None:
-    """Both leads now fix with a fixup when there is a single unambiguous target, so
-    the coordination note must not still claim the paths differ by fixup-vs-plain;
-    the only surviving difference is HOW the target is found."""
-    shared = "the fix path differs only in how a fixup target is found"
-    for path in (TASK_LEAD, SWEEP):
-        flat = " ".join(path.read_text().split())
-        assert shared in flat, path.name
-        assert "only the fix path differs" not in flat, path.name
-        assert "in sweep context with a plain commit" not in flat, path.name
-    sweep_flat = " ".join(SWEEP.read_text().split())
-    lead_flat = " ".join(TASK_LEAD.read_text().split())
-    assert "you resolve it from the log" in sweep_flat
-    assert "deferred-sweep resolves it from the log" in lead_flat
-
-
-def test_deferred_sweep_triage_ban_exempts_the_fixup_target_lookup() -> None:
-    """The no-self-verify ban covers gates, the suite, lint and typecheck — not
-    reading history. Left absolute, it forbids the `git log` the triage path needs
-    to resolve a fixup target, which the no-confident-target fallback would then
-    swallow as a plain commit."""
-    flat = " ".join(SWEEP.read_text().split())
-    assert ("that reasoning, plus the read-only `git log` lookup that resolves a "
-            "fixup target, is the only action here") in flat
-    assert "that reasoning is the only action here" not in flat
-    # The ban itself is untouched.
-    assert "never run the gate, the full suite, lint, or typecheck yourself" in flat
 
 
 def test_no_workflow_prompt_records_a_fixed_item_by_sha() -> None:

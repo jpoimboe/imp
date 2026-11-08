@@ -78,9 +78,9 @@ def test_sweep_and_plan_skeleton_commit_with_a_message_file() -> None:
     # The sweep does not include the partial, so each dispatch string must itself
     # point at the rule — the same clause the task-lead bullet carries.
     assert sweep.count(
-        "`git add <files> && git commit -F` with a message in the house style") == 2
-    # Both sites converted; a lower bound so a future third mention is not a failure.
-    assert sweep.count("git commit -F") >= 2        # the item commit and the sweep fix
+        "`git add <files> && git commit -F` with a message in the house style") == 1
+    # A lower bound so a future second mention is not a failure.
+    assert sweep.count("git commit -F") >= 1        # the standalone item commit
     assert "git commit -m" not in sweep
     # The skeleton stops modelling the old shape in every plan written from it.
     assert 'git commit -F "${TMPDIR:-/tmp}/msg"' in plan_writer

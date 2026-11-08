@@ -86,22 +86,27 @@ def test_deferred_sweep_calibration_clauses() -> None:
     assert "four-test" not in fixed_block
 
 
-def test_deferred_sweep_triage_is_single_source() -> None:
+_SWEEP_BAN = ("- You **never run the gate, the full suite, lint, or typecheck yourself — "
+              "not even to confirm a fix**: coders run focused tests only, and "
+              "`integration-verify` is the quest's one slow run.")
+
+
+def test_deferred_sweep_does_no_gate_triage() -> None:
     body = SWEEP.read_text()
-    low = body.lower()
-    # Single-source: only the slow converge-verify gate resumes deferred-sweep.
-    assert "(converge-verify)" in body
-    assert "(sweep-verify)" not in body
-    # The toleration is recorded as a DEFERRED converge-verify: line.
-    assert "DEFERRED converge-verify:" in body
-    assert "DEFERRED sweep-verify:" not in body
-    # converge_verify_tolerated is the sole toleration flag; sweep_tolerated is gone.
-    assert "converge_verify_tolerated: true" in low
-    assert "sweep_tolerated" not in low
-    # The forward escape routes to wait-for-head.
-    assert "wait-for-head" in low
-    # The Part-2 single-source placeholder ("wired in a later change") is gone.
-    assert "wired in a later change" not in low
+    flat = " ".join(body.split())
+    # No gate resumes the sweep any more: the triage section and its flag are gone.
+    assert "## Verify triage" not in body
+    assert "converge-verify" not in body and "converge_verify" not in body
+    assert "injected feedback" not in body
+    # The sweep runs after the last `verify`, so the merge-queue slow run backstops it.
+    assert "The `integration-verify` gate is the backstop" in flat
+    assert "The `verify` gate is the backstop" not in flat
+
+
+def test_deferred_sweep_dispatch_ends_with_the_self_run_ban() -> None:
+    dispatch = SWEEP.read_text().split("## Dispatch", 1)[1].split("\n## ", 1)[0]
+    bullets = [line for line in dispatch.splitlines() if line.startswith("- ")]
+    assert bullets[-1] == _SWEEP_BAN
 
 
 def test_deferred_sweep_treats_tracked_by_as_terminal() -> None:

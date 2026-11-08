@@ -59,11 +59,6 @@ def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:
     assert "check off" in low
     # The fixed disposition still records the durable opportunistic line in progress.md.
     assert "under `## Completed plans` in `{{ quest.home }}/progress.md`" in sw
-    # The verify-triage toleration is recorded in deferred.md.
-    assert (
-        "Record a toleration as a normal `## Deferred Followups` entry in"
-        " `{{ quest.home }}/deferred.md`"
-    ) in sw
 
 
 def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:

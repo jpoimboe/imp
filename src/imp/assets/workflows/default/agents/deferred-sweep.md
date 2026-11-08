@@ -5,7 +5,6 @@ description: Drain the Deferred Followups list — re-evaluate each item on a ri
 subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
-  converge_verify_tolerated: {type: bool}
   summary: {type: string}
 ---
 
@@ -57,8 +56,9 @@ That bar is the line between **fixed** and **needs-decision**: if the existing g
 
 ## Dispatch — preserve the reviewer discipline
 
-- **Trivial / mechanical fix** (a rename, an import swap, a dedup): dispatch ONLY the coder (`sub_agent(subagent_name="coder", tier="medium", …)`) with the over-reach guardrail — "apply ONLY this named item; it is bounded and mechanical; do not refactor beyond it, touch unrelated code, or alter behavior." Run **no code-reviewer** — this matches the existing nit-only-fixup rule. The `verify` gate is the backstop; self-verify the diff stays within the named item.
+- **Trivial / mechanical fix** (a rename, an import swap, a dedup): dispatch ONLY the coder (`sub_agent(subagent_name="coder", tier="medium", …)`) with the over-reach guardrail — "apply ONLY this named item; it is bounded and mechanical; do not refactor beyond it, touch unrelated code, or alter behavior." Run **no code-reviewer** — this matches the existing nit-only-fixup rule. The `integration-verify` gate is the backstop; self-verify the diff stays within the named item.
 - **Non-trivial fix**: dispatch the coder **and then the code-reviewer** (`sub_agent(subagent_name="code-reviewer", tier="medium", …)`); clear every blocking finding before committing.
+- You **never run the gate, the full suite, lint, or typecheck yourself — not even to confirm a fix**: coders run focused tests only, and `integration-verify` is the quest's one slow run.
 
 ## Work source — bounded, not an open audit
 
@@ -97,29 +97,8 @@ A checked-off `- [x]` line is inert to a re-run (the `- [ ] DEFERRED ` parse ski
 
 Do **not** mark the run degraded — improvement and polish are not correctness (consistent with the existing nit-only-fixup rule).
 
-## Verify triage — tolerated failures (single-source: slow `converge-verify`)
-
-{# SYNCED PAIR (task-lead ↔ deferred-sweep): keep this block's toleration JUDGMENT in lockstep with task-lead.md's (and vice-versa). Both leads are single-source — task-lead ← `verify`, you ← `converge-verify` — so the judgment is uniform; the fix path differs only in how a fixup target is found (task-lead has the task's recorded commit subject; you resolve it from the log, and fall back to a plain commit when no single target is unambiguous). #}
-
-**Feedback-gated, like the drain above.** A **fresh** entry (no injected feedback) drains the Deferred Followups list as above and does NOT triage — return `converge_verify_tolerated: false`. Only a **resumed** entry that began with injected feedback performs **triage only**: do NOT re-drain the list, just adjudicate the failures.
-
-The only gate that resumes you is the slow **`converge-verify`** gate (its injected feedback contains `(converge-verify)`), so the source label is always `converge-verify`. A toleration emits `converge_verify_tolerated: true`, routing **forward to `wait-for-head`** (the slow gate never re-runs).
-
-Reason over the OPAQUE failure text against the diff (`cur_base_head..HEAD`) — pure judgment. You **never run the gate, the full suite, lint, or typecheck yourself — not even to confirm a fix**; that reasoning, plus the read-only `git log` lookup that resolves a fixup target, is the only action here.
-
-Record a toleration as a normal `## Deferred Followups` entry in `{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with `converge-verify` as its source, never an agent. The EXACT shape:
-
-`- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
-
-- **Every current failure is already recorded as a `DEFERRED converge-verify:` line in `## Deferred Followups`, or is plainly not attributable to the diff** → append any not-yet-recorded such failure in the shape above (create the `## Deferred Followups` heading if absent), make NO commit, and return `converge_verify_tolerated: true`. Run the convergence check by grepping `## Deferred Followups` for `DEFERRED converge-verify:` lines and matching each line's embedded failure signature against the current failure output. The workflow forward-escapes to `wait-for-head` and never re-runs. A toleration born `— needs-decision:` is inert to the list drain per the drain-only-untagged invariant. It is **visibility, not reproduction**: it changes nothing about the merge — `finalize` surfaces it to a human before merge.
-- **A failure attributable to the diff** → fix it via the coder and return `converge_verify_tolerated: false` so the loop re-runs the slow `converge-verify` gate; do not self-verify. Commit it by *Commit granularity* above: a regression in what a quest commit did folds into that commit (`git commit --fixup=<SHA>`, target resolved from the log); anything standalone, or any case without exactly one unambiguous target, is a plain new commit — `git add <files> && git commit -F` with a message in the house style. Never `--fixup=HEAD` blindly — by the time the sweep runs, `HEAD` is rarely the commit at fault.
-
-Emit `converge_verify_tolerated: true` ONLY on the all-tolerated case above; on every other return — a fresh list-drain entry, a real-regression fix — emit `converge_verify_tolerated: false`. A **`max_loops` pause at `converge-verify`** means the triage is **non-converging** — an unrecognized flake or a hard regression you could not fix in the budget; it escalates to a human, not a transient to retry.
-
 ## Finish
 
-Return `converge_verify_tolerated: true` only on an all-tolerated `converge-verify` triage; it is `false` on every list-drain entry and every real-regression fix.
+If there is no `## Deferred Followups` section, or it has no parsable items, that is a normal, common outcome — nothing to drain. Make no commits and call `complete_step` with `status: Success` and a `summary` saying the list was empty.
 
-If there is no `## Deferred Followups` section, or it has no parsable items, that is a normal, common outcome — nothing to drain. Make no commits and call `complete_step` with `status: Success`, `converge_verify_tolerated: false`, and a `summary` saying the list was empty.
-
-When the list is drained (every parsable item has a disposition recorded; malformed lines left untouched), call `complete_step` with `status: Success`, `converge_verify_tolerated: false`, and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent's final message reports `NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you write.
+When the list is drained (every parsable item has a disposition recorded; malformed lines left untouched), call `complete_step` with `status: Success` and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent's final message reports `NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you write.
