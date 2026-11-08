@@ -21,6 +21,7 @@ from imp.cli.render_text import render_tree
 from imp.engine.state import InMemoryEventLog
 from tests._event_fixtures import (
     INTERNAL_TOOLS,
+    INTERRUPTED_SUBAGENT,
     agent_text,
     assert_spec_marker_scrollback,
     ev,
@@ -3049,14 +3050,15 @@ def test_full_subagent_header_clips_and_collapses_task_description() -> None:
     # whitespace (incl. newlines) collapses to single spaces.
     long_sub = nv.SubagentFold(
         subagent_name="explorer", event_id="e", block_id="b",
-        nested=nv.NarrativeBuilder(), task_description="x" * 200)
+        nested=nv.NarrativeBuilder(), running=False, task_description="x" * 200)
     long_out = list(rt._render_subagent(long_sub, depth=0, full=True,
                                         color=False, width=80))
     assert long_out[0] == "▾ explorer · " + "x" * rt._SUBAGENT_TASK_CLIP + "…"
 
     multiline = nv.SubagentFold(
         subagent_name="explorer", event_id="e", block_id="b",
-        nested=nv.NarrativeBuilder(), task_description="Map  the\nauth   module")
+        nested=nv.NarrativeBuilder(), running=False,
+        task_description="Map  the\nauth   module")
     ml_out = list(rt._render_subagent(multiline, depth=0, full=True,
                                       color=False, width=80))
     assert ml_out[0] == "▾ explorer · Map the auth module"
@@ -4673,3 +4675,58 @@ def test_complete_step_ack_flushed_by_prose_keeps_live_log_parity() -> None:
     live = _live_body(events, cats)
     assert "→ step complete" not in live
     assert live == _log_body(events, cats)
+
+
+def test_full_subagent_header_ends_with_the_lean_rows_tag() -> None:
+    def header(*, color=False):
+        events = titled_subagent_events(_TITLE, error_content=INTERRUPTED_SUBAGENT)
+        out = render_tree(nv.build_tree(events), full=True, color=color, width=80)
+        return next(ln for ln in out if "▾ explorer" in ln)
+
+    assert header() == f"▾ explorer · {_TITLE} · interrupted"
+    assert header(color=True) == (pal.ansi("▾ explorer", *pal.NODE_COLORS["subagent"])
+                                  + f" · {_TITLE}" + pal.ansi(" · interrupted", "wordmark"))
+
+
+def _full_header(**fields: object) -> str:
+    fold = nv.SubagentFold(subagent_name="explorer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False)
+    for k, v in fields.items():
+        setattr(fold, k, v)
+    return next(rt._render_subagent(fold, depth=0, full=True, color=False, width=80))
+
+
+@pytest.mark.parametrize(("fields", "word"), [
+    pytest.param({"is_error": True, "terminal_state": "interrupted"}, "interrupted",
+                 id="interrupted"),
+    pytest.param({"is_error": True, "terminal_state": "stalled"}, "stalled", id="stalled"),
+    pytest.param({"is_error": True, "terminal_state": "context_exhausted"},
+                 "context exhausted", id="context-exhausted"),
+    pytest.param({"is_error": True, "terminal_state": "suspended"}, "suspended",
+                 id="suspended"),
+    pytest.param({"is_error": True}, "failed", id="plain-failure"),
+    pytest.param({"running": True}, "running", id="running"),
+])
+def test_full_subagent_header_tag_matches_the_lean_row(fields, word) -> None:
+    fold = nv.SubagentFold(subagent_name="explorer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False)
+    for k, v in fields.items():
+        setattr(fold, k, v)
+    assert rt.subagent_status_row(fold, depth=0, color=False).endswith(f" · {word}")
+    assert _full_header(title="map repo", **fields) == f"▾ explorer · map repo · {word}"
+    assert _full_header(task_description="Map  the\nauth   module", **fields) \
+        == f"▾ explorer · Map the auth module · {word}"
+    assert _full_header(**fields) == f"▾ explorer · {word}"
+
+
+def test_full_subagent_header_running_tag_is_subagent_magenta() -> None:
+    fold = nv.SubagentFold(subagent_name="explorer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), task_description="go")
+    sub_c = pal.NODE_COLORS["subagent"]
+    assert next(rt._render_subagent(fold, depth=0, full=True, color=True, width=80)) \
+        == pal.ansi("▾ explorer · go", *sub_c) + pal.ansi(" · running", *sub_c)
+
+
+def test_full_clean_subagent_header_carries_no_tag() -> None:
+    assert _full_header(title="map repo") == "▾ explorer · map repo"
+    assert _full_header() == "▾ explorer"

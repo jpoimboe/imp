@@ -1477,16 +1477,17 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool = False,
     # --full stays a superset of the lean view.
     header = f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}"
     sub_c = pal.NODE_COLORS["subagent"]
+    tag = _subagent_tag(sub, color=color)
     title = display_subagent_title(sub.title)
     if title:
-        yield _line(header, depth, color, *sub_c, gutters=gutters) + f" · {title}"
+        yield _line(header, depth, color, *sub_c, gutters=gutters) + f" · {title}" + tag
     else:
         task = " ".join(sub.task_description.split()) if sub.task_description else ""
         if task:
             if len(task) > _SUBAGENT_TASK_CLIP:
                 task = task[:_SUBAGENT_TASK_CLIP] + "…"
             header += f" · {_caret_escape(task)}"
-        yield _line(header, depth, color, *sub_c, gutters=gutters)
+        yield _line(header, depth, color, *sub_c, gutters=gutters) + tag
     yield from _render_children(sub.tree.root.children, depth=depth + 1, cats=cats,
                                 color=color, width=width, display_width=display_width,
                                 gutters=(*gutters, depth))
