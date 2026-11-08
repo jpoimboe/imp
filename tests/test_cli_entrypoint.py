@@ -106,7 +106,7 @@ def test_imp_help_help_prints_the_help_subparsers_own_usage(tmp_path: Path) -> N
     r = _front_door(["help", "help"], tmp_path, {"NO_COLOR": "1"})
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith("usage: imp help [-h] [<command>]\n")
-    assert "  <command>\n" in r.stdout
+    assert "  <command>   Command to show help for.\n" in r.stdout
 
 
 @pytest.mark.parametrize("flag", ["-h", "--help"])
