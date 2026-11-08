@@ -5,6 +5,8 @@ import pytest
 from imp.cli import palette as pal
 from imp.cli.accounting import RowUsage
 from imp.cli.narrative import Exclusions, elapsed_seconds
+from imp.cli.quota_column import FOOTNOTE, quota_view
+from imp.cli.quota_share import Charge, GaugeCharge
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
@@ -18,6 +20,7 @@ from imp.cli.render_summary import (
     legend_lines,
     open_span_label,
     render_summary,
+    rows_charge,
     summary_total,
     summary_totals,
 )
@@ -2241,3 +2244,106 @@ def test_ledger_row_clips_a_long_title_and_keeps_columns_aligned():
     step = next(ln for ln in out if ln.strip().startswith("spec"))
     total = next(ln for ln in out if ln.strip().startswith("total"))
     assert step.index("—") == sub.index("—") == total.index("—")
+
+
+def _at(secs: int) -> str:
+    return f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
+
+
+def _pts(gauge: str, points: float) -> Charge:
+    return Charge.of(gauge, GaugeCharge.resolved(points))
+
+
+def _notional(fresh: int, out: int, dollars: float) -> RowUsage:
+    return RowUsage(fresh_input=fresh, output=out, dollars=dollars, priced=1,
+                    notional=1)
+
+
+def _threshold_rows(second_title: str = "map escalation and notice mechanisms"
+                    ) -> list[StepRow]:
+    subs = [SubagentRow(name="explorer", title="map spec phase decision flow",
+                        start_ts=_START, end_ts=_at(71),
+                        usage=RowUsage(fresh_input=409_000, output=9_300),
+                        charge=_pts("claude", 0.02)),
+            SubagentRow(name="explorer", title=second_title,
+                        start_ts=_START, end_ts=_at(79),
+                        usage=RowUsage(fresh_input=552_800, output=9_700),
+                        charge=_pts("claude", 0.02))]
+    return [StepRow(phase="threshold", step="threshold", start_ts=_START,
+                    subagents=subs)]
+
+
+_THRESHOLD_HDR = SummaryHeader(
+    quest_id="defi21", title="Stop specs silently reversing user-approved decisions",
+    status="running", total_seconds=153.0)
+
+
+def _dollar_rows() -> list[StepRow]:
+    sub = SubagentRow(name="explorer", title="map the ledger renderer and every caller",
+                      start_ts=_START, end_ts=_at(420),
+                      usage=_notional(350_000, 4_000, 0.40))
+    return [StepRow(phase="spec", step="spec-finalizer",
+                    label="addressing spec review feedback from the second lap",
+                    start_ts=_START, end_ts=_at(90),
+                    usage=_notional(163_000, 3_000, 0.27), subagents=[sub])]
+
+
+def _mixed_rows() -> list[StepRow]:
+    return [StepRow(phase="plan", step="plan-writer",
+                    label="writing the implementation plan for part one of two",
+                    start_ts=_START, end_ts=_at(90),
+                    usage=_notional(1_000_000, 20_000, 3.0),
+                    charge=_pts("claude", 0.9)),
+            StepRow(phase="plan", step="coder", start_ts=_START, end_ts=_at(120),
+                    usage=_notional(500_000, 9_000, 3.0),
+                    charge=_pts("codex", 60.0))]
+
+
+def _quota_render(rows: list[StepRow], header: SummaryHeader,
+                  width: int) -> list[str]:
+    return render_summary(rows, header=header, color=False, width=width,
+                          quota=quota_view(rows_charge(rows)))
+
+
+def test_unbounded_width_keeps_a_quota_ledger_byte_identical():
+    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 10_000) == [
+        "defi21  ·  Stop specs silently reversing user-approved decisions  ·  running",
+        "                                                                   tokens       quota",
+        "                                                          time      in    out  weekly*",
+        "threshold phase",
+        "  threshold                                            running  961.8k  19.0k   0.04%",
+        "    ↳ explorer (map spec phase decision flow)           1m 11s  409.0k   9.3k   0.02%",
+        "    ↳ explorer (map escalation and notice mechanisms)   1m 19s  552.8k   9.7k   0.02%",
+        "",
+        "  total                                                 2m 33s  961.8k  19.0k   0.04%",
+        f"  {FOOTNOTE}",
+    ]
+
+
+def test_unbounded_width_keeps_a_dollar_ledger_byte_identical():
+    assert render_summary(_dollar_rows(), header=_HDR, color=False, width=10_000) == [
+        "abc  ·  feature  ·  completed",
+        "                                                             time      in   out    cost",
+        "spec phase",
+        "  addressing spec review feedback from the second lap      1m 30s  513.0k  7.0k  $0.67*",
+        "    ↳ explorer (map the ledger renderer and every caller)   7m 0s  350.0k  4.0k  $0.40*",
+        "",
+        "  total                                                    39m 2s  513.0k  7.0k  $0.67*",
+        "  * theoretical API list price; actual subscription usage is much lower",
+    ]
+
+
+def test_unbounded_width_keeps_a_mixed_provider_ledger_byte_identical():
+    assert _quota_render(_mixed_rows(), _HDR, 10_000) == [
+        "abc  ·  feature  ·  completed",
+        "                                                                  tokens       quota",
+        "                                                         time      in    out  weekly*",
+        "plan phase",
+        "  writing the implementation plan for part one of two  1m 30s    1.0M  20.0k   0.90%",
+        "  coder                                                 2m 0s  500.0k   9.0k  60.00%",
+        "",
+        "  total                                                39m 2s    1.5M  29.0k       —",
+        "    claude                                                                     0.90%",
+        "    codex                                                                     60.00%",
+        f"  {FOOTNOTE}",
+    ]
