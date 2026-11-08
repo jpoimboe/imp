@@ -133,7 +133,8 @@ Run this top-to-bottom once on a real feature-sized intent:
    `send("\x04")` and grab the change id (`cd "$WT" && imp list`, the id column). Spawn
    `imp resume <id>`. Judge: does the resume banner make it obvious which
    Change you're continuing and where it left off — and does it land you back where you left
-   it? Header parity with the live run? Then run `imp log <id>`. Judge: does a
+   it? Below the banner, do the agent's last message and what followed it replay, with
+   earlier turns absent? Header parity with the live run? Then run `imp log <id>`. Judge: does a
    `paused · resumed … later` line sit where the run stopped, with a duration matching the
    time you were away?
 5. **Sweep every subcommand** — enumerate the real surface so nothing is missed as imp grows

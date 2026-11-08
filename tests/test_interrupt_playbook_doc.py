@@ -25,6 +25,10 @@ _WHERE_YOU_LEFT = (
     " prompt |"
     " Leaving again from the landing re-applies the same rule; a stale landing never outlives"
     " the step it was recorded for. Headless and autonomous resumes always run the agent."
+    " Every resume — draft or built — first replays, under the `resuming` header, the current"
+    " step agent's last message and everything after it (your replies, tool runs, subagent"
+    " folds); earlier turns stay in `imp log <id>`. A step with no agent message yet replays"
+    " nothing. An inert pending-question resume prints that question itself instead."
 )
 _RESUMED_HOLD = "`paused · enter to continue · type to redirect · Ctrl-D to leave`"
 
@@ -70,6 +74,8 @@ def test_resume_and_verify_asserts_the_where_you_left_table() -> None:
     step = _between("### **`RESUME-AND-VERIFY(id)`**", "\n---")
     assert ("4. Assert the landing per the *where you left* table in §0b, for whichever"
             " gesture you left with.") in step
+    assert ("Below the header it replays the step agent's last message and everything after"
+            " it, earlier turns absent (§0b).") in step
     for check in ("**SIGTERM mid-run**", "**Ctrl-D at the resumed hold prompt**",
                   "**An answer typed at a re-asked question**"):
         assert check in step, check
@@ -120,3 +126,12 @@ def test_phase0_leave_outcomes_are_scoped_by_regime() -> None:
     assert len(rows) == 4
     for row in rows:
         assert clause in row, row
+
+
+def test_resume_landings_name_the_replayed_tail() -> None:
+    flat = _flat(DOC.read_text())
+    assert "transcript replays" not in flat
+    assert ("(resume_target = None: the agent's last message and what followed replay,"
+            " no intervening prompt)") in flat
+    assert ("(the agent's last message and what followed replay, then the next agent turn"
+            " runs) — no hold prompt is shown.") in flat
