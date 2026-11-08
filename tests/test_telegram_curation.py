@@ -97,7 +97,7 @@ def test_errored_is_not_a_buzz_event_or_label() -> None:
 @pytest.mark.parametrize(
     "payload,expected",
     [
-        ({"reason": "context_window", "kind": "reincarnation_cap"}, "hit the context limit"),
+        ({"reason": "context_window", "kind": "reincarnation_cap"}, "used up its context handoffs"),
         ({"reason": "max_loops"}, "stuck in a loop"),
         ({"reason": "unknown_step"}, "workflow error"),
     ],
@@ -162,7 +162,7 @@ def test_awaiting_user_pause_is_silent() -> None:
 
 def test_pause_reason_bodies_exact() -> None:
     assert imp_telegram._PAUSE_REASON_BODIES == {
-        "context_window": "hit the context limit",
+        "context_window": "used up its context handoffs",
         "max_loops": "stuck in a loop",
         "unknown_step": "workflow error",
         "reauth_needed": "needs you to re-authenticate",
@@ -173,7 +173,7 @@ def test_pause_reason_bodies_exact() -> None:
 def test_reincarnation_cap_stop_buzzes_with_body() -> None:
     payload = {"reason": "context_window", "kind": "reincarnation_cap"}
     assert imp_telegram.curate("workflow_paused", payload) == "buzz"
-    assert imp_telegram.event_body("workflow_paused", payload) == "hit the context limit"
+    assert imp_telegram.event_body("workflow_paused", payload) == "used up its context handoffs"
 
 
 def test_tier_b_context_window_is_silent_with_empty_body() -> None:
