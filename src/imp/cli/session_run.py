@@ -113,6 +113,21 @@ def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
                           merge_commit=state.merge_commit)
 
 
+def _emit_settled_completion(
+    quest: Quest, outcome: SettledOutcome, *, intent: str | None,
+) -> None:
+    """The completed block from a disk-resolved outcome: merged form when the record
+    carries a merge commit, with the commits recorded on that ending."""
+    from imp.cli.main import Merge, _emit_completed, _recorded_commits
+    merge = (Merge(base=quest.base_branch, commit=outcome.merge_commit)
+             if outcome.merge_commit is not None else None)
+    _emit_completed(
+        quest,
+        merge=merge,
+        intent=intent,
+        commits=_recorded_commits(outcome.events, merged=merge is not None))
+
+
 def _closing_block(
     quest: Quest, *, witness: RunWitness, ending: StreamEnding,
     coord: InterruptCoordinator, leave_state: dict[str, str],
@@ -133,7 +148,6 @@ def _closing_block(
         _emit_paused_summary,
         _leave_trigger,
         _print_leave_disposition,
-        _recorded_commits,
     )
     from imp.cli.store import _resolve_intent
     intent = witness.intent()
@@ -182,13 +196,7 @@ def _closing_block(
     outcome = resolve_settled_outcome(quest)
     settled_intent = _resolve_intent(outcome.events)
     if outcome.completed:
-        merge = (Merge(base=quest.base_branch, commit=outcome.merge_commit)
-                 if outcome.merge_commit is not None else None)
-        _emit_completed(
-            quest,
-            merge=merge,
-            intent=settled_intent,
-            commits=_recorded_commits(outcome.events, merged=merge is not None))
+        _emit_settled_completion(quest, outcome, intent=settled_intent)
         return ExitCode.OK
     _emit_lost_connection(quest, intent=settled_intent or intent)
     return ExitCode.LOST_CONNECTION
