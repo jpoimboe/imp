@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from imp.cli.narrative import NarrativeTree
     from imp.cli.quota_column import QuotaColumn, QuotaFallback
     from imp.cli.render_summary import StepRow, SummaryHeader
-    from imp.cli.store import QuestCard, SearchHit, Store, Zone, _Row
+    from imp.cli.store import QuestCard, SearchHit, SearchZones, Store, Zone, _Row
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.quest import Quest
     from imp.engine.state import State
@@ -3858,20 +3858,19 @@ def _board_json(control: Path, *, dispositions: set[str],
 _SEARCH_ZONES: tuple[Zone, ...] = ("active", "backlog", "history")
 
 
-def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
-    """(search_active, search_backlog, history_statuses) from the search flags."""
-    statuses: set[str] = set()
-    if args.completed:
-        statuses.add("completed")
-    if args.abandoned:
-        statuses.add("abandoned")
-    if args.archived:
-        statuses.add("archived")
-    if args.merged_after is not None:
-        statuses.add("completed")
+def _selected_search(args: argparse.Namespace, merged_after: str | None) -> SearchZones:
+    """Zones from the five zone flags; none searches everything, merged_after implies completed."""
+    from imp.cli.store import SearchZones
+    statuses = frozenset(
+        status for status, on in (("completed", args.completed),
+                                  ("abandoned", args.abandoned),
+                                  ("archived", args.archived)) if on)
+    if merged_after is not None:
+        statuses |= {"completed"}
     if not (args.active or args.backlog or statuses):
-        return True, True, {"completed", "abandoned", "archived"}
-    return args.active, args.backlog, statuses
+        return SearchZones(True, True, frozenset({"completed", "abandoned", "archived"}),
+                           merged_after)
+    return SearchZones(args.active, args.backlog, statuses, merged_after)
 
 
 def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
@@ -4101,11 +4100,9 @@ def _search_list_line(
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
-    from imp.cli.store import SearchZones, make_store
+    from imp.cli.store import make_store
     control = _control if _control is not None else _control_root()
-    want_active, want_backlog, statuses = _selected_search(args)
-    zones = SearchZones(active=want_active, backlog=want_backlog,
-                        statuses=frozenset(statuses), merged_after=args.merged_after)
+    zones = _selected_search(args, args.merged_after)
     hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
         zone_flags = [("--active", args.active), ("--backlog", args.backlog),
