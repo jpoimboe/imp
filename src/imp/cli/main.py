@@ -3905,14 +3905,15 @@ def _widening_flags(zone_flags: list[tuple[str, bool]],
     return zones + [flag for flag, on in filter_flags if on]
 
 
-def _search_miss_lines(query: str, drop: list[str], *, suggest_events: bool) -> list[str]:
+def _search_miss_lines(query: str, drop: list[str], *,
+                       noun: Literal["quests", "events"], suggest_events: bool) -> list[str]:
     if drop:
         hint = f"Try another term, or drop {' '.join(drop)} to widen the search."
     elif suggest_events:
         hint = "Try another term, or `imp events search` to include tool calls and results."
     else:
         hint = "Try another term."
-    return [f'No quests match "{query}".',
+    return [f'No {noun} match "{query}".',
             pal.ansi(hint, "dim", enabled=should_use_color(sys.stdout))]
 
 
@@ -4129,7 +4130,8 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
                       ("--archived", args.archived)]
         drop = _widening_flags(zone_flags, [("--merged-after", args.merged_after is not None)])
         narrowed = any(on for _, on in zone_flags) or args.merged_after is not None
-        _emit_human(_search_miss_lines(args.query, drop, suggest_events=not narrowed))
+        _emit_human(_search_miss_lines(args.query, drop, noun="quests",
+                                       suggest_events=not narrowed))
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
@@ -4208,7 +4210,7 @@ def _cmd_events_search(
     args: argparse.Namespace, _control: Path | None = None,
 ) -> int:
     if args.query is None:
-        args.parser.print_help(sys.stderr)
+        _emit_cli_error("events search needs a query — see imp events search -h")
         return 2
     if error := _events_search_output_control_error(args):
         _emit_cli_error(error)
@@ -4227,7 +4229,8 @@ def _cmd_events_search(
                  ("--completed", args.completed), ("--abandoned", args.abandoned),
                  ("--archived", args.archived)],
                 [("--type", bool(args.type)), ("--agent", bool(args.agent))])
-            _emit_human(_search_miss_lines(args.query, drop, suggest_events=False))
+            _emit_human(_search_miss_lines(args.query, drop, noun="events",
+                                           suggest_events=False))
         return 0
     color = should_use_color(sys.stdout)
     zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
@@ -4465,7 +4468,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
         help="Structured output, bounded like the default view unless --all.")
     p.add_argument("--no-pager", action="store_true",
                    help="Disable the pager even when stdout is a TTY.")
-    p.set_defaults(func=_cmd_events_search, parser=p)
+    p.set_defaults(func=_cmd_events_search)
     return p
 
 

@@ -351,7 +351,7 @@ def test_cmd_events_search_no_match_headline_and_hint(
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
     rc = m._cmd_events_search(_search_ns("zzqq", **flags), tmp_path)
     assert rc == 0
-    assert capsys.readouterr().out == f'No quests match "zzqq".\n{hint}\n'
+    assert capsys.readouterr().out == f'No events match "zzqq".\n{hint}\n'
 
 
 def test_cmd_events_search_no_match_dims_only_the_hint(
@@ -361,7 +361,7 @@ def test_cmd_events_search_no_match_dims_only_the_hint(
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
     m._cmd_events_search(_search_ns("zzqq"), tmp_path)
     assert capsys.readouterr().out.splitlines() == [
-        'No quests match "zzqq".',
+        'No events match "zzqq".',
         pal.ansi("Try another term.", "dim", enabled=True),
     ]
 
