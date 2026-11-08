@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -222,6 +224,40 @@ def test_ctrl_c_hint_then_ctrl_d_at_opening_prompt_leaves_a_blank_above_the_spin
         s.send("\x03")
         assert _poll(lambda: hint in s.lines(), timeout=E2E_POLL_TIMEOUT), \
             "\n".join(s.lines())
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        rows = s.lines()
+        assert rc == 130, "\n".join(rows)
+        at = rows.index(hint)
+        assert rows[at + 1:at + 3] == ["", f"{qid} · (unnamed) · discarded"], "\n".join(rows)
+
+
+def test_sigint_hint_at_opening_prompt_under_a_non_exec_wrapper(tmp_path: Path) -> None:
+    script = {"default": [{"text": "unused", "tools": [
+        {"name": "complete_step", "input": {"status": "Success"}}]}]}
+    script_path = seed_minimal_repo(tmp_path, script=script)
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
+    hint = "press Ctrl-D to pause & exit"
+
+    # The trailing command stops sh exec-ing imp, so imp is not its process-group leader.
+    with TerminalSession(
+        ["sh", "-c", f"{shlex.quote(sys.executable)} -m imp new; exit $?"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        qid = _wait_for_opening_prompt(s)
+        children = subprocess.run(
+            ["pgrep", "-P", str(s.pid)],
+            capture_output=True, text=True, check=True).stdout.split()
+        assert len(children) == 1, children
+        os.kill(int(children[0]), signal.SIGINT)
+
+        def _hint_above_prompt() -> bool:
+            rows = s.lines()
+            return hint in rows and any(
+                r.startswith("> ") for r in rows[rows.index(hint) + 1:])
+
+        assert _poll(_hint_above_prompt, timeout=E2E_POLL_TIMEOUT), "\n".join(s.lines())
         s.send("\x04")
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 

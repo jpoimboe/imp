@@ -279,7 +279,7 @@ def test_async_cmd_new_chat_mode_does_not_proxy(
     def _boom(*a, **k):
         raise _Stop
 
-    monkeypatch.setattr("imp.cli.signals.install_process_group", _boom)
+    monkeypatch.setattr(main, "_control_root", _boom)
     args = argparse.Namespace(
         opening="brief", title=None, workflow=None, base=None,
         idea=None, depends_on=None)
