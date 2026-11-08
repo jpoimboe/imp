@@ -2706,11 +2706,13 @@ def _fmt_hm(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def _pause_gap_text(gap_s: int) -> str:
+    return (_fmt_hm(gap_s).removesuffix(" 0h") if gap_s >= 48 * 3600
+            else fmt_seconds(gap_s).removesuffix(" 0s").removesuffix(" 0m"))
+
+
 def resume_marker_text(node: ResumeMarkerNode) -> str:
-    gap = node.gap_s
-    duration = (_fmt_hm(gap).removesuffix(" 0h") if gap >= 48 * 3600
-                else fmt_seconds(gap).removesuffix(" 0s").removesuffix(" 0m"))
-    return f"paused · resumed {duration} later"
+    return f"paused · resumed {_pause_gap_text(node.gap_s)} later"
 
 
 def leave_marker_text(node: LeaveMarkerNode) -> str:

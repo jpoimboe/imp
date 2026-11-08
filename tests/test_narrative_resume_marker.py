@@ -245,6 +245,18 @@ def test_duration_floors(gap: float, text: str) -> None:
     assert _markers(_agent_run(gap=gap)) == [f"paused · resumed {text} later"]
 
 
+# AC3: the resume recap's pause age shares these strings (test_narrative_interrupt_recap.py).
+SHARED_DURATIONS: list[tuple[int, str]] = [
+    (59, "59s"), (60, "1m"), (3 * 3600, "3h"), (2 * 3600 + 13 * 60, "2h 13m"),
+    (49 * 3600, "2d 1h"),
+]
+
+
+@pytest.mark.parametrize(("gap", "text"), SHARED_DURATIONS)
+def test_marker_durations_match_the_recap_age(gap: int, text: str) -> None:
+    assert _markers(_agent_run(gap=gap)) == [f"paused · resumed {text} later"]
+
+
 # AC5(b)
 @pytest.mark.parametrize("gap", [0, 0.6, 0.999])
 def test_a_gap_under_one_second_gets_no_marker(gap: float) -> None:
