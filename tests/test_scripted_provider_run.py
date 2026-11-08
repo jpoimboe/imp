@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import json
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -88,3 +89,24 @@ def test_scripted_tool_calls_produce_real_commit_and_sentinel(
                   and e["payload"].get("name") == "bash"]
     assert bash_calls
 
+
+def test_scripted_turn_text_is_journaled_as_agent_prose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = {"default": [
+        {"text": "checking the tree", "tools": [{"name": "bash", "input": {"command": "true"}}]},
+        {"tools": [{"name": "complete_step", "input": {"outcome": "ok", "status": "Success"}}]},
+    ]}
+    script_path = tmp_path / "script.json"
+    script_path.write_text(json.dumps(script))
+    monkeypatch.setenv("IMP_SCRIPTED_SCRIPT", str(script_path))
+    _seed_scripted_repo(tmp_path, script_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="2026-06-12-bbb222", base_branch="main")
+
+    events: list[dict[str, Any]] = []
+    anyio.run(functools.partial(run_quest, ch, on_event=events.append))
+
+    # A prose turn carries its text, as a real provider's raw does; a tool-only turn stays empty.
+    assert [e["payload"]["raw"]["content"] for e in events
+            if e["type"] == "agent_message"] == [
+        [{"type": "text", "text": "checking the tree"}], []]
