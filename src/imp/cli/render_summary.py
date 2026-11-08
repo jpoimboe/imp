@@ -394,6 +394,22 @@ def overlay_units(summary: list[StepRow], by_row: dict[str, Units]) -> None:
             sub.units = by_row.get(sub.key, NO_UNITS)
 
 
+def overlay_spans(summary: list[StepRow], full: list[StepRow]) -> None:
+    """Give each row the end its span reached in `full`, a build of the unfiltered log."""
+    steps = {row.key: row for row in full}
+    subs = {sub.key: sub for row in full for sub in row.subagents}
+    for row in summary:
+        step = steps.get(row.key)
+        if step is not None:
+            row.end_ts, row.end_inferred = step.end_ts, step.end_inferred
+            row.wait_seconds, row.errored = step.wait_seconds, step.errored
+        for sub in row.subagents:
+            src = subs.get(sub.key)
+            if src is not None:
+                sub.end_ts, sub.end_inferred, sub.errored = (
+                    src.end_ts, src.end_inferred, src.errored)
+
+
 def summary_totals(
     summary: list[StepRow], total_seconds: float | None,
     exclusions: Exclusions = NO_EXCLUSIONS,
