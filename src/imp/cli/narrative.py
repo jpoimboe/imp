@@ -231,7 +231,8 @@ class ToolCall:
     result: str | None = None
     is_error: bool = False
     killed: bool = False
-    call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
+    call_ts: str | None = None         # the constructing event's timestamp
+    result_ts: str | None = None       # the pairing tool_result's timestamp
     citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
@@ -2015,6 +2016,17 @@ def _union_seconds(segments: list[tuple[float, float]]) -> float:
     return total
 
 
+def tool_seconds(calls: list[ToolCall]) -> float:
+    """Union of the calls' tool_call→tool_result intervals; calls without a result add nothing."""
+    ref = next((c.call_ts for c in calls if c.call_ts), None)
+    segments: list[tuple[float, float]] = []
+    for c in calls:
+        lo, hi = elapsed_seconds(ref, c.call_ts), elapsed_seconds(ref, c.result_ts)
+        if lo is not None and hi is not None:
+            segments.append((lo, hi))
+    return _union_seconds(segments)
+
+
 @dataclass(frozen=True)
 class Exclusions:
     """Wall-clock intervals of a run that are not work: human waits and pauses."""
@@ -2411,6 +2423,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
                 # This turn actually ran → advance the clock.
                 burst.end_ts = ts
                 call.result = summary
+                call.result_ts = ts
                 call.citations_footer = footer
                 call.is_error = is_error
                 return
@@ -2425,7 +2438,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     burst.end_ts = ts
     burst.calls.append(ToolCall(
         call_id=rid, name="tool", input={}, result=summary,
-        citations_footer=footer, is_error=is_error, call_ts=ts))
+        citations_footer=footer, is_error=is_error, call_ts=ts, result_ts=ts))
 
 
 def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

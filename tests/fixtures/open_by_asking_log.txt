@@ -12,19 +12,19 @@ spec-writer · opus
 
 • Let me explore the CLI structure before proposing a design.
 
-  2 calls · ToolSearch · 8s
+  2 calls · ToolSearch
 
 • Let me explore the CLI structure.
 
-  2 calls · grep · glob · 3s
+  2 calls · grep · glob
 
 • Let me look at the main parser setup and how the package is named.
 
-  1 call · read_file · 5s
+  1 call · read_file
 
 • Let me check the package metadata and any existing version handling/tests.
 
-  2 calls · read_file · grep · 29s
+  2 calls · read_file · grep
 
 • The codebase is clear. The package is named `imp` (version `0.0.1` in
   `pyproject.toml`), and the CLI is a single `argparse` parser in
@@ -58,7 +58,7 @@ spec-writer · opus
 
 • Naming this `add-version-flag`.
 
-  3 calls · rename_change · write_file · bash · 25s
+  3 calls · rename_change · write_file · bash
 
 • Spec written and committed as `imp/specs/2026-06-06-add-version-flag.md`. It
   captures the top-level `--version`/`-V` flag, version resolution via
@@ -76,12 +76,12 @@ fast-path-spec-gate · complete
 
 spec-reviewer · opus
 
-  7 calls · ToolSearch · read_file · glob · imp_events · 39s
+  7 calls · ToolSearch · read_file · glob · imp_events · 1s
 
 • The events file is large and the spec's factual claims are already verified
   against source. Let me check for the relevant brainstorm turn type.
 
-  1 call · imp_events · 13s
+  1 call · imp_events
 
 • I have verified all of the spec's load-bearing claims against the actual
   source. Findings:
@@ -131,12 +131,12 @@ spec-writer · opus
   version at call time so the fallback test's patch takes effect. Let me load
   tools and amend.
 
-  2 calls · ToolSearch · read_file · 6s
+  2 calls · ToolSearch · read_file
 
 • I'll integrate the reviewer's nit by adding a call-time resolution note to the
   decisions summary.
 
-  2 calls · edit_file · bash · 11s
+  2 calls · edit_file · bash
 
 • Polish pass complete. Integrated the reviewer's advisory nit — added a
   "Resolve the version at call time" decision so the helper calls
@@ -154,12 +154,12 @@ spec phase complete · 2m 48s
 
 plan-writer · opus
 
-  14 calls · ToolSearch · read_file · glob · bash · 1m 22s
+  14 calls · ToolSearch · read_file · glob · bash · 1s
 
 • Now I have a clear picture. No prior plan files exist, so I'll author plan 1
   fresh. Let me write the plan.
 
-  2 calls · write_file · bash · 53s
+  2 calls · write_file · bash
 
 • Plan 1 authored and committed. It delivers the `--version` / `-V` flag in two
   atomic tasks:
@@ -186,18 +186,18 @@ fast-path-plan-gate · complete
 
 plan-review · opus
 
-  4 calls · ToolSearch · glob · read_file · 13s
+  4 calls · ToolSearch · glob · read_file
 
 • Now let me verify the plan's claims against the actual source code.
 
-  4 calls · read_file · glob · 21s
+  4 calls · read_file · glob
 
 • The plan's core claims about `main.py` check out: the `main(argv: list[str] |
   None = None) -> int` signature, the exact two-line parser/subparser block, the
   import order (`argparse` then `json`), and the subcommand set all match. Let
   me verify the regression test files and ruff config the plan references.
 
-  5 calls · glob · read_file · 21s
+  5 calls · glob · read_file · 1s
 
 • All of the plan's load-bearing claims are verified against the actual source:
 
@@ -245,12 +245,12 @@ plan-writer · opus
   adding an explicit mypy step given the project's `--strict` mypy config — is
   worth integrating. Let me load tools and revise.
 
-  2 calls · ToolSearch · read_file · 9s
+  2 calls · ToolSearch · read_file
 
 • I'll integrate the Minor finding by adding an explicit mypy type-check to the
   verification steps of each task (the project uses `--strict` mypy).
 
-  4 calls · edit_file · bash · 21s
+  4 calls · edit_file · bash
 
 • Integrated the Minor finding — added an explicit mypy `--strict` type-check
   step to both tasks (and updated Self-Review §5), then folded the edit into the
@@ -273,7 +273,7 @@ plan phase complete · 4m 7s
 
 task-lead · sonnet
 
-  6 calls · ToolSearch · glob · read_file · bash · 25s
+  6 calls · ToolSearch · glob · read_file · bash
 
 • No progress file yet — both tasks are unimplemented. Let me dispatch the
   implementer for Task 1: Version-resolution helper.
@@ -282,11 +282,11 @@ task-lead · sonnet
 
 • Good. Now let me verify the state before dispatching reviewers.
 
-  2 calls · bash · 3s
+  2 calls · bash · 1s
 
 • Tests are green at `0e1b4c2`. Now dispatching both reviewers.
 
-  2 calls · read_file · 5s
+  2 calls · read_file
 
 • Now dispatching both reviewers for Task 1.
 
@@ -303,7 +303,7 @@ task-lead · sonnet
   (test doesn't verify the dist name argument) is deferred as a followup. Let me
   write progress.md and proceed to Task 2.
 
-  2 calls · bash · write_file · 8s
+  2 calls · bash · write_file
 
 • Now dispatching the implementer for Task 2.
 
@@ -313,7 +313,7 @@ task-lead · sonnet
 
 • Let me verify the state.
 
-  2 calls · bash · 3s
+  2 calls · bash · 1s
 
 • All 5 tests green at `7dd20b8`. Now reading the updated main.py diff for
   reviewers.
@@ -329,11 +329,11 @@ task-lead · sonnet
 
   Let me update progress.md and verify completeness.
 
-  1 call · write_file · 7s
+  1 call · write_file
 
 • Now load the verification skill and confirm all tasks are done.
 
-  1 call · bash · 6s
+  1 call · bash · 1s
 
   loading skill verification-before-completion
 
@@ -350,7 +350,7 @@ fast-path-cycle-gate · complete
 
 plan-cycle-check · sonnet
 
-  10 calls · ToolSearch · read_file · glob · grep · 36s
+  10 calls · ToolSearch · read_file · glob · grep · 2s
 
 • The implementation is complete. Both tasks from plan-1 are committed:
 
@@ -376,21 +376,21 @@ stamp-trailers · complete
 
 code-reviewer · gpt-5.5
 
-  12 calls · read_file · glob · bash · grep · 44s
+  12 calls · read_file · glob · bash · grep · 1s
 
 code-reviewer · complete · 59s
 
 summarizer · opus
 
-  10 calls · ToolSearch · glob · bash · read_file · 40s
+  10 calls · ToolSearch · glob · bash · read_file · 1s
 
 • Now let me inspect the actual diff and the test state.
 
-  2 calls · bash · 4s
+  2 calls · bash
 
 • Now let me run the test suite for the version tests (cheap, no code changes).
 
-  4 calls · bash · 13s
+  4 calls · bash · 3s
 
 • Everything verifies. Let me complete.
 
@@ -403,7 +403,7 @@ summarizer · complete · 1m 15s
 
 final-review · sonnet
 
-  2 calls · ToolSearch · imp_events · 26s
+  2 calls · ToolSearch · imp_events
 
 • Change Summary: `2026-06-06-add-version-flag`
 
