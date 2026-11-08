@@ -1036,5 +1036,5 @@ integrate
   merge-to-base                            0s       —       —       —
 
   total                                 1h 3m   14.0M  260.1k   0.87%
-  * estimated to ±1 point of the weekly gauge; usage outside imp during the run skews it high
+  * this quest's part of all imp work this week, applied to the week's gauge; final once the week resets; usage outside imp skews it high
 ```

@@ -95,20 +95,15 @@ class SearchZones:
 
 
 @dataclass(frozen=True)
-class NeighbourQuota:
-    """One overlapping quest's in-span quota slice. `anchors` holds, per
-    (agent, session) pair with an in-span `query_result`, the one row before the
-    span its first increment differences against; `agents` the
-    (provider, model, auth_mode) triple resolved from that agent's last
-    `agent_message` at or before the span end, which a usage row carries none of
-    and may precede the span."""
+class GaugeWeek:
+    """One provider gauge's week, anchored by its `resets_at`: the highest `7d`
+    reading any quest took in it, and the subscription units every quest but the
+    subject drew in it."""
 
-    project: str
-    quest_id: str
-    readings: tuple[dict[str, Any], ...]
-    usage: tuple[dict[str, Any], ...]
-    anchors: tuple[dict[str, Any], ...]
-    agents: dict[str, tuple[str | None, str | None, str | None]]
+    provider: str
+    resets_at: int
+    peak_pct: float
+    other_units: float
 
 
 class Store(Protocol):
@@ -120,8 +115,7 @@ class Store(Protocol):
     def quest_card(self, quest_id: str) -> QuestCard | None: ...
     def search(self, query: str, zones: SearchZones) -> list[SearchHit]: ...
     def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]: ...
-    def quota_neighbours(self, quest_id: str, start_iso: str,
-                         end_iso: str) -> list[NeighbourQuota]: ...
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]: ...
 
 
 class LocalStore:
@@ -226,10 +220,9 @@ class LocalStore:
         from imp.engine.archive import read as archive_read
         return archive_read.search_archive_events_content(self.control_root, query)
 
-    def quota_neighbours(self, quest_id: str, start_iso: str,
-                         end_iso: str) -> list[NeighbourQuota]:
-        from imp.cli.quota_neighbours import scan_neighbours
-        return scan_neighbours(self.control_root, quest_id, start_iso, end_iso)
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        from imp.cli.quota_scan import scan_weeks
+        return scan_weeks(self.control_root, quest_id, self.get_events(quest_id) or [])
 
 
 # Terminal status -> resumable. Explicit, never the _INFLIGHT complement: archiving a

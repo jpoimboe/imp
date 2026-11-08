@@ -455,17 +455,33 @@ def test_introspection_says_ledger_rows_show_labels_and_step_filters_take_ids() 
 
 
 def test_introspection_documents_the_summary_ledger_and_its_quota_column() -> None:
-    # AC 20: the column and the two reaches it does not cover are recorded.
+    # AC 10(a): the per-week charge and the two reaches it does not cover.
     flat = " ".join(_introspection_doc().split())
     assert "## The summary ledger" in _introspection_doc()
     assert "`imp log <id> -s` reads a run as a ledger rather than a story" in flat
-    assert ("the share of the account's weekly quota window this quest"
-            " consumed, attributed to *this* quest rather than reported as raw"
-            " gauge movement") in flat
-    # limit 1: a project pinned outside the discovered tree is absorbed
+    assert ("the share of its week's quota this quest consumed, charged to"
+            " *this* quest rather than read off the gauge") in flat
+    assert ("takes the gauge's highest reading that week and divides it across"
+            " all imp work in the week") in flat
+    assert "every quest's, in every project" in flat
+    assert "priced at each week's own rate" in flat
+    assert "final once the week resets" in flat
+    assert "Before the week's gauge first ticks off zero the total reads `<1%`" in flat
+    assert "whose weeks have no gauge readings at all" in flat
+    # limit 1: usage imp cannot see, including a project pinned outside the tree
     assert "hand-pinned with `$IMP_STATE_DIR` is not discoverable" in flat
+    assert "usage outside imp" in flat
     # limit 2: the gauge's own quantization
     assert "carries ±1 point of quantization" in flat
+    assert ("the charge (its share of its week's quota, or the dollar cost when"
+            " no gauge readings exist for that week)") in flat
+
+
+def test_knowledge_names_the_per_week_charge() -> None:
+    # AC 10(b)
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert ("the run's share of its week's quota, or its cost when no gauge"
+            " readings exist for that week") in flat
 
 
 def test_knowledge_and_introspection_name_the_verify_artifact_view() -> None:

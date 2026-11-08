@@ -484,14 +484,14 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
             cur_phase = row.phase
             grouped.append((row.phase_text, []))
         step = esc(row.step_text).replace("|", "\\|")
-        last = _last_cell(row.totals, row.subtree_units, column)
+        last = _last_cell(row.totals, row.subtree_charge, column)
         cells.append(last)
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
             f" | {_md_cells(row.totals, last)} |")
         for sub in row.subagents:
             body = esc(_sub_body(sub)).replace("|", "\\|")
-            sub_last = _last_cell(sub.usage, sub.units, column)
+            sub_last = _last_cell(sub.usage, sub.charge, column)
             cells.append(sub_last)
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"

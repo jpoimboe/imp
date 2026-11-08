@@ -4,30 +4,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from imp.cli.quota_share import (
-    NO_UNITS,
-    Increment,
-    QuotaAttribution,
-    QuotaFigure,
-    QuotaWithheld,
-    Units,
-    Withheld,
-    credits_by_index,
+    NO_CHARGE,
+    Charge,
+    charges_by_index,
     increments,
     parse_ts,
-    quota_attribution,
-    rollup_units,
-    run_span,
-    units_in_span,
-    weekly_movement,
     weighted_units,
 )
 from imp.cli.render_summary import (
     build_summary,
-    overlay_units,
-    rows_units,
-    units_by_row,
+    charges_by_row,
+    overlay_charges,
+    rows_charge,
 )
-from imp.cli.store import NeighbourQuota
+from imp.cli.store import GaugeWeek
 from imp.providers.catalog import BillingUsage
 
 
@@ -66,9 +56,10 @@ def test_a_rollup_is_priced_per_model_not_at_one_blended_rate() -> None:
     """AC 4(d): a million haiku input tokens ($1/M) plus a million opus-5 output
     tokens ($25/M) is $26. Summing the buckets first and pricing the total at
     either model's rates gives $6 or $30."""
-    rollup = {"claude-haiku-4-5": {"inputTokens": 1_000_000},
-              "claude-opus-5": {"outputTokens": 1_000_000}}
-    assert rollup_units("claude", rollup) == 26.0
+    log = [_SEED, _qr("e1", "01:00", "s1", 1000,
+                      {"claude-haiku-4-5": {"inputTokens": 1_000_000},
+                       "claude-opus-5": {"outputTokens": 1_000_000}})]
+    assert [round(i.units, 4) for i in increments(log)] == [26.0]
 
 
 def test_an_unpriced_model_draws_zero_rather_than_a_guessed_rate() -> None:
@@ -77,34 +68,26 @@ def test_an_unpriced_model_draws_zero_rather_than_a_guessed_rate() -> None:
     assert weighted_units("codex", None, heavy) == 0.0
 
 
-def test_the_span_is_the_first_timestamped_event_to_the_last() -> None:
-    """AC 23(a), first half: a `quest_created` before the first `step_started`
-    widens the span, a trailing `quest_merged` extends it, and a usage patch —
-    which carries no timestamp of its own — never bounds it."""
-    events: list[dict[str, Any]] = [
-        {"type": "quest_created", "timestamp": "2026-01-01T00:00:00+00:00"},
-        {"type": "step_started", "timestamp": "2026-01-01T00:05:00+00:00"},
-        {"type": "agent_message_usage_patch", "payload": {"usage": {}}},
-        {"type": "step_completed", "timestamp": "2026-01-01T00:10:00+00:00"},
-        {"type": "quest_merged", "timestamp": "2026-01-01T00:11:00+00:00"},
-    ]
-    assert run_span(events) == (datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
-                               datetime(2026, 1, 1, 0, 11, tzinfo=UTC))
-    assert run_span([]) is None
-
-
 def test_a_naive_timestamp_reads_utc() -> None:
     assert parse_ts("2026-01-01T00:00:00") == datetime(2026, 1, 1, tzinfo=UTC)
     assert parse_ts(None) is None
     assert parse_ts("not a timestamp") is None
 
 
-_SPAN = (datetime(2026, 1, 1, 0, 1, tzinfo=UTC),
-         datetime(2026, 1, 1, 0, 5, tzinfo=UTC))
-_CLAUDE = {"a1": ("claude", "claude-sonnet-4-6", "subscription")}
-_CODEX = {"a1": ("codex", "gpt-5.3-codex", "subscription")}
 _CODEX_USAGE = {"input_tokens": 1000, "cache_read_input_tokens": 2000,
                 "cache_creation_input_tokens": 3000, "output_tokens": 4000}
+
+
+def _seed(provider: str, model: str) -> dict[str, Any]:
+    """The `agent_message` whose triple a1's later patch and `query_result`
+    rows inherit."""
+    return {"id": "m0", "type": "agent_message", "agent_id": "a1",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "payload": {"provider": provider, "model": model,
+                        "auth_mode": "subscription"}}
+
+
+_SEED = _seed("claude", "claude-sonnet-4-6")
 
 
 def _qr(eid: str, clock: str, session: str, duration_ms: int,
@@ -122,88 +105,64 @@ def _out(tokens: int, model: str = "claude-sonnet-4-6") -> dict[str, Any]:
 def test_a_cumulative_pair_yields_its_per_model_bucket_difference() -> None:
     """AC 21(a): sonnet output is $15/M and opus-5 output $25/M, so 200k sonnet
     followed by the same 200k plus 1M of opus-5 is 3.00 u then 25.00 u. The later
-    row's absolute total would be 28.00 u, and differencing the flat `usage`
-    block — a 1M output delta priced at the agent's sonnet rate — would be
-    15.00 u."""
-    log = [_qr("e1", "01:00", "s1", 1000, _out(200_000)),
+    row's absolute total would be 28.00 u."""
+    log = [_SEED, _qr("e1", "01:00", "s1", 1000, _out(200_000)),
            _qr("e2", "02:00", "s1", 1000,
                {**_out(200_000), "claude-opus-5": {"outputTokens": 1_000_000}})]
-    assert [round(i.units, 4) for i in increments(log, dict(_CLAUDE))] == [3.0, 25.0]
+    assert [round(i.units, 4) for i in increments(log)] == [3.0, 25.0]
 
 
 def test_a_new_session_restarts_differencing_from_zero() -> None:
-    """AC 21(b): 200k then 100k output in a *different* session is 3.00 + 1.50,
-    never the -1.50 that differencing across the session boundary would give.
-    Both rows sit wholly inside `_SPAN`, so the whole 4.50 u is in-span."""
-    log = [_qr("e1", "01:30", "s1", 1000, _out(200_000)),
+    """200k then 100k output in a *different* session is 3.00 + 1.50, never the
+    -1.50 that differencing across the session boundary would give."""
+    log = [_SEED, _qr("e1", "01:30", "s1", 1000, _out(200_000)),
            _qr("e2", "02:00", "s2", 1000, _out(100_000))]
-    rows = increments(log, dict(_CLAUDE))
-    assert [round(i.units, 4) for i in rows] == [3.0, 1.5]
-    assert round(units_in_span(rows, *_SPAN).get("claude"), 4) == 4.5
+    assert [round(i.units, 4) for i in increments(log)] == [3.0, 1.5]
 
 
-def test_a_query_straddling_the_span_start_contributes_its_overlap() -> None:
-    """AC 21(c): a 60 s query ending 30 s after the span opens contributes half
-    of its 3.00 u."""
-    log = [_qr("e1", "01:30", "s1", 60_000, _out(200_000))]
-    rows = increments(log, dict(_CLAUDE))
-    assert rows[0].start == datetime(2026, 1, 1, 0, 0, 30, tzinfo=UTC)
-    assert round(units_in_span(rows, *_SPAN).get("claude"), 4) == 1.5
+def test_a_query_occupies_the_interval_its_duration_names() -> None:
+    (inc,) = increments([_SEED, _qr("e1", "01:30", "s1", 60_000, _out(200_000))])
+    assert (inc.start, inc.end) == (datetime(2026, 1, 1, 0, 0, 30, tzinfo=UTC),
+                                    datetime(2026, 1, 1, 0, 1, 30, tzinfo=UTC))
+    assert (inc.provider, inc.gauge) == ("claude", "claude")
 
 
-def test_an_increment_wholly_outside_the_span_contributes_nothing() -> None:
-    """AC 21(d)."""
-    log = [_qr("e1", "00:30", "s1", 1000, _out(200_000))]
-    rows = increments(log, dict(_CLAUDE))
-    assert round(rows[0].units, 4) == 3.0
-    assert units_in_span(rows, *_SPAN) == Units((("claude", 0.0),))
+def test_a_codex_agent_message_is_a_point_in_time_increment() -> None:
+    """A codex `agent_message` has no interval, so it carries no start."""
+    message = {"id": "e1", "type": "agent_message", "agent_id": "a1",
+               "timestamp": "2026-01-01T00:02:00+00:00",
+               "payload": {"provider": "codex", "model": "gpt-5.3-codex",
+                           "auth_mode": "subscription", "usage": _CODEX_USAGE}}
+    (inc,) = increments([message])
+    assert (inc.start, inc.provider, inc.gauge) == (None, "codex", "codex")
+    assert inc.units == 0.06335
 
 
-def test_a_point_in_time_row_is_credited_whole_and_never_prorated() -> None:
-    """AC 21(e): a codex `agent_message` has no interval, so it belongs whole to
-    the span holding its timestamp — 0.06335 u in, nothing out."""
-    def message(ts: str) -> dict[str, Any]:
-        return {"id": "e1", "type": "agent_message", "agent_id": "a1",
-                "timestamp": ts,
-                "payload": {"provider": "codex", "model": "gpt-5.3-codex",
-                            "auth_mode": "subscription", "usage": _CODEX_USAGE}}
-
-    inside = increments([message("2026-01-01T00:02:00+00:00")], {})
-    assert inside[0].start is None
-    assert inside[0].provider == "codex"
-    assert units_in_span(inside, *_SPAN).get("codex") == 0.06335
-    outside = increments([message("2026-01-01T00:00:30+00:00")], {})
-    assert units_in_span(outside, *_SPAN).get("codex") == 0.0
+def test_the_first_row_of_a_pair_differences_against_its_predecessor() -> None:
+    """200k output and then 300k cumulative is a 100k increment — 1.50 u. Drop
+    the earlier row and the later one differences against zero instead,
+    over-counting it to 4.50 u."""
+    earlier = _qr("e0", "00:30", "s1", 1000, _out(200_000))
+    later = _qr("e1", "02:00", "s1", 1000, _out(300_000))
+    assert [round(i.units, 4) for i in increments([_SEED, earlier, later])] == [3.0, 1.5]
+    assert [round(i.units, 4) for i in increments([_SEED, later])] == [4.5]
 
 
-def test_the_first_in_span_row_differences_against_the_pre_span_anchor() -> None:
-    """AC 21(f): 200k output before the span and 300k cumulative inside it is a
-    100k increment — 1.50 u. Drop the anchor and the in-span row differences
-    against zero instead, over-counting it to 4.50 u."""
-    anchor = _qr("e0", "00:30", "s1", 1000, _out(200_000))
-    inside = _qr("e1", "02:00", "s1", 1000, _out(300_000))
-    with_anchor = units_in_span(increments([anchor, inside], dict(_CLAUDE)), *_SPAN)
-    without = units_in_span(increments([inside], dict(_CLAUDE)), *_SPAN)
-    assert round(with_anchor.get("claude"), 4) == 1.5
-    assert round(without.get("claude"), 4) == 4.5
-
-
-def test_a_patch_row_is_priced_from_the_resolved_per_agent_triple() -> None:
-    """AC 21(g): `state.py:783` persists the patch with exactly three keys —
-    `type`, `agent_id`, `payload` — so it carries no provider, model, timestamp or
-    event id of its own and takes the seeded triple with the last timestamp seen.
-    Unseeded there is no rate to price it at, so it draws nothing at all."""
-    log: list[dict[str, Any]] = [
-        {"id": "e1", "type": "step_started", "agent_id": "a1",
-         "timestamp": "2026-01-01T00:02:00+00:00", "payload": {"step": "s"}},
-        {"type": "agent_message_usage_patch", "agent_id": "a1",
-         "payload": {"usage": _CODEX_USAGE}},
-    ]
-    seeded = increments(log, dict(_CODEX))
-    assert seeded[0].index == 1
-    assert seeded[0].end == datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
-    assert units_in_span(seeded, *_SPAN).get("codex") == 0.06335
-    assert units_in_span(increments(log, {}), *_SPAN) == NO_UNITS
+def test_a_patch_row_is_priced_from_the_agents_last_message() -> None:
+    """`state.py` persists the patch with exactly three keys — `type`,
+    `agent_id`, `payload` — so it carries no provider, model, timestamp or event
+    id of its own. It takes its agent's triple and the last timestamp seen.
+    With no message before it there is no rate to price it at."""
+    patch = {"type": "agent_message_usage_patch", "agent_id": "a1",
+             "payload": {"usage": _CODEX_USAGE}}
+    started = {"id": "e1", "type": "step_started", "agent_id": "a1",
+               "timestamp": "2026-01-01T00:02:00+00:00", "payload": {"step": "s"}}
+    (seeded,) = increments([_seed("codex", "gpt-5.3-codex"), started, patch])
+    assert seeded.index == 2
+    assert seeded.end == datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
+    assert (seeded.gauge, seeded.units) == ("codex", 0.06335)
+    (bare,) = increments([started, patch])
+    assert (bare.provider, bare.gauge, bare.units) == (None, None, 0.0)
 
 
 def test_claudes_own_agent_message_usage_is_ignored() -> None:
@@ -214,30 +173,7 @@ def test_claudes_own_agent_message_usage_is_ignored() -> None:
             "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
                         "auth_mode": "subscription",
                         "usage": {"output_tokens": 1_000_000}}}]
-    assert increments(log, {}) == []
-
-
-def test_units_merge_per_provider_and_keep_a_zero_draw() -> None:
-    assert Units.of(None, 5.0) == NO_UNITS
-    assert Units.of("claude", 0.0).providers == ("claude",)
-    merged = Units.of("codex", 1.0) + Units.of("claude", 2.0) + Units.of("codex", 3.0)
-    assert merged.per_provider == (("claude", 2.0), ("codex", 4.0))
-    assert merged.get("claude") == 2.0
-    assert merged.get("anthropic") == 0.0
-
-
-def test_the_span_start_splits_an_interval_but_not_an_instant() -> None:
-    """A 1 s query ending exactly as the span opens intersects it in zero length
-    and so carries none of its 3.00 u, while a point-in-time row at that same
-    instant belongs whole to the span — only one of the two has an interval to
-    measure."""
-    edge = increments([_qr("e1", "01:00", "s1", 1000, _out(200_000))],
-                      dict(_CLAUDE))
-    assert round(edge[0].units, 4) == 3.0
-    assert units_in_span(edge, *_SPAN).get("claude") == 0.0
-    instant = Increment(index=0, agent_id="a1", session_id=None,
-                        provider="claude", units=3.0, start=None, end=_SPAN[0])
-    assert instant.credit(*_SPAN) == 3.0
+    assert increments(log) == []
 
 
 def _quest_log() -> list[dict[str, Any]]:
@@ -304,291 +240,91 @@ def _codex_log() -> list[dict[str, Any]]:
     ]
 
 
-def _span_of(log: list[dict[str, Any]]) -> tuple[datetime, datetime]:
-    span = run_span(log)
-    assert span is not None
-    return span
+_WEEK1 = 1767312000  # 2026-01-02T00:00Z: the week holding every event below
 
 
-def test_each_increment_is_credited_at_its_own_log_position() -> None:
+def _charges(log: list[dict[str, Any]], peak: float = 24.0,
+             provider: str = "claude") -> dict[int, Charge]:
+    """`log` priced in one week no other quest drew on."""
+    return charges_by_index(log, [GaugeWeek(provider, _WEEK1, peak, 0.0)])
+
+
+def _pts(charge: Charge, gauge: str = "claude") -> float:
+    points = dict(charge.per_gauge)[gauge].points
+    assert points is not None
+    return points
+
+
+def test_each_increment_is_charged_at_its_own_log_position() -> None:
     """The step's pair reports 200k then 500k cumulative sonnet output, so its two
     increments are 3.00 u at index 3 and 4.50 u at index 8 — the second of which
     the cumulative collapse keeps and the first of which it drops, both belonging
     to the same row."""
-    log = _quest_log()
-    credits = credits_by_index(log, _span_of(log))
-    assert {i: round(u.get("claude"), 4) for i, u in credits.items()} == {
+    charges = _charges(_quest_log())
+    assert {i: round(_pts(c), 4) for i, c in charges.items()} == {
         3: 3.0, 6: 1.5, 8: 4.5, 10: 15.0}
 
 
 def test_an_id_less_usage_patch_still_reaches_the_row_that_owns_it() -> None:
-    """A join keyed on the event id leaves a codex run's whole draw unattributed —
-    `quota unattributable` on a gauge that moved — while the dollar column, which
-    resolves the row from the log position, prices the same usage fine."""
+    """A join keyed on the event id would leave a codex run's whole draw
+    uncharged, while the dollar column, which resolves the row from the log
+    position, prices the same usage fine. The patch is the week's only codex
+    draw, so it carries all 5 points."""
     log = _codex_log()
-    rows = build_summary(log, _span_of(log))
-    assert rows[0].units.get("codex") == 0.06335
-    assert rows_units(rows).get("codex") == 0.06335
+    rows = build_summary(log, _charges(log, peak=5.0, provider="codex"))
+    assert _pts(rows[0].charge, "codex") == 5.0
+    assert _pts(rows_charge(rows), "codex") == 5.0
     assert rows[0].usage.dollars > 0
 
 
-def test_a_filtered_render_keeps_the_units_the_whole_log_computed() -> None:
-    """AC 18 / AC 19(b): `--range` can drop the one `query_result` a cumulative
-    pair's dollars ride on — which moves the dollar cell, as the first assertion
-    shows — so the rendered rows take the units the unfiltered log computed,
-    matched by row rather than by event."""
+def test_a_filtered_render_keeps_the_charge_the_whole_log_computed() -> None:
+    """`--range` can drop the one `query_result` a cumulative pair's dollars ride
+    on — which moves the dollar cell, as the first assertion shows — so the
+    rendered rows take the charge the unfiltered log computed, matched by row
+    rather than by event."""
     log = _quest_log()
-    whole = build_summary(log, _span_of(log))
+    whole = build_summary(log, _charges(log))
     narrowed = build_summary([e for e in log if e["id"] != "e8"])
     assert round(narrowed[0].usage.dollars, 4) < round(whole[0].usage.dollars, 4)
-    assert narrowed[0].units == NO_UNITS
-    overlay_units(narrowed, units_by_row(whole))
-    assert round(narrowed[0].units.get("claude"), 4) == 7.5
-    assert round(narrowed[0].subagents[0].units.get("claude"), 4) == 1.5
+    assert narrowed[0].charge == NO_CHARGE
+    overlay_charges(narrowed, charges_by_row(whole))
+    assert round(_pts(narrowed[0].charge), 4) == 7.5
+    assert round(_pts(narrowed[0].subagents[0].charge), 4) == 1.5
 
 
-def test_units_land_on_the_step_and_subagent_rows_that_own_the_agent() -> None:
+def test_charges_land_on_the_step_and_subagent_rows_that_own_the_agent() -> None:
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
+    rows = build_summary(log, _charges(log))
     assert len(rows) == 1
     step = rows[0]
-    assert round(step.units.get("claude"), 4) == 7.5
+    assert round(_pts(step.charge), 4) == 7.5
     assert [s.name for s in step.subagents] == ["explorer"]
-    assert round(step.subagents[0].units.get("claude"), 4) == 1.5
-    assert round(step.subtree_units.get("claude"), 4) == 9.0
+    assert round(_pts(step.subagents[0].charge), 4) == 1.5
+    assert round(_pts(step.subtree_charge), 4) == 9.0
 
 
-def test_an_unowned_agents_units_are_dropped_from_both_sides() -> None:
-    """Decision 18: `ghost` draws 15.00 u that no row owns, so the row-attributed
-    sum is 9.00 u — the same figure the per-step cells add up to."""
+def test_an_unowned_agents_units_dilute_the_week_but_render_on_no_row() -> None:
+    """`ghost` draws 15.00 of the week's 24.00 u and no row owns it, so the rows
+    carry 9/24 of the 24 points. Without it they carry all 24."""
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
-    assert round(rows_units(rows).get("claude"), 4) == 9.0
+    assert round(_pts(rows_charge(build_summary(log, _charges(log)))), 4) == 9.0
+    solo = [e for e in log if e["agent_id"] != "ghost"]
+    assert round(_pts(rows_charge(build_summary(solo, _charges(solo)))), 4) == 24.0
 
 
-def test_build_summary_without_a_span_leaves_every_row_at_no_units() -> None:
+def test_build_summary_without_charges_leaves_every_row_at_no_charge() -> None:
     rows = build_summary(_quest_log())
-    assert rows[0].units == NO_UNITS
-    assert rows[0].subagents[0].units == NO_UNITS
-    assert rows_units(rows) == NO_UNITS
+    assert rows[0].charge == NO_CHARGE
+    assert rows[0].subagents[0].charge == NO_CHARGE
+    assert rows_charge(rows) == NO_CHARGE
 
 
 def test_a_row_is_identified_by_its_occurrence_not_by_its_agent_id() -> None:
     """Two runs of one step share the agent id `step:impl/build`, so the keys the
     overlay matches on must still tell the occurrences apart."""
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
+    rows = build_summary(log, _charges(log))
     assert rows[0].key == "step:impl/build@2026-01-01T00:00:00+00:00"
     assert rows[0].subagents[0].key == "sub:e4"
-    assert sorted(units_by_row(rows)) == [
+    assert sorted(charges_by_row(rows)) == [
         "step:impl/build@2026-01-01T00:00:00+00:00", "sub:e4"]
-
-
-_GAUGE_SPAN = (datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
-               datetime(2026, 1, 1, 1, 0, tzinfo=UTC))
-
-
-def _reading(minute: int, used_pct: float, *, resets_at: int | None = 1_000_000,
-             provider: str = "claude") -> dict[str, Any]:
-    return {"id": f"r{minute}{provider}", "type": "quota_reading",
-            "agent_id": None,
-            "timestamp": f"2026-01-01T00:{minute:02d}:00+00:00",
-            "payload": {"provider": provider, "plan": None, "windows": [
-                {"label": "5h", "used_pct": 50.0, "resets_at": 500},
-                {"label": "7d", "used_pct": used_pct, "resets_at": resets_at}]}}
-
-
-def test_a_run_with_no_reading_for_the_provider_has_no_gauge() -> None:
-    """AC 6(a)."""
-    assert weekly_movement([], "claude", *_GAUGE_SPAN) is Withheld.NO_READINGS
-    codex_only = [_reading(10, 40.0, provider="codex")]
-    assert (weekly_movement(codex_only, "claude", *_GAUGE_SPAN)
-            is Withheld.NO_READINGS)
-
-
-def test_a_gauge_that_did_not_move_is_below_resolution() -> None:
-    """AC 6(b)."""
-    readings = [_reading(10, 78.0), _reading(50, 78.0)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.BELOW_RESOLUTION)
-
-
-def test_a_changed_resets_at_is_a_window_reset() -> None:
-    """AC 6(c)."""
-    readings = [_reading(10, 78.0, resets_at=1_000_000),
-                _reading(50, 2.0, resets_at=2_000_000)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_a_missing_reset_stamp_is_not_evidence_of_a_reset() -> None:
-    """`resets_at` is None whenever the provider's `resetsAt` is not an int
-    (`src/imp/providers/claude.py:1345`), and one sample missing the stamp beside
-    one carrying it is no window change: 78 → 81 is still 3 points."""
-    readings = [_reading(10, 78.0, resets_at=None), _reading(50, 81.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_a_drop_larger_than_the_gauges_quantization_is_a_reset() -> None:
-    """AC 6(c): 78 down to 74 inside one window is not sampling jitter."""
-    readings = [_reading(10, 78.0), _reading(30, 74.0), _reading(50, 76.0)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_a_one_point_dip_between_samples_is_jitter_not_a_reset() -> None:
-    """Two quests sampling the same gauge seconds apart straddle the provider's
-    own rounding boundary, so 78 → 79 → 78 → 81 is a 3-point rise — as the real
-    `samo71` reading union is."""
-    readings = [_reading(10, 78.0), _reading(20, 79.0),
-                _reading(30, 78.0), _reading(50, 81.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_a_reset_outranks_a_zero_movement() -> None:
-    """AC 6(e): endpoints that happen to match still report the reset."""
-    readings = [_reading(10, 78.0, resets_at=1_000_000),
-                _reading(30, 5.0, resets_at=2_000_000),
-                _reading(50, 78.0, resets_at=2_000_000)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_exactly_one_point_of_movement_resolves() -> None:
-    """AC 7."""
-    readings = [_reading(10, 78.0), _reading(50, 79.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 1.0
-
-
-def test_movement_spans_the_union_of_own_and_neighbour_readings() -> None:
-    """AC 5: a neighbour reading inside the span but later than this quest's own
-    last one extends the movement from 1 point to 3."""
-    own = [_reading(10, 78.0), _reading(30, 79.0)]
-    assert weekly_movement(own, "claude", *_GAUGE_SPAN) == 1.0
-    neighbour = [_reading(45, 81.0)]
-    assert weekly_movement([*own, *neighbour], "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_readings_outside_the_span_are_not_sampled() -> None:
-    readings = [_reading(10, 78.0), _reading(30, 79.0)]
-    late = {**_reading(10, 95.0), "id": "late",
-            "timestamp": "2026-01-01T02:00:00+00:00"}
-    assert weekly_movement([*readings, late], "claude", *_GAUGE_SPAN) == 1.0
-
-
-def _gauge_readings() -> list[dict[str, Any]]:
-    """Two claude readings inside `_quest_log()`'s span: 78% to 81%, one window."""
-    def at(second: int, used_pct: float) -> dict[str, Any]:
-        return {"id": f"g{second}", "type": "quota_reading", "agent_id": None,
-                "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-                "payload": {"provider": "claude", "windows": [
-                    {"label": "7d", "used_pct": used_pct, "resets_at": 1}]}}
-
-    return [at(2, 78.0), at(38, 81.0)]
-
-
-def _gauge_log() -> list[dict[str, Any]]:
-    """`_quest_log()` with the readings interleaved in timestamp order, as a real
-    log carries them — `run_span` reads the first and last entries, not min/max."""
-    return sorted([*_quest_log(), *_gauge_readings()],
-                  key=lambda e: str(e["timestamp"]))
-
-
-def _neighbour(second: int, tokens: int, *, provider: str = "claude",
-               readings: tuple[dict[str, Any], ...] = (),
-               anchors: tuple[dict[str, Any], ...] = ()) -> NeighbourQuota:
-    usage = {"id": f"n{second}", "type": "query_result", "agent_id": "n1",
-             "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-             "payload": {"session_id": "ns", "duration_ms": 1000,
-                         "model_usage": {
-                             "claude-sonnet-4-6": {"outputTokens": tokens}}}}
-    return NeighbourQuota(
-        project="other", quest_id="q2", readings=readings, usage=(usage,),
-        anchors=anchors, agents={"n1": (provider, "claude-sonnet-4-6",
-                                        "subscription")})
-
-
-def _attribution(neighbours: list[NeighbourQuota]) -> QuotaAttribution:
-    events = _gauge_log()
-    span = _span_of(events)
-    rows = build_summary(events, span)
-    return quota_attribution(events, span, rows_units(rows), neighbours)
-
-
-def test_the_subject_appears_in_the_denominator_exactly_once() -> None:
-    """AC 24: the quest's row-attributed 9.00 u plus the neighbour's 3.00 u is a
-    12.00 u denominator — not the 21.00 u double-counting the subject gives."""
-    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
-    assert round(figure.subject_units, 4) == 9.0
-    assert round(figure.total_units, 4) == 12.0
-
-
-def test_the_figure_is_the_movement_scaled_by_the_unit_share() -> None:
-    """3 points of movement x 9/12 is 2.25 points of the weekly window, and a
-    row holding 3.00 u of that draws 0.75."""
-    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
-    assert figure.movement == 3.0
-    assert round(figure.percent, 4) == 2.25
-    assert round(figure.scale(Units.of("claude", 3.0)), 4) == 0.75
-    assert figure.scale(NO_UNITS) == 0.0
-
-
-def test_a_widened_span_pulls_in_a_neighbour_increment() -> None:
-    """AC 23(a), second half: the neighbour's 3.00 u query occupies
-    [00:00:00, 00:00:01] — inside the span that opens at the `quest_created`
-    event, outside one that opens a second later."""
-    events = _gauge_log()
-    wide = _span_of(events)
-    narrow = (datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC), wide[1])
-    early = [_neighbour(1, 200_000)]
-    subject = rows_units(build_summary(events, wide))
-    wide_total = quota_attribution(events, wide, subject,
-                                   early).figures[0].total_units
-    narrow_total = quota_attribution(events, narrow, subject,
-                                     early).figures[0].total_units
-    assert (round(wide_total, 4), round(narrow_total, 4)) == (12.0, 9.0)
-
-
-def test_a_gauge_that_moved_with_no_units_yields_no_figure() -> None:
-    """AC 6(d) / AC 14(d): a codex gauge moved 4 points with no codex units
-    anywhere in the span, so there is nothing to divide by — no rule and no
-    division, just a withhold."""
-    codex_gauge = tuple(
-        {"id": f"c{second}", "type": "quota_reading", "agent_id": None,
-         "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-         "payload": {"provider": "codex", "windows": [
-             {"label": "7d", "used_pct": used_pct, "resets_at": 9}]}}
-        for second, used_pct in ((3, 10.0), (37, 14.0)))
-    attribution = _attribution([_neighbour(30, 200_000, readings=codex_gauge)])
-    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
-    assert isinstance(attribution.gauges[0], QuotaFigure)
-    assert attribution.gauges[1] == QuotaWithheld("codex",
-                                                  Withheld.NO_TRACKED_USAGE)
-    assert [f.provider for f in attribution.figures] == ["claude"]
-
-
-def test_each_provider_gauge_is_resolved_independently() -> None:
-    """AC 14(e): the neighbour's draw is codex's, which recorded no reading, so
-    that gauge is withheld while claude's resolvable figure still stands over a
-    denominator holding only claude's units."""
-    attribution = _attribution([_neighbour(30, 200_000, provider="codex")])
-    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
-    assert round(attribution.figures[0].total_units, 4) == 9.0
-    assert attribution.gauges[1] == QuotaWithheld("codex",
-                                                  Withheld.NO_READINGS)
-
-
-def test_a_neighbours_pre_span_anchor_keeps_its_pre_span_burn_out() -> None:
-    """A neighbour's `query_result` is cumulative, so its pre-span anchor is what
-    stops the denominator swallowing a burn from before the span: 300k output
-    differenced against a 200k anchor is 1.50 u, where dropping the anchor
-    contributes the whole 4.50 u."""
-    anchor = {"id": "n-anchor", "type": "query_result", "agent_id": "n1",
-              "timestamp": "2025-12-31T23:59:00+00:00",
-              "payload": {"session_id": "ns", "duration_ms": 1000,
-                          "model_usage": {
-                              "claude-sonnet-4-6": {"outputTokens": 200_000}}}}
-    anchored = _attribution([_neighbour(30, 300_000, anchors=(anchor,))])
-    bare = _attribution([_neighbour(30, 300_000)])
-    assert round(anchored.figures[0].total_units, 4) == 10.5
-    assert round(bare.figures[0].total_units, 4) == 13.5

@@ -7,6 +7,7 @@ import anyio
 import pytest
 
 from imp.cli.store import (
+    GaugeWeek,
     LocalStore,
     SearchZones,
     make_store,
@@ -71,32 +72,47 @@ async def test_proxy_store_search_event_candidates_matches_local(tmp_path: Path)
         tg.cancel_scope.cancel()
 
 
-_QUOTA_START = "2026-06-01T03:30:00+00:00"
-_QUOTA_END = "2026-06-01T05:38:00+00:00"
+_RESET = 1780642800
 
 
-def _neighbour_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quest_id: str,
-) -> None:
-    """A live quest home in another project with one in-span query_result."""
+def _weeks_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A neighbour in another project with a 30-point reading and 3.0 units, and
+    the live subject `samo71` with its own 10-point reading."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / quest_id
+    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / "fego87"
     qdir.mkdir(parents=True)
     (qdir / "quest.json").write_text(json.dumps({
-        "id": quest_id, "title": quest_id, "base_branch": "main",
+        "id": "fego87", "title": "fego87", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00"}))
-    (qdir / "events.jsonl").write_text(json.dumps({
-        "id": "qr", "agent_id": "step:a",
-        "timestamp": "2026-06-01T04:30:00+00:00", "type": "query_result",
-        "payload": {"session_id": "s1", "duration_ms": 30000, "usage": {},
-                    "model_usage": {}}}) + "\n")
+    (qdir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in [
+        {"id": "am", "agent_id": "step:a", "timestamp": "2026-06-01T04:00:00+00:00",
+         "type": "agent_message",
+         "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
+                     "auth_mode": "subscription"}},
+        {"id": "qk", "agent_id": "step:a", "timestamp": "2026-06-01T04:20:00+00:00",
+         "type": "quota_reading",
+         "payload": {"provider": "claude", "windows": [
+             {"label": "7d", "used_pct": 30.0, "resets_at": _RESET}]}},
+        {"id": "qr", "agent_id": "step:a", "timestamp": "2026-06-01T04:30:00+00:00",
+         "type": "query_result",
+         "payload": {"session_id": "s1", "duration_ms": 30000,
+                     "model_usage": {"claude-sonnet-4-6": {"outputTokens": 200_000}}}}]))
+    _seed_control(tmp_path)
+    subject = Quest.create(tmp_path, title="Subject", quest_id="samo71",
+                           base_branch="main")
+    _append_event(subject, {
+        "id": "own", "agent_id": "step:b", "timestamp": "2026-06-01T04:05:00+00:00",
+        "type": "quota_reading",
+        "payload": {"provider": "claude", "windows": [
+            {"label": "7d", "used_pct": 10.0, "resets_at": _RESET}]}})
 
 
 @pytest.mark.anyio
-async def test_proxy_store_quota_neighbours_matches_local(
+async def test_proxy_store_quota_weeks_matches_local(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _neighbour_home(tmp_path, monkeypatch, "fego87")
+    """AC 8: a sandboxed render sees the same weeks a local one does."""
+    _weeks_homes(tmp_path, monkeypatch)
     local = LocalStore(tmp_path)
     sock = str(tmp_path / "s.sock")
 
@@ -109,11 +125,9 @@ async def test_proxy_store_quota_neighbours_matches_local(
         tg.start_soon(session.serve)
         proxy = ProxyStore(sock)
 
-        got = await anyio.to_thread.run_sync(
-            proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
-        assert got == local.quota_neighbours("samo71", _QUOTA_START, _QUOTA_END)
-        assert [(n.project, n.quest_id) for n in got] == [("other", "fego87")]
-        assert [u["id"] for u in got[0].usage] == ["qr"]
+        got = await anyio.to_thread.run_sync(proxy.quota_weeks, "samo71")
+        assert got == local.quota_weeks("samo71")
+        assert got == [GaugeWeek("claude", _RESET, 30.0, 3.0)]
 
         await session.close()
         tg.cancel_scope.cancel()
@@ -127,7 +141,7 @@ async def test_a_store_side_failure_surfaces_as_a_plain_runtime_error(
     sock = str(tmp_path / "s.sock")
 
     async def on_query(op: str, args: dict) -> object:
-        if op == "quota_neighbours":
+        if op == "quota_weeks":
             raise OSError("archive unreadable")
         return run_query(local, op, args)
 
@@ -138,8 +152,7 @@ async def test_a_store_side_failure_surfaces_as_a_plain_runtime_error(
         proxy = ProxyStore(sock)
 
         with pytest.raises(RuntimeError) as err:
-            await anyio.to_thread.run_sync(
-                proxy.quota_neighbours, "samo71", _QUOTA_START, _QUOTA_END)
+            await anyio.to_thread.run_sync(proxy.quota_weeks, "samo71")
         assert "archive unreadable" in str(err.value)
 
         await session.close()

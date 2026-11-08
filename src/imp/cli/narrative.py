@@ -2117,7 +2117,7 @@ def tool_seconds(calls: list[ToolCall]) -> float:
 
 @dataclass(frozen=True)
 class Exclusions:
-    """Wall-clock intervals of a run that are not work: human waits and pauses."""
+    """Wall-clock intervals of a run that are not work: waits, pauses, dead gaps."""
 
     spans: tuple[tuple[str, str], ...] = ()
 
@@ -2152,27 +2152,54 @@ class Exclusions:
         return _union_seconds(segments)
 
 
+INERT_EVENTS = frozenset({
+    "quest_created", "quest_renamed", "user_renamed", "quest_abandoned",
+    "conversation_archived", "conversation_saved", "cli_attached"})
+_RUN_STARTS = frozenset({"tiers_resolved", "workflow_resumed"})
+_MODEL_TURN_EVENTS = frozenset({
+    "thinking", "agent_message", "tool_call", "tool_result", "query_result",
+    "agent_result", "skill_load", "step_label_updated", "user_message"})
+
+
 class ExclusionTracker:
-    """Human waits (`awaiting_user_input` → the reply) and pauses (`workflow_paused`
-    → `workflow_resumed`), each also closed by the step boundary that ends it."""
+    """Dead time: human waits, pauses, the gap before each run start, and a resume's
+    startup when all it did was re-arm the wait. Inert events are invisible."""
 
     def __init__(self) -> None:
         self._spans: list[tuple[str, str]] = []
         self._wait_start: str | None = None
         self._pause_start: str | None = None
+        self._startup_start: str | None = None
+        self._last_live: str | None = None
 
     @property
     def exclusions(self) -> Exclusions:
         """The spans closed so far; a still-open wait or pause is not included."""
         return Exclusions(tuple(self._spans))
 
+    @property
+    def through_end(self) -> Exclusions:
+        """Closed spans plus a still-open wait or pause, run to the last live event."""
+        end = self._last_live
+        still_open = tuple((start, end) for start in (self._wait_start, self._pause_start)
+                           if start is not None and end is not None)
+        return Exclusions((*self._spans, *still_open))
+
     def feed(self, event: dict[str, Any]) -> list[tuple[str, str]]:
         etype = event.get("type")
         ts = event.get("timestamp")
-        if not isinstance(ts, str):
+        if not isinstance(ts, str) or etype in INERT_EVENTS:
             return []
         mark = len(self._spans)
-        if etype == "awaiting_user_input":
+        if etype in _RUN_STARTS:
+            if self._last_live is not None:
+                self._spans.append((self._last_live, ts))
+            self._close_pause(ts)
+            self._startup_start = ts
+        elif etype == "awaiting_user_input":
+            if self._startup_start is not None:
+                self._spans.append((self._startup_start, ts))
+                self._startup_start = None
             if self._wait_start is None:  # a re-armed gate keeps the first ask
                 self._wait_start = ts
         elif etype == "workflow_paused":
@@ -2180,11 +2207,14 @@ class ExclusionTracker:
                 self._pause_start = ts
         elif etype == "user_message":
             self._close_wait(ts)
-        elif etype == "workflow_resumed":
-            self._close_pause(ts)
         elif etype in ("step_started", "step_completed"):
+            if etype == "step_completed":
+                self._startup_start = None
             self._close_wait(ts)
             self._close_pause(ts)
+        if etype in _MODEL_TURN_EVENTS:
+            self._startup_start = None
+        self._last_live = ts
         return self._spans[mark:]
 
     def _close_wait(self, ts: str) -> None:

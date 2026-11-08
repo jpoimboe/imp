@@ -71,8 +71,8 @@ bookkeeping. Ask the CLI instead:
   the board as a structured array.
 - `imp show <id>` — a quest's card: status, why it halted, current step, `--var`
   values (`vars:`), intent, summary, and the run ledger — a `run:` line of time,
-  tokens, and charge (the run's share of the weekly quota window, or its cost
-  when that window is unmeasurable), `workflow:`, and the per-step `ledger:`
+  tokens, and charge (the run's share of its week's quota, or its cost when no
+  gauge readings exist for that week), `workflow:`, and the per-step `ledger:`
   table minus idle steps (`show <id> spec` for the raw spec, `show <id> verify`
   for the last failing gate run, `--json` for a structured card with every
   effective var, no ledger).
