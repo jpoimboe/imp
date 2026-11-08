@@ -1366,6 +1366,23 @@ def test_subagent_result_stop(payload, stop):
     assert nv.subagent_result_stop(payload) == stop
 
 
+@pytest.mark.parametrize(("fields", "stop"), [
+    pytest.param({}, None, id="clean"),
+    pytest.param({"is_error": True}, "failed", id="plain-failure"),
+    pytest.param({"is_error": True, "terminal_state": "stalled"}, "stalled", id="stalled"),
+    pytest.param({"is_error": True, "terminal_state": "context_exhausted"},
+                 "context_exhausted", id="context-exhausted"),
+    pytest.param({"is_error": True, "terminal_state": "suspended"}, "suspended", id="suspended"),
+    pytest.param({"terminal_state": "interrupted"}, "interrupted", id="salvage-interrupted"),
+])
+def test_subagent_fold_stop(fields, stop):
+    fold = nv.SubagentFold(subagent_name="s", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False)
+    for k, v in fields.items():
+        setattr(fold, k, v)
+    assert fold.stop == stop
+
+
 def test_quest_renamed_updates_root_title() -> None:
     # The narrative builder must reflect the settled title after quest_renamed.
     b = nv.NarrativeBuilder()

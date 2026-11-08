@@ -963,9 +963,9 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     the title (when dispatched with one) keeps the default fg, the
     model is gray, a finished subagent's frozen run duration is gray, and the
     terminal-state tag comes LAST. A clean success carries no tag; `running` is
-    subagent magenta; the abnormal states (stalled, interrupted, context
-    exhausted, failed) are imp's brand gold (`wordmark`) so a subagent that did
-    not cleanly finish stands out."""
+    subagent magenta; the abnormal stops (narrative.STOP_WORDS) are imp's
+    brand gold (`wordmark`) so a subagent that did not cleanly finish stands
+    out."""
     sub_c = pal.NODE_COLORS["subagent"]
     parts = [pal.ansi(f"  {sub.subagent_name}", *sub_c, enabled=color)]
     title = display_subagent_title(sub.title)
@@ -981,19 +981,17 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
         parts.append(pal.ansi(f" · {done}", "gray", enabled=color))
-    if sub.running:
-        parts.append(pal.ansi(" · running", *sub_c, enabled=color))
-    elif sub.terminal_state == "stalled":
-        parts.append(pal.ansi(" · stalled", "wordmark", enabled=color))
-    elif sub.terminal_state == "interrupted":
-        parts.append(pal.ansi(" · interrupted", "wordmark", enabled=color))
-    elif sub.terminal_state == "context_exhausted":
-        parts.append(pal.ansi(" · context exhausted", "wordmark", enabled=color))
-    elif sub.terminal_state == "suspended":
-        parts.append(pal.ansi(" · suspended", "wordmark", enabled=color))
-    elif sub.is_error:
-        parts.append(pal.ansi(" · failed", "wordmark", enabled=color))
+    parts.append(_subagent_tag(sub, color=color))
     return _gutter_indent(depth, gutters, color) + "".join(parts)
+
+
+def _subagent_tag(sub: nv.SubagentFold, *, color: bool) -> str:
+    """` · running` in subagent magenta, ` · <stop word>` in gold, else empty."""
+    if sub.running:
+        return pal.ansi(" · running", *pal.NODE_COLORS["subagent"], enabled=color)
+    if sub.stop is None:
+        return ""
+    return pal.ansi(f" · {nv.STOP_WORDS[sub.stop]}", "wordmark", enabled=color)
 
 
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,

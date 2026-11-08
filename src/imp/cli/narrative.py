@@ -422,9 +422,7 @@ class SubagentFold:
                                        # end_ts and drop the run duration live).
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
-    terminal_state: str | None = None  # 'stalled'/'interrupted'/'context_exhausted'/
-                                       # 'suspended' (both providers now emit it via
-                                       # kind= or [bracket]); else None
+    terminal_state: StopKind | None = None
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     label: str | None = None
@@ -436,6 +434,13 @@ class SubagentFold:
     @property
     def tree(self) -> NarrativeTree:
         return self.nested.tree
+
+    @property
+    def stop(self) -> SubagentStop | None:
+        """Its terminal kind, else `failed` on an error, else None."""
+        if self.terminal_state is not None:
+            return self.terminal_state
+        return "failed" if self.is_error else None
 
 
 StopKind = Literal["stalled", "interrupted", "context_exhausted", "suspended"]
@@ -1058,7 +1063,7 @@ class NarrativeBuilder:
         self,
         fold: SubagentFold,
         ts: str | None,
-        terminal_state: str | None = None,
+        terminal_state: StopKind | None = None,
     ) -> None:
         was_running = fold.running
         fold.nested._finalize_direct_descendant_subtrees(ts, terminal_state)
@@ -1076,7 +1081,7 @@ class NarrativeBuilder:
     def _finalize_direct_descendant_subtrees(
         self,
         ts: str | None,
-        terminal_state: str | None = None,
+        terminal_state: StopKind | None = None,
     ) -> None:
         for fold in list(self._sub_by_agent_id.values()):
             self._provisionally_close_subtree(fold, ts, terminal_state)
