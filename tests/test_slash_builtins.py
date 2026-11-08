@@ -193,7 +193,7 @@ def test_leave_command_on_materialized_quest_is_rejected(
         "/archive and /clear apply only before a quest is built — this one is "
         "live. Type /pause or press Ctrl-D to pause it (resume with imp resume "
         "mat9), or /abandon to tear it down.")
-    assert expected in out
+    assert expected in " ".join(out)
 
 
 def test_pause_on_materialized_quest_returns_literal(tmp_path: Path) -> None:
@@ -302,7 +302,7 @@ def test_leave_command_pre_session_shows_redirect(
     result = handle_slash_line(
         command, quest=quest, output_fn=out.append, pre_session=True)
     assert result is REPROMPT
-    assert PRE_SESSION_REDIRECT in out
+    assert PRE_SESSION_REDIRECT in " ".join(out)
     assert out[0] == f"> {command}"          # command is echoed with the caret
 
 
@@ -319,7 +319,7 @@ def test_leave_command_pre_session_takes_precedence_over_materialized(
         command, quest=quest, output_fn=out.append, pre_session=True)
     assert result is REPROMPT
     assert not any("apply only before a quest is built" in line for line in out)
-    assert PRE_SESSION_REDIRECT in out
+    assert PRE_SESSION_REDIRECT in " ".join(out)
 
 
 def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
@@ -343,7 +343,7 @@ def test_sandbox_pre_session_off_echoes_state_off_and_returns_literal(
         pre_session=True, unsandboxed=unsandboxed)
     assert result == "/sandbox off"
     assert out[0] == "> /sandbox off"
-    assert any(SANDBOX_STATE_OFF in line for line in out)
+    assert SANDBOX_STATE_OFF in " ".join(out)
 
 
 def test_sandbox_pre_session_on_cancels_pending_off_returns_literal(
@@ -356,7 +356,7 @@ def test_sandbox_pre_session_on_cancels_pending_off_returns_literal(
         "/sandbox on", quest=quest, output_fn=out.append,
         pre_session=True, unsandboxed=True)
     assert result == "/sandbox on"
-    assert any(SANDBOX_STATE_ON in line for line in out)
+    assert SANDBOX_STATE_ON in " ".join(out)
 
 
 def test_sandbox_pre_session_on_with_nothing_pending_reprompts(
@@ -386,7 +386,7 @@ def test_sandbox_pre_session_no_arg_reports_pending_state(
         "/sandbox", quest=quest, output_fn=out.append,
         pre_session=True, unsandboxed=pending)
     assert result is slash.REPROMPT
-    assert any(getattr(slash, constant) in line for line in out)
+    assert getattr(slash, constant) in " ".join(out)
 
 
 def test_sandbox_pre_session_bad_arg_prints_usage(tmp_path: Path) -> None:
@@ -499,3 +499,48 @@ def test_compact_pre_session_shows_redirect_and_reprompts(tmp_path: Path) -> Non
     assert result is REPROMPT
     assert out[0] == "> /compact"
     assert COMPACT_PRE_SESSION_REDIRECT in out
+
+
+@pytest.mark.parametrize("width", range(20, 81))
+def test_long_notices_word_wrap_to_width(
+    tmp_path: Path, width: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.slash import MATERIALIZED_LEAVE_REDIRECT, SANDBOX_STATE_OFF
+    monkeypatch.setattr("imp.cli.slash._is_materialized", lambda quest: True)
+    quest = SimpleNamespace(id="mat9", control_root=tmp_path, workflow_dir=tmp_path)
+    cases = [
+        ("/archive", {}, MATERIALIZED_LEAVE_REDIRECT.format(qid="mat9")),
+        ("/sandbox", {"unsandboxed": True}, SANDBOX_STATE_OFF),
+    ]
+    for command, kwargs, constant in cases:
+        out: list[str] = []
+        assert handle_slash_line(command, quest=quest, output_fn=out.append,
+                                 width=width, **kwargs) is REPROMPT
+        assert out[:2] == [f"> {command}", ""]
+        rows = out[2:]
+        assert len(rows) > 1
+        assert all(0 < len(row) <= width for row in rows)
+        assert " ".join(rows) == constant          # no word split, no hyphen split
+        if "Ctrl-D" in constant:
+            assert any("Ctrl-D" in row for row in rows)
+
+
+def test_multiline_notice_wraps_each_line_keeping_breaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "imp.cli.slash.validate_model_arg",
+        lambda args, quest: "config error:\n\nfirst problem is fairly long here\nsecond")
+    quest = SimpleNamespace(id="q1", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    assert handle_slash_line("/model x", quest=quest, output_fn=out.append,
+                             width=20) is REPROMPT
+    assert out[2:] == ["config error:", "", "first problem is", "fairly long here",
+                       "second"]
+
+
+def test_help_listing_is_not_wrapped_at_narrow_width(tmp_path: Path) -> None:
+    quest = SimpleNamespace(id="q1", control_root=tmp_path, workflow_dir=tmp_path)
+    narrow: list[str] = []
+    handle_slash_line("/help", quest=quest, output_fn=narrow.append, width=20)
+    assert narrow[2:] == UNBUILT_HELP

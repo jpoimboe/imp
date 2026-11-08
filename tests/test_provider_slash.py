@@ -109,8 +109,8 @@ def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
 
     assert handle_slash_line("/provider bogus", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == ("unknown provider 'bogus' (configured: claude; "
-                       "also installed: codex; needs setup: anthropic, openai)")
+    assert " ".join(out[2:]) == ("unknown provider 'bogus' (configured: claude; "
+                                 "also installed: codex; needs setup: anthropic, openai)")
 
 
 def test_an_unavailable_name_is_refused_with_its_auth_hint(
@@ -249,3 +249,28 @@ def test_a_malformed_config_is_printed_not_raised(
                              output_fn=out.append) is REPROMPT
     assert out.count("bad config") == 1
     assert sum(1 for s in out if s.endswith(line)) == 1
+
+
+@pytest.mark.parametrize("line", ["/model", "/provider"])
+def test_a_long_roster_load_error_is_word_wrapped(
+    tmp_path: Path, monkeypatch, line: str,
+) -> None:
+    from imp.engine.errors import LoadError
+
+    msg = ("config error: the providers table in the project config is "
+           "malformed and could not be loaded at all")
+    quest, _state, _wf = _seed(tmp_path)
+
+    def _boom(*_a, **_k):
+        raise LoadError(msg)
+
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config", _boom)
+    out: list[str] = []
+
+    assert handle_slash_line(line, quest=quest, output_fn=out.append,
+                             width=30) is REPROMPT
+    rows = out[2:]                                # past the command echo
+    assert len(rows) > 1
+    assert all(0 < len(r) <= 30 for r in rows)
+    assert " ".join(rows) == msg

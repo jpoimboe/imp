@@ -675,11 +675,11 @@ def test_sandbox_no_arg_reports_state(tmp_path: Path) -> None:
     out: list[str] = []
     assert handle_slash_line("/sandbox", quest=quest, output_fn=out.append,
                              unsandboxed=False) is REPROMPT
-    assert any(SANDBOX_STATE_ON in line for line in out)
+    assert SANDBOX_STATE_ON in " ".join(out)
     out.clear()
     assert handle_slash_line("/sandbox", quest=quest, output_fn=out.append,
                              unsandboxed=True) is REPROMPT
-    assert any(SANDBOX_STATE_OFF in line for line in out)
+    assert SANDBOX_STATE_OFF in " ".join(out)
 
 
 def test_sandbox_on_from_off_returns_literal(tmp_path: Path) -> None:
@@ -834,7 +834,7 @@ def test_ask_line_with_slash_pre_session_reads_pending_off_from_sink(
         ask_line_with_slash, prompt, _NullStatus(), quest,
         pre_session=True, sandbox_sink=sink))
     assert line == "go"
-    assert SANDBOX_STATE_OFF in capsys.readouterr().out
+    assert SANDBOX_STATE_OFF in " ".join(capsys.readouterr().out.split())
 
 
 def test_ask_line_with_slash_pre_session_no_pending_reports_on(
@@ -850,4 +850,21 @@ def test_ask_line_with_slash_pre_session_no_pending_reports_on(
         ask_line_with_slash, prompt, _NullStatus(), quest,
         pre_session=True, sandbox_sink=sink))
     assert line == "go"
-    assert SANDBOX_STATE_ON in capsys.readouterr().out
+    assert SANDBOX_STATE_ON in " ".join(capsys.readouterr().out.split())
+
+
+def test_ask_line_with_slash_wraps_notices_at_its_width(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    import functools
+
+    from imp.cli.slash import ask_line_with_slash
+    quest = _FakeQuest(tmp_path)
+    prompt = _FakePrompt(["/sandbox", "go"])
+    line = anyio.run(functools.partial(
+        ask_line_with_slash, prompt, _NullStatus(), quest, width=40,
+        pre_session=True, sandbox_sink={"unsandboxed": True}))
+    assert line == "go"
+    rows = capsys.readouterr().out.splitlines()
+    assert "Sandbox is off — this step is running" in rows
+    assert "/sandbox on to re-enable it now." in rows
