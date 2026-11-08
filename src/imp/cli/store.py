@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
 from imp.cli.quest_row import fallback_intent
-from imp.paths import project_state_dir
+from imp.paths import display_path, project_state_dir
 
 
 @dataclass(frozen=True)
@@ -251,9 +252,29 @@ def _archive_stranded_home(
         resumable=resumable)
 
 
+@functools.cache
+def _run_control_root(project_root: str) -> Path:
+    from imp.engine import worktree
+    return worktree.find_control_root(Path(project_root))
+
+
+def refuse_foreign_project(control_root: Path) -> None:
+    """Raise unless `control_root` is the sandboxed run's own project."""
+    run_root = _run_control_root(os.environ["IMP_PROJECT_ROOT"])
+    if control_root == run_root:
+        return
+    from imp.engine.worktree import PreconditionError
+    raise PreconditionError(
+        f"{display_path(control_root)} is a different project from this run's "
+        f"({display_path(run_root)})\n"
+        "  to use that project's own imp state, clear the run's pins: "
+        "IMP_SESSION_SOCKET= IMP_STATE_DIR= imp …")
+
+
 def make_store(control_root: Path) -> Store:
     sock = os.environ.get("IMP_SESSION_SOCKET")
     if sock:
+        refuse_foreign_project(control_root)
         from imp.cli.store_proxy import ProxyStore
         return ProxyStore(sock)
     return LocalStore(control_root)

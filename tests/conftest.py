@@ -368,8 +368,9 @@ def _isolate_global_config(
 
 @pytest.fixture(autouse=True)
 def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop ambient IMP_SESSION_SOCKET so make_store uses LocalStore, not a live daemon."""
+    """Drop ambient IMP_SESSION_SOCKET / IMP_PROJECT_ROOT so tests default to LocalStore."""
     monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    monkeypatch.delenv("IMP_PROJECT_ROOT", raising=False)
 
 
 @pytest.fixture(autouse=True)

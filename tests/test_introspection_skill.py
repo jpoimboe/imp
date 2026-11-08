@@ -45,6 +45,8 @@ def test_reading_another_quest_credits_the_daemon_not_the_sandbox_floor() -> Non
     # The demotion: the on-disk cross-project read is a fallback, not the history path.
     flat = _flat(text)
     assert "a fallback for cross-project diagnosis only" in flat
+    assert ("Running `imp` from another project's directory without clearing both "
+            "pins is refused.") in flat
     assert ("**This** project's history is unreachable that way (its sibling quest homes "
             "and archive are masked); search it with `imp search` / `imp events search`, "
             "which the daemon resolves.") in flat

@@ -256,7 +256,8 @@ async def _serve_and_run(
     # Mirror engine_env(): the in-sandbox CLI resolves the state dir through this
     # override, since the mask hides the `repo` marker the slug walk needs.
     engine_env = {"PYTHONPATH": _SRC,
-                  "IMP_STATE_DIR": str(project_state_dir(control))}
+                  "IMP_STATE_DIR": str(project_state_dir(control)),
+                  "IMP_PROJECT_ROOT": str(control)}
 
     # Bind the socket BEFORE resolving the policy: the session_socket_ro re-expose is
     # existence-gated, and a bind pins the inode it resolved at namespace creation.

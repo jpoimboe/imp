@@ -210,6 +210,7 @@ def test_session_proxy_payload_carries_the_raw_var_flags(
     # Inside a session `imp new` is proxied to the daemon: the raw strings must
     # ride along or the flag would be silently dropped.
     monkeypatch.setenv("IMP_SESSION_SOCKET", str(tmp_path / "sock"))
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     sent: dict[str, object] = {}
 
     async def _fake_proxy(op: str, args: dict[str, object]) -> dict[str, object]:

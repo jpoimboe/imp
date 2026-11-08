@@ -1213,6 +1213,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             _emit_cli_error(f"--provider: {reason}")
             return 2
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
+        _refuse_foreign_cwd()
         return _emit_mutation_result(await proxy_mutation_async("new", {
             "opening": getattr(args, "opening", None),
             "title": getattr(args, "title", None),
@@ -1507,6 +1508,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.state import State, lock_is_live
     if os.environ.get("IMP_SESSION_SOCKET"):
+        _refuse_foreign_cwd()
         return _emit_mutation_result(
             await proxy_mutation_async("resume", {"token": args.token}))
     from imp.cli.signals import InterruptCoordinator
@@ -3456,6 +3458,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     from imp.cli.mutation_proxy import proxy_mutation
     token = args.token
     if os.environ.get("IMP_SESSION_SOCKET"):
+        _refuse_foreign_cwd()
         if token is None or not token.strip():
             _emit_cli_error("abandon needs a quest id in a sandboxed session")
             return 2
@@ -3589,6 +3592,16 @@ def apply_edit(
     return 0, f"edited {quest_id} · {changes}"
 
 
+def _refuse_foreign_cwd() -> None:
+    from imp.cli.store import refuse_foreign_project
+    from imp.engine import worktree
+    try:
+        cwd_root = worktree.find_control_root(Path.cwd())
+    except worktree.PreconditionError:
+        return  # outside any repo: nothing foreign to protect
+    refuse_foreign_project(cwd_root)
+
+
 def _emit_mutation_result(result: dict[str, Any]) -> int:
     rc: int = result["returncode"]
     message = result.get("message")
@@ -3600,6 +3613,7 @@ def _emit_mutation_result(result: dict[str, Any]) -> int:
 def _cmd_edit(args: argparse.Namespace) -> int:
     from imp.cli.mutation_proxy import proxy_mutation
     if os.environ.get("IMP_SESSION_SOCKET"):
+        _refuse_foreign_cwd()
         return _emit_mutation_result(proxy_mutation("edit", {
             "token": args.token, "title": args.title, "backlog": args.backlog,
             "active": args.active, "depends_on": args.depends_on,

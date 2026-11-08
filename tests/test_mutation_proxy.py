@@ -139,6 +139,7 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
     _draft(tmp_path, "2026-06-24-mut50")
     sock = str(tmp_path / "s.sock")
     monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(tmp_path))
 
     session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
     async with anyio.create_task_group() as tg:
@@ -161,6 +162,7 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
 
 def test_cmd_edit_proxies_when_socket_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
 
     def _fake(op: str, args: dict) -> dict:
@@ -185,6 +187,7 @@ def test_async_cmd_resume_proxies_when_socket_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
 
     async def _fake(op: str, args: dict) -> dict:
@@ -202,6 +205,7 @@ def test_async_cmd_new_proxies_when_socket_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
 
     async def _fake(op: str, args: dict) -> dict:
@@ -321,6 +325,7 @@ async def test_proxy_mutation_abandon_round_trips_over_socket(
     _draft(tmp_path, "2026-06-24-abn50")
     sock = str(tmp_path / "s.sock")
     monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(tmp_path))
 
     session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
     async with anyio.create_task_group() as tg:
@@ -340,6 +345,7 @@ def test_cmd_abandon_proxies_when_socket_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
 
     def _fake(op: str, args: dict) -> dict:
@@ -357,6 +363,7 @@ def test_cmd_abandon_missing_token_in_sandbox_errors(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], token: str | None,
 ) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
 
     def _boom(op: str, args: dict) -> dict:
         raise AssertionError("must not proxy or tear down without a token")
@@ -390,6 +397,7 @@ def test_new_mutation_threads_var_flags_to_apply_new(
 def test_async_cmd_new_proxy_forwards_background(
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
 
     async def _fake(op: str, args: dict) -> dict:
