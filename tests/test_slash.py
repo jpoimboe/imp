@@ -285,7 +285,7 @@ def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
 def test_no_chrome_printed_around_the_submitted_prompt(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """ask_line_with_slash prints NO chrome around the field: no rule, no blank
-    line. The bright-blue caret marks the turn while typing; on submit
+    line. The gold caret marks the turn while typing; on submit
     prompt_toolkit erases its region and the live driver reprints the entered line
     with the subtle background. So a plain submit produces no stdout here."""
     from imp.cli.slash import ask_line_with_slash

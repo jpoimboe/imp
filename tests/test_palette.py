@@ -108,7 +108,6 @@ def test_fold_glyphs_default_unicode() -> None:
 def test_node_colors_calm_scheme() -> None:
     # The most frequent content is calmest; weight/color go to identity + structure.
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)     # bright-blue caret marks user turn
     assert pal.NODE_COLORS["phase"] == ("bold", "blue")    # structure stands out: bold blue
     assert pal.NODE_COLORS["step"] == ("bold", "step")     # bold darker-blue "mini-phase" label
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
@@ -134,11 +133,12 @@ def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
 
 
-def test_user_color_is_bright_blue_foreground() -> None:
-    # User-turn identity is now a bright-blue FOREGROUND caret (not a bg fill):
-    # the live prompt (slash/prompt) and the imp-log replay both reference this.
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)
-    assert pal._ANSI["bright_blue"] == "\x1b[94m"
+def test_no_user_role_and_bright_blue_only_in_truecolor_maps() -> None:
+    assert "user" not in pal.NODE_COLORS
+    assert "bright_blue" not in pal.theme_escapes("ansi")
+    # The snap-ui / showcase pyte palettes map `brightblue` through theme_rgb.
+    for theme in pal.THEMES:
+        assert "bright_blue" in pal.theme_rgb(theme)
 
 
 def test_caret_constant_and_helper_are_the_gold_arrow() -> None:

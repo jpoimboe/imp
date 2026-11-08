@@ -23,7 +23,7 @@ _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m",
 _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[94m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[94m",
+    "gray": "\x1b[90m", "step": "\x1b[94m",
     "wordmark": "\x1b[33m",  # 16-color has no warm gold; plain yellow is closest
 }
 
@@ -302,7 +302,6 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "error": ("bold", "red"),          # semantic
     "warning": ("wordmark",),          # semantic — warm accent (orange)
     "lifecycle": ("wordmark",),        # navigational spine: rules, route labels, run-spine states
-    "user": ("bright_blue",),          # bright-blue caret/text marks the user's turn
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 

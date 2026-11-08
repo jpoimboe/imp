@@ -453,7 +453,7 @@ async def ask_line_with_slash(
     Framing: no chrome around the field. While the user types, the slate input
     field marks the turn; on submit prompt_toolkit erases its region
     (erase_when_done) and the live driver reprints the entered line with the
-    bright-blue `> ` caret. The gray bracketing rules are gone — the caret is
+    gold `> ` caret. The gray bracketing rules are gone — the caret is
     the marker now.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
