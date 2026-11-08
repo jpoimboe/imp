@@ -90,7 +90,12 @@ async def test_run_fresh_session_interactive_threads_create_mode(
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
     monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
 
-    async def _fake_loop(control: object, base: str, *, first: object) -> int:
+    loop_modes: list[str] = []
+
+    async def _fake_loop(
+        control: object, base: str, *, first: object, leave_mode: str,
+    ) -> int:
+        loop_modes.append(leave_mode)
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -102,6 +107,7 @@ async def test_run_fresh_session_interactive_threads_create_mode(
     rc = await m._run_fresh_session(quest, args=args)
     assert rc == 0
     assert captured["leave_mode"] == create_mode
+    assert loop_modes == [create_mode]
 
 
 @pytest.mark.anyio
@@ -129,7 +135,9 @@ async def test_run_fresh_session_interactive_seeds_a_blank_tail(
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
     monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
 
-    async def _fake_loop(control: object, base: str, *, first: object) -> int:
+    async def _fake_loop(
+        control: object, base: str, *, first: object, leave_mode: str,
+    ) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -155,7 +163,12 @@ def test_interactive_resume_threads_create_mode(
     monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True)
     captured = _capture_leave_mode(monkeypatch)
 
-    async def _fake_loop(control: object, base: str, *, first: object) -> int:
+    loop_modes: list[str] = []
+
+    async def _fake_loop(
+        control: object, base: str, *, first: object, leave_mode: str,
+    ) -> int:
+        loop_modes.append(leave_mode)
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -163,6 +176,7 @@ def test_interactive_resume_threads_create_mode(
         token="feat", non_interactive=False, message=None))
     assert rc == 0
     assert captured["leave_mode"] == create_mode
+    assert loop_modes == [create_mode]
 
 
 @pytest.mark.parametrize("create_mode", ["chat", "new"])
@@ -200,7 +214,12 @@ async def test_inert_resume_threads_create_mode(
     async def _fake_run_inert(*, question: object, ask_line: object, launch: object) -> int:
         return await launch("my answer")
 
-    async def _fake_loop(control: object, base: str, *, first: object) -> int:
+    loop_modes: list[str] = []
+
+    async def _fake_loop(
+        control: object, base: str, *, first: object, leave_mode: str,
+    ) -> int:
+        loop_modes.append(leave_mode)
         return await first({})
 
     monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
@@ -209,3 +228,4 @@ async def test_inert_resume_threads_create_mode(
         quest, "the question?", marker="resuming", notice=None, autonomous=False)
     assert rc == 0
     assert captured["leave_mode"] == create_mode
+    assert loop_modes == [create_mode]

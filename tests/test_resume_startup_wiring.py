@@ -63,7 +63,7 @@ def test_interactive_resume_derives_verb_from_step_label(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -125,7 +125,7 @@ async def test_inert_resume_derives_verb_and_passes_display_width(
 
     monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)

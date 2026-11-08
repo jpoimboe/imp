@@ -90,7 +90,7 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
 
-    async def fake_clear_loop(control_root, base, *, first):
+    async def fake_clear_loop(control_root, base, *, first, leave_mode):
         return 9
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
@@ -114,7 +114,7 @@ async def test_resume_skips_inert_when_message_supplied(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
 
-    async def fake_clear_loop(control_root, base, *, first):
+    async def fake_clear_loop(control_root, base, *, first, leave_mode):
         return 7
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
@@ -590,7 +590,7 @@ async def test_inert_resume_echoes_reply_before_session_boot(
 
     monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -637,7 +637,7 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
 
     monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -684,7 +684,7 @@ async def test_resume_inert_forwards_provider_to_session_client(
 
     monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -706,7 +706,7 @@ async def test_inert_resume_hands_quest_base_to_clear_loop(
     State(id="c2", step="s", step_attempt=0, status="paused").save(ch.state_dir)
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         seen["base"] = base
         return 0
 

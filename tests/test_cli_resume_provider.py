@@ -258,7 +258,7 @@ def test_the_interactive_path_threads_the_frame(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
-    async def _fake_clear_loop(control_root, base, *, first):
+    async def _fake_clear_loop(control_root, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)

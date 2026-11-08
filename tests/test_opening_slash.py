@@ -288,7 +288,7 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._run_cleared_session(
-        tmp_path, "main", leave_state={})
+        tmp_path, "main", leave_state={}, leave_mode="new")
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"
 
@@ -458,7 +458,8 @@ async def test_cleared_session_threads_sandbox_sink(tmp_path, monkeypatch) -> No
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
-    rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await main._run_cleared_session(
+        tmp_path, "main", leave_state={}, leave_mode="new")
     assert rc == 0
     assert isinstance(captured["sandbox_sink"], dict)
 
@@ -590,7 +591,8 @@ async def test_cleared_session_threads_opening_unsandboxed_to_run(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
-    rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await main._run_cleared_session(
+        tmp_path, "main", leave_state={}, leave_mode="new")
     assert rc == 0
     assert captured["opening_unsandboxed"] is True
 

@@ -60,7 +60,7 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     ls: dict[str, str] = {}
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls)
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls, leave_mode="new")
 
     assert rc == 0
     assert captured["leave_mode"] == "new"            # parks like imp new, not abandon
@@ -109,7 +109,7 @@ async def test_run_cleared_session_seeds_a_blank_tail_and_echoes_the_message(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
 
-    assert await m._run_cleared_session(tmp_path, "main", leave_state={}) == 0
+    assert await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new") == 0
     assert driver_kwargs["preceded_by_blank"] is True
     assert echoed == echoes
 
@@ -131,7 +131,7 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
 
     monkeypatch.setattr(m, "Prompt", _FakePromptCancel)
 
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 130
     changes_dir = project_state_dir(tmp_path) / "quests"
@@ -160,7 +160,7 @@ async def test_run_cleared_session_cancel_emits_discarded_spine(
 
     monkeypatch.setattr(m, "Prompt", _FakePromptCancel)
 
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 130
     out = capsys.readouterr().out
@@ -195,7 +195,7 @@ async def test_run_cleared_session_leave_signal_discards_like_ctrl_d(
     monkeypatch.setattr(m, "Prompt", _SignalledPrompt)
 
     async with asyncio.timeout(HANG_BACKSTOP):
-        rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+        rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 130
     out = capsys.readouterr().out
@@ -240,7 +240,7 @@ async def test_run_cleared_session_out_of_band_sigint_feeds_ctrl_c_and_continues
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     async with asyncio.timeout(HANG_BACKSTOP):
-        rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+        rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 0
     assert fed == [True]
@@ -254,7 +254,7 @@ async def test_clear_loop_reopens_only_on_clear(
     intents = iter(["clear", "pause"])
     calls: list[str] = []
 
-    async def _fake_cleared(control, base, *, leave_state, leave_mode="new"):
+    async def _fake_cleared(control, base, *, leave_state, leave_mode):
         kind = next(intents)
         calls.append(f"cleared:{kind}")
         leave_state["intent"] = kind
@@ -267,7 +267,7 @@ async def test_clear_loop_reopens_only_on_clear(
         leave_state["intent"] = "clear"
         return 9
 
-    rc = await m._clear_loop(tmp_path, "main", first=_first)
+    rc = await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new")
 
     assert rc == 5                                        # the final non-clear rc
     assert calls == ["first", "cleared:clear", "cleared:pause"]  # looped twice
@@ -285,7 +285,7 @@ async def test_clear_loop_returns_first_rc_without_clear(
     async def _first(leave_state: dict[str, str]) -> int:
         return 3
 
-    assert await m._clear_loop(tmp_path, "main", first=_first) == 3
+    assert await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new") == 3
 
 
 @pytest.mark.anyio
@@ -294,7 +294,7 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
 ) -> None:
     call_count = 0
 
-    async def _fake_cleared(control, base, *, leave_state, leave_mode="new"):
+    async def _fake_cleared(control, base, *, leave_state, leave_mode):
         nonlocal call_count
         call_count += 1
         assert call_count <= 3, "loop did not exit — leave_state reset is missing"
@@ -307,7 +307,7 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
         leave_state["intent"] = "clear"
         return 9
 
-    rc = await m._clear_loop(tmp_path, "main", first=_first)
+    rc = await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new")
 
     assert rc == 7
     assert call_count == 1
@@ -326,14 +326,14 @@ async def test_clear_loop_archive_intent_does_not_reopen(
         leave_state["intent"] = "archive"
         return 4
 
-    assert await m._clear_loop(tmp_path, "main", first=_first) == 4
+    assert await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new") == 4
 
 
 @pytest.mark.anyio
 async def test_clear_loop_propagates_exception_from_cleared_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_cleared(control, base, *, leave_state, leave_mode="new"):
+    async def _fake_cleared(control, base, *, leave_state, leave_mode):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
@@ -343,7 +343,7 @@ async def test_clear_loop_propagates_exception_from_cleared_session(
         return 0
 
     with pytest.raises(RuntimeError, match="boom"):
-        await m._clear_loop(tmp_path, "main", first=_first)
+        await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new")
 
 
 def test_new_interactive_routes_through_clear_loop(
@@ -354,7 +354,7 @@ def test_new_interactive_routes_through_clear_loop(
     _branch_with_commit(tmp_path, "trunk")      # exists, but is NOT the checkout
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, base, *, first, leave_mode="new"):
+    async def _fake_loop(control, base, *, first, leave_mode):
         seen["leave_mode"] = leave_mode
         seen["base"] = base
         return 0
@@ -386,7 +386,7 @@ def test_fresh_session_line_routes_through_clear_loop(
     ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="topic")
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         seen["base"] = base
         return 0
 
@@ -422,7 +422,7 @@ def test_resume_interactive_routes_through_clear_loop(
 
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         seen["base"] = base
         return 0
 
@@ -463,7 +463,7 @@ def test_resume_interactive_leads_with_header_before_splash(
     monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -518,7 +518,7 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
 
-    async def _fake_loop(control, base, *, first):
+    async def _fake_loop(control, base, *, first, leave_mode):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -571,7 +571,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 0
     # The idle escape for the freshly minted (unnamed) draft is already written:
@@ -617,7 +617,7 @@ async def test_run_cleared_session_cancel_resets_title(
 
     monkeypatch.setattr(m, "Prompt", _CancelPrompt)
 
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state={}, leave_mode="new")
 
     assert rc == 130
     assert reset == ["reset"]
@@ -653,7 +653,7 @@ async def test_run_cleared_session_intercepts_help(
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
     ls: dict[str, str] = {}
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls)
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls, leave_mode="new")
 
     assert rc == 0
     # /help was intercepted; the following real line becomes the persisted intent.
@@ -716,7 +716,7 @@ async def test_clear_loop_records_caller_base_on_detached_head(
         leave_state["intent"] = "clear"
         return 9
 
-    rc = await m._clear_loop(tmp_path, "main", first=_first)
+    rc = await m._clear_loop(tmp_path, "main", first=_first, leave_mode="new")
 
     assert rc == 0
     quest = captured["quest"]
@@ -812,3 +812,16 @@ async def test_run_cleared_session_divider_colors_id_gold_and_rule_dim(
         + pal.ansi(quest_id, *pal.NODE_COLORS["quest_id"])
         + pal.ansi(" ───", "dim")
         + "\n\n")
+
+
+def test_clear_loop_requires_leave_mode(tmp_path: Path) -> None:
+    async def _first(leave_state: dict[str, str]) -> int:
+        return 0
+
+    with pytest.raises(TypeError, match="leave_mode"):
+        m._clear_loop(tmp_path, "main", first=_first)
+
+
+def test_run_cleared_session_requires_leave_mode(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="leave_mode"):
+        m._run_cleared_session(tmp_path, "main", leave_state={})

@@ -855,10 +855,9 @@ async def _read_opening_message(
 
 
 async def _run_cleared_session(
-    control: Path, base: str, *, leave_state: dict[str, str],
-    leave_mode: str = "new",
+    control: Path, base: str, *, leave_state: dict[str, str], leave_mode: str,
 ) -> int:
-    """Open a fresh imp new-style draft in place after /clear."""
+    """Open a fresh draft in place after /clear, of the caller's kind (`leave_mode`)."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import (
@@ -940,10 +939,10 @@ async def _clear_loop(
     base: str,
     *,
     first: Callable[[dict[str, str]], Awaitable[int]],
-    leave_mode: str = "new",
+    leave_mode: str,
 ) -> int:
-    """Run first, then loop only while /clear: open a fresh new-style chat
-    forked from `base` — the caller's, never the checkout's current branch."""
+    """Run first, then loop only while /clear: open a fresh conversation of the
+    caller's kind, forked from `base` — the caller's, never the checkout's branch."""
     leave_state: dict[str, str] = {}
     rc = await first(leave_state)
     while leave_state.get("intent") == "clear":
@@ -1129,7 +1128,8 @@ async def _run_fresh_session(
             leave_mode=quest.create_mode,
             autonomous=autonomous, stream=watched)
 
-    return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
+    return await _clear_loop(quest.control_root, quest.base_branch, first=_first,
+                             leave_mode=quest.create_mode)
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
@@ -1608,7 +1608,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             leave_mode=quest.create_mode,
             autonomous=autonomous, provider=pending_provider, stream=watched)
 
-    return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
+    return await _clear_loop(quest.control_root, quest.base_branch, first=_first,
+                             leave_mode=quest.create_mode)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -1714,7 +1715,8 @@ async def _resume_inert(
                 title=term_title, autonomous=autonomous,
                 provider=provider, stream=watched)
 
-        return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
+        return await _clear_loop(quest.control_root, quest.base_branch, first=_first,
+                                 leave_mode=quest.create_mode)
 
     return await run_inert_resume(
         question=question,
