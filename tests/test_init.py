@@ -8,8 +8,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from imp.cli.init import run_init
+from imp.providers import ProviderStatus, Readiness
 from tests._readiness import pin_readiness
 from tests.conftest import _git, _init_repo
 
@@ -21,6 +25,12 @@ def _inputs(*answers: str) -> object:
 
 def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
+
+
+_TWO_STATUSES = {
+    "claude": ProviderStatus(Readiness.SIGNED_IN, "signed in"),
+    "anthropic": ProviderStatus(Readiness.KEY_SET, "ANTHROPIC_API_KEY set"),
+}
 
 
 def _stub_screen(monkeypatch, **overrides) -> None:
@@ -354,7 +364,7 @@ def test_init_suggestion_reads_as_opening_message(tmp_path: Path) -> None:
 def test_picker_cursor_uses_render_safe_caret() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], _TWO_STATUSES, cursor=0, selected={0})
     active = rows[1][1]
     inactive = rows[2][1]
     assert active.startswith("> ")
@@ -1254,24 +1264,9 @@ def test_already_initialized_rerun_prints_no_splash(
 def test_picker_cursor_row_is_gold_not_cyan() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], _TWO_STATUSES, cursor=0, selected={0})
     assert rows[1][0] == "ansiyellow bold"
     assert rows[2][0] == ""
-
-
-def test_picker_block_has_a_blank_line_around_the_options() -> None:
-    from imp.cli.init import _picker_rows
-
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
-    text = "".join(t for _style, t in rows)
-    assert text.splitlines() == [
-        "Which providers do you want to enable?",
-        "",
-        "> [x] claude",
-        "  [ ] anthropic",
-        "",
-        "↑↓ move · space toggle · enter confirm · esc cancel",
-    ]
 
 
 def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
@@ -1280,6 +1275,155 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     doc = _interactive_provider_picker.__doc__ or ""
     assert "ansicyan" not in doc
     assert "ansiyellow" in doc
+
+
+_PICKER_HINT = "↑↓ move · space toggle · enter confirm · esc cancel"
+_ORDER = ["claude", "anthropic", "openai", "codex"]
+
+
+def _mockup_statuses(
+    monkeypatch: pytest.MonkeyPatch, base: Path,
+) -> dict[str, ProviderStatus]:
+    """The spec mockup's machine: claude on PATH and signed in, codex absent, no keys."""
+    from imp.providers import provider_readiness
+    from imp.providers.effective import floor_config
+
+    claude_dir, _ = pin_readiness(monkeypatch, base, on_path=("claude",), keys=())
+    (claude_dir / ".credentials.json").write_text('{"claudeAiOauth": {}}')
+    return {n: provider_readiness(n, floor_config()) for n in _ORDER}
+
+
+def _fragment_lines(rows: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    lines: list[list[tuple[str, str]]] = [[]]
+    for style, text in rows:
+        for i, part in enumerate(text.split("\n")):
+            if i:
+                lines.append([])
+            if part:
+                lines[-1].append((style, part))
+    return lines
+
+
+def test_picker_rows_show_each_status_in_one_aligned_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import _picker_rows
+
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    rows = _picker_rows(_ORDER, statuses, cursor=0, selected={0})
+
+    text = "".join(t for _style, t in rows).splitlines()
+    assert text == [
+        "Which providers do you want to enable?",
+        "",
+        "> [x] claude      signed in",
+        "  [ ] anthropic   ANTHROPIC_API_KEY not set",
+        "  [ ] openai      OPENAI_API_KEY not set",
+        "  [ ] codex       CLI not found",
+        "",
+        _PICKER_HINT,
+    ]
+    labels = ["signed in", "ANTHROPIC_API_KEY not set", "OPENAI_API_KEY not set",
+              "CLI not found"]
+    assert len({line.index(label) for line, label in zip(text[2:6], labels, strict=True)}) == 1
+
+
+def test_picker_label_is_dim_except_on_the_cursor_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import _picker_rows
+
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    rows = _picker_rows(_ORDER, statuses, cursor=1, selected={0})
+
+    options = _fragment_lines(rows)[2:6]
+    for i, (line, name) in enumerate(zip(options, _ORDER, strict=True)):
+        label = statuses[name].label
+        if i == 1:
+            assert {style for style, _t in line} == {"ansiyellow bold"}
+            assert "".join(t for _s, t in line).endswith(label)
+        else:
+            assert ("ansibrightblack", label) in line
+            assert line[0][0] == ""
+
+
+def test_provider_picker_erases_itself_on_confirm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import prompt_toolkit as pt
+
+    from imp.cli.init import _interactive_provider_picker
+
+    real_application = pt.Application
+    captured: dict[str, object] = {}
+
+    def spy(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return real_application(*args, **kwargs)
+
+    monkeypatch.setattr(pt, "Application", spy)
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")             # confirm the pre-selected claude
+        picked = _interactive_provider_picker(_ORDER, statuses)
+
+    assert picked == ["claude"]
+    assert captured.get("erase_when_done") is True
+
+
+def _capture_default_picker(
+    monkeypatch: pytest.MonkeyPatch, seen: dict[str, object], pick: list[str],
+) -> None:
+    def _picker(available: list[str], statuses: dict[str, ProviderStatus]) -> list[str]:
+        seen["available"] = list(available)
+        seen["labels"] = {n: s.label for n, s in statuses.items()}
+        return pick
+
+    monkeypatch.setattr("imp.cli.init._interactive_provider_picker", _picker)
+
+
+def test_default_picker_gets_statuses_from_the_effective_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    seen: dict[str, object] = {}
+    _capture_default_picker(monkeypatch, seen, ["anthropic"])
+
+    run_init(
+        project_root=tmp_path, settings_root=tmp_path,
+        input_fn=_inputs(), output_fn=lambda _m: None,
+    )
+
+    assert seen["available"] == _ORDER
+    assert seen["labels"] == {
+        "claude": "signed in",
+        "anthropic": "MY_KEY not set",
+        "openai": "OPENAI_API_KEY set",
+        "codex": "signed in",
+    }
+
+
+def test_picker_falls_back_to_the_floor_but_the_repaired_summary_keeps_provider_envs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # providers: [] fails to load until repaired; the picker falls back to the floor.
+    _plain(monkeypatch)
+    _write_machine_config("providers: []\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    seen: dict[str, object] = {}
+    _capture_default_picker(monkeypatch, seen, ["anthropic"])
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, input_fn=_inputs(), output_fn=msgs.append)
+
+    labels = seen["labels"]
+    assert isinstance(labels, dict)
+    assert labels["anthropic"] == "ANTHROPIC_API_KEY set"
+    enabled = msgs.index("Enabled: anthropic")
+    assert msgs[enabled + 1] == "  anthropic — MY_KEY not set"
 
 
 def test_read_user_config_refuses_unparseable_yaml(tmp_path: Path) -> None:
@@ -1652,7 +1796,7 @@ def test_cmd_init_reports_an_unparseable_machine_config_interactively(
     # refusal must land before it, and an unpinned red run would try to draw it.
     monkeypatch.setattr(
         "imp.cli.init._interactive_provider_picker",
-        lambda _available: (_ for _ in ()).throw(
+        lambda *_args: (_ for _ in ()).throw(
             AssertionError("a config that will not parse must not reach the picker")))
 
     rc = m._cmd_init(_init_args(non_interactive=False))
