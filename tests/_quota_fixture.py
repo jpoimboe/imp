@@ -4,10 +4,10 @@ that shared one weekly Claude Max window on 2026-09-18.
 Captured with `imp events <id> --all --json --no-pager` against the maintainer's
 archive and projected down to the event envelope plus only the payload fields the
 summary reads — no conversation prose, so the capture is publishable as it
-stands. `samo71` is its whole log, whose span is the whole run; `fego87` carries
-its in-span events plus, per `(agent, session)`, the one pre-span `query_result`
-and, per agent, the last pre-span `agent_message`, which is what
-`quota_neighbours` ships across the seam.
+stands. `samo71` is its whole log. `fego87` carries the events that overlapped
+samo71's run plus, per `(agent, session)`, the one earlier `query_result` and,
+per agent, the last earlier `agent_message`: another quest drawing on the same
+week.
 
 Nothing in the suite reads the live archive: conftest's `_isolate_global_config`
 pins `IMP_HOME` at an absent per-test directory."""

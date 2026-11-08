@@ -265,7 +265,7 @@ def _snapshot(root: Path) -> dict[str, bytes]:
 def test_the_walk_writes_nothing_in_another_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC 9(h), ported from test_quota_neighbours."""
+    """AC 9(h)."""
     home = _imp_home(tmp_path, monkeypatch)
     root = _subject_project(tmp_path, home)
     # a REAL archive, so the walk runs past archive_is_current into the index

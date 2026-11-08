@@ -17,8 +17,6 @@ from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import Enum
-from itertools import pairwise
 from typing import Any
 
 from imp.cli.accounting import (
@@ -27,7 +25,7 @@ from imp.cli.accounting import (
     is_metered,
     model_rows,
 )
-from imp.cli.store import GaugeWeek, NeighbourQuota
+from imp.cli.store import GaugeWeek
 from imp.providers.catalog import BillingUsage, cost_usd, prices_for
 
 _CACHE_READ_FREE = frozenset({"claude", "anthropic"})
@@ -49,18 +47,6 @@ def parse_ts(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def run_span(events: Iterable[dict[str, Any]]) -> tuple[datetime, datetime] | None:
-    """The run's wall clock: its first timestamped event to its last -- the widest
-    interval the log evidences, needing no inference about which events bound the
-    run. Not the active time the `time` column reports: the gauge keeps moving
-    while a run is parked."""
-    stamps = [when for when in (parse_ts(e.get("timestamp")) for e in events)
-              if when is not None]
-    if not stamps:
-        return None
-    return stamps[0], stamps[-1]
-
-
 def weighted_units(provider: str | None, model: str | None,
                    billing: BillingUsage) -> float:
     """One request's draw on the quota gauge, in list-price dollars. 0.0 when the
@@ -78,14 +64,6 @@ def weighted_units(provider: str | None, model: str | None,
             + billing.output * prices.output) / 1_000_000
 
 
-def rollup_units(provider: str | None, model_usage: dict[str, Any]) -> float:
-    """A claude `query_result`'s `model_usage` rollup, priced per model. One
-    blended rate over the summed buckets gives a different number the moment a
-    turn's model mix changes."""
-    return sum((weighted_units(provider, model, billing)
-                for model, billing in model_rows(model_usage)), 0.0)
-
-
 def _number(value: Any) -> float:
     """A JSON number, or 0.0 for anything else — a foreign log's field may be
     null, a string, or absent."""
@@ -99,44 +77,12 @@ def _text(value: Any) -> str:
 
 
 @dataclass(frozen=True)
-class Units:
-    """Weighted units per provider. A zero draw is kept rather than dropped: it
-    is what records that the provider did tracked work, which the per-gauge
-    no-units state reads."""
-
-    per_provider: tuple[tuple[str, float], ...] = ()
-
-    @classmethod
-    def of(cls, provider: str | None, amount: float) -> Units:
-        return cls() if provider is None else cls(((provider, amount),))
-
-    def get(self, provider: str) -> float:
-        return next((a for p, a in self.per_provider if p == provider), 0.0)
-
-    @property
-    def providers(self) -> tuple[str, ...]:
-        return tuple(p for p, _ in self.per_provider)
-
-    def __add__(self, other: Units) -> Units:
-        merged: dict[str, float] = {}
-        for provider, amount in (*self.per_provider, *other.per_provider):
-            merged[provider] = merged.get(provider, 0.0) + amount
-        return Units(tuple(sorted(merged.items())))
-
-
-NO_UNITS = Units()
-
-
-@dataclass(frozen=True)
 class Increment:
     """One request's raw billing and the wall-clock interval it occupied, at
     `index` in the log it was read from. Prices and metering are applied on
-    read, so the facts stay valid when either changes.
-
-    `start is None` is a point-in-time row — an `agent_message` or a codex usage
-    patch, neither of which carries a duration. It belongs whole to the span
-    holding `end` and has no interval to prorate over, so the overlap division
-    below is reachable only where a real interval exists."""
+    read, so the facts stay valid when either changes. `start is None` is a
+    point-in-time row — an `agent_message` or a codex usage patch, neither of
+    which carries a duration."""
 
     index: int
     provider: str | None
@@ -157,17 +103,6 @@ class Increment:
             return None
         return self.provider
 
-    def credit(self, start: datetime, end: datetime) -> float:
-        """This increment's units falling inside `[start, end]`. An interval meeting
-        the span in zero length carries none of them; an instant on the boundary
-        belongs to the span, having no interval to divide."""
-        if self.start is None:
-            return self.units if start <= self.end <= end else 0.0
-        overlap = (min(self.end, end) - max(self.start, start)).total_seconds()
-        if overlap <= 0:
-            return 0.0
-        return self.units * overlap / (self.end - self.start).total_seconds()
-
 
 def _delta_row(current: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
     keys = set(current) | set(previous)
@@ -183,20 +118,17 @@ def _rollup_delta(current: dict[str, Any],
             for model, row in current.items() if isinstance(row, dict)}
 
 
-def increments(events: Iterable[dict[str, Any]],
-               agents: dict[str, tuple[str | None, str | None, str | None]] | None = None,
-               ) -> list[Increment]:
+def increments(events: Iterable[dict[str, Any]]) -> list[Increment]:
     """Every usage-bearing row as one increment, in log order.
 
-    `agents` both seeds and accumulates the per-agent
-    `(provider, model, auth_mode)` triple: a usage patch and a `query_result`
-    carry none of the three.
+    A usage patch and a `query_result` carry no `(provider, model, auth_mode)`
+    triple, so each takes its agent's from that agent's last `agent_message`.
 
     claude `query_result` rows are cumulative within an `(agent, session)` pair,
     so each differences against its predecessor in that pair and a new session
     restarts from zero. claude's own `agent_message` usage is the unreliable
     start-of-message snapshot `build_summary` also skips."""
-    triples = {} if agents is None else agents
+    triples: dict[str, tuple[str | None, str | None, str | None]] = {}
     out: list[Increment] = []
     previous: dict[tuple[str, str], dict[str, Any]] = {}
     latest: datetime | None = None
@@ -243,179 +175,6 @@ def increments(events: Iterable[dict[str, Any]],
                        if duration_ms > 0 else None),
                 end=when))
     return out
-
-
-def units_in_span(rows: Iterable[Increment], start: datetime,
-                  end: datetime) -> Units:
-    """A quest's whole in-span draw: what a neighbour, which has no row structure
-    to attribute against, contributes to the denominator."""
-    total = NO_UNITS
-    for inc in rows:
-        total = total + Units.of(inc.provider, inc.credit(start, end))
-    return total
-
-
-def credits_by_index(events: list[dict[str, Any]],
-                     span: tuple[datetime, datetime]) -> dict[int, Units]:
-    """Each increment's in-span units, keyed by its position in `events` — the one
-    join a row walk over the same list can rely on. An event id cannot serve: the
-    persisted usage patch carries none, which is where a codex run's whole draw
-    lives. One event yields at most one increment, so no key collides."""
-    start, end = span
-    return {inc.index: Units.of(inc.provider, inc.credit(start, end))
-            for inc in increments(events, {})}
-
-
-class Withheld(Enum):
-    """Why a gauge yields no figure, in the order Scope §1 evaluates them."""
-
-    NO_READINGS = "no_readings"
-    WINDOW_RESET = "window_reset"
-    BELOW_RESOLUTION = "below_resolution"
-    NO_TRACKED_USAGE = "no_tracked_usage"
-
-
-@dataclass(frozen=True)
-class _Sample:
-    when: datetime
-    used_pct: float
-    resets_at: int | None
-
-
-def _samples(readings: Iterable[dict[str, Any]], provider: str,
-             start: datetime, end: datetime) -> list[_Sample]:
-    """The provider's in-span `7d` readings in time order. The gauge is
-    account-global, so a reading from any quest is a valid sample of it."""
-    out: list[_Sample] = []
-    for e in readings:
-        p = e.get("payload") or {}
-        when = parse_ts(e.get("timestamp"))
-        if p.get("provider") != provider or when is None:
-            continue
-        if not start <= when <= end:
-            continue
-        for window in p.get("windows") or []:
-            if isinstance(window, dict) and window.get("label") == _WEEKLY:
-                stamp = window.get("resets_at")
-                out.append(_Sample(when, _number(window.get("used_pct")),
-                                   stamp if isinstance(stamp, int) else None))
-    return sorted(out, key=lambda s: s.when)
-
-
-def _window_reset(samples: list[_Sample]) -> bool:
-    """A reset changes `resets_at`, or drops `used_pct` by more than the gauge's
-    own quantization. Two quests sampling the same gauge seconds apart straddle a
-    rounding boundary and read a point apart in either direction, so a 1-point
-    dip is jitter; a real reset falls the whole window. An absent stamp is no
-    evidence either way."""
-    for earlier, later in pairwise(samples):
-        if (earlier.resets_at is not None and later.resets_at is not None
-                and earlier.resets_at != later.resets_at):
-            return True
-        if earlier.used_pct - later.used_pct > _GAUGE_QUANTUM:
-            return True
-    return False
-
-
-def weekly_movement(readings: Iterable[dict[str, Any]], provider: str,
-                    start: datetime, end: datetime) -> float | Withheld:
-    """The gauge's movement over the span: the plain difference of the first and
-    last in-span `7d` reading. The order of the withhold states is load-bearing —
-    a window that reset mid-span can land back on the `used_pct` it started from
-    and so satisfy both the second state and the third."""
-    samples = _samples(readings, provider, start, end)
-    if not samples:
-        return Withheld.NO_READINGS
-    if _window_reset(samples):
-        return Withheld.WINDOW_RESET
-    movement = samples[-1].used_pct - samples[0].used_pct
-    if movement < _GAUGE_QUANTUM:
-        return Withheld.BELOW_RESOLUTION
-    return movement
-
-
-@dataclass(frozen=True)
-class QuotaFigure:
-    """A resolved gauge: its movement and the unit split that divides it. A
-    figure exists only where it is resolvable, so no half-resolved state is
-    representable and `scale`'s division cannot meet a zero denominator."""
-
-    provider: str
-    movement: float
-    subject_units: float
-    total_units: float
-
-    def scale(self, units: Units) -> float:
-        """Points of the weekly window attributable to `units`."""
-        return self.movement * units.get(self.provider) / self.total_units
-
-    @property
-    def percent(self) -> float:
-        """The whole quest's share of the window, in points."""
-        return self.movement * self.subject_units / self.total_units
-
-
-@dataclass(frozen=True)
-class QuotaWithheld:
-    provider: str
-    reason: Withheld
-
-
-@dataclass(frozen=True)
-class QuotaAttribution:
-    """Every provider gauge the run touched, resolved or withheld."""
-
-    span: tuple[datetime, datetime]
-    gauges: tuple[QuotaFigure | QuotaWithheld, ...]
-
-    @property
-    def figures(self) -> tuple[QuotaFigure, ...]:
-        return tuple(g for g in self.gauges if isinstance(g, QuotaFigure))
-
-
-def _reading_providers(readings: Iterable[dict[str, Any]]) -> set[str]:
-    """A gauge that moved with nothing to attribute is still a gauge to report,
-    so a provider with readings but no units must reach the walk below."""
-    found: set[str] = set()
-    for e in readings:
-        provider = (e.get("payload") or {}).get("provider")
-        if isinstance(provider, str):
-            found.add(provider)
-    return found
-
-
-def quota_attribution(events: Iterable[dict[str, Any]],
-                      span: tuple[datetime, datetime], subject: Units,
-                      neighbours: Iterable[NeighbourQuota]) -> QuotaAttribution:
-    """The run's gauges. The subject contributes its row-attributed sum, so the
-    rendered cells sum to the total exactly; a neighbour has no row structure and
-    contributes its whole in-span increment total.
-
-    A neighbour's anchors lead its stream so each pair differences correctly;
-    each anchor's own increment lies before the span and credits nothing. Own
-    readings need no span filter: the span is this quest's first event to its
-    last."""
-    start, end = span
-    readings = [e for e in events if e.get("type") == "quota_reading"]
-    neighbour_units = NO_UNITS
-    for n in neighbours:
-        readings.extend(n.readings)
-        rows = increments([*n.anchors, *n.usage], dict(n.agents))
-        neighbour_units = neighbour_units + units_in_span(rows, start, end)
-    total = subject + neighbour_units
-    gauges: list[QuotaFigure | QuotaWithheld] = []
-    for provider in sorted({*total.providers, *_reading_providers(readings)}):
-        movement = weekly_movement(readings, provider, start, end)
-        if isinstance(movement, Withheld):
-            gauges.append(QuotaWithheld(provider, movement))
-        elif total.get(provider) <= 0:
-            gauges.append(QuotaWithheld(provider, Withheld.NO_TRACKED_USAGE))
-        else:
-            gauges.append(QuotaFigure(
-                provider=provider, movement=movement,
-                subject_units=subject.get(provider),
-                total_units=total.get(provider)))
-    return QuotaAttribution(span=span, gauges=tuple(gauges))
 
 
 @dataclass(frozen=True)

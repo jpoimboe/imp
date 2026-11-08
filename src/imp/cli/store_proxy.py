@@ -17,7 +17,6 @@ from imp.cli.store import (
     CompletedRow,
     GaugeWeek,
     HomeDigest,
-    NeighbourQuota,
     QuestCard,
     Readiness,
     SearchHit,
@@ -120,21 +119,6 @@ def _zones_from_wire(d: dict[str, Any]) -> SearchZones:
                        d["merged_after"])
 
 
-def _neighbour_to_wire(n: NeighbourQuota) -> dict[str, Any]:
-    return {"project": n.project, "quest_id": n.quest_id,
-            "readings": list(n.readings), "usage": list(n.usage),
-            "anchors": list(n.anchors),
-            "agents": {a: list(t) for a, t in n.agents.items()}}
-
-
-def _neighbour_from_wire(d: dict[str, Any]) -> NeighbourQuota:
-    return NeighbourQuota(
-        project=d["project"], quest_id=d["quest_id"],
-        readings=tuple(d["readings"]), usage=tuple(d["usage"]),
-        anchors=tuple(d["anchors"]),
-        agents={a: (t[0], t[1], t[2]) for a, t in d["agents"].items()})
-
-
 def _week_to_wire(w: GaugeWeek) -> dict[str, Any]:
     return {"provider": w.provider, "resets_at": w.resets_at,
             "peak_pct": w.peak_pct, "other_units": w.other_units}
@@ -162,9 +146,6 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
                 for h in store.search(args["query"], _zones_from_wire(args["zones"]))]
     if op == "search_event_candidates":
         return [list(t) for t in store.search_event_candidates(args["query"])]
-    if op == "quota_neighbours":
-        return [_neighbour_to_wire(n) for n in store.quota_neighbours(
-            args["quest_id"], args["start_iso"], args["end_iso"])]
     if op == "quota_weeks":
         return [_week_to_wire(w) for w in store.quota_weeks(args["quest_id"])]
     raise ValueError(f"unknown store op {op!r}")
@@ -226,12 +207,6 @@ class ProxyStore:
 
     def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]:
         return [tuple(x) for x in self._call("search_event_candidates", {"query": query})]
-
-    def quota_neighbours(self, quest_id: str, start_iso: str,
-                         end_iso: str) -> list[NeighbourQuota]:
-        rows = self._call("quota_neighbours", {
-            "quest_id": quest_id, "start_iso": start_iso, "end_iso": end_iso})
-        return [_neighbour_from_wire(d) for d in rows]
 
     def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
         return [_week_from_wire(d)

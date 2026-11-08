@@ -82,7 +82,7 @@ def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any,
     monkeypatch.setenv("NO_COLOR", "1")
 
 
-def _neighbour_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _quest_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """fego87's replay as a live quest home in another project."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / NEIGHBOUR_ID
@@ -96,7 +96,7 @@ def _neighbour_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _subject_home(tmp_path: Path) -> None:
     """samo71 as a live quest of the project at `tmp_path`, so a LocalStore there
-    reads its log. Call after `_neighbour_home`, which pins IMP_HOME."""
+    reads its log. Call after `_quest_home`, which pins IMP_HOME."""
     from imp.engine.state import State
 
     qdir = project_state_dir(tmp_path) / "quests" / SUBJECT_ID
@@ -292,7 +292,7 @@ def anyio_backend() -> str:
 def test_samo71_renders_its_share_of_the_week(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     store = _QuotaStore(quota_events(SUBJECT_ID), tmp_path)
     _cli(tmp_path, monkeypatch, store)
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
@@ -310,7 +310,7 @@ def test_the_per_step_cells_sum_to_the_quest_total(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """AC 5(d): every row is priced at the one week's rate, and the total is the
     rows' sum, so the cells add up to it exactly."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     events = quota_events(SUBJECT_ID)
     rows = build_summary(events)
     view = m._attribute_quota(_QuotaStore(events, tmp_path), SUBJECT_ID, events, rows)
@@ -327,7 +327,7 @@ def test_discovery_routes_through_the_store_not_the_filesystem(
     """Reaching fego87 moves the figure off the 81.00% the subject alone gives.
     A direct filesystem read in-sandbox returns a partial set of quests, so the
     guard is that the denominator provably comes from the store."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _subject_home(tmp_path)
     events = quota_events(SUBJECT_ID)
     assert _total(LocalStore(tmp_path), events) == "67.68%"
@@ -337,7 +337,7 @@ def test_discovery_routes_through_the_store_not_the_filesystem(
 def test_a_filtered_render_keeps_the_steps_own_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     full = capsys.readouterr().out
@@ -360,7 +360,7 @@ def test_a_filtered_render_keeps_the_steps_own_cell(
 async def test_local_and_proxied_weeks_render_the_same_bytes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """AC 8."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _subject_home(tmp_path)
     events = quota_events(SUBJECT_ID)
 
@@ -404,7 +404,7 @@ def test_the_markdown_export_carries_samo71s_share(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
     """The same 67.68% the terminal renders."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
     out = capsys.readouterr().out
@@ -420,7 +420,7 @@ def test_a_filtered_export_keeps_the_steps_own_cell(
         capsys: pytest.CaptureFixture[str]) -> None:
     """The export gets the filtered rows, so it needs the unfiltered log to price
     over."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--step", "threshold",
                    "--md=-"]) == 0
@@ -433,7 +433,7 @@ def test_a_filtered_export_keeps_the_steps_own_cell(
 def test_the_html_export_carries_the_share_as_a_table_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--html=-"]) == 0
     out = capsys.readouterr().out
@@ -492,7 +492,7 @@ def test_an_ordinal_range_export_keeps_the_steps_own_cell(
         capsys: pytest.CaptureFixture[str]) -> None:
     """The other selector. Events 1-107 are the threshold step — its
     `step_completed` is the 107th event of the fixture."""
-    _neighbour_home(tmp_path, monkeypatch)
+    _quest_home(tmp_path, monkeypatch)
     _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--range=1-107", "--md=-"]) == 0
     out = capsys.readouterr().out
