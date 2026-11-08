@@ -133,10 +133,11 @@ def _closing_block(
     coord: InterruptCoordinator, leave_state: dict[str, str],
 ) -> ExitCode:
     """Select the closing block from what this client witnessed, in row order: its own
-    leave, then a leave the end frame named, then the run's own outcome. Only the
-    last row consults disk — there the stream broke before anything could be
-    witnessed, and it can only upgrade a lost connection to a completed run, never
-    invent a pause."""
+    leave, then a leave the end frame named, then the run's own outcome. Two rows
+    consult disk, and only to upgrade to a completed run, never to invent a pause:
+    the deliberate-leave row, since the daemon may have completed before it
+    processed the leave, and the last row, where the stream broke before anything
+    could be witnessed."""
     from imp.cli.main import (
         Merge,
         _emit_completed,
@@ -177,8 +178,13 @@ def _closing_block(
         return ExitCode.FAILED
     trigger = _leave_trigger(coord)
     if trigger is not None:
-        # The daemon writes its workflow_paused after this client departs, so on a
-        # deliberate leave the client's own trigger is the fresher truth.
+        # A deliberate leave outranks a witnessed pause, but never a completion seen
+        # on the stream or on disk.
+        settled = resolve_settled_outcome(quest)
+        if settled.completed:
+            _emit_settled_completion(
+                quest, settled, intent=_resolve_intent(settled.events) or intent)
+            return ExitCode.OK
         _emit_leave_pause(quest, trigger, intent=intent)
         return ExitCode.USER_ENDED
     paused = witness.paused()

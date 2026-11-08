@@ -1,7 +1,8 @@
 """AC 10a: disk state reaches no path that had a witness available. The closing
-block's one surviving read and the startup-failure check are the only callers of
-resolve_settled_outcome in src/ — a third would be a path rendering a state it
-never observed."""
+block's reads (the deliberate-leave row and the lost-connection row, each able
+only to upgrade to a completed run) and the startup-failure check are the only
+callers of resolve_settled_outcome in src/ — a third site would be a path
+rendering a state it never observed."""
 
 from __future__ import annotations
 
