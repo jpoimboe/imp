@@ -26,7 +26,7 @@ from imp.engine.abandon import (
 )
 from imp.engine.completion import INTERRUPT_STEER_HINT, steer_hint
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
-from imp.engine.executor import RunResult, run_quest
+from imp.engine.executor import RunResult, _emit_paused_event, _interrupt_reason, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
@@ -314,8 +314,11 @@ async def serve_quest_session(
             prompt = _hold_prompt(
                 result, coordinator, is_script_fn=_paused_is_script,
                 log=quest.event_log())
-        # Nothing ran this session: a leave keeps the armed target.
-        if ran and result is RunResult.PAUSED and server.left_at is not None:
+        if not ran:
+            # Nothing ran: the armed landing stands; close the resume's workflow_resumed.
+            _emit_paused_event(broadcast_log, "interrupt",
+                               interrupt_reason=_interrupt_reason(coordinator))
+        elif result is RunResult.PAUSED and server.left_at is not None:
             state = State.load(quest.state_dir)
             # The run moved on since the leave: the executor's own resume arming stands.
             if state.step == server.left_at.step:

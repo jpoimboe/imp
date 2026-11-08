@@ -4,12 +4,20 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
 
+from imp.cli.narrative import (
+    FallbackLine,
+    LeaveMarkerNode,
+    NarrativeBuilder,
+    ResumeMarkerNode,
+    build_tree,
+)
 from imp.engine.completion import INTERRUPT_STEER_HINT
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
@@ -19,7 +27,11 @@ from imp.remote.session import daemon
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import serve_quest_session
 from imp.remote.session.discover import session_socket_path
-from imp.remote.session.protocol import CONTROL_INTERRUPT, CONTROL_INTERRUPT_LEAVE
+from imp.remote.session.protocol import (
+    CONTROL_COMPACT,
+    CONTROL_INTERRUPT,
+    CONTROL_INTERRUPT_LEAVE,
+)
 from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _git
 from tests.test_session_daemon import _make_quest, _seed_step, _wait_for_socket
@@ -157,6 +169,41 @@ def _fake_recorder() -> tuple[list[int], Any]:
     return calls, _fake
 
 
+def _arm_hold(quest: Quest, step: str, target: Any, cont: bool) -> None:
+    st = State.load(quest.state_dir)
+    st.step = step
+    st.arm_step_resume(should_continue=cont, target=target)
+    st.save(quest.state_dir)
+
+
+def _seed_old_pause(quest: Quest) -> None:
+    """A manual-stop pause an hour back: the resume marker renders; its age is unmistakable."""
+    ts = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    with quest.events_path.open("a") as f:
+        f.write(json.dumps({"id": "seed", "parent_id": None, "agent_id": None,
+                            "timestamp": ts, "type": "workflow_paused",
+                            "payload": {"reason": "interrupt",
+                                        "interrupt_reason": "ctrl-d"}}) + "\n")
+
+
+def _after_resume(quest: Quest) -> Events:
+    j = _journal(quest)
+    i = max(k for k, e in enumerate(j) if e["type"] == "workflow_resumed")
+    return j[i:]
+
+
+def _types(events: Events) -> list[str]:
+    return [e["type"] for e in events]
+
+
+async def _resume_and_leave(quest: Quest, run_fn: Any, leave: str) -> None:
+    async def _body(client: SessionClient, received: Events) -> None:
+        await wait_until(lambda: bool(_gates(received)))
+        await _leave(client, leave)
+
+    assert await _leg(quest, run_fn, _body, resume=True) is RunResult.PAUSED
+
+
 _MODES = ["cooperative", "hard_kill"]
 
 
@@ -237,10 +284,7 @@ async def test_leave_at_a_resumed_hold_prompt_lands_there_again(
 ) -> None:
     # No config: the bundled default workflow, where threshold is an agent and verify a script.
     quest = _make_quest(tmp_path, QID)
-    st = State.load(quest.state_dir)
-    st.step = step
-    st.arm_step_resume(should_continue=cont, target=target)
-    st.save(quest.state_dir)
+    _arm_hold(quest, step, target, cont)
     calls, fake = _fake_recorder()
 
     async def _body(client: SessionClient, received: Events) -> None:
@@ -251,6 +295,104 @@ async def test_leave_at_a_resumed_hold_prompt_lands_there_again(
     assert await _leg(quest, fake, _body, resume=True) is RunResult.PAUSED
     assert _landing(quest) == (step, target, cont)
     assert calls == []
+    after = _after_resume(quest)
+    types = _types(after)
+    assert types[0] == "workflow_resumed"
+    assert types[-1] == "workflow_paused"
+    assert types.count("workflow_paused") == 1
+    expected: dict[str, Any] = {"reason": "interrupt"}
+    if leave != "lease-drop":
+        assert leave in [e["payload"].get("source") for e in after[:-1]
+                         if e["type"] == "interrupt_requested"]
+        expected["interrupt_reason"] = leave
+    assert after[-1]["payload"] == expected
+
+
+@pytest.mark.anyio
+async def test_compact_at_a_resumed_hold_prompt_journals_and_broadcasts_the_pause(
+    tmp_path: Path,
+) -> None:
+    quest = _make_quest(tmp_path, QID)
+    _arm_hold(quest, "threshold", "prompt-interrupted", True)
+    calls, fake = _fake_recorder()
+    seen: list[Events] = []
+
+    def _live_pauses(received: Events) -> Events:
+        return [e for e in received
+                if e.get("type") == "workflow_paused" and not e.get("_replay")]
+
+    async def _body(client: SessionClient, received: Events) -> None:
+        seen.append(received)   # the session ends on its own, cancelling this body
+        await wait_until(lambda: bool(_gates(received)))
+        await client.send_control(CONTROL_COMPACT)
+        await wait_until(lambda: bool(_live_pauses(received)))
+
+    assert await _leg(quest, fake, _body, resume=True) is RunResult.PAUSED
+    expected = {"reason": "interrupt", "interrupt_reason": "compact"}
+    assert _live_pauses(seen[0])[-1]["payload"] == expected
+    after = _after_resume(quest)
+    assert _types(after)[-1] == "workflow_paused"
+    assert _types(after).count("workflow_paused") == 1
+    assert after[-1]["payload"] == expected
+    assert calls == []
+
+
+@pytest.mark.anyio
+async def test_log_ends_on_the_leave_from_a_resumed_hold_prompt(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, QID)
+    _arm_hold(quest, "threshold", "prompt-interrupted", True)
+    _seed_old_pause(quest)
+    _, fake = _fake_recorder()
+    await _resume_and_leave(quest, fake, "ctrl-d")
+
+    tree = build_tree(_journal(quest))
+    # interrupt_requested has no narrative handler: it renders as a --full-only FallbackLine.
+    kids = [c for c in tree.root.children if not isinstance(c, FallbackLine)]
+    new_ts = _after_resume(quest)[-1]["timestamp"]
+    assert kids[-1] == LeaveMarkerNode(reason="ctrl-d", ts=new_ts)
+    assert isinstance(kids[-2], ResumeMarkerNode)
+
+
+@pytest.mark.anyio
+async def test_second_resume_recaps_from_the_latest_leave(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, QID)
+    _arm_hold(quest, "threshold", "prompt-interrupted", True)
+    _seed_old_pause(quest)
+    _, fake = _fake_recorder()
+    await _resume_and_leave(quest, fake, "ctrl-d")
+    latest = _journal(quest)[-1]
+    assert latest["type"] == "workflow_paused"
+    n1 = len(_journal(quest))
+    await _resume_and_leave(quest, fake, "ctrl-d")
+
+    j = _journal(quest)
+    assert _types(j[n1:]).count("workflow_resumed") == 1
+    r2 = n1 + _types(j[n1:]).index("workflow_resumed")
+    b = NarrativeBuilder()
+    for e in j[:r2 + 1]:   # a later workflow_paused would clear the recap anchor
+        b.add(e)
+    now = datetime.fromisoformat(latest["timestamp"]) + timedelta(seconds=120)
+    assert b.interrupt_recap(now.isoformat()) == "paused 2m ago"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("text", ["", "go on"])
+async def test_reply_at_a_resumed_hold_prompt_adds_no_pause(
+    tmp_path: Path, text: str,
+) -> None:
+    quest = _make_quest(tmp_path, QID)
+    _arm_hold(quest, "threshold", "prompt-interrupted", True)
+    calls, fake = _fake_recorder()
+
+    async def _body(client: SessionClient, received: Events) -> None:
+        await wait_until(lambda: bool(_gates(received)))
+        await client.send_input(text)
+        await wait_until(lambda: bool(calls))
+
+    assert await _leg(quest, fake, _body, resume=True) is RunResult.PAUSED
+    assert calls == [1]
+    j = _journal(quest)
+    assert "workflow_paused" not in _types(j[_types(j).index("workflow_resumed"):])
 
 
 @pytest.mark.anyio
