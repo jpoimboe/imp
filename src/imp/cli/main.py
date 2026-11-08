@@ -3494,7 +3494,7 @@ def apply_edit(
 
     if title is not None and title != quest.title:
         if quest.materialized:
-            quest.rename(title, log=quest.event_log())
+            quest.rename(title, by="user", log=quest.event_log())
         else:
             quest.set_title(title)
     if backlog:

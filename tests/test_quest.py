@@ -551,7 +551,7 @@ def test_materialize_untitled_then_named_recovery(tmp_path: Path) -> None:
     ch = Quest.create_draft(tmp_path, title="", quest_id="ttl2", base_branch="main")
     with pytest.raises(ValueError):
         ch.materialize()
-    ch.rename("Real title", log=ch.event_log())
+    ch.rename("Real title", by="agent", log=ch.event_log())
     head_changed = ch.materialize()
     wt = project_state_dir(tmp_path) / "worktrees" / "ttl2"
     assert wt.exists()
@@ -566,7 +566,7 @@ def test_materialize_idempotent_no_op_never_raises_even_when_title_emptied(
     ch = Quest.create_draft(tmp_path, title="Titled", quest_id="ttl3", base_branch="main")
     ch.materialize()
     root_after_first = ch.project_root
-    ch.rename("   ", log=ch.event_log())          # blank the title AFTER materializing
+    ch.rename("   ", by="agent", log=ch.event_log())          # blank the title AFTER materializing
     assert ch.materialize() is False              # idempotent no-op, no raise
     assert ch.project_root == root_after_first
 

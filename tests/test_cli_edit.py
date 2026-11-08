@@ -22,6 +22,15 @@ def _meta(quest: Quest) -> dict:
     return json.loads((quest.quest_dir / "quest.json").read_text())
 
 
+def _make_materialized(control: Path, quest_id: str) -> Quest:
+    quest = _make_draft(control, quest_id)
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    return quest
+
+
 def _edit_args(token: str, **kw) -> argparse.Namespace:
     fields = dict(token=token, title=None, backlog=False, active=False,
                   depends_on=None, clear_deps=False, append_intent=None, base=None)
@@ -511,25 +520,37 @@ def test_edit_title_unmaterialized_writes_metadata_only(
     assert quest.title == "Renamed"
     assert _meta(quest)["title"] == "Renamed"
     # The one CLI mutation that would write the masked log must NOT fire.
-    assert all(e["type"] != "quest_renamed" for e in _events(quest))
+    assert all(e["type"] not in ("quest_renamed", "user_renamed")
+               for e in _events(quest))
 
 
-def test_edit_title_materialized_keeps_logged_rename(
+def test_edit_title_materialized_logs_user_rename(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    quest = _make_draft(tmp_path, "2026-06-24-edit31")
-    meta = _meta(quest)
-    meta["materialized"] = True
-    (quest.quest_dir / "quest.json").write_text(
-        json.dumps(meta, indent=2, sort_keys=True))
+    _make_materialized(tmp_path, "2026-06-24-edit31")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit31", title="Renamed"))
     assert rc == 0
     reloaded = Quest.load(tmp_path, "2026-06-24-edit31")
     assert reloaded.title == "Renamed"
-    renamed = [e for e in _events(reloaded) if e["type"] == "quest_renamed"]
-    assert len(renamed) == 1
-    assert renamed[0]["payload"]["new_title"] == "Renamed"
+    assert _meta(reloaded)["title"] == "Renamed"
+    renames = [e for e in _events(reloaded)
+               if e["type"] in ("quest_renamed", "user_renamed")]
+    assert [e["type"] for e in renames] == ["user_renamed"]
+    assert renames[0]["payload"] == {
+        "id": "2026-06-24-edit31", "old_title": "Original", "new_title": "Renamed"}
+    assert renames[0].get("agent_id") is None
+
+
+def test_edit_title_with_current_title_appends_no_event(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_materialized(tmp_path, "2026-06-24-edit32")
+    before = _events(quest)
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit32", title="Original"))
+    assert rc == 0
+    assert _events(quest) == before
 
 
 def test_edit_base_rewrites_base_and_orig_base_head(
