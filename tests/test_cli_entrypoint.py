@@ -299,7 +299,9 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
         captured.update(kw)
         return 0
 
-    async def _fake_clear_loop(control: object, base: str, *, first: object) -> int:
+    async def _fake_clear_loop(
+        control: object, base: str, *, first: object, leave_mode: str,
+    ) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
