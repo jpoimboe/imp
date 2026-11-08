@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 POLL_INTERVAL_S = 1.0
+WAIT_LABEL = "waiting to test"
 
 
 class WaitAborted(Exception):

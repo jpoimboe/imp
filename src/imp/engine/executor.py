@@ -1268,6 +1268,8 @@ async def _route_script(
     max_parallel_test_runs: int = 1,
     coordinator: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
+    # Captured before _emit_started consumes route_label.
+    run_label = state.route_label or render_label(step.label, quest, log, state)
     _emit_started(log, step, state, quest)
     command = step.command
     assert command is not None, "script step must have a command"
@@ -1306,15 +1308,25 @@ async def _route_script(
     try:
         if step.acquire == "test-lane":
             priority = state.held_lane is not None
-            slot_fd = _test_lane.try_acquire(quest.control_root, max_parallel_test_runs,
-                                             priority=priority)
-            if slot_fd is None:
-                _emit(log, "waiting_for_test_lane", {"step": step.name})
-                slot_fd = await anyio.to_thread.run_sync(
-                    functools.partial(_test_lane.acquire_blocking,
-                                      quest.control_root, max_parallel_test_runs,
-                                      priority=priority, abort=abort))
-                _emit(log, "test_lane_acquired", {"step": step.name})
+            try:
+                slot_fd = _test_lane.try_acquire(quest.control_root,
+                                                 max_parallel_test_runs,
+                                                 priority=priority)
+                if slot_fd is None:
+                    # Saved before the event so readers see it on emit.
+                    state.step_label = _test_lane.WAIT_LABEL
+                    state.save(quest.state_dir)
+                    _emit(log, "waiting_for_test_lane", {"step": step.name})
+                    slot_fd = await anyio.to_thread.run_sync(
+                        functools.partial(_test_lane.acquire_blocking,
+                                          quest.control_root, max_parallel_test_runs,
+                                          priority=priority, abort=abort))
+                    _emit(log, "test_lane_acquired", {"step": step.name})
+            finally:
+                # Also heals a wait label left by a run killed mid-wait.
+                if state.step_label != run_label:
+                    state.step_label = run_label
+                    state.save(quest.state_dir)
         def _emit_spawn_retry(next_attempt: int, detail: str) -> None:
             # open() fires this on the anyio WORKER thread; from_thread hops it back
             # to the loop thread, the single terminal writer. A hop, not a buffer:

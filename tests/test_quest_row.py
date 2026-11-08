@@ -240,6 +240,14 @@ def test_status_cell_omits_phase_when_none():
     assert "·" not in line
 
 
+def test_status_cell_shows_test_lane_wait():
+    # "running (integration phase · waiting to test)" is 45 chars; give it room.
+    line = format_quest_line(**_row(status="running", step="verify", status_width=60),
+                              step_label="waiting to test",
+                              phase_label="integration phase", color=False)
+    assert "running (integration phase · waiting to test)" in line
+
+
 def test_status_width_truncates_oversized_label():
     # status_width 20 -> room 20-7-3 = 10; a 30-char label truncates to 9 chars + "…".
     line = format_quest_line(**_row(status="running", step="x", status_width=20),
