@@ -459,6 +459,27 @@ def test_bare_config_and_explain_are_unchanged(
     assert "tiers:" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("tier", ["bogus", ""])
+def test_explain_rejects_an_unknown_tier_as_a_usage_error(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str], tier: str,
+) -> None:
+    assert main(["config", "--explain", tier]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"imp: unknown tier {tier!r} (choose from: high, medium, low)\n")
+
+
+@pytest.mark.parametrize("tier", ["high", "medium", "low"])
+def test_explain_accepts_each_known_tier(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str], tier: str,
+) -> None:
+    assert main(["config", "--explain", tier]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[0] == f"tier {tier}:"
+    assert captured.err == ""
+
+
 def test_rejected_global_set_writes_no_config_and_accepted_set_leaves_no_scratch(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:

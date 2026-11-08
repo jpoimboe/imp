@@ -101,10 +101,6 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
 
 def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool = False) -> None:
     cfg, prov = eff.config, eff.provenance
-    if tier not in cfg.tiers:
-        out.write(f"unknown tier {tier!r} "
-                  f"(known: {sorted(cfg.tiers, key=_REQUIRED_TIERS.index)})\n")
-        return
     out.write(f"tier {tier}:\n")
     rows = [
         (vendor, cfg.tiers[tier][vendor],

@@ -632,12 +632,3 @@ def test_config_lists_tiers_high_medium_low(
         assert vendors == sorted(vendors)
         if show_all:
             assert len(vendors) > 1
-
-
-def test_explain_unknown_tier_lists_known_tiers_in_order(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    eff = _eff(tmp_path, monkeypatch)
-    out = io.StringIO()
-    render_explain(eff, "x", out, color=False)
-    assert out.getvalue() == "unknown tier 'x' (known: ['high', 'medium', 'low'])\n"
