@@ -9,7 +9,15 @@ dies) frees it, so no stale-lock recovery is needed.
 """
 import fcntl
 import os
+import time
+from collections.abc import Callable
 from pathlib import Path
+
+POLL_INTERVAL_S = 1.0
+
+
+class WaitAborted(Exception):
+    """The wait's abort predicate fired before a slot was acquired."""
 
 
 def _slot_dir(control_root: Path) -> Path:
@@ -36,18 +44,23 @@ def try_acquire(control_root: Path, n: int) -> int | None:
     return None
 
 
-def acquire_blocking(control_root: Path, n: int) -> int:
-    """Block until a slot is free; return a held fd. Call from a worker thread."""
-    fd = try_acquire(control_root, n)
-    if fd is not None:
-        return fd
-    fd = _open_slot(control_root, 1)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)   # blocks until slot-1 frees
-    except OSError:
-        os.close(fd)
-        raise
-    return fd
+def _poll_sleep() -> None:
+    time.sleep(POLL_INTERVAL_S)
+
+
+def acquire_blocking(control_root: Path, n: int, *,
+                     abort: Callable[[], bool] | None = None) -> int:
+    """Poll slots 1..n until one frees; return a held fd. Call from a worker thread.
+
+    Raises WaitAborted, holding nothing, once abort() is true.
+    """
+    while True:
+        if abort is not None and abort():
+            raise WaitAborted
+        fd = try_acquire(control_root, n)
+        if fd is not None:
+            return fd
+        _poll_sleep()
 
 
 def release(fd: int) -> None:
