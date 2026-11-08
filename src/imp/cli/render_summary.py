@@ -18,7 +18,15 @@ from imp.cli.accounting import (
     vendor_contribution,
 )
 from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds
-from imp.cli.quest_row import STATUS_COLORS, display_word
+from imp.cli.quest_row import (
+    NAME_CAP,
+    STATUS_COLORS,
+    NameKind,
+    ResolvedName,
+    _truncate,
+    display_word,
+    resolve_display_name,
+)
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
 from imp.cli.render_text import fmt_seconds
@@ -446,11 +454,19 @@ def total_cell(summary: list[StepRow],
 
 @dataclass
 class SummaryHeader:
-    workflow: str
     quest_id: str
+    title: str
     status: str
     total_seconds: float | None
+    intent: str | None = None
     exclusions: Exclusions = NO_EXCLUSIONS
+
+    @property
+    def name(self) -> ResolvedName:
+        resolved = resolve_display_name(self.title, self.intent)
+        if resolved.kind is NameKind.PROMPT:
+            return resolved._replace(text=_truncate(resolved.text, NAME_CAP))
+        return resolved
 
 
 _HUE_ROTATION: tuple[str, ...] = ("step", "magenta", "cyan", "green")
@@ -463,9 +479,12 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
 
 
 def _header_line(h: SummaryHeader, *, color: bool) -> str:
-    workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
+    quest_id = pal.ansi(h.quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    name = h.name
+    name_codes = () if name.kind is NameKind.TITLE else ("dim",)
+    name_text = pal.ansi(name.text, *name_codes, enabled=color)
     status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
-    return f"{workflow}  ·  {h.quest_id}  ·  {status}"
+    return f"{quest_id}  ·  {name_text}  ·  {status}"
 
 
 _TITLES = ("time", "in", "out", "cost")

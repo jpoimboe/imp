@@ -13,13 +13,13 @@ from imp.paths import project_state_dir
 
 
 def _make_worktree(control: Path, slug: str, status: str = "paused",
-                   workflow: str | None = None) -> None:
+                   workflow: str | None = None, title: str | None = None) -> None:
     from imp.engine.state import State
 
     quest_dir = project_state_dir(control) / "quests" / slug
     (quest_dir / "state").mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
-        json.dumps({"id": slug, "title": slug, "base_branch": "main",
+        json.dumps({"id": slug, "title": slug if title is None else title, "base_branch": "main",
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "workflow": workflow,
                     "layout_version": LAYOUT_VERSION}))
@@ -38,8 +38,8 @@ def _make_worktree(control: Path, slug: str, status: str = "paused",
     State(id=slug, status=status, step="plan", step_attempt=0).save(quest_dir / "state")
 
 
-def _setup(tmp_path, monkeypatch, slug="sum-smoke", workflow=None):
-    _make_worktree(tmp_path, slug, workflow=workflow)
+def _setup(tmp_path, monkeypatch, slug="sum-smoke", workflow=None, title=None):
+    _make_worktree(tmp_path, slug, workflow=workflow, title=title)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -51,7 +51,7 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     rc = main(["log", "-s", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    assert f"default  ·  {slug}  ·  paused\n" in out   # identity only
+    assert f"{slug}  ·  {slug}  ·  paused\n" in out    # identity only
     assert "·  4m 45s" not in out                       # the total moved out
     assert "                 time  in  out  cost\n" in out
     assert "spec phase\n" in out
@@ -61,20 +61,35 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     assert "\n  total        4m 45s" in out
 
 
-@pytest.mark.parametrize(
-    "workflow,expected",
-    [("memory", "memory"), (None, "default")],
-    ids=["explicit", "null"],
-)
-def test_summary_header_names_the_quests_own_workflow(
-        workflow, expected, tmp_path, monkeypatch, capsys):
-    """A quest's own workflow heads both renders; `"workflow": null` — every quest
-    created without an explicit one — reads as the project default."""
-    slug = _setup(tmp_path, monkeypatch, slug="wf-run", workflow=workflow)
+def test_summary_header_names_the_quests_title_not_its_workflow(
+        tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch, slug="wf-run", workflow="memory",
+                  title="imp doctor")
     assert main(["log", "-s", slug]) == 0
-    assert f"{expected}  ·  {slug}  ·  paused\n" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"{slug}  ·  imp doctor  ·  paused\n" in out
+    assert "memory" not in out
     assert main(["log", "-s", slug, "--md=-"]) == 0
-    assert f"# {expected} — {slug}" in capsys.readouterr().out
+    md = capsys.readouterr().out
+    assert f"# {slug} — imp doctor\n" in md
+    assert "memory" not in md
+
+
+def test_summary_header_takes_a_titleless_name_from_the_seed_opening():
+    from types import SimpleNamespace
+
+    from imp.cli import quest_row
+    card = SimpleNamespace(title="", intent=None, seed_opening="seed  text",
+                           status="paused")
+    hdr = m._summary_header("q", card, [])
+    assert hdr.name == quest_row.ResolvedName("seed text", quest_row.NameKind.PROMPT)
+
+
+def test_summary_header_without_a_card_is_unnamed_with_unknown_status():
+    from imp.cli import quest_row
+    hdr = m._summary_header("q", None, [])
+    assert hdr.name.kind is quest_row.NameKind.UNNAMED
+    assert hdr.status == "?"
 
 
 def test_summary_total_excludes_a_pause_between_steps(tmp_path, monkeypatch, capsys):

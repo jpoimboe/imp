@@ -291,7 +291,6 @@ def action_text(action: Any) -> str:
 # Ink spent backwards from frequency: the most frequent content (agent prose) is
 # calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
-    "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
     "quest_id": ("wordmark",),         # the quest's identity handle: imp's brand gold, no bold
     "phase": ("bold", "blue"),         # structure stands out: bold blue
     "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label

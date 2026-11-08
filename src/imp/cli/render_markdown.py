@@ -17,6 +17,7 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.accounting import RowUsage
+from imp.cli.quest_row import display_word
 from imp.cli.quota_column import QuotaColumn, QuotaFallback
 from imp.cli.render_html import _MD, _fold_markers
 from imp.cli.render_summary import (
@@ -464,8 +465,8 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
     table_header = _MD_HEADER if column is None else _MD_QUOTA_HEADER
     total_last = total_cell(summary, quota)
     blocks = [
-        _heading(1, esc(f"{header.workflow} — {header.quest_id}")),
-        f"**Status:** {esc(header.status)}",
+        _heading(1, esc(f"{header.quest_id} — {header.name.text}")),
+        f"**Status:** {esc(display_word(header.status))}",
     ]
     cells = [total_last]
     grouped: list[tuple[str, list[str]]] = []

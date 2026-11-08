@@ -521,10 +521,10 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
         _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
              step="spec", kind="agent", action={"verb": "continue"}, var_mutations={}),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="gumu81",
+    header = SummaryHeader(title="imp", quest_id="gumu81",
                            status="completed", total_seconds=summary_total(events))
     out = render_summary_markdown(build_summary(events), header=header)
-    assert "# imp — gumu81" in out               # SummaryHeader workflow/id
+    assert "# gumu81 — imp" in out               # SummaryHeader id/name
     assert "completed" in out                        # status carried
     assert "## design" in out                     # phase grouping heading
     assert ("| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
@@ -545,7 +545,7 @@ def test_summary_markdown_durations_exclude_wait_and_drop_wait_column() -> None:
         StepRow(phase="design", step="open",
                 start_ts="2024-01-01T00:00:00Z", end_ts=None),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="running", total_seconds=None)
     out = render_summary_markdown(rows, header=header)
     assert "Wait" not in out                          # Wait column dropped
@@ -559,7 +559,7 @@ def test_summary_markdown_total_subtracts_the_exclusion_union() -> None:
                     start_ts="2024-01-01T00:00:00Z",
                     end_ts="2024-01-01T00:01:00Z")]
     header = SummaryHeader(
-        workflow="imp", quest_id="c", status="completed", total_seconds=480.0,
+        title="imp", quest_id="c", status="completed", total_seconds=480.0,
         exclusions=nv.Exclusions((("2024-01-01T00:01:30Z",
                                    "2024-01-01T00:06:30Z"),)))
     out = render_summary_markdown(rows, header=header)
@@ -575,7 +575,7 @@ def test_summary_multiple_phases_grouped_in_order() -> None:
                 start_ts="2024-01-01T00:00:10Z",
                 end_ts="2024-01-01T00:00:20Z"),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=30.0)
     out = render_summary_markdown(rows, header=header)
     assert out.index("## design") < out.index("## build")
@@ -597,7 +597,7 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
                     usage=RowUsage(fresh_input=200, output=20, dollars=0.05,
                                    priced=1))]),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     # AC 22(a): the four buckets are broken out, not collapsed into one figure.
@@ -608,7 +608,7 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="paused", total_seconds=100.0)
     rows = [StepRow(phase="implement", step="task-lead",
                     start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]
@@ -718,7 +718,7 @@ def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
                                            start_ts="2026-01-01T00:00:10+00:00",
                                            end_ts="2026-01-01T00:02:24+00:00",
                                            end_inferred=True)])]
-    hdr = SummaryHeader(workflow="imp", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="imp", quest_id="c", status="completed",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | ~5m 0s | — | — | — | — | — |" in out
@@ -730,7 +730,7 @@ def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> N
                     start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
                     subagents=[SubagentRow(name="coder",
                                            start_ts="2026-01-01T00:00:10+00:00")])]
-    hdr = SummaryHeader(workflow="imp", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="imp", quest_id="c", status="completed",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | interrupted | — | — | — | — | — |" in out
@@ -741,7 +741,7 @@ def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> N
 def test_summary_markdown_merge_blocked_open_step_reads_two_words() -> None:
     rows = [StepRow(phase="implement", step="task-lead",
                     start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]
-    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merge_blocked",
+    hdr = SummaryHeader(title="imp", quest_id="c", status="merge_blocked",
                         total_seconds=100.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | merge blocked | — | — | — | — | — |" in out
@@ -793,7 +793,7 @@ def test_summary_markdown_carries_a_totals_row() -> None:
                     usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
                                    priced=1))]),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
+    header = SummaryHeader(title="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     assert "| total | 1m 0s | 2.5k | 200 | 100 | 60 | ~$0.50 |" in out
@@ -812,7 +812,7 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
                 usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
                                priced=1, notional=1)),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
+    header = SummaryHeader(title="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     tilde = "~ estimated at API list price"
@@ -850,7 +850,7 @@ def test_summary_markdown_prices_a_vendor_less_claude_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
     rows = build_summary(_cc_fallback_events())
-    header = SummaryHeader(workflow="imp", quest_id="c", status="completed",
+    header = SummaryHeader(title="imp", quest_id="c", status="completed",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     lines = out.split("\n")
@@ -866,7 +866,7 @@ def test_summary_markdown_prices_a_vendor_less_claude_row():
 
 def test_summary_markdown_with_no_steps_keeps_the_time_and_drops_the_legend():
     # Same reachable window as the terminal view: no step rows, but a real span.
-    header = SummaryHeader(workflow="imp", quest_id="c", status="running",
+    header = SummaryHeader(title="imp", quest_id="c", status="running",
                            total_seconds=2342.0)
     out = render_summary_markdown([], header=header)
     assert "| total | 39m 2s | — | — | — | — | — |" in out
@@ -997,7 +997,7 @@ def _quota_rows() -> list[StepRow]:
 def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
     # AC 19(a): 9 points of movement over a 10-unit window, so a row's share is
     # 0.9x its own units — the step's subtree drew 3 of them, its subagent 1.
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
+    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     column = QuotaColumn((QuotaFigure("claude", 9.0, 3.0, 10.0),))
     out = render_summary_markdown(_quota_rows(), header=header, quota=column)
@@ -1015,7 +1015,7 @@ def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
 def test_summary_markdown_falls_back_to_cost_with_the_withheld_legend() -> None:
     # AC 19(a) over AC 6(b): no gauge resolved, so today's Cost column stays and
     # one extra line names why — under, not instead of, the dollar legend.
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
+    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     still = ("quota below measurement resolution; the weekly gauge did not move"
              " during this run")
@@ -1047,7 +1047,7 @@ def _quota_events() -> list[dict]:
 
 
 def test_summary_markdown_without_a_quota_argument_is_unchanged() -> None:
-    header = SummaryHeader(workflow="imp", quest_id="gumu81",
+    header = SummaryHeader(title="imp", quest_id="gumu81",
                            status="completed", total_seconds=60.0)
     rows = build_summary(_quota_events())
     out = render_summary_markdown(rows, header=header)
@@ -1077,7 +1077,7 @@ def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
                                priced=1, notional=1),
                 units=Units.of("codex", 1.0)),
     ]
-    header = SummaryHeader(workflow="imp", quest_id="abc", status="completed",
+    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
                            total_seconds=2342.0)
     column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
                           QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
@@ -1155,13 +1155,13 @@ def test_render_markdown_keeps_pass_c_when_structure_matches(monkeypatch) -> Non
 
 def test_summary_markdown_guard_picks_pass_c_or_full_escape(monkeypatch) -> None:
     monkeypatch.setattr(rm, "_md_escape", lambda s: s)
-    def header(workflow: str) -> SummaryHeader:
-        return SummaryHeader(workflow=workflow, quest_id="q", status="running",
+    def header(title: str) -> SummaryHeader:
+        return SummaryHeader(title=title, quest_id="q", status="running",
                              total_seconds=1.0)
     kept = render_summary_markdown([], header=header("`a -> b`"))
-    assert kept.startswith("# `a -> b` — q\n")
+    assert kept.startswith("# q — `a -> b`\n")
     fallback = render_summary_markdown([], header=header("<b>x</b>"))
-    assert fallback.startswith("# &lt;b&gt;x&lt;/b&gt; — q\n")
+    assert fallback.startswith("# q — &lt;b&gt;x&lt;/b&gt;\n")
 
 
 _SAFE_FOLD_HTML = re.compile(r"<details>\n<summary>[^<>]*</summary>\n|</details>\n")
@@ -1296,7 +1296,7 @@ def test_hostile_document_falls_back_to_full_escape(
 
 
 def test_summary_step_code_span_is_safe_and_verbatim() -> None:
-    header = SummaryHeader(workflow="imp", quest_id="q", status="completed",
+    header = SummaryHeader(title="imp", quest_id="q", status="completed",
                            total_seconds=1.0)
 
     def rows(step: str) -> list[StepRow]:
@@ -1415,7 +1415,7 @@ def test_summary_rows_sharing_a_raw_phase_stay_one_section_under_the_first_headi
         return StepRow(phase="plan", step=step, phase_label=phase_label,
                        start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")
 
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=20.0)
     out = render_summary_markdown(
         [row("plan-writer", "planning phase · plan 1/3"),
@@ -1426,7 +1426,7 @@ def test_summary_rows_sharing_a_raw_phase_stay_one_section_under_the_first_headi
 
 
 def test_summary_step_cell_escapes_a_pipe_in_a_label() -> None:
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=20.0)
     out = render_summary_markdown(
         [StepRow(phase="p", step="s", label="a|b",
@@ -1436,7 +1436,7 @@ def test_summary_step_cell_escapes_a_pipe_in_a_label() -> None:
 
 
 def test_summary_export_escapes_html_in_labels() -> None:
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=10.0)
     out = render_summary_markdown(
         [StepRow(phase="p", step="s", label="<b>x</b>", phase_label="<i>y</i>",
@@ -1451,7 +1451,7 @@ def test_summary_raw_phase_recurring_later_starts_a_new_section_with_its_own_hea
         return StepRow(phase=phase, step="s", phase_label=phase_label,
                        start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:10Z")
 
-    header = SummaryHeader(workflow="imp", quest_id="c",
+    header = SummaryHeader(title="imp", quest_id="c",
                            status="completed", total_seconds=30.0)
     out = render_summary_markdown(
         [row("plan", "planning phase · plan 1/2"),
@@ -1534,3 +1534,27 @@ def test_full_omit_only_burst_emits_no_heading() -> None:
 def test_lean_burst_recap_times_only_the_tools() -> None:
     lines = _md(subagent_then_bash_events()).splitlines()
     assert "1 call · bash · 5s" in lines
+
+
+def _md_head(*, title: str = "", intent: str | None = None,
+             status: str = "paused") -> list[str]:
+    hdr = SummaryHeader(quest_id="kole14", title=title, status=status,
+                        total_seconds=None, intent=intent)
+    return render_summary_markdown([], header=hdr).split("\n\n")[:2]
+
+
+def test_summary_markdown_heading_is_id_then_title() -> None:
+    assert _md_head(title="imp doctor") == ["# kole14 — imp doctor", "**Status:** paused"]
+
+
+def test_summary_markdown_heading_truncates_a_titleless_opening_message() -> None:
+    opening = "fix the summary " + "x" * 80
+    assert _md_head(intent=opening)[0] == f"# kole14 — {opening[:69]}…"
+
+
+def test_summary_markdown_heading_reads_unnamed_without_title_or_intent() -> None:
+    assert _md_head()[0] == "# kole14 — (unnamed)"
+
+
+def test_summary_markdown_status_line_uses_the_display_word() -> None:
+    assert _md_head(title="t", status="merge_blocked")[1] == "**Status:** merge blocked"

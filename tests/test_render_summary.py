@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from imp.cli import palette as pal
 from imp.cli.accounting import RowUsage
 from imp.cli.narrative import Exclusions, elapsed_seconds
 from imp.cli.render_summary import (
@@ -167,7 +168,7 @@ def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False,
                    label=label, phase_label=phase_label)
 
 
-_HDR = SummaryHeader(workflow="feature", quest_id="abc",
+_HDR = SummaryHeader(title="feature", quest_id="abc",
                      status="completed", total_seconds=2342.0)
 
 
@@ -175,7 +176,7 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     rows = [_row("plan", "plan-writer", 90)]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  completed",
+        "abc  ·  feature  ·  completed",
         "                 time  in  out  cost",
         "plan phase",
         "  plan-writer  1m 30s   —    —     —",
@@ -192,7 +193,7 @@ def test_plain_multi_step_shows_column_padding():
     ]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  completed",
+        "abc  ·  feature  ·  completed",
         "                 time  in  out  cost",
         "plan phase",
         "  plan-writer  1m 30s   —    —     —",
@@ -248,7 +249,7 @@ def test_no_wait_badge_and_duration_excludes_wait():
 
 
 def test_open_trailing_step_renders_running():
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="running", total_seconds=None)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
@@ -256,7 +257,7 @@ def test_open_trailing_step_renders_running():
 
 
 def test_open_trailing_step_on_paused_change_reflects_status():
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="paused", total_seconds=100.0)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
@@ -264,9 +265,9 @@ def test_open_trailing_step_on_paused_change_reflects_status():
     assert "running" not in out[3]
 
 
-def test_header_status_color_and_workflow_magenta():
+def test_header_id_is_coloured_and_completed_status_plain():
     out = render_summary([], header=_HDR, color=True, width=80)
-    assert "\x1b[1m\x1b[35mfeature\x1b[0m" in out[0]   # workflow bold magenta
+    assert out[0].startswith(pal.ansi("abc", *pal.NODE_COLORS["quest_id"], enabled=True))
     assert "completed" in out[0]                       # completed status plain (no color)
 
 
@@ -815,7 +816,7 @@ def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
         **_FALLBACK_USAGE,
         "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}}))
     assert cost_cell(rows[0].totals) == "≥$0.20*"
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[-1] == \
@@ -861,7 +862,7 @@ def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
                               "cacheCreationInputTokens": 0,
                               "webSearchRequests": 0}}))
     assert cost_cell(rows[0].totals) == "—"
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[3].split() == ["reviewer", "1m", "0s", "—", "—", "—"]
@@ -1108,13 +1109,13 @@ def test_header_carries_identity_only_and_the_total_row_carries_the_numbers():
                     end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0,
                     usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
                                    priced=1))]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=120.0,
                         exclusions=Exclusions(
                             (("2026-01-01T00:00:15+00:00",
                               "2026-01-01T00:01:45+00:00"),)))
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert out[0] == "f  ·  c  ·  completed"     # AC 19: identity only
+    assert out[0] == "c  ·  f  ·  completed"     # AC 19: identity only
     assert "$" not in out[0]
     assert "1.0k" not in out[0]
     total = next(ln for ln in out if ln.startswith("  total"))
@@ -1140,7 +1141,7 @@ def test_total_row_is_the_sum_of_the_step_rows_including_subagents():
                     usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
                                    priced=1))]),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     # AC 19/20: 1000 + (1000 + 500) in, 40 + (10 + 10) out, 0.20 + 0.30 cost.
@@ -1214,7 +1215,7 @@ def test_errored_subagent_duration_follows_error_color():
 
 
 def test_header_merge_blocked_renders_two_words_bold():
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="merge_blocked", total_seconds=100.0)
     out = render_summary([], header=hdr, color=True, width=80)
     assert "\x1b[1mmerge blocked\x1b[0m" in out[0]   # bold weight, two-word text
@@ -1222,7 +1223,7 @@ def test_header_merge_blocked_renders_two_words_bold():
 
 
 def test_header_waiting_renders_bold():
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="waiting", total_seconds=100.0)
     out = render_summary([], header=hdr, color=True, width=80)
     assert "\x1b[1mwaiting\x1b[0m" in out[0]   # bold, like running
@@ -1454,7 +1455,7 @@ def test_open_spans_in_a_finished_quest_read_interrupted():
 
 @pytest.mark.parametrize("status", ["abandoned"])
 def test_other_finished_statuses_also_read_interrupted(status):
-    hdr = SummaryHeader(workflow="feature", quest_id="abc", status=status,
+    hdr = SummaryHeader(title="feature", quest_id="abc", status=status,
                         total_seconds=100.0)
     out = render_summary([_row("implement", "task-lead", 0, open_=True)],
                          header=hdr, color=False, width=80)
@@ -1463,7 +1464,7 @@ def test_other_finished_statuses_also_read_interrupted(status):
 
 
 def test_merge_blocked_open_step_reads_two_words():
-    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+    hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="merge_blocked", total_seconds=100.0)
     out = render_summary([_row("implement", "task-lead", 0, open_=True)],
                          header=hdr, color=False, width=80)
@@ -1652,7 +1653,7 @@ def test_title_row_is_dim_and_absent_when_there_are_no_step_rows():
     # AC 21: the dim title row appears with the first step row, not before it.
     # The totals row still renders, so a range with no step rows keeps its time.
     assert render_summary([], header=_HDR, color=False, width=80) == [
-        "feature  ·  abc  ·  completed",
+        "abc  ·  feature  ·  completed",
         "",
         "  total  39m 2s   —    —     —",
     ]
@@ -1664,12 +1665,12 @@ def test_title_row_is_dim_and_absent_when_there_are_no_step_rows():
 def test_a_range_with_no_step_rows_still_reports_the_runs_time():
     # `imp log -s <id> 1-3` on a window with no step_started still has a span:
     # main.py:2486 selects events before the summary branch reads them.
-    hdr = SummaryHeader(workflow="default", quest_id="abc",
+    hdr = SummaryHeader(title="default", quest_id="abc",
                         status="running", total_seconds=2342.0)
     assert render_summary([], header=hdr, color=False, width=80)[-1] \
         == "  total  39m 2s   —    —     —"
     # No span recorded at all: the duration reads open, not a fabricated zero.
-    blank = SummaryHeader(workflow="default", quest_id="abc",
+    blank = SummaryHeader(title="default", quest_id="abc",
                           status="running", total_seconds=None)
     assert render_summary([], header=blank, color=False, width=80)[-1] \
         == "  total  running   —    —     —"
@@ -1704,10 +1705,10 @@ def test_the_reference_after_state_renders_verbatim():
                                  dollars=0.40, **notional))]),
         _step("integration", "integrate", 120, RowUsage()),
     ]
-    hdr = SummaryHeader(workflow="default", quest_id="zita45",
+    hdr = SummaryHeader(title="", quest_id="zita45",
                         status="completed", total_seconds=3120.0)
     assert render_summary(rows, header=hdr, color=False, width=80) == [
-        "default  ·  zita45  ·  completed",
+        "zita45  ·  (unnamed)  ·  completed",
         "                                       time      in    out    cost",
         "scoping phase",
         "  threshold                          12m 0s  163.0k   3.0k  $0.27*",
@@ -1736,7 +1737,7 @@ def test_a_mixed_auth_run_shows_both_legend_lines_tilde_first():
                 usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
                                priced=1, notional=1)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[3].endswith("~$2.00")
@@ -1759,7 +1760,7 @@ def test_an_unpriced_step_floors_the_total_and_adds_the_third_legend_line():
                 end_ts="2026-01-01T00:01:00+00:00",
                 usage=RowUsage(fresh_input=900, output=90, unpriced=1)),
     ]
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="completed",
+    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert out[4].endswith("n/a")
@@ -1899,7 +1900,7 @@ def test_numeric_columns_stay_aligned_with_the_longest_label():
     rows = [_row("spec", "spec-finalizer", 90, label="addressing spec review feedback"),
             _row("spec", "verify", 30)]
     assert render_summary(rows, header=_HDR, color=False, width=80) == [
-        "feature  ·  abc  ·  completed",
+        "abc  ·  feature  ·  completed",
         "                                     time  in  out  cost",
         "spec phase",
         "  addressing spec review feedback  1m 30s   —    —     —",
@@ -1990,3 +1991,49 @@ def test_hide_idle_keeps_hues_and_drops_the_header_of_an_all_idle_phase() -> Non
     assert card == [ln for ln in full if not any(h in ln for h in hidden)]
     # third step of its phase: cyan, even though the idle step before it is hidden
     assert "\x1b[36m" in next(ln for ln in card if "spec-review" in ln)
+
+
+def _header(*, title: str = "", intent: str | None = None, status: str = "paused",
+            color: bool = False) -> str:
+    hdr = SummaryHeader(quest_id="kole14", title=title, status=status,
+                        total_seconds=None, intent=intent)
+    return render_summary([], header=hdr, color=color, width=80)[0]
+
+
+_GOLD_ID = pal.ansi("kole14", *pal.NODE_COLORS["quest_id"], enabled=True)
+
+
+def test_header_leads_with_id_then_title_then_status():
+    assert _header(title="imp doctor") == "kole14  ·  imp doctor  ·  paused"
+    assert _header(title="imp doctor", color=True) == f"{_GOLD_ID}  ·  imp doctor  ·  paused"
+
+
+def test_header_never_truncates_a_title():
+    long_title = "t" * 90
+    assert _header(title=long_title) == f"kole14  ·  {long_title}  ·  paused"
+
+
+def test_titleless_header_falls_back_to_the_opening_message_truncated_and_dim():
+    opening = "fix  the\nsummary " + "x" * 80          # flattened: "fix the summary xxx…"
+    flat = " ".join(opening.split())
+    shown = flat[:69] + "…"
+    assert len(shown) == 70
+    assert _header(intent=opening) == f"kole14  ·  {shown}  ·  paused"
+    dim = pal.ansi(shown, "dim", enabled=True)
+    assert _header(intent=opening, color=True) == f"{_GOLD_ID}  ·  {dim}  ·  paused"
+
+
+def test_short_opening_message_is_not_truncated():
+    assert _header(intent="fix it") == "kole14  ·  fix it  ·  paused"
+
+
+def test_header_with_no_title_or_intent_reads_unnamed_and_dim():
+    assert _header() == "kole14  ·  (unnamed)  ·  paused"
+    dim = pal.ansi("(unnamed)", "dim", enabled=True)
+    assert _header(color=True) == f"{_GOLD_ID}  ·  {dim}  ·  paused"
+
+
+def test_header_status_keeps_display_word_and_bold():
+    bold = pal.ansi("merge blocked", "bold", enabled=True)
+    assert (_header(title="t", status="merge_blocked", color=True)
+            == f"{_GOLD_ID}  ·  t  ·  {bold}")
