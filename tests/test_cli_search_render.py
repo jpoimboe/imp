@@ -99,8 +99,20 @@ def test_excerpts_span_surrounds_match_with_ellipses() -> None:
     assert len(spans) == 1
     assert extra == 0
     assert "50%" in spans[0]
-    assert spans[0].startswith("… ")
-    assert spans[0].endswith(" …")
+    assert spans[0].startswith("…")
+    assert spans[0][1] != " "
+    assert spans[0].endswith("…")
+    assert spans[0][-2] != " "
+
+
+def test_excerpts_flush_ellipses_sit_outside_color_highlight() -> None:
+    content = "x" * 200 + " the 50% mark is here " + "y" * 200
+    plain, _ = _excerpts(content, "50%", color=False)
+    colored, _ = _excerpts(content, "50%", color=True)
+    assert colored[0].startswith("…x")
+    assert colored[0].endswith("y…")
+    assert "\x1b[1m\x1b[33m50%" in colored[0]
+    assert _plain(colored[0]) == plain[0]
 
 
 def test_excerpts_collapse_newlines_and_cap_limit() -> None:
