@@ -94,6 +94,10 @@ def test_introspection_names_the_read_commands() -> None:
     assert ("`imp list --json` — the same board as a structured JSON array, one "
             "object per quest tagged with its zone; composes with every filter."
             ) in " ".join(body.split())
+    assert ("`name` is what the board shows — the title, else the opening intent "
+            "or draft brief flattened to one line (`null` if none); `step` holds "
+            "the board's display labels. For a quest's full intent, use "
+            "`imp show <id> --json`.") in " ".join(body.split())
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
