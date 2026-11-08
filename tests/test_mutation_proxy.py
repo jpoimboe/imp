@@ -139,6 +139,7 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
     _draft(tmp_path, "2026-06-24-mut50")
     sock = str(tmp_path / "s.sock")
     monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(tmp_path))
 
     session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
     async with anyio.create_task_group() as tg:
@@ -321,6 +322,7 @@ async def test_proxy_mutation_abandon_round_trips_over_socket(
     _draft(tmp_path, "2026-06-24-abn50")
     sock = str(tmp_path / "s.sock")
     monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(tmp_path))
 
     session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
     async with anyio.create_task_group() as tg:

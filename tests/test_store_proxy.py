@@ -10,10 +10,14 @@ from imp.cli.store import (
     GaugeWeek,
     LocalStore,
     SearchZones,
+    _run_control_root,
     make_store,
 )
 from imp.cli.store_proxy import ProxyStore, run_query
+from imp.engine import worktree
 from imp.engine.quest import Quest
+from imp.engine.worktree import PreconditionError
+from imp.paths import display_path
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _archive_with_event, _seed_control
 
@@ -33,6 +37,7 @@ def test_make_store_returns_proxy_when_env_set(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(tmp_path))
     store = make_store(tmp_path)
     assert isinstance(store, ProxyStore)
     assert store._path == "/tmp/imp-x/y.sock"
@@ -41,6 +46,55 @@ def test_make_store_returns_proxy_when_env_set(
 def test_make_store_returns_local_when_env_unset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     assert isinstance(make_store(tmp_path), LocalStore)
+
+
+def test_make_store_refuses_a_control_root_foreign_to_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run, foreign = tmp_path / "run", tmp_path / "foreign"
+    for root in (run, foreign):
+        root.mkdir()
+        _seed_control(root)
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(run))
+    with pytest.raises(PreconditionError) as exc:
+        make_store(foreign)
+    assert str(exc.value) == (
+        f"{display_path(foreign)} is a different project from this run's "
+        f"({display_path(run)})\n"
+        "  to use that project's own imp state, clear the run's pins: "
+        "IMP_SESSION_SOCKET= IMP_STATE_DIR= imp …")
+
+
+def test_run_control_root_resolves_once_per_project_root_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        root.mkdir()
+        _seed_control(root)
+    _run_control_root.cache_clear()
+    resolved: list[Path] = []
+    real = worktree.find_control_root
+
+    def _counting(start: Path) -> Path:
+        resolved.append(start)
+        return real(start)
+
+    monkeypatch.setattr(worktree, "find_control_root", _counting)
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(a))
+    for _ in range(3):
+        assert isinstance(make_store(a), ProxyStore)
+    assert resolved == [a]
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(b))
+    for _ in range(3):
+        assert isinstance(make_store(b), ProxyStore)
+    assert resolved == [a, b]
+    # The cached root follows the env value: a is now foreign.
+    with pytest.raises(PreconditionError):
+        make_store(a)
+    assert resolved == [a, b]
 
 
 @pytest.mark.anyio

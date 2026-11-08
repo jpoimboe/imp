@@ -64,7 +64,7 @@ async def _imp_over_daemon(server: Path, client: Path, sock: str,
                            *args: str) -> tuple[int, str, str]:
     """Mirrors the sandbox topology (local state unreadable, daemon authoritative) with no bwrap."""
     session = SessionSocket(sock, on_query=build_session_handler(server))
-    env = {**os.environ, "IMP_SESSION_SOCKET": sock}
+    env = {**os.environ, "IMP_SESSION_SOCKET": sock, "IMP_PROJECT_ROOT": str(client)}
     async with anyio.create_task_group() as tg:
         await session.open()
         tg.start_soon(session.serve)
