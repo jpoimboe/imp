@@ -34,10 +34,10 @@ of that scale; engine, schema, and workflow-routing changes never reach it.
 
 When the user wants to build, do three things in this turn:
 
-1. **Name the quest if it is still unnamed** — a fallback for when you went straight
-   to build without a drawn-out design phase (you normally name it earlier; see
-   "Naming the quest early"). Call `rename_quest(name="…")` once the intent is clear
-   and announce the name in prose without asking permission, titled as under "Naming
+1. **Title the quest if it is still untitled** — a fallback for when you went straight
+   to build without a drawn-out design phase (you normally title it earlier; see
+   "Titling the quest early"). Call `rename_quest(name="…")` once the intent is clear
+   and announce the title in prose without asking permission, titled as under "Titling
    the quest early".
 2. **Default to the full design-and-review pass; the lighter path is never the
    default.** Raise it only when the quest clears the trivial bar above on **blast

@@ -213,8 +213,10 @@ def test_threshold_renames_early_on_design_formation() -> None:
     body = _agent_prompt("threshold")
     # Rename fires as soon as a design forms, not deferred to go-live.
     assert "as soon as a design has formed" in fd
-    # Pure concierge/scout conversations are explicitly excluded from renaming.
-    assert "so they never rename" in fd
+    assert "## Titling the quest early" in fd
+    assert "the title declares a design" in fd
+    # Pure concierge/scout conversations are explicitly excluded from titling.
+    assert "so they never set a title" in fd
     # The go-live rename survives as a fallback for straight-to-build (threshold tail).
     assert "a fallback for when you went" in body
 

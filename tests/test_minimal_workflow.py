@@ -79,6 +79,14 @@ def test_front_door_body_includes_partials_and_goes_live_in_worktree() -> None:
     assert "in place on the current branch" not in body
 
 
+def test_front_door_go_live_titles_the_quest() -> None:
+    body = " ".join(_wf().agents["front-door"].prompt_template_source.split())
+    assert "**Title the quest if it is still untitled.**" in body
+    assert "announce the title in prose without asking permission" in body
+    assert 'titled as under "Titling the quest early"' in body
+    assert "Naming" not in body
+
+
 def test_front_door_renders_full_include_closure() -> None:
     # Rendering the front-door agent resolves the whole shared closure with no
     # leftover {% include %}. workflow_dir=MINIMAL has no local partials/, so the
