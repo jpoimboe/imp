@@ -24,7 +24,7 @@ from imp.engine.abandon import (
     save_as_draft,
     tear_down_quest,
 )
-from imp.engine.completion import steer_hint
+from imp.engine.completion import INTERRUPT_STEER_HINT, steer_hint
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
@@ -51,7 +51,6 @@ from imp.remote.session.warmup import warm_module_graph
 RunFn = Callable[..., Awaitable[Any]]
 
 _RESUME_PROMPT = steer_hint("paused")
-_RESUME_INTERRUPTED_PROMPT = steer_hint("interrupted")
 _SCRIPT_HOLD_PROMPT = "paused · enter to re-run the gate · Ctrl-D to leave"
 _SCRIPT_REDIRECT_REFUSED = (
     "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
@@ -118,7 +117,7 @@ def _hold_prompt(
             return _SCRIPT_HOLD_PROMPT
         if log is not None and _interrupt_gate_already_emitted(log):
             return None
-        return _RESUME_INTERRUPTED_PROMPT
+        return INTERRUPT_STEER_HINT
     return None
 
 

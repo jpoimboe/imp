@@ -1091,7 +1091,15 @@ def test_hold_prompt_resume_prompt_for_interrupt() -> None:
     import imp.remote.session.daemon as daemon
 
     coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
-    assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_INTERRUPTED_PROMPT
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) == INTERRUPT_STEER_HINT
+
+
+def test_hold_prompt_on_a_script_step_is_the_paused_gate_hold() -> None:
+    import imp.remote.session.daemon as daemon
+
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord, is_script_fn=lambda: True) == (
+        "paused · enter to re-run the gate · Ctrl-D to leave")
 
 
 def test_hold_prompt_none_for_model_override() -> None:
@@ -2326,10 +2334,10 @@ def test_hold_prompt_suppressed_for_side_effect_reason() -> None:
 
 
 def test_hold_prompt_returns_resume_for_plain_interrupt() -> None:
-    from imp.remote.session.daemon import _RESUME_INTERRUPTED_PROMPT, _hold_prompt
+    from imp.remote.session.daemon import _hold_prompt
 
     coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
-    assert _hold_prompt(RunResult.PAUSED, coord) == _RESUME_INTERRUPTED_PROMPT
+    assert _hold_prompt(RunResult.PAUSED, coord) == INTERRUPT_STEER_HINT
 
 
 def test_run_compaction_slims_transcript_and_emits_confirmation(
@@ -2682,7 +2690,7 @@ def test_hold_prompt_posts_when_no_inline_gate(tmp_path: Path) -> None:
     log = quest.event_log()
     coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
     assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
-            == daemon._RESUME_INTERRUPTED_PROMPT)
+            == INTERRUPT_STEER_HINT)
 
 
 def test_hold_prompt_posts_after_gate_resolved_by_continuation(
@@ -2705,7 +2713,7 @@ def test_hold_prompt_posts_after_gate_resolved_by_continuation(
                payload={"reason": "interrupt"})
     coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
     assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
-            == daemon._RESUME_INTERRUPTED_PROMPT)
+            == INTERRUPT_STEER_HINT)
 
 
 def _reap_home(quest: Quest) -> None:

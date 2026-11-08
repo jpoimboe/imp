@@ -10,6 +10,7 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.engine.completion import INTERRUPT_STEER_HINT
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -191,7 +192,7 @@ def _interrupt_gate(received: Events) -> bool:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("mode", _MODES)
-@pytest.mark.parametrize("leave", ["ctrl-d", "sigterm", "lease-drop"])
+@pytest.mark.parametrize("leave", ["ctrl-d", "pause", "sigterm", "lease-drop"])
 async def test_steer_gate_leave_resumes_at_the_interrupted_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, leave: str, mode: str,
 ) -> None:
@@ -461,7 +462,7 @@ async def test_question_leave_then_lane_eviction_leaves_resume_cleared(
     ("script", ("prompt-paused", False)),
 ])
 @pytest.mark.parametrize("hint", [
-    daemon._RESUME_PROMPT, daemon._RESUME_INTERRUPTED_PROMPT, daemon._SCRIPT_HOLD_PROMPT])
+    daemon._RESUME_PROMPT, INTERRUPT_STEER_HINT, daemon._SCRIPT_HOLD_PROMPT])
 def test_interrupt_prompt_landing_keys_on_step_kind_not_text(
     step_kind: str, landing: tuple[str, bool], hint: str,
 ) -> None:
