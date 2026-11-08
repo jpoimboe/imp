@@ -2282,7 +2282,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except ValueError:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
-    selected = dispositions or set(_DEFAULT_LIST_DISPOSITIONS)
+    selected = dispositions or _board_dispositions(show_all=args.all)
     if args.json:
         _page_or_print(
             json.dumps(_board_json(control, dispositions=selected, cutoff=cutoff),
@@ -3682,6 +3682,10 @@ def _board_dispositions(*, show_all: bool) -> set[str]:
     return picked
 
 
+def _finished_block_label(dispositions: set[str]) -> str:
+    return "history:" if dispositions & {"abandoned", "archived"} else "completed:"
+
+
 def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     """Union of the disposition tokens selected by the `imp list` flags."""
     picked: set[str] = set()
@@ -3764,17 +3768,17 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/TITLE width."""
-    rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
-                          cutoff=None)
+    dispositions = _board_dispositions(show_all=show_all)
+    rows = _overview_rows(control, dispositions=dispositions, cutoff=None)
     if not rows.inflight and not rows.backlog and not rows.history:
         if not show_all and _history_by_disposition(
                 control, dispositions={"abandoned", "archived"},
                 live_ids=set()):
             return [_NO_ACTIVE_QUESTS_MESSAGE]
         return [_NO_QUESTS_MESSAGE]
-    label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label=label,
+                          intents=rows.display_intents,
+                          history_label=_finished_block_label(dispositions),
                           inflight_notice=True, now=now, color=color)
 
 
@@ -3835,7 +3839,8 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not rows.inflight and not rows.backlog and not rows.history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(rows.inflight, rows.backlog, rows.history,
-                          intents=rows.display_intents, history_label="history:",
+                          intents=rows.display_intents,
+                          history_label=_finished_block_label(dispositions),
                           inflight_notice="active" in dispositions and cutoff is None,
                           now=now, color=color)
 
@@ -4802,7 +4807,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, an overview of your quests — in-flight, the "
             "backlog, and every completed quest. -a/--all also includes "
-            "abandoned/archived quests (the block is then labelled `history`)."),
+            "abandoned/archived quests. The finished-quest block is labelled "
+            "`completed`, or `history` once abandoned or archived quests are "
+            "included."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
