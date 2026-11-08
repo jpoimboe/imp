@@ -609,11 +609,11 @@ def test_ack_is_clipped_to_the_terminal_width_so_a_repaint_cannot_wrap() -> None
     s = LiveStatus(out)
     s._width_fn = lambda: 24
     s.update(lambda f: ["thinking · 2s"])
-    s.show_stop_ack("stopping… (interrupt again to force-quit)")
+    s.show_stop_ack("stopping… (a deliberately over-wide ack)")
     out.truncate(0)
     out.seek(0)
     s._draw()
-    assert "force-quit" not in out.getvalue()
+    assert "over-wide" not in out.getvalue()
     assert s._drawn_widths == [23]
 
 

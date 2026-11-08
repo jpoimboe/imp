@@ -14,8 +14,6 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import anyio
-
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
@@ -265,9 +263,10 @@ class ScriptedAgentRunner:
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_tool_processes
         if self.interrupt_mode == "hard_kill":
-            # Never acknowledges: models a runner wedged past the cooperative deadline.
+            # Returns only once force-killed (like claude), never via terminate_tool_processes.
             self._stop_requested = True
-            await anyio.sleep_forever()
+            await self._killed.wait()
+            return
         if self.interrupt_mode == "cooperative":
             self._steer_requested = True
         ctx = self._ctx

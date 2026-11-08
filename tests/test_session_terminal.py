@@ -3617,8 +3617,7 @@ async def test_only_a_live_interrupt_delivery_start_arms_the_force_quit_offer(
             t["now"] = 102.5
             coord._dispatch_signal(signal.SIGINT)
             assert sent == [_FORCE_FORWARD]
-            assert acks == [
-                "stopping…", "stopping… (interrupt again to force-quit)"]
+            assert acks == ["stopping…", "force-quitting…"]
 
             done.set()
 

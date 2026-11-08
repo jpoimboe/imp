@@ -4175,19 +4175,19 @@ def test_show_stop_ack_renders_ack_text_on_the_status_line() -> None:
     assert "stopping…" in out.getvalue()
 
 
-def test_ack_hook_wired_to_driver_renders_stopping_then_force_quit() -> None:
+def test_ack_hook_wired_to_driver_renders_stopping_then_force_quitting() -> None:
     """Registering driver.show_stop_ack as the coordinator ack hook renders
-    'stopping…' on the first gesture and the force-quit upgrade on the second."""
+    'stopping…' on the first gesture and 'force-quitting…' on the forcing press."""
     drv, out = _tty_driver()
     coord = InterruptCoordinator()
     coord.set_ack_hook(drv.show_stop_ack)
 
     asyncio.run(coord.signal_pause(reason="ctrl-c"))
     assert "stopping…" in out.getvalue()
-    assert "interrupt again to force-quit" not in out.getvalue()
+    assert "force-quitting…" not in out.getvalue()
 
-    coord._note_gesture_ack(force_quit_available=True)
-    assert "stopping… (interrupt again to force-quit)" in out.getvalue()
+    coord._note_gesture_ack(forced=True)
+    assert "force-quitting…" in out.getvalue()
 
 
 def test_stop_ack_cleared_when_prompt_gate_lands() -> None:

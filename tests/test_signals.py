@@ -777,11 +777,12 @@ def test_press_after_an_observed_delivery_still_offers_the_force_quit() -> None:
     t["now"] = 102.5
     coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD]
-    assert acks == ["stopping…", "stopping… (interrupt again to force-quit)"]
+    assert acks == ["stopping…", "force-quitting…"]
 
     t["now"] = 103.5
     coord._dispatch_signal(_sig.SIGINT)     # still at most one FORCE per round
     assert sent == [_FORCE_FORWARD]
+    assert acks == ["stopping…", "force-quitting…"]   # a third press acks nothing
 
 
 def test_end_gesture_round_drops_the_observed_delivery() -> None:
