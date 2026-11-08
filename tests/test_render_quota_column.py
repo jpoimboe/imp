@@ -219,19 +219,19 @@ def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
                         usage=_usage(100_000, 2_000),
                         charge=_pts("claude", 0.15)),
             SubagentRow(name="coder", start_ts="2026-01-01T00:00:05+00:00",
-                        end_ts="2026-01-01T00:00:55+00:00", errored=True,
+                        end_ts="2026-01-01T00:00:55+00:00", stop="failed",
                         usage=_usage(50_000, 1_000),
                         charge=_pts("claude", 0.07))]
     rows = [_row("task-lead", 90, _usage(), _pts("claude", 0.9), subs)]
     lines = _render(rows, color=True)
-    assert lines[1] == "\x1b[2m                           tokens       quota\x1b[0m"
-    assert lines[2] == "\x1b[2m                  time      in    out  weekly*\x1b[0m"
+    assert lines[1] == "\x1b[2m                                 tokens       quota\x1b[0m"
+    assert lines[2] == "\x1b[2m                        time      in    out  weekly*\x1b[0m"
     # The step's own cells stay undimmed and carry its subtree (0.9 + 0.15 + 0.07).
-    assert lines[4] == ("  \x1b[94mtask-lead   \x1b[0m  \x1b[94m1m 30s\x1b[0m"
+    assert lines[4] == ("  \x1b[94mtask-lead         \x1b[0m  \x1b[94m1m 30s\x1b[0m"
                         "    1.1M  23.0k   1.12%")
-    assert lines[5] == ("    \x1b[35m↳ explorer\x1b[0m  \x1b[2m   45s\x1b[0m"
+    assert lines[5] == ("    \x1b[35m↳ explorer      \x1b[0m  \x1b[2m   45s\x1b[0m"
                         "  \x1b[2m100.0k   2.0k   0.15%\x1b[0m")
-    assert lines[6] == ("    \x1b[1m\x1b[31m↳ coder   \x1b[0m"
+    assert lines[6] == ("    \x1b[1m\x1b[31m↳ coder · failed\x1b[0m"
                         "  \x1b[1m\x1b[31m   50s\x1b[0m"
                         "  \x1b[2m 50.0k   1.0k   0.07%\x1b[0m")
     assert lines[-1] == f"\x1b[2m  {FOOTNOTE}\x1b[0m"

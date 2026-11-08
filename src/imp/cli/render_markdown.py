@@ -26,6 +26,7 @@ from imp.cli.render_summary import (
     _dur_text,
     _fmt_tokens,
     _last_cell,
+    _step_body,
     _sub_body,
     open_span_label,
     summary_notes,
@@ -166,23 +167,18 @@ def _subagent_heading(sub: nv.SubagentFold) -> str:
     return f"{sub.subagent_name} · {title}" if title else sub.subagent_name
 
 
+def _subagent_tag(sub: nv.SubagentFold) -> str:
+    if sub.running:
+        return " (running)"
+    return f" ({nv.STOP_WORDS[sub.stop]})" if sub.stop is not None else ""
+
+
 def _subagent_status_label(sub: nv.SubagentFold) -> str:
     label = _subagent_heading(sub)
     model = rt.subagent_model(sub)
     if model:
         label += f" · {model}"
-    if sub.running:
-        label += " (running)"
-    elif sub.terminal_state == "stalled":
-        label += " (stalled)"
-    elif sub.terminal_state == "interrupted":
-        label += " (interrupted)"
-    elif sub.terminal_state == "context_exhausted":
-        label += " (context exhausted)"
-    elif sub.terminal_state == "suspended":
-        label += " (suspended)"
-    elif sub.is_error:
-        label += " (failed)"
+    label += _subagent_tag(sub)
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
     done = "" if sub.running else rt.fmt_seconds_done(elapsed)
     if done:
@@ -312,7 +308,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         if not inner_text and not full:
             yield "· " + esc(label)
             return
-        summary = _subagent_heading(node) if full else "· " + label
+        summary = (_subagent_heading(node) + _subagent_tag(node)) if full else "· " + label
         yield _details(summary, inner_text, full=full, esc=esc)
         return
     if isinstance(node, nv.OutcomeLine):
@@ -483,7 +479,7 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
         if row.phase != cur_phase:
             cur_phase = row.phase
             grouped.append((row.phase_text, []))
-        step = esc(row.step_text).replace("|", "\\|")
+        step = esc(_step_body(row)).replace("|", "\\|")
         last = _last_cell(row.totals, row.subtree_charge, column)
         cells.append(last)
         grouped[-1][1].append(

@@ -52,8 +52,10 @@ def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dic
 
 def titled_subagent_events(title: str | None, *,
                            finished: bool = True,
-                           label: str | None = None) -> list[dict[str, Any]]:
-    """One explorer dispatch (model claude-sonnet-5-5, 55s run) carrying `title`."""
+                           label: str | None = None,
+                           error_content: str | None = None) -> list[dict[str, Any]]:
+    """One explorer dispatch (model claude-sonnet-5-5, 55s run) carrying `title`;
+    `error_content` makes it end in an error result with that content."""
     inp: dict[str, Any] = {"subagent_name": "explorer", "task_description": "go"}
     if title is not None:
         inp["title"] = title
@@ -67,11 +69,19 @@ def titled_subagent_events(title: str | None, *,
         ev("c1", "step_context", agent_id="sub:4", provider="anthropic",
            model="claude-sonnet-5-5", tools_schema=[], params={}, max_tool_calls=None),
     ]
-    if finished:
+    if error_content is not None:
+        events.append(ev("6", "tool_result", agent_id="a", id="t1",
+                         content=error_content, error=True,
+                         timestamp="2026-01-01T00:00:55+00:00"))
+    elif finished:
         events.append(ev("6", "tool_result", agent_id="a", id="t1",
                          content='{"status":"Success"}',
                          timestamp="2026-01-01T00:00:55+00:00"))
     return events
+
+
+INTERRUPTED_SUBAGENT = ("RuntimeError: subagent 'explorer' was interrupted before "
+                        "finishing — the run was paused. [interrupted]")
 
 
 # A minimal change -> step (phase derived) -> thinking -> complete sequence.

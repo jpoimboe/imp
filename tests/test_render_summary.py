@@ -266,7 +266,9 @@ def test_subagent_rows_stay_magenta_and_errored_steps_bold_red(theme):
 def test_errored_step_renders_bold_red():
     rows = [_row("implement", "task-lead", 10, errored=True)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
-    assert "\x1b[1m\x1b[31mtask-lead" in next(ln for ln in out if "task-lead" in ln)
+    line = next(ln for ln in out if "task-lead" in ln)
+    assert "\x1b[1m\x1b[31mtask-lead" in line
+    assert "\x1b[1m\x1b[31mtask-lead · failed\x1b[0m" in line
 
 
 def test_no_wait_badge_and_duration_excludes_wait():
@@ -447,7 +449,7 @@ def test_subagent_row_wall_seconds_and_defaults():
                       end_ts="2026-01-01T00:00:45+00:00")
     assert sub.wall_seconds == 45.0
     assert sub.label is None
-    assert sub.errored is False
+    assert sub.stop is None
     assert sub.usage == RowUsage()
 
 
@@ -531,8 +533,8 @@ def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
 
 
 def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False, *,
-               stamped: bool = True) -> dict:
-    payload: dict = {"id": block_id, "error": error}
+               stamped: bool = True, **extra: object) -> dict:
+    payload: dict = {"id": block_id, "error": error, **extra}
     if stamped:
         payload["id_ns"] = "block"
     return {"type": "tool_result", "agent_id": agent_id, "timestamp": ts,
@@ -649,7 +651,7 @@ def test_subagent_captured_with_name_label_and_duration():
     assert sub.name == "explorer"
     assert sub.label == "map the repo"
     assert sub.wall_seconds == 45.0
-    assert sub.errored is False
+    assert sub.stop is None
 
 
 def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
@@ -672,7 +674,7 @@ def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
     assert rows[0].usage == RowUsage()
 
 
-def test_subagent_errored_from_tool_result_error_flag():
+def test_subagent_failed_from_tool_result_error_flag():
     rows = build_summary([
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         _context("lead1", "2026-01-01T00:00:01+00:00"),
@@ -680,7 +682,117 @@ def test_subagent_errored_from_tool_result_error_flag():
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", error=True),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
     ])
-    assert rows[0].subagents[0].errored is True
+    assert rows[0].subagents[0].stop == "failed"
+
+
+_STOPPED_RESULTS = [
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was interrupted before "
+                             "finishing — the run was paused. [interrupted]"},
+                 "interrupted", "interrupted", id="interrupted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config) [stalled]"},
+                 "stalled", "stalled", id="stalled"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' reached its context limit "
+                             "and stopped before finishing. [context_exhausted]"},
+                 "context_exhausted", "context exhausted", id="context-exhausted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was suspended before "
+                             "finishing — its provider or retry budget ran out. [suspended]"},
+                 "suspended", "suspended", id="suspended"),
+    pytest.param({"content": "whatever", "kind": "interrupted"},
+                 "interrupted", "interrupted", id="explicit-kind"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config)"},
+                 "failed", "failed", id="plain-failure"),
+]
+
+
+def _stopped_subagent(**extra: object) -> list[StepRow]:
+    """A closed task-lead whose explorer (map repo) ran 13s and ended with an error result."""
+    return build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00",
+                 "explorer", label="map repo"),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:23+00:00", error=True, **extra),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+
+
+@pytest.mark.parametrize(("extra", "stop", "_word"), _STOPPED_RESULTS)
+def test_subagent_stop_comes_from_its_tool_result(extra, stop, _word):
+    assert _stopped_subagent(**extra)[0].subagents[0].stop == stop
+
+
+def test_interrupted_subagent_row_is_tagged_and_keeps_its_duration():
+    out = render_summary(_stopped_subagent(content="RuntimeError: subagent 'explorer' was "
+                                                   "interrupted before finishing — the run "
+                                                   "was paused. [interrupted]"),
+                         header=_HDR, color=False, width=80)
+    assert out[3:5] == [
+        "  task-lead                               1m 0s   —    —     —",
+        "    ↳ explorer (map repo) · interrupted     13s   —    —     —",
+    ]
+
+
+@pytest.mark.parametrize(("extra", "_stop", "word"), _STOPPED_RESULTS)
+def test_abnormal_subagent_row_is_tagged_after_its_name(extra, _stop, word):
+    out = render_summary(_stopped_subagent(**extra), header=_HDR, color=False, width=80)
+    sub_line = next(ln for ln in out if "↳ explorer" in ln)
+    assert " ".join(sub_line.split()) == f"↳ explorer (map repo) · {word} 13s — — —"
+
+
+def test_closed_errored_step_is_tagged_failed():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        {"type": "error", "timestamp": "2026-01-01T00:00:05+00:00",
+         "payload": {"message": "boom", "category": "runner"}},
+        _completed("task-lead", "2026-01-01T00:00:10+00:00"),
+    ])
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    assert out[3] == "  task-lead · failed     10s   —    —     —"
+
+
+def test_clean_inferred_and_open_rows_carry_no_tag():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "blk1", "lead1", "2026-01-01T00:00:02+00:00", "explorer"),
+        _subresult("blk1", "lead1", "2026-01-01T00:00:05+00:00"),
+        _subcall("ev2", "blk2", "lead1", "2026-01-01T00:00:06+00:00", "scout"),
+        _completed("plan-writer", "2026-01-01T00:00:10+00:00"),
+        _started("task-lead", "implement", "2026-01-01T00:00:10+00:00"),
+        {"type": "error", "timestamp": "2026-01-01T00:00:12+00:00",
+         "payload": {"message": "boom", "category": "runner"}},
+    ])
+    out = render_summary(rows, header=_HDR, color=False, width=80)   # _HDR is completed
+    assert rows[1].errored is True          # errored, but its span never closed
+    body = out[1:]                          # the header line's own separators aside
+    assert not any("·" in ln for ln in body)
+    assert any("↳ scout" in ln and "~4s" in ln for ln in body)            # inferred end
+    assert any("task-lead" in ln and "interrupted" in ln for ln in body)  # open span
+
+
+def test_tagged_rows_keep_the_numeric_columns_aligned():
+    rows = [
+        StepRow(phase="implement", step="a", errored=True,
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                subagents=[SubagentRow(name="coder",
+                                       start_ts="2026-01-01T00:00:05+00:00",
+                                       end_ts="2026-01-01T00:00:50+00:00"),
+                           SubagentRow(name="scout", stop="context_exhausted",
+                                       start_ts="2026-01-01T00:00:05+00:00",
+                                       end_ts="2026-01-01T00:00:20+00:00")]),
+        StepRow(phase="implement", step="b",
+                start_ts="2026-01-01T00:01:00+00:00",
+                end_ts="2026-01-01T00:01:45+00:00", end_inferred=True),
+    ]
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    assert out[3:7] == [
+        "  a · failed                      1m 0s   —    —     —",
+        "    ↳ coder                         45s   —    —     —",
+        "    ↳ scout · context exhausted     15s   —    —     —",
+        "  b                                ~45s   —    —     —",
+    ]
+    assert len({len(ln) for ln in [out[1], *out[3:7], out[8]]}) == 1
 
 
 def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
@@ -1045,6 +1157,9 @@ def test_sub_body_with_and_without_label():
     assert _sub_body(SubagentRow(name="explorer")) == "↳ explorer"
     assert _sub_body(SubagentRow(name="explorer", label="map repo")) \
         == "↳ explorer (map repo)"
+    assert _sub_body(SubagentRow(name="explorer", label="map repo",
+                                 stop="context_exhausted")) \
+        == "↳ explorer (map repo) · context exhausted"
 
 
 def test_summary_totals_subtracts_the_exclusion_union_and_rolls_up_steps_and_subs():
@@ -1263,12 +1378,13 @@ def test_errored_subagent_duration_follows_error_color():
                    start_ts="2026-01-01T00:00:00+00:00",
                    end_ts="2026-01-01T00:01:00+00:00",
                    subagents=[SubagentRow(
-                       name="coder", errored=True,
+                       name="coder", stop="failed",
                        start_ts="2026-01-01T00:00:05+00:00",
                        end_ts="2026-01-01T00:00:50+00:00")])
     out = render_summary([step], header=_HDR, color=True, width=80)
     sub_line = next(ln for ln in out if "coder" in ln)
     assert "\x1b[1m\x1b[31m   45s\x1b[0m" in sub_line
+    assert "\x1b[1m\x1b[31m↳ coder · failed\x1b[0m" in sub_line
 
 
 def test_header_merge_blocked_renders_two_words_bold():

@@ -235,7 +235,7 @@ def _suspend_handback_body(
     subagent_name: str, quest_id: str, call_event_id: str, *, interrupted: bool
 ) -> str:
     """Parent-handback body for a suspended/interrupted subagent."""
-    # _close_subagent_fold scans is_error content for the [suspended]/[interrupted] marker.
+    # narrative.subagent_stop_kind scans is_error content for the [suspended]/[interrupted] marker.
     if interrupted:
         header = (f"subagent {subagent_name!r} was interrupted before finishing — "
                   f"the run was paused. [interrupted]")
@@ -551,7 +551,7 @@ async def dispatch_task(
             # is_error tool_result (the raise below reuses that path) so the parent
             # adjudicates: re-dispatch narrower, hand the fresh subagent this
             # handoff, or carry on itself.
-            # CONSUMER CONTRACT: narrative._close_subagent_fold scans this is_error
+            # CONSUMER CONTRACT: narrative.subagent_stop_kind scans this is_error
             # content for the literal "[context_exhausted]" marker to derive the
             # subagent's terminal state — keep that bracketed marker in the body.
             context_ceiling = (
@@ -594,7 +594,7 @@ async def dispatch_task(
                 # is_error tool_result content carries it — Part D derives the subagent's
                 # terminal glyph from this marker. Without it, a stalled subagent reads
                 # as a generic ✗ failed and the operator can't tell it timed out.
-                # CONSUMER CONTRACT: narrative._close_subagent_fold scans this error
+                # CONSUMER CONTRACT: narrative.subagent_stop_kind scans this error
                 # content for the literal "[<kind>]" marker (only on is_error closes).
                 # Keep the bracketed format and kind vocabulary in sync with that scan.
                 suffix = f" [{kind}]" if kind else ""

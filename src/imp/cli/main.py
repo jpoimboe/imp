@@ -202,12 +202,12 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 
 # -- end-of-run status lines ------------------------------------------------
 # Every terminal line shares one spine: a gold quest id, a middle display-name
-# segment, and a dot-joined outcome tail whose color carries meaning (green =
-# success, red = error, gold = everything-else). The middle segment is always
-# present via the shared resolver (quest_row.resolve_display_name): a real title
-# is plain, else the opening message renders dim, else the dim `(untitled)`
-# placeholder. Dim is color-only, so NO_COLOR / non-TTY output stays plain and
-# script-parseable. Shared by `new`/`resume`, leaves, and the completed block.
+# segment, and a dot-joined gold outcome tail; only an error block's head
+# (_error_block) is red. The middle segment is always present via the shared
+# resolver (quest_row.resolve_display_name): a real title is plain, else the
+# opening message renders dim, else the dim `(untitled)` placeholder. Dim is
+# color-only, so NO_COLOR / non-TTY output stays plain and script-parseable.
+# Shared by `new`/`resume`, leaves, and the completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
