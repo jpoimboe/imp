@@ -51,17 +51,19 @@ def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dic
 
 
 def titled_subagent_events(title: str | None, *,
-                           finished: bool = True) -> list[dict[str, Any]]:
+                           finished: bool = True,
+                           label: str | None = None) -> list[dict[str, Any]]:
     """One explorer dispatch (model claude-sonnet-5-5, 55s run) carrying `title`."""
     inp: dict[str, Any] = {"subagent_name": "explorer", "task_description": "go"}
     if title is not None:
         inp["title"] = title
+    extra = {"label": label} if label is not None else {}
     events = [
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent", input=inp,
-           timestamp="2026-01-01T00:00:00+00:00"),
+           timestamp="2026-01-01T00:00:00+00:00", **extra),
         ev("c1", "step_context", agent_id="sub:4", provider="anthropic",
            model="claude-sonnet-5-5", tools_schema=[], params={}, max_tool_calls=None),
     ]

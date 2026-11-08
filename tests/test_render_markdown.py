@@ -38,6 +38,7 @@ from tests._event_fixtures import (
     interrupted_task_lead_events,
     subagent_then_bash_events,
     task_lead_started,
+    titled_subagent_events,
     tool_burst_events,
 )
 
@@ -605,6 +606,22 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
             in out)
     assert ("| ↳ explorer (map repo) | 45s | 200 | — | — | 20 | ~$0.05 |"
             in out)
+
+
+def test_summary_markdown_and_html_ledger_show_the_title_else_the_label() -> None:
+    header = SummaryHeader(title="imp", quest_id="c",
+                           status="completed", total_seconds=55.0)
+
+    def ledger(title):
+        events = titled_subagent_events(title, label="exploring codebase")
+        return render_summary_markdown(build_summary(events), header=header)
+
+    titled = ledger("map ledger time totals")
+    assert "| ↳ explorer (map ledger time totals) | 55s | — | — | — | — | — |" in titled
+    assert "<td>↳ explorer (map ledger time totals)</td>" in render_html(titled)
+    untitled = ledger(None)
+    assert "| ↳ explorer (exploring codebase) | 55s | — | — | — | — | — |" in untitled
+    assert "<td>↳ explorer (exploring codebase)</td>" in render_html(untitled)
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
