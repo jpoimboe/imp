@@ -168,10 +168,10 @@ to score).
   - `imp chat` — the conversation surface (own item below).
   - `imp resume -h` — the flag surface; the resume itself is driven in the walk spine (step 4)
     and the picker under Inline pickers.
-  - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
-    titles? Then `imp show <id>` (detail card) and the artifact views `imp show <id> spec`
-    and `imp show <id> verify` (the last failing test-gate run). `spec` and `verify` are the
-    only artifacts — a bare name like `status` errors. Also `imp list -a`.
+  - `imp list` — the overview: zones (in-flight / backlog / completed; `history` under `-a`)
+    legible? ids vs titles? Then `imp show <id>` (detail card) and the artifact views
+    `imp show <id> spec` and `imp show <id> verify` (the last failing test-gate run). `spec`
+    and `verify` are the only artifacts — a bare name like `status` errors. Also `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`):
