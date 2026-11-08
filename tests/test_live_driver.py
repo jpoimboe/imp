@@ -26,6 +26,7 @@ from tests._event_fixtures import (
     express_spec_marker_events,
     interrupted_task_lead_events,
     task_lead_started,
+    titled_subagent_events,
 )
 
 
@@ -4440,3 +4441,23 @@ def test_internal_only_last_burst_prints_nothing_and_keeps_one_blank(name: str) 
     i = next(n for n, ln in enumerate(live) if "final prose" in ln)
     assert live[i + 1] == ""
     assert live[i + 2] != ""
+
+
+def test_titled_subagent_row_live_equals_log() -> None:
+    events = titled_subagent_events("map ledger time totals")
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    live = [ln for ln in _body(out) if "explorer" in ln]
+    log = [ln for ln in _render_body(events) if "explorer" in ln]
+    assert live == log == ["  explorer · map ledger time totals · claude-sonnet-5-5 · 55s"]
+
+
+def test_titled_subagent_row_puts_abnormal_tag_last() -> None:
+    drv, out = _driver()
+    for e in titled_subagent_events("map ledger time totals", finished=False):
+        drv.on_event(e)
+    drv.finish(interrupted=True)
+    assert [ln for ln in _body(out) if "explorer" in ln] == [
+        "  explorer · map ledger time totals · claude-sonnet-5-5 · interrupted"]

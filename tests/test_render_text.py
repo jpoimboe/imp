@@ -24,6 +24,7 @@ from tests._event_fixtures import (
     interrupted_task_lead_events,
     subagent_then_bash_events,
     task_lead_started,
+    titled_subagent_events,
 )
 
 _MAX_LOOPS_COPY = (
@@ -4431,3 +4432,61 @@ def test_light_markdown_wraps_where_ansi_does() -> None:
     light = _visible(_md_under("light", para, width=30))
     assert light == _visible(_md_under("ansi", para, width=30))
     assert light.count("\n") >= 3
+
+
+_TITLE = "map ledger time totals"
+
+
+def test_display_subagent_title_collapses_clips_and_escapes() -> None:
+    assert rt.display_subagent_title("  map   the\nledger ") == "map the ledger"
+    fifty = "abcdefghij" * 5
+    assert rt.display_subagent_title(fifty) == fifty[:40] + "…"
+    assert rt.display_subagent_title("x" * 40) == "x" * 40
+    assert rt.display_subagent_title("map\x1b[31mred") == "map^[[31mred"
+    # Clip before escaping: escaping first would cut the `^[` pair to a bare `^`.
+    assert rt.display_subagent_title("a" * 39 + "\x1b[31m") == "a" * 39 + "^[…"
+    assert rt.display_subagent_title(None) is None
+    assert rt.display_subagent_title(" \n ") is None
+
+
+def test_subagent_fold_carries_dispatch_title() -> None:
+    def fold(title):
+        b = nv.NarrativeBuilder()
+        for e in titled_subagent_events(title, finished=False):
+            b.add(e)
+        return b.running_subagents()[0]
+
+    assert fold(_TITLE).title == _TITLE
+    assert fold(None).title is None
+
+
+def test_titled_subagent_status_row() -> None:
+    def rows(title, *, color=False):
+        tree = nv.build_tree(titled_subagent_events(title))
+        return [ln for ln in render_tree(tree, color=color, width=80) if "explorer" in ln]
+
+    assert rows(_TITLE) == [f"  explorer · {_TITLE} · claude-sonnet-5-5 · 55s"]
+    assert rows(None) == ["  explorer · claude-sonnet-5-5 · 55s"]
+    # Title sits in default fg between the magenta name and the gray model.
+    sub_c = pal.NODE_COLORS["subagent"]
+    assert (pal.ansi("  explorer", *sub_c) + f" · {_TITLE}"
+            + pal.ansi(" · claude-sonnet-5-5", "gray")) in rows(_TITLE, color=True)[0]
+    escaped = rows("map\x1b[31mred")
+    assert escaped == ["  explorer · map^[[31mred · claude-sonnet-5-5 · 55s"]
+    assert "\x1b" not in escaped[0]
+
+
+def test_full_subagent_header_shows_title_instead_of_brief() -> None:
+    def full(title, *, color=False):
+        tree = nv.build_tree(titled_subagent_events(title))
+        return list(render_tree(tree, full=True, color=color, width=80))
+
+    titled = full(_TITLE)
+    assert f"▾ explorer · {_TITLE}" in titled
+    assert "▾ explorer · go" not in titled
+    assert "▾ explorer · go" in full(None)               # untitled keeps the brief clip
+    header = pal.ansi("▾ explorer", *pal.NODE_COLORS["subagent"]) + f" · {_TITLE}"
+    assert header in full(_TITLE, color=True)
+    escaped = full("map\x1b[31mred")
+    assert "▾ explorer · map^[[31mred" in escaped
+    assert not any("\x1b" in ln for ln in escaped)
