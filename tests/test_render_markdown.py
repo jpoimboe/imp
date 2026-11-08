@@ -331,6 +331,42 @@ def test_subagent_status_label_tags_suspended() -> None:
     assert _subagent_status_label(sub) == "reviewer (suspended)"
 
 
+def test_titled_subagent_markdown_row_and_full_header() -> None:
+    title = "map ledger time totals"
+
+    def rows(md: str) -> list[str]:
+        return [ln for ln in md.split("\n") if "explorer" in ln]
+
+    assert rows(_md(titled_subagent_events(title))) == [
+        f"· explorer · {title} · claude-sonnet-5-5 · 55s"]
+    assert rows(_md(titled_subagent_events(title, finished=False))) == [
+        f"· explorer · {title} · claude-sonnet-5-5 (running)"]
+    assert rows(_md(titled_subagent_events(title), show=frozenset({"subagents"}))) == [
+        f"<summary>· explorer · {title} · claude-sonnet-5-5 · 55s</summary>"]
+    assert rows(_md(titled_subagent_events(title), full=True)) == [
+        f"**explorer · {title}**"]
+    # Untitled folds keep today's bytes.
+    assert rows(_md(titled_subagent_events(None))) == [
+        "· explorer · claude-sonnet-5-5 · 55s"]
+    assert rows(_md(titled_subagent_events(None), full=True)) == ["**explorer**"]
+
+
+def test_markdown_subagent_title_is_html_escaped() -> None:
+    title = "<b>x</b>"
+    for md in (_md(titled_subagent_events(title)),
+               _md(titled_subagent_events(title), full=True)):
+        (line,) = [ln for ln in md.split("\n") if "explorer" in ln]
+        assert "&lt;b&gt;x&lt;/b&gt;" in line
+        assert "<b>" not in line
+
+
+def test_markdown_subagent_title_goes_through_the_display_helper() -> None:
+    assert _subagent_status_label(_make_subagent(title="  map   the\nledger ")) \
+        == "reviewer · map the ledger"
+    assert _subagent_status_label(_make_subagent(title="map\x1b[31mred")) \
+        == "reviewer · map^[[31mred"
+
+
 def test_escape_all_strips_sgr_caret_escapes_and_html_escapes() -> None:
     assert _escape_all("\x1b[1;33m<b>&\x00") == "&lt;b&gt;&amp;^@"
 
