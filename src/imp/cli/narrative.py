@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from imp.engine.feedback import truncate_detail
+from imp.engine.test_lane import WAIT_LABEL
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
 if TYPE_CHECKING:
@@ -1528,7 +1529,7 @@ def _h_waiting_for_test_lane(
     # already fired, so current_activity() reads its "running tests" phrase —
     # override the footer verb with "waiting to test" until test_lane_acquired clears it.
     if self._step_stack:
-        self._step_stack[-1].lane_wait_label = "waiting to test"
+        self._step_stack[-1].lane_wait_label = WAIT_LABEL
         self._step_stack[-1].lane_wait = True
         self._step_stack[-1].lane_wait_start_ts = event.get("timestamp")
 

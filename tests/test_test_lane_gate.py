@@ -1,13 +1,16 @@
 import fcntl
+import json
 import os
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
 import pytest
 
+import imp.cli.main as m
 import imp.remote.session.attach as attach_mod
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import merge_queue as mq
@@ -26,10 +29,12 @@ _LANE_STEP = (
 )
 
 
-def _gate_step(command: str = "true", *, interruptible: bool = False) -> str:
+def _gate_step(command: str = "true", *, interruptible: bool = False,
+               label: str | None = None) -> str:
     return (
         "      - name: run-tests\n"
-        f"        command: \"{command}\"\n"
+        + (f"        label: {label}\n" if label is not None else "")
+        + f"        command: \"{command}\"\n"
         + ("        interruptible: true\n" if interruptible else "")
         + "        acquire: test-lane\n"
         "        rules:\n"
@@ -38,13 +43,14 @@ def _gate_step(command: str = "true", *, interruptible: bool = False) -> str:
     )
 
 
-def _write_workflow(root: Path, steps: str) -> None:
+def _write_workflow(root: Path, steps: str, *, phase_label: str | None = None) -> None:
     wf = root / "imp" / "workflows" / "imp" / "workflow.yaml"
     wf.write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n"
         "  - name: gate\n"
-        "    steps:\n" + steps
+        + (f"    label: {phase_label}\n" if phase_label is not None else "")
+        + "    steps:\n" + steps
     )
     cfg_path = project_state_dir(root) / "config.yaml"
     cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
@@ -101,6 +107,40 @@ async def _until(pred: Callable[[], bool], what: str) -> None:
             return
         await anyio.sleep(0.025)
     raise AssertionError(f"timed out waiting for {what}")
+
+
+def _snapshot_state(dest: Path) -> str:
+    # The gate copies the persisted state.json, so a test reads the label the script ran under.
+    return f"cp $IMP_QUEST_DIR/state/state.json {dest}"
+
+
+def _labeled_quest(root: Path, command: str, *, interruptible: bool = False) -> Quest:
+    _seed_control(root)
+    _write_workflow(root, _gate_step(command, interruptible=interruptible,
+                                     label="running tests"),
+                    phase_label="integration phase")
+    return Quest.create(root, title="x", quest_id="feat", base_branch="main")
+
+
+def _persisted_label(ch: Quest) -> str | None:
+    return State.load(ch.state_dir).step_label
+
+
+async def _run_until_waiting_then_free(
+    ch: Quest, held: int, result: list[RunResult],
+    while_waiting: Callable[[], None] = lambda: None,
+) -> None:
+    with anyio.fail_after(30):
+        async with anyio.create_task_group() as tg:
+            async def _run() -> None:
+                result.append(await run_quest(ch))
+            tg.start_soon(_run)
+            try:
+                await _until(lambda: _persisted_label(ch) == "waiting to test",
+                             "the persisted wait label")
+                while_waiting()
+            finally:
+                test_lane.release(held)
 
 
 def test_free_slot_runs_gate_without_waiting_or_merge_queue(
@@ -314,3 +354,115 @@ def test_non_interruptible_gate_keeps_waiting_through_pause_request(
     assert result == [RunResult.PAUSED]
     assert ran.exists()
     assert "test_lane_acquired" in _types(ch)
+
+
+def test_waiting_gate_persists_wait_label_then_restores_run_label(
+    tmp_path: Path, provider_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _register_fake_provider(provider_registry)
+    seen = tmp_path / "seen.json"
+    ch = _labeled_quest(tmp_path, _snapshot_state(seen))
+    held = test_lane.try_acquire(tmp_path, 1)
+    assert held is not None
+    result: list[RunResult] = []
+    boards: list[str] = []
+
+    def _read_board() -> None:
+        boards.append("\n".join(m._overview_lines(
+            tmp_path, show_all=False, now=datetime.now(UTC), color=False)))
+
+    anyio.run(_run_until_waiting_then_free, ch, held, result, _read_board)
+
+    assert result == [RunResult.PAUSED]
+    assert "(integration phase · waiting to test)" in boards[0]
+    assert json.loads(seen.read_text())["step_label"] == "running tests"
+    assert _persisted_label(ch) == "running tests"
+
+
+def test_waiting_gate_restores_route_label_not_step_label(
+    tmp_path: Path, provider_registry) -> None:
+    _register_fake_provider(provider_registry)
+    seen = tmp_path / "seen.json"
+    ch = _labeled_quest(tmp_path, _snapshot_state(seen))
+    st = State.load(ch.state_dir)
+    st.route_label = st.step_label = "re-running tests"   # as a labeled goto leaves it
+    st.save(ch.state_dir)
+    held = test_lane.try_acquire(tmp_path, 1)
+    assert held is not None
+    result: list[RunResult] = []
+
+    anyio.run(_run_until_waiting_then_free, ch, held, result)
+
+    assert result == [RunResult.PAUSED]
+    assert json.loads(seen.read_text())["step_label"] == "re-running tests"
+    assert _persisted_label(ch) == "re-running tests"
+
+
+def test_pause_while_waiting_leaves_run_label_persisted(
+    tmp_path: Path, provider_registry) -> None:
+    _register_fake_provider(provider_registry)
+    ran = tmp_path / "ran"
+    ch = _labeled_quest(tmp_path, f"touch {ran}", interruptible=True)
+    coord = InterruptCoordinator()
+    held = test_lane.try_acquire(tmp_path, 1)
+    assert held is not None
+    result: list[RunResult] = []
+
+    async def _scenario() -> None:
+        with anyio.fail_after(30):
+            async with anyio.create_task_group() as tg:
+                async def _run() -> None:
+                    result.append(await run_quest(ch, coordinator=coord))
+                tg.start_soon(_run)
+                try:
+                    await _until(lambda: _persisted_label(ch) == "waiting to test",
+                                 "the persisted wait label")
+                    coord._should_pause = True
+                    coord.pause_reason = "ctrl-c"
+                    await _until(lambda: bool(result), "the waiting gate to pause")
+                finally:
+                    coord._should_pause = True
+                    test_lane.release(held)
+
+    anyio.run(_scenario)
+
+    assert result == [RunResult.PAUSED]
+    paused = [e["payload"] for e in JsonlEventLog(ch.events_path).read()
+              if e.get("type") == "workflow_paused"]
+    assert paused[-1]["reason"] == "interrupt"
+    assert not ran.exists()
+    assert _persisted_label(ch) == "running tests"
+
+
+def test_immediate_slot_heals_stale_wait_label_before_script_runs(
+    tmp_path: Path, provider_registry) -> None:
+    _register_fake_provider(provider_registry)
+    seen = tmp_path / "seen.json"
+    ch = _labeled_quest(tmp_path, _snapshot_state(seen))
+    st = State.load(ch.state_dir)
+    st.step_label = "waiting to test"                     # left by a run killed mid-wait
+    st.save(ch.state_dir)
+
+    assert anyio.run(run_quest, ch) is RunResult.PAUSED
+
+    assert json.loads(seen.read_text())["step_label"] == "running tests"
+    assert _persisted_label(ch) == "running tests"
+
+
+def test_immediate_slot_never_persists_wait_label(
+    tmp_path: Path, provider_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+    _register_fake_provider(provider_registry)
+    seen = tmp_path / "seen.json"
+    ch = _labeled_quest(tmp_path, _snapshot_state(seen))
+    saved: list[str | None] = []
+    real_save = State.save
+
+    def _spy(self: State, state_dir: Path) -> None:
+        saved.append(self.step_label)
+        real_save(self, state_dir)
+    monkeypatch.setattr(State, "save", _spy)
+
+    assert anyio.run(run_quest, ch) is RunResult.PAUSED
+
+    assert saved and set(saved) == {"running tests"}
+    assert json.loads(seen.read_text())["step_label"] == "running tests"
