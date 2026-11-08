@@ -154,19 +154,30 @@ resume marker. The taxonomy below carries the full feedback strings:
 
 **Verify each finding before acting on it.** A finding can rest on a false premise —
 a misread of the spec or an untrue claim about the code. Confirm it first: re-read
-the cited passage and use `read_file`/`grep` to check any code claim. If it holds,
-fix it. If it rests on a false premise, do **not** make the change — editing
-correct content to satisfy a phantom finding introduces the very bug the reviewer
-imagined; instead resolve the misread (fix the real concern if any, or add a
-clarifying note so the next reviewer doesn't re-flag it). Never apply an unverified
-finding, and never edit the spec into something you know to be wrong to make a
-finding disappear.
+the cited passage and use `read_file`/`grep` to check any code claim, and
+`imp log {{ quest.id }} --step threshold` (the brainstorm dialogue) to check a
+claim about what was decided. If it holds, fix it. If it rests on a false
+premise, do **not** make the change — editing correct content to satisfy a phantom
+finding introduces the very bug the reviewer imagined; instead resolve the misread
+(fix the real concern if any, or add a clarifying note so the next reviewer doesn't
+re-flag it). Never apply an unverified finding, and never edit the spec into
+something you know to be wrong to make a finding disappear.
 
 Address each verified finding, re-write `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,
 and finish tool-terminal with `complete_step(phase="written", …)` (engine journals
 at the step boundary; no manual commit) — do not trail off with prose when you are
 done. Most rework decisions you **decide and record** (see **Ask vs. decide**
 below); escalate only at the high bar that section defines.
+
+## Decisions reached with the user
+
+A decision the brainstorm settled with the user binds the spec on every turn, first write and rework alike. Check it against `imp log {{ quest.id }} --step threshold`.
+
+- Dropped or drifted by mistake → restore it.
+- New information shows it is wrong → make the better call, record the rationale in the Decisions summary, and append one open item for the user to ratify at the merge gate (reader form under **Surfacing a decision you cannot resolve**):
+  `- [ ] DEFERRED spec-finalizer: <decision made with the user> → <what the spec does instead> [scope: quest] — needs-decision: <the new information>`
+
+Never yield for it. A departure with no open item is a defect the reviewer blocks.
 
 ## Ask vs. decide
 
@@ -177,14 +188,11 @@ Then finish tool-terminal. A trivial spec with no Decisions summary yet gains on
 the moment a turn actually decides something.
 
 **Escalate by ending your turn with the question** only when the decision is
-genuinely the user's to make — a big deal, not a technical detail:
-
-- the fix would change scope, or drop/alter/add a user-stated requirement;
-- the finding exposes a real fork in *user intent* — plausible readings with
-  materially different outcomes that nothing in the brainstorm, spec, or codebase
-  settles;
-- conflicting directives (the review demands the opposite of something the user
-  explicitly asked for).
+genuinely the user's to make: the finding exposes a real fork in *user intent* —
+plausible readings with materially different outcomes that nothing in the
+brainstorm, spec, or codebase settles. A departure from a decision already
+reached with the user never qualifies; it follows
+**Decisions reached with the user**.
 
 Technical choices the spec or codebase can settle never qualify. When you escalate
 and the user answers, record it with "*(user-confirmed during review)*" and treat
