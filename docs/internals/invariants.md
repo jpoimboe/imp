@@ -29,7 +29,9 @@ Read this when editing imp's engine/renderer or workflow prompts.
   or counted; imp's transcript is the only source of truth for resumed context.
   At load the CLI splices a synthetic "No response requested." after a user-tail
   body; imp counters it with a stream-only `RESUME_STUB_NOTE` at the head of the
-  streamed message, never persisted.
+  streamed message, never persisted. A resume armed to continue ends its
+  streamed turn on imp's continuation unless a human message is pending;
+  claude-p's interrupt marker is never a human message.
 - **Codex native session.** One run-scoped process owner linearizes cancellation
   with subprocess publication and identity-safe cleanup; a live hard stop captures
   the process tree before waking blocked driver I/O, and the wake also releases

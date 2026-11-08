@@ -731,6 +731,58 @@ def _seed_between_turns_marker_transcript(inv_dir: Path) -> None:
     transcript.append(Message(role="user", content=(TextBlock(text=_MARKER),)))
 
 
+_LONE_MARKER = "[Request interrupted by user]"
+
+
+def _seed_mid_prose_marker_transcript(inv_dir: Path) -> None:
+    """An interrupt mid-prose: partial assistant text, then claude-p's lone marker."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(role="assistant", content=(
+        TextBlock(text="partial thought, cut off"),)))
+    transcript.append(Message(role="user", content=(TextBlock(text=_LONE_MARKER),)))
+
+
+def _seed_first_turn_marker_transcript(inv_dir: Path) -> None:
+    """An interrupt before any assistant output: the prompt, then the marker."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(role="user", content=(TextBlock(text=_LONE_MARKER),)))
+
+
+def _seed_marker_then_human_text_transcript(inv_dir: Path) -> None:
+    """A lone marker followed by a genuine human reply."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(role="assistant", content=(
+        TextBlock(text="partial thought, cut off"),)))
+    transcript.append(Message(role="user", content=(TextBlock(text=_LONE_MARKER),)))
+    transcript.append(Message(role="user", content=(TextBlock(text="wrap it up now"),)))
+
+
+def _first_query_user_texts(created: list[Any]) -> list[str]:
+    """User text blocks of the resume's first streamed query, in order."""
+    texts: list[str] = []
+    for d in created[0].queries[0]:
+        if d.get("type") != "user":
+            continue
+        content = d["message"]["content"]
+        if isinstance(content, str):
+            texts.append(content)
+        else:
+            texts.extend(b["text"] for b in content if b.get("type") == "text")
+    return texts
+
+
 @pytest.mark.anyio
 async def test_claude_subagent_interrupt_marker_resume_continues(
     tmp_path: Path,
@@ -755,12 +807,12 @@ async def test_claude_subagent_interrupt_marker_resume_continues(
 
 
 @pytest.mark.anyio
-async def test_claude_subagent_between_turns_marker_resume_unchanged(
+async def test_claude_subagent_between_turns_marker_resume_nudges_after_marker(
     tmp_path: Path,
 ) -> None:
-    """Criterion 11(b): the between-turns marker at subagent_depth > 0 resumes
-    exactly as on main — the helper is a no-op, the marker stays on disk and
-    streams as the delta, and pending_human_tail still suppresses the nudge."""
+    """The between-turns marker at subagent_depth > 0 is left on disk and
+    streamed by the repair, and the continue nudge now follows it — a marker
+    is never a pending human tail."""
     from imp.agents.runner import TextBlock
     from imp.agents.transcript import Transcript
 
@@ -769,11 +821,14 @@ async def test_claude_subagent_between_turns_marker_resume_unchanged(
 
     assert events[-1]["type"] == "agent_result"
     assert events[-1]["payload"] == {"status": "Success"}
-    assert _continuations(log) == []
+    conts = _continuations(log)
+    assert len(conts) == 1, log.read()
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     loaded = Transcript(tmp_path / "step" / "transcript.jsonl").load()
     assert loaded[2].role == "user"
     assert loaded[2].content == (TextBlock(text=_MARKER),)
     assert _MARKER in _shipped_blob(created, [])
+    assert _first_query_user_texts(created)[-2:] == [_MARKER, RESUME_CONTINUE_NUDGE]
 
 
 @pytest.mark.anyio
@@ -792,3 +847,56 @@ async def test_claude_interject_wins_over_repaired_interrupt_nudge(
     assert RESUME_CONTINUE_NUDGE not in blob
     assert "The tool use was rejected" not in blob
     assert _INTERRUPTED_PREFIX in blob
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("depth", [0, 1])
+@pytest.mark.parametrize("seed", [
+    _seed_mid_prose_marker_transcript, _seed_first_turn_marker_transcript,
+], ids=["mid_prose", "first_turn"])
+async def test_claude_lone_marker_resume_streams_nudge_after_marker(
+    tmp_path: Path, seed: Any, depth: int,
+) -> None:
+    """A lone marker (mid-prose or first-turn interrupt) is not a human tail: the
+    armed resume journals one continuation and streams it right after the marker."""
+    log, created, _records, events = await _run_claude_resume(
+        tmp_path, seed=seed, subagent_depth=depth)
+
+    assert events[-1]["type"] == "agent_result"
+    assert events[-1]["payload"] == {"status": "Success"}
+    conts = _continuations(log)
+    assert len(conts) == 1, log.read()
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
+    assert _first_query_user_texts(created)[-2:] == [
+        _LONE_MARKER, RESUME_CONTINUE_NUDGE]
+
+
+@pytest.mark.anyio
+async def test_claude_human_text_after_marker_suppresses_nudge(
+    tmp_path: Path,
+) -> None:
+    """A genuine human turn after the marker is still a pending human tail."""
+    log, created, _records, events = await _run_claude_resume(
+        tmp_path, seed=_seed_marker_then_human_text_transcript)
+
+    assert events[-1]["type"] == "agent_result"
+    assert _continuations(log) == []
+    texts = _first_query_user_texts(created)
+    assert texts[-1] == "wrap it up now"
+    assert RESUME_CONTINUE_NUDGE not in texts
+
+
+@pytest.mark.anyio
+async def test_claude_interject_wins_over_lone_marker_nudge(
+    tmp_path: Path,
+) -> None:
+    """An interject drained at resume over a lone marker ships instead of the nudge."""
+    log, created, records, events = await _run_claude_resume(
+        tmp_path, seed=_seed_mid_prose_marker_transcript,
+        queued=["actually, run the tests first"])
+
+    assert events[-1]["type"] == "agent_result"
+    assert _continuations(log) == []
+    blob = _shipped_blob(created, records)
+    assert "actually, run the tests first" in blob
+    assert RESUME_CONTINUE_NUDGE not in blob
