@@ -2010,7 +2010,6 @@ _CARD_PAUSE_PHRASE: dict[str, str] = {
     "detached": "the terminal went away",
     "sigterm": "interrupted",
     "interrupt": "interrupted",
-    "ctrl-c": "Ctrl-C",
     "reauth_needed": "provider login expired",
     "sandbox_spawn_failed": "the sandbox could not start",
     "max_loops": "a step hit its loop limit",
