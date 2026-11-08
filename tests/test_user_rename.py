@@ -16,6 +16,7 @@ from tests.test_narrative_resume_marker import (
     AID,
     CTRL_D,
     MARKER_2M,
+    MARKER_2M45,
     _agent_run,
     _at,
     _live,
@@ -46,11 +47,14 @@ _PAUSED_SHAPES = [_agent_run(CTRL_D), _script_run(), _script_run(show_label=Fals
 _PAUSED_IDS = ["agent", "held-script", "hidden-script"]
 
 
-@pytest.mark.parametrize("events", _PAUSED_SHAPES, ids=_PAUSED_IDS)
-def test_user_rename_during_pause_renders_before_the_resume_marker(events: Events) -> None:
+@pytest.mark.parametrize(("events", "marker"),
+                         list(zip(_PAUSED_SHAPES, [MARKER_2M, MARKER_2M45, MARKER_2M45])),
+                         ids=_PAUSED_IDS)
+def test_user_rename_during_pause_renders_before_the_resume_marker(
+        events: Events, marker: str) -> None:
     lines = _stripped(_during_pause(events, _user_rename("r", "X")))
     i = lines.index(LINE)
-    assert lines[i + 1] == "" and lines[i + 2] == MARKER_2M
+    assert lines[i + 1] == "" and lines[i + 2] == marker
     assert not any("Set name to" in ln for ln in lines)
 
 
