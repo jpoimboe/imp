@@ -1869,6 +1869,11 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     self._flush_burst()
     self._root.status = "paused"
     self._finalize_direct_descendant_subtrees(event.get("timestamp"), "interrupted")
+    # A waiting thread gives up on pause; a step still waiting after resume re-emits its wait.
+    for step in self._step_stack:
+        step.lane_wait = False
+        step.lane_wait_label = None
+        step.lane_wait_start_ts = None
     reason = p.get("interrupt_reason") or p.get("reason")
     if reason:
         # A genuine your-turn yield is a normal solicit, not an interrupt: the
