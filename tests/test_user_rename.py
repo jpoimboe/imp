@@ -161,3 +161,13 @@ def test_replayed_user_rename_is_not_reprinted_on_resume() -> None:
 def test_live_user_rename_after_the_boundary_prints_once() -> None:
     out = _resumed([*_PAUSED_WITH_RENAME, _GATE], cut=len(_PAUSED_WITH_RENAME) - 1)
     assert out.count(LINE) == 1
+
+
+def test_markdown_export_renders_user_rename_bold_with_escaped_title() -> None:
+    from imp.cli.render_markdown import render_markdown
+
+    root = nv.WorkflowNode(title="d")
+    root.children = [nv.UserRenameNode(name="X"), nv.UserRenameNode(name="a <b>")]
+    out = render_markdown(nv.NarrativeTree(root=root), full=False)
+    assert '**renamed to "X" · by you**' in out
+    assert '**renamed to "a &lt;b&gt;" · by you**' in out
