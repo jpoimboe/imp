@@ -244,8 +244,8 @@ def test_memory_doc_states_the_shared_three_state_shape() -> None:
     assert ("`test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify "
             "gates run. `test_cmd_slow` falls back to `test_cmd_fast` when it names no "
             "command of its own.") in flat
-    assert ("`pythonpath` — worktree-relative import roots prepended to the gate/agent "
-            "subprocess PYTHONPATH") in flat
+    assert ("`pythonpath` — worktree-relative Python import paths prepended to the "
+            "gate/agent subprocess PYTHONPATH") in flat
     assert ("**unset** means never decided, and imp raises it once the repo can answer; "
             "**`false`** means this project needs none, and stays silent forever; "
             "anything else is the value.") in flat
@@ -418,7 +418,13 @@ def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
 def test_knowledge_names_worktree_setup_among_the_settings_init_confirms() -> None:
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ("detects the default workflow, integration branch, fast test command, "
-            "`worktree_setup`, and import root and confirms them on one screen") in flat
+            "`worktree_setup`, and Python import path and confirms them on one screen") in flat
+
+
+def test_no_user_facing_markdown_says_import_root() -> None:
+    hits = [str(md) for root in (Path("src/imp"), Path("docs/guide"))
+            for md in sorted(root.rglob("*.md")) if "import root" in md.read_text().lower()]
+    assert hits == []
 
 
 def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -> None:

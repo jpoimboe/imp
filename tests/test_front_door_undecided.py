@@ -31,16 +31,16 @@ needs none, so it stops being raised. If this quest can't answer one, leave it.
   (e.g. `npm ci`).
 {% endif %}
 {% if project.undecided.pythonpath %}
-- `pythonpath` — worktree-relative import roots. Unset in an editable-installed
-  Python project, imp's test gate imports the stale main checkout instead of the
-  worktree under test (e.g. `[src]`).
+- `pythonpath` — worktree-relative Python import paths. Unset in an
+  editable-installed Python project, imp's test gate imports the stale main
+  checkout instead of the worktree under test (e.g. `[src]`).
 {% endif %}
 {% endif %}"""
 
 FRAMING = "**Undecided project settings.**"
 FAST = "`test_cmd_fast` — the lint+typecheck+fast-test command"
 SETUP = "`worktree_setup` — a command run in each new quest worktree"
-ROOTS = "`pythonpath` — worktree-relative import roots"
+ROOTS = "`pythonpath` — worktree-relative Python import paths"
 
 
 def _render(workflow: str, agent: str, undecided: Undecided) -> str:

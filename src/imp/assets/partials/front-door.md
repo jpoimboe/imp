@@ -54,9 +54,9 @@ needs none, so it stops being raised. If this quest can't answer one, leave it.
   (e.g. `npm ci`).
 {% endif %}
 {% if project.undecided.pythonpath %}
-- `pythonpath` — worktree-relative import roots. Unset in an editable-installed
-  Python project, imp's test gate imports the stale main checkout instead of the
-  worktree under test (e.g. `[src]`).
+- `pythonpath` — worktree-relative Python import paths. Unset in an
+  editable-installed Python project, imp's test gate imports the stale main
+  checkout instead of the worktree under test (e.g. `[src]`).
 {% endif %}
 {% endif %}
 
