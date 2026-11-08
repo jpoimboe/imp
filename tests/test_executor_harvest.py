@@ -228,3 +228,39 @@ def test_a_recreated_artifacts_spike_is_still_harvested(tmp_path: Path) -> None:
                 "refs/imp/artifacts/flight").stdout.split() == ["spike"]
     assert _git(tmp_path, "show",
                 "refs/imp/artifacts/flight:spike/probe.py").stdout == "print('old')\n"
+
+
+def test_harvest_journals_only_regular_files_never_links(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    ch = _change(tmp_path, "lnk")
+    art = ch.quest_dir / "artifacts"
+    (art / "spec").mkdir(parents=True)
+    (art / "spec" / "lnk.md").write_text("# spec\n")
+    outside = tmp_path / "outside"
+    (outside / "dir").mkdir(parents=True)
+    (outside / "secret.md").write_text("SECRET\n")
+    (outside / "dir" / "inner.md").write_text("INNER\n")
+    (art / "leak.md").symlink_to(outside / "secret.md")
+    (art / "linkdir").symlink_to(outside / "dir")
+
+    executor._harvest_artifacts(ch, SimpleNamespace(name="spec-finalizer"))
+
+    assert _git(tmp_path, "ls-tree", "-r", "--name-only",
+                "refs/imp/artifacts/lnk").stdout.split() == ["spec/lnk.md"]
+
+
+def test_harvest_journals_nothing_through_a_symlinked_artifacts_root(
+    tmp_path: Path,
+) -> None:
+    _init_repo(tmp_path)
+    ch = _change(tmp_path, "root")
+    outside = tmp_path / "outside"
+    (outside / "spec").mkdir(parents=True)
+    (outside / "spec" / "root.md").write_text("SECRET\n")
+    ch.quest_dir.mkdir(parents=True)
+    (ch.quest_dir / "artifacts").symlink_to(outside)
+
+    executor._harvest_artifacts(ch, SimpleNamespace(name="threshold"))
+
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/artifacts/root").returncode != 0

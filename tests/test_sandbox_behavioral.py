@@ -1095,7 +1095,7 @@ def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
         art = wt_path / "artifact.md"
         art.write_text("hello\n")
         wrote = wt.artifact_commit(
-            control, "esc1", {"spec/esc1.md": art}, message="snap")
+            control, "esc1", {"spec/esc1.md": art.read_bytes()}, message="snap")
         assert wrote is True
         assert _git(
             control, "rev-parse", "--verify", "--quiet",
@@ -2305,10 +2305,10 @@ def test_artifact_ref_history_readable_from_readonly_sandboxed_worktree() -> Non
 
         src.write_text("# Plan\n\nrevision one\n")
         assert wt.artifact_commit(
-            control, "esc1", {"plans/esc1-plan-1.md": src}, message="plan 1") is True
+            control, "esc1", {"plans/esc1-plan-1.md": src.read_bytes()}, message="plan 1") is True
         src.write_text("# Plan\n\nrevision two\n")
         assert wt.artifact_commit(
-            control, "esc1", {"plans/esc1-plan-1.md": src},
+            control, "esc1", {"plans/esc1-plan-1.md": src.read_bytes()},
             message="plan 1 revised") is True
 
         ctx, pol = _refprot_ctx(control, wt_path)

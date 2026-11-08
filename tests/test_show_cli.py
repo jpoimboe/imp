@@ -114,7 +114,7 @@ def _archive_and_prune(control: Path, ch: Quest, quest_id: str) -> None:
     """Prunes the home's artifacts too: `_show_artifact` prefers the live file, so
     leaving it would resolve without ever reading the archive."""
     files = {
-        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        str(p.relative_to(ch.quest_dir / "artifacts")): p.read_bytes()
         for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
@@ -438,7 +438,8 @@ def test_show_spec_from_wip_ref_when_home_absent(
     worktree.artifact_commit(
         tmp_path,
         "ghost01",
-        {"spec/ghost01.md": spec, "plans/ghost01-plan-1.md": p1, "plans/ghost01-plan-2.md": p2},
+        {"spec/ghost01.md": spec.read_bytes(), "plans/ghost01-plan-1.md": p1.read_bytes(),
+         "plans/ghost01-plan-2.md": p2.read_bytes()},
         message="artifact: ghost",
     )
     # Seed the archive runtime (events/change/state) so `_resolve_id` finds the
@@ -518,7 +519,7 @@ def test_show_default_card_renders_summary_after_archive(
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        str(p.relative_to(ch.quest_dir / "artifacts")): p.read_bytes()
         for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }

@@ -514,7 +514,7 @@ def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     (art / "doomed-plan-1.md").write_text("# plan\n")
     worktree.artifact_commit(
         tmp_path, "doomed",
-        {"plans/doomed-plan-1.md": art / "doomed-plan-1.md"},
+        {"plans/doomed-plan-1.md": (art / "doomed-plan-1.md").read_bytes()},
         message="artifact: plan")
 
     rc = m._abandon_local(tmp_path, "doomed")
@@ -558,7 +558,7 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     art = ch.quest_dir / "artifacts" / "spec"
     art.mkdir(parents=True)
     (art / "doc-thing.md").write_text("# the spec\n")
-    files = {str(p.relative_to(ch.quest_dir / "artifacts")): p
+    files = {str(p.relative_to(ch.quest_dir / "artifacts")): p.read_bytes()
              for p in (art / "doc-thing.md",)}
     worktree.artifact_commit(tmp_path, "doc-thing", files, message="artifact: spec")
     # Simulate a completed merge so _complete takes the finalize path.

@@ -1192,14 +1192,12 @@ def _harvest_artifacts(
     quest: Quest, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
     """Journal quest_dir/artifacts/** to the quest's artifact ref (no-op if none)."""
-    from imp.engine import worktree
-    art_root = quest.quest_dir / "artifacts"
-    if not art_root.is_dir():
+    from imp.engine import artifact_files, worktree
+    names = artifact_files.list_files(quest.quest_dir)
+    if names is None:
         return
-    files = {
-        str(p.relative_to(art_root)): p
-        for p in sorted(art_root.rglob("*")) if p.is_file()
-    }
+    files = {rel: data for rel in names
+             if (data := artifact_files.read_file(quest.quest_dir, rel)) is not None}
     worktree.artifact_commit(
         quest.control_root, quest.id, files,
         message=f"artifact: {step.name}", warn=warn)

@@ -42,7 +42,7 @@ def _park(root: Path, quest_id: str, files: dict[str, str], *, message: str,
         src = root.parent / "files" / quest_id / name
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_text(body)
-        sources[name] = src
+        sources[name] = src.read_bytes()
     assert wt.artifact_commit(root, quest_id, sources, message=message) is True
     for name in ident:
         monkeypatch.delenv(name)
