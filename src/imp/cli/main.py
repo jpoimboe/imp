@@ -3873,13 +3873,6 @@ def _selected_search(args: argparse.Namespace, merged_after: str | None) -> Sear
     return SearchZones(args.active, args.backlog, statuses, merged_after)
 
 
-def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
-    """(active, backlog, history) zone flags; none given searches all three."""
-    if not (args.active or args.backlog or args.history):
-        return True, True, True
-    return args.active, args.backlog, args.history
-
-
 def _widening_flags(zone_flags: list[tuple[str, bool]],
                     filter_flags: list[tuple[str, bool]]) -> list[str]:
     """Passed flags a miss could drop to widen; zone flags omitted when all are passed."""
@@ -3977,12 +3970,15 @@ def _archived_hit_intent(store: Store, quest_id: str,
 
 def _events_search_archived(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+    statuses: frozenset[str],
 ) -> list[EventSearchHit]:
-    """History-zone quests: index candidates re-scanned to specific matching events."""
+    """History-zone quests in `statuses`: index candidates re-scanned to matching events."""
     from imp.cli.store import make_store
     store = make_store(control)
     hits: list[EventSearchHit] = []
-    for cid, title, _status, last in store.search_event_candidates(query):
+    for cid, title, status, last in store.search_event_candidates(query):
+        if status not in statuses:
+            continue
         events = store.get_events(cid) or []
         matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
@@ -3994,17 +3990,17 @@ def _events_search_archived(
 
 
 def _events_search(
-    control: Path, query: str, zones: tuple[bool, bool, bool], *,
+    control: Path, query: str, zones: SearchZones, *,
     types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
-    active, backlog, history = zones
     hits: list[EventSearchHit] = []
-    if active:
+    if zones.active:
         hits += _events_search_active(control, query, types=types, agents=agents)
-    if backlog:
+    if zones.backlog:
         hits += _events_search_backlog(control, query, types=types, agents=agents)
-    if history:
-        hits += _events_search_archived(control, query, types=types, agents=agents)
+    if zones.statuses:
+        hits += _events_search_archived(control, query, types=types, agents=agents,
+                                        statuses=zones.statuses)
     return hits
 
 
@@ -4197,7 +4193,7 @@ def _cmd_events_search(
     control = _control if _control is not None else _control_root()
     types = set(args.type) if args.type else None
     agents = set(args.agent) if args.agent else None
-    zones = _selected_events_search(args)
+    zones = _selected_search(args, None)
     hits = _events_search(control, args.query, zones, types=types, agents=agents)
     if not hits:
         if args.json:
@@ -4205,7 +4201,8 @@ def _cmd_events_search(
         else:
             drop = _widening_flags(
                 [("--active", args.active), ("--backlog", args.backlog),
-                 ("--history", args.history)],
+                 ("--completed", args.completed), ("--abandoned", args.abandoned),
+                 ("--archived", args.archived)],
                 [("--type", bool(args.type)), ("--agent", bool(args.agent))])
             _emit_human(_search_miss_lines(args.query, drop, suggest_events=False))
         return 0
@@ -4402,8 +4399,9 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
             "Case-insensitive substring search over structured event content "
             "(tool calls, tool results, agent reasoning, skill loads) across "
             "quests — the structured-event sibling of `imp search` (prose only). "
-            "Searches active, backlog, and history by default; --type / --agent "
-            "narrow which events match."),
+            "--active, --backlog, --completed, --abandoned, and --archived narrow "
+            "the search and combine; with none of them, everything is searched. "
+            "--type / --agent narrow which events match."),
     )
     p.add_argument(
         "query", metavar="QUERY", nargs="?", default=None,
@@ -4412,8 +4410,12 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
                    help="Search in-flight quests' events.")
     p.add_argument("--backlog", action="store_true",
                    help="Search backlog quests (matched on title + intent).")
-    p.add_argument("--history", action="store_true",
-                   help="Search history quests' events.")
+    p.add_argument("--completed", action="store_true",
+                   help="Search completed quests' events.")
+    p.add_argument("--abandoned", action="store_true",
+                   help="Search abandoned quests' events.")
+    p.add_argument("--archived", action="store_true",
+                   help="Search archived conversations' events.")
     p.add_argument(
         "--type", action=SplitAppend, default=None,
         help="Keep only these event types (repeatable / comma-joined).")
