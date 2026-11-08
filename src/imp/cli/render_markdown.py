@@ -358,10 +358,10 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         yield f"**{nv.leave_marker_text(node)}**"
         return
     if isinstance(node, nv.RenameNode):
-        yield 'Set name to "' + esc(node.name) + '"'
+        yield 'Set title to "' + esc(node.title) + '"'
         return
     if isinstance(node, nv.UserRenameNode):
-        yield '**renamed to "' + esc(node.name) + '" · by you**'
+        yield '**title set to "' + esc(node.title) + '" · by you**'
         return
     if isinstance(node, nv.WarningsSummaryNode):
         noun = "warning" if node.total == 1 else "warnings"

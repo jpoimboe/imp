@@ -1239,17 +1239,17 @@ def _render(node: Any, *, depth: int, full: bool = False,
         return
 
     if isinstance(node, nv.RenameNode):
-        # A naming reads as a quiet agent-style aside, inline where it happened:
-        # a wordmark "• " turn bullet, then "Set name to" with the new title also in
+        # A titling reads as a quiet agent-style aside, inline where it happened:
+        # a wordmark "• " turn bullet, then "Set title to" with the new title also in
         # wordmark — the warm accent — so the whole aside reads as one identity signal.
         indent = _gutter_indent(depth, gutters, color)
         bullet = pal.ansi("• ", "wordmark", enabled=color)
-        name = pal.ansi(_caret_escape(node.name), "wordmark", enabled=color)
-        yield indent + bullet + 'Set name to "' + name + '"'
+        title = pal.ansi(_caret_escape(node.title), "wordmark", enabled=color)
+        yield indent + bullet + 'Set title to "' + title + '"'
         return
 
     if isinstance(node, nv.UserRenameNode):
-        yield _line(f'renamed to "{_caret_escape(node.name)}" · by you', depth, color,
+        yield _line(f'title set to "{_caret_escape(node.title)}" · by you', depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 

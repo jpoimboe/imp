@@ -425,7 +425,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     step.children = [
         nv.SkillLoadNode(name="brainstorming"),
         nv.OutcomeLine(action={"verb": "continue"}),
-        nv.RenameNode(name="new title"),
+        nv.RenameNode(title="new title"),
         nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
                                     "max_tool_calls": 50}),
     ]
@@ -444,7 +444,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     out = render_markdown(tree, full=True)
     assert "loading skill brainstorming" in out        # SkillLoadNode
     assert "→ continue" in out                         # OutcomeLine
-    assert 'Set name to "new title"' in out            # RenameNode
+    assert 'Set title to "new title"' in out            # RenameNode
     assert "Internal context — anthropic/claude" in out  # ctx fold
     assert "**tiers resolved**" in out                 # TiersResolvedNode (full)
     assert "- high → anthropic/claude" in out          # tiers list item
