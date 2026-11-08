@@ -2126,7 +2126,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
             f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
             for d in card.depends_on)
         lines.append(_card_field("depends_on:", deps, 15, color=color))
-    lines.extend(_vars_row(card.vars, 15, color=color))
+    lines.extend(_vars_row(card.seeded_vars, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.intent:
@@ -2138,7 +2138,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
         lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
-    lines.extend(_vars_blocks(card.vars, color=color))
+    lines.extend(_vars_blocks(card.seeded_vars, color=color))
     if ledger is not None:
         lines.append("")
         lines.append(pal.ansi("ledger:", "dim", enabled=color))

@@ -824,7 +824,7 @@ def _quest_with_vars(control: Path) -> str:
     _seed_control_with_vars(control)
     Quest.create_draft(
         control, title="Varred", quest_id="varshow", base_branch="main",
-        vars={"retries": 5, "strict": True})
+        vars={"jurisdiction": "eu", "retries": 5, "strict": True})
     return "varshow"
 
 
@@ -856,12 +856,51 @@ def test_quest_card_carries_seeded_vars_beside_the_effective_set(
         "integration_fork": "abc", "plan_review_notes": "line one\nline two"}
 
 
-def test_show_card_renders_effective_vars_sorted_by_name(
+def test_show_card_lists_only_the_vars_seeded_with_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The card shows the effective merge, so the workflow's own default for
-    # jurisdiction appears next to the two per-quest overrides; bools render the
-    # way --var accepts them.
+    quest_id = _quest_with_engine_vars(tmp_path)
+
+    out = _run(monkeypatch, tmp_path, "show", quest_id)
+
+    assert _vars_rows(out) == ["vars:          strict=false"]
+    for hidden in ("plan_index", "integration_fork", "plan_review_notes",
+                   "jurisdiction", "retries"):
+        assert hidden not in out
+
+
+def test_show_json_keeps_every_effective_var_the_card_hides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest_id = _quest_with_engine_vars(tmp_path)
+
+    data = json.loads(_run(monkeypatch, tmp_path, "show", quest_id, "--json"))
+
+    assert data["vars"] == {
+        "jurisdiction": "eu", "retries": 3, "strict": False, "plan_index": 1,
+        "integration_fork": "abc", "plan_review_notes": "line one\nline two"}
+
+
+def test_show_card_omits_vars_when_none_were_seeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The workflow defaults and an engine-set multi-line var are effective, not seeded.
+    _seed_control_with_vars(tmp_path)
+    quest = Quest.create_draft(
+        tmp_path, title="Bare", quest_id="bare01", base_branch="main")
+    st = State.load(quest.state_dir)
+    st.vars["plan_review_notes"] = "line one\nline two"
+    st.save(quest.state_dir)
+
+    out = _run(monkeypatch, tmp_path, "show", "bare01")
+
+    assert not any(ln.startswith("vars") for ln in out.splitlines())
+
+
+def test_show_card_renders_seeded_vars_sorted_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Bools render the way --var accepts them.
     quest_id = _quest_with_vars(tmp_path)
 
     out = _run(monkeypatch, tmp_path, "show", quest_id)
@@ -945,7 +984,7 @@ def test_show_card_counts_the_trailing_comma_when_wrapping(
     _seed_control_with_vars(tmp_path)
     Quest.create_draft(
         tmp_path, title="Edge", quest_id="varedge", base_branch="main",
-        vars={"jurisdiction": "e", "retries": 5})
+        vars={"jurisdiction": "e", "retries": 5, "strict": False})
     monkeypatch.setattr("imp.cli.main._term_width", lambda: cols)
 
     out = _run(monkeypatch, tmp_path, "show", "varedge")
@@ -1021,7 +1060,7 @@ def test_show_card_moves_a_multiline_var_into_its_own_block(
     out = _run(monkeypatch, tmp_path, "show", "varml")
 
     lines = out.splitlines()
-    assert _vars_rows(out) == ["vars:          retries=5, strict=false"]
+    assert _vars_rows(out) == ["vars:          retries=5"]
     i = lines.index("vars.jurisdiction:")
     assert lines[i - 1:i + 4] == ["", "vars.jurisdiction:", "para one", "", "para two"]
     assert json.loads(_run(monkeypatch, tmp_path, "show", "varml", "--json"))[
@@ -1034,7 +1073,7 @@ def test_show_card_places_var_blocks_between_summary_and_ledger(
     # Multi-line and >80-char values both leave the row; blocks sort by name.
     lines = _card_lines(
         tmp_path, monkeypatch, with_ledger=True, summary=b"Shipped.\n",
-        vars={"notes": "para one\n\npara two\n", "retries": 5, "zeta": "y" * 81})
+        seeded_vars={"notes": "para one\n\npara two\n", "retries": 5, "zeta": "y" * 81})
 
     assert next(ln for ln in lines if ln.startswith("vars:")) == "vars:          retries=5"
     assert lines[lines.index("summary:"):] == [
@@ -1051,7 +1090,7 @@ def test_show_card_keeps_short_and_empty_values_on_the_vars_row(
     # Exactly 80 characters is still short; an empty value stays inline.
     lines = _card_lines(
         tmp_path, monkeypatch,
-        vars={"edge": "e" * 80, "plan_review_notes": "", "retries": 5})
+        seeded_vars={"edge": "e" * 80, "plan_review_notes": "", "retries": 5})
 
     assert next(ln for ln in lines if ln.startswith("vars:")) == (
         "vars:          edge=" + "e" * 80 + ", plan_review_notes=, retries=5")
@@ -1061,7 +1100,7 @@ def test_show_card_keeps_short_and_empty_values_on_the_vars_row(
 def test_show_card_omits_the_vars_row_when_every_var_is_long(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    lines = _card_lines(tmp_path, monkeypatch, vars={"notes": "a\nb"})
+    lines = _card_lines(tmp_path, monkeypatch, seeded_vars={"notes": "a\nb"})
 
     assert not any(ln.startswith("vars:") for ln in lines)
     i = lines.index("vars.notes:")
