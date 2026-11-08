@@ -62,6 +62,8 @@ class ToolContext:
     model_name: str = ""
     parent_transcript_dir: Path | None = None
     running_processes: list[Any] = field(default_factory=list)
+    # Bumped per terminate_running_processes call; lets a mid-spawn bash call spot a missed one.
+    teardown_epoch: int = 0
     # Background processes (bg.py): id -> BgProc, invocation-scoped. Registered
     # ONLY here — never on running_processes: that registry is drained by
     # terminate_running_processes on interrupt with the caller emitting
@@ -397,24 +399,18 @@ def _group_alive(proc: Any) -> bool:
     return True
 
 
-async def terminate_running_processes(
-    ctx: ToolContext, *, timeout: float = PROCESS_KILL_GRACE_S,
-) -> list[Any]:
-    """SIGTERM the process GROUP of every registered process AND its transitive
+async def terminate_processes(
+    procs: list[Any], *, timeout: float = PROCESS_KILL_GRACE_S,
+) -> None:
+    """SIGTERM the process GROUP of every proc in `procs` AND its transitive
     descendants, wait `timeout` (named grace, default 4 s) for the GROUP to empty,
-    then SIGKILL the group + descendants of any survivor. Drain the registry. Returns
-    the processes that were signalled (caller emits tool_killed from it). Escalation
-    is TIME-gated, not count-gated. Waiting on the registered proc alone would end the
-    grace at ~0s for a sandboxed command — the outer bwrap exits on SIGTERM while its
-    children are still shutting down — so the wait polls group liveness after the
-    reap. Descendants that left the group (setpgid/setsid) are reached by pid via a
-    /proc walk, captured while the parent tree is still alive."""
+    then SIGKILL the group + descendants of any survivor. Escalation is TIME-gated,
+    not count-gated. Waiting on the proc alone would end the grace at ~0s for a
+    sandboxed command — the outer bwrap exits on SIGTERM while its children are
+    still shutting down — so the wait polls group liveness after the reap.
+    Descendants that left the group (setpgid/setsid) are reached by pid via a /proc
+    walk, captured while the parent tree is still alive."""
     import anyio
-
-    if not ctx.running_processes:
-        return []
-    procs = list(ctx.running_processes)
-    ctx.running_processes.clear()
 
     captured: dict[int, set[int]] = {}
     for p in procs:
@@ -436,10 +432,10 @@ async def terminate_running_processes(
             while any(_group_alive(p) for p in procs):
                 await anyio.sleep(_KILL_POLL_INTERVAL_S)
     finally:
-        # Shielded like bg.py's _kill_group_escalate: the registry is already
-        # drained, so a caller deadline (signals.py's 2s cooperative budget)
-        # landing mid-grace would otherwise skip the escalation with no later
-        # sweep to retry it. Only the WAIT above is cancellable.
+        # Shielded like bg.py's _kill_group_escalate: the caller has already
+        # deregistered `procs`, so a caller deadline (signals.py's 2s cooperative
+        # budget) landing mid-grace would otherwise skip the escalation with no
+        # later sweep to retry it. Only the WAIT above is cancellable.
         with anyio.CancelScope(shield=True):
             for p in procs:
                 pid = getattr(p, "pid", None)
@@ -454,6 +450,21 @@ async def terminate_running_processes(
                     with contextlib.suppress(Exception):
                         await p.wait()
                 _signal_pids(survivors, _signal.SIGKILL)
+
+
+async def terminate_running_processes(
+    ctx: ToolContext, *, timeout: float = PROCESS_KILL_GRACE_S,
+) -> list[Any]:
+    """Bump the teardown epoch, drain the registry, and terminate_processes what it
+    held. Returns the processes that were signalled (caller emits tool_killed from
+    it). The bump precedes the early return so a bash call that is mid-spawn, and
+    so not yet registered, still sees that a teardown happened."""
+    ctx.teardown_epoch += 1
+    if not ctx.running_processes:
+        return []
+    procs = list(ctx.running_processes)
+    ctx.running_processes.clear()
+    await terminate_processes(procs, timeout=timeout)
     return procs
 
 

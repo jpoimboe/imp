@@ -35,6 +35,7 @@ class _HangAfterKill:
 class _Ctx:
     def __init__(self, procs: list[Any]) -> None:
         self.running_processes = procs
+        self.teardown_epoch = 0
 
 
 @pytest.mark.anyio
