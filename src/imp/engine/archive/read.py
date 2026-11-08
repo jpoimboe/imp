@@ -20,10 +20,12 @@ from imp.engine.archive import (
     require_current,
 )
 from imp.engine.archive.blobstore import LocalBlobStore
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir
 
 
 def _read_index_ids(control_root: Path) -> list[str]:
+    if claimed_state_dir(control_root) is None:
+        return []
     db = index_path(control_root)
     if not db.exists():
         return []
@@ -39,6 +41,8 @@ def archived_ids(control_root: Path) -> list[str]:
 
 
 def is_archived(control_root: Path, quest_id: str) -> bool:
+    if claimed_state_dir(control_root) is None:
+        return False
     db = index_path(control_root)
     if not db.exists():
         return False
@@ -52,6 +56,8 @@ def is_archived(control_root: Path, quest_id: str) -> bool:
 def completed_rows(
     control_root: Path,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:
+    if claimed_state_dir(control_root) is None:
+        return []
     check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
@@ -67,6 +73,8 @@ def completed_rows(
 def search_archive_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str, str | None]]:
+    if claimed_state_dir(control_root) is None:
+        return []
     check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
@@ -82,6 +90,8 @@ def search_archive_content(
 def search_archive_events_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str | None]]:
+    if claimed_state_dir(control_root) is None:
+        return []
     check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)

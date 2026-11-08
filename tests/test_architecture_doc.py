@@ -150,6 +150,10 @@ def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
     assert "$IMP_STATE_DIR" in text
     assert "$IMP_HOME" in text
     assert "`repo` marker" in text
+    assert ("Read-only lookups — live quest listing, archive index reads, the "
+            "remote-control pid, the local config layer — use `claimed_state_dir()` "
+            "and see an unclaimed project as empty, so imp claims a slug only inside "
+            "a project with `imp/config.yaml` or on a deliberate write.") in text
     # AC 26(b): the backfill touches only imp-owned dirs, so this promise stays true.
     assert "overrides the per-project path verbatim — no slug walk, no marker written" in text
     for entry in ("`quests/<id>/`", "`worktrees/<id>/`", "`archive/`"):

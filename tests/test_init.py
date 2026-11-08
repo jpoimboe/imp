@@ -499,6 +499,52 @@ def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
              output_fn=msgs.append)
     assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
+    assert (tmp_path / "imphome" / "config.yaml").is_file()
+
+
+def test_fresh_init_writes_the_machine_config_only_after_accept(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    user = tmp_path / "imphome" / "config.yaml"
+    seen: dict[str, bool] = {}
+
+    def _screen(_root, state, **_kw):
+        seen["written_before_accept"] = user.exists()
+        return initmod.ScreenAccepted(state)
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen, raising=False)
+    run_init(tmp_path, picker_fn=_picks("claude", "openai"), input_fn=_inputs("y"),
+             output_fn=lambda _m: None, detect_theme_fn=lambda: "dark")
+
+    assert seen == {"written_before_accept": False}
+    data = yaml.safe_load(user.read_text())
+    assert data["providers"] == ["claude", "openai"]
+    assert data["theme"] == "dark"
+    assert data["editing_mode"] == "emacs"
+    assert data["sandbox"] == {"allow_unsandboxed": True}
+
+
+def test_bwrap_decline_still_repairs_an_invalid_provider_list(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    _plain(monkeypatch)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+    msgs: list[str] = []
+
+    run_init(tmp_path, picker_fn=_picks("claude", "openai"), input_fn=_inputs("n"),
+             output_fn=msgs.append)
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["claude", "openai"]
+    assert _sans_providers(after) == _sans_providers(before)
+    line = "Set providers in your machine config: claude, openai."
+    install = next(i for i, m in enumerate(msgs)
+                   if m.startswith("Install bubblewrap for a real filesystem boundary"))
+    assert msgs.count(line) == 1
+    assert msgs.index(line) < install
+    assert not (tmp_path / "imp" / "config.yaml").exists()
 
 
 def test_git_question_accepted_initializes_the_repo(tmp_path_factory, monkeypatch):
@@ -534,6 +580,7 @@ def test_git_question_declined_stops_before_the_screen(
     assert not (fresh / "imp" / "config.yaml").exists()
     assert not (fresh / ".git").exists()
     assert "git repository" in "\n".join(msgs).lower()
+    assert not (fresh / "imphome" / "config.yaml").exists()
 
 
 def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> None:
@@ -970,6 +1017,30 @@ def test_cmd_init_ctrl_c_prints_cancelled_and_exits_user_ended(
 
     assert rc == ExitCode.USER_ENDED
     assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+
+
+def test_main_init_cancelled_at_the_screen_writes_no_machine_config(
+    tmp_path, monkeypatch, capsys,
+):
+    import imp.cli.init as initmod
+    import imp.cli.main as m
+    from imp.cli.exit_codes import ExitCode
+
+    def _cancel(_root, _state, **_kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _cancel, raising=False)
+    monkeypatch.setattr(m, "_select_headless", lambda _args: (False, False))
+    monkeypatch.setattr("imp.diagnostics.install_stack_dumper", lambda _path: None)
+    monkeypatch.chdir(tmp_path)
+
+    rc = m.main(["init", "--providers", "claude"])
+
+    assert rc == ExitCode.USER_ENDED
+    assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+    assert not (tmp_path / "imphome" / "config.yaml").exists()
+    assert not (tmp_path / "imphome" / "projects").exists()
+    assert not (tmp_path / "imp").exists()
 
 
 def test_init_input_ends_the_line_when_cancelled(monkeypatch, capsys):
@@ -1536,11 +1607,12 @@ def test_default_picker_gets_statuses_from_the_effective_config(
     }
 
 
-def test_picker_falls_back_to_the_floor_but_the_repaired_summary_keeps_provider_envs(
+def test_reinit_picker_falls_back_to_the_floor_but_the_repaired_summary_keeps_provider_envs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # providers: [] fails to load until repaired; the picker falls back to the floor.
     _plain(monkeypatch)
+    _mark_initialized(tmp_path)
     _write_machine_config("providers: []\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
     monkeypatch.delenv("MY_KEY", raising=False)
     seen: dict[str, object] = {}
@@ -2243,14 +2315,27 @@ def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
         "Change providers later: imp config set providers <name>,<name>")
 
 
-def test_fresh_interactive_init_announces_provider_repair(tmp_path: Path) -> None:
+def test_fresh_interactive_init_announces_provider_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Fresh init (no imp/config.yaml) against a machine config with providers: []
-    reports the repair and preserves the existing comment."""
+    repairs it only after accept, announces it before Configured:, and preserves
+    the existing comment."""
+    import imp.cli.init as initmod
+
+    _plain(monkeypatch)
     home = tmp_path / "imphome"
     home.mkdir(parents=True)
     before = _seed_machine_config(home, "providers: []\n")
-
     msgs: list[str] = []
+    seen: dict[str, object] = {}
+
+    def _screen(_root, state, **_kw):
+        seen["msgs"] = list(msgs)
+        seen["machine"] = (home / "config.yaml").read_text()
+        return initmod.ScreenAccepted(state)
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen, raising=False)
     run_init(
         project_root=tmp_path,
         picker_fn=_picks("claude", "openai"),
@@ -2258,10 +2343,42 @@ def test_fresh_interactive_init_announces_provider_repair(tmp_path: Path) -> Non
         output_fn=msgs.append,
     )
 
-    assert "Set providers in your machine config: claude, openai." in msgs
+    line = "Set providers in your machine config: claude, openai."
+    assert seen["machine"] == before
+    before_screen = seen["msgs"]
+    assert isinstance(before_screen, list)
+    assert line not in before_screen
+    after_screen = msgs[len(before_screen):]
+    assert after_screen.index(line) < after_screen.index("Configured:")
+    assert msgs.count(line) == 1
     after = (home / "config.yaml").read_text()
     assert yaml.safe_load(after)["providers"] == ["claude", "openai"]
     assert _sans_providers(after) == _sans_providers(before)
+
+
+def test_fresh_init_cancel_leaves_an_invalid_machine_config_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+
+    def _cancel(_root, _state, **_kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _cancel, raising=False)
+    msgs: list[str] = []
+    with pytest.raises(KeyboardInterrupt):
+        run_init(
+            project_root=tmp_path, picker_fn=_picks("claude", "openai"),
+            input_fn=_inputs(), output_fn=msgs.append,
+        )
+
+    assert (home / "config.yaml").read_bytes() == before.encode()
+    assert not any("Set providers in your machine config:" in m for m in msgs)
+    assert not (tmp_path / "imp" / "config.yaml").exists()
 
 
 def test_fresh_interactive_init_no_repair_no_announcement(tmp_path: Path) -> None:

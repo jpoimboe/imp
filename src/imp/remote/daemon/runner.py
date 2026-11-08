@@ -21,7 +21,7 @@ from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.errors import LayoutMismatch, LoadError
 from imp.engine.quest import Quest
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
@@ -166,6 +166,8 @@ def write_pid(control_root: Path) -> None:
 
 
 def read_pid(control_root: Path) -> int | None:
+    if claimed_state_dir(control_root) is None:
+        return None
     try:
         return int(pid_path(control_root).read_text().strip())
     except (FileNotFoundError, ValueError):
