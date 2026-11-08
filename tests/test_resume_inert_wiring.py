@@ -379,29 +379,36 @@ async def test_inert_ask_line_rejects_session_verb_and_reprompts(
 
 
 @pytest.mark.anyio
-async def test_inert_ask_line_ctrl_d_retains_caret(
-        monkeypatch, tmp_path: Path, capsys) -> None:
-    # Ctrl-D retains the gold `> ` caret + one trailing blank, prints nothing
-    # else, and maps to None (the quest stays parked).
+@pytest.mark.parametrize(
+    "exc,display", [(EOFError, "Ctrl-D"), (KeyboardInterrupt, "Ctrl-C")],
+    ids=["ctrl-d", "ctrl-c"])
+async def test_inert_ask_line_ctrl_d_prints_pause_block_without_caret(
+    exc: type[BaseException], display: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Ctrl-D prints the trigger-qualified pause block (no caret echo) and maps
+    # to None (the quest stays parked).
     ch = _seed(tmp_path)
     monkeypatch.setattr(m, "should_use_color", lambda _s: False)
     monkeypatch.setattr(m, "_term_width", lambda: 80)
-    monkeypatch.setattr(
-        m, "Prompt", lambda **kw: _RaisingPrompt(EOFError, **kw))
+    monkeypatch.setattr(m, "Prompt", lambda **kw: _RaisingPrompt(exc, **kw))
 
     line = await m._inert_ask_line(ch)
 
     assert line is None
-    assert capsys.readouterr().out == "> \n\n"   # caret line, then one blank
+    assert capsys.readouterr().out == (
+        f"paused · {display}\nc · C\nresume: imp resume c\n\n")
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
-async def test_resume_inert_ctrl_d_retains_caret_parks_and_exits_130(
-    exc: type[BaseException], monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "exc,display", [(EOFError, "Ctrl-D"), (KeyboardInterrupt, "Ctrl-C")],
+    ids=["ctrl-d", "ctrl-c"])
+async def test_resume_inert_ctrl_d_prints_pause_block_parks_and_exits_130(
+    exc: type[BaseException], display: str, monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Ctrl-D at the inert prompt parks the quest and exits 130, caret kept.
+    # Ctrl-D at the inert prompt parks the quest, prints the pause block, exits 130.
     ch = _seed(tmp_path)
     before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     monkeypatch.setattr(m, "should_use_color", lambda _s: False)
@@ -413,10 +420,12 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_exits_130(
     assert rc == 130
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before                       # nothing launched -> quest parked
+    assert State.load(ch.state_dir).status == "paused"
     out = capsys.readouterr().out
     assert "c · C · resuming" in out             # resuming header printed
     assert "Which DB should I use?" in out       # pending question replayed
-    assert out.endswith("> \n\n")                # retained caret + one trailing blank
+    assert out.endswith(f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+    assert not any(ln.startswith(">") for ln in out.splitlines())   # no caret line
     assert "cancelled" not in out                # no `imp: cancelled` message
 
 
