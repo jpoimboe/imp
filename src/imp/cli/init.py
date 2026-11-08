@@ -1028,7 +1028,7 @@ def run_init(
         if picker_fn is not None:
             result = picker_fn(available)
         else:
-            # Its own load: an invalid providers: list raises until repair fixes it.
+            # Its own load: an invalid providers: list raises, and no repair has run yet.
             try:
                 pick_cfg = load_effective_config(control_root=settings_root).config
             except LoadError:
@@ -1048,7 +1048,7 @@ def run_init(
             pal.set_theme(theme)
     else:
         theme = str(existing_cfg.get("theme", "ansi"))
-    if repaired:
+    if already_initialized and repaired:
         _set_user_providers(user_path, providers)
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
     try:
@@ -1092,10 +1092,15 @@ def run_init(
             output_fn(_committed_line(committed))
         return
 
-    if repaired:
-        output_fn(pal.ansi(
-            f"Set providers in your machine config: {', '.join(providers)}.",
-            "dim", enabled=color_on))
+    def _persist_machine_config(*, allow_unsandboxed: bool) -> None:
+        if wrote_user_config:
+            _bootstrap_user_config(
+                user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
+        elif repaired:
+            _set_user_providers(user_path, providers)
+            output_fn(pal.ansi(
+                f"Set providers in your machine config: {', '.join(providers)}.",
+                "dim", enabled=color_on))
 
     # --- fresh init: the sandbox gate (init itself needs no model provider) ---
     allow_unsandboxed = False
@@ -1112,9 +1117,7 @@ def run_init(
                 "Running without an OS sandbox. Install bubblewrap later and "
                 "remove sandbox.allow_unsandboxed to re-enable it.")
         else:
-            if wrote_user_config:
-                _bootstrap_user_config(
-                    user_path, providers, theme, allow_unsandboxed=False)
+            _persist_machine_config(allow_unsandboxed=False)
             output_fn(
                 "Install bubblewrap for a real filesystem boundary, then "
                 "re-run `imp init`:")
@@ -1148,9 +1151,7 @@ def run_init(
             tests=detect_test_command(project_root),
             setup=detect_worktree_setup(project_root),
             roots=detect_import_roots(project_root)))
-    if wrote_user_config:
-        _bootstrap_user_config(
-            user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
+    _persist_machine_config(allow_unsandboxed=allow_unsandboxed)
     committed = write_init_files(project_root, settings)
 
     output_fn("")
