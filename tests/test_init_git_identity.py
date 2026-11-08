@@ -264,7 +264,7 @@ def test_reinit_asks_for_an_identity_and_commits(
     assert _local_config(broken_repo, "user.name") == "Ada Lovelace"
     assert _local_config(broken_repo, "user.email") == "ada@example.org"
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
-    assert "Committed imp/config.yaml." in msgs
+    assert "Committed imp/config.yaml, .gitignore." in msgs
     author = _git(broken_repo, "log", "-1", "--format=%an <%ae>").stdout.strip()
     assert author == "Ada Lovelace <ada@example.org>"
 

@@ -4509,7 +4509,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "workflow + project settings) with the default workflow, detect\n"
             "your terminal theme, and bootstrap your machine-local config\n"
             "(providers and theme). Makes an initial commit of\n"
-            "imp/config.yaml and .gitignore."
+            "imp/config.yaml, the imp/memory/ scaffold, and .gitignore."
         ),
     )
     p_init.set_defaults(func=_cmd_init, warm=True)

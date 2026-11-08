@@ -194,8 +194,8 @@ def test_init_help_fills_the_terminal_width(
                    and not line.endswith(":")]
     assert description, text
     assert max(len(line) for line in description) > 70
-    assert ("Makes an initial commit of imp/config.yaml and .gitignore."
-            in " ".join(text.split()))
+    assert ("Makes an initial commit of imp/config.yaml, the imp/memory/ "
+            "scaffold, and .gitignore." in " ".join(text.split()))
 
 
 def test_events_help_keeps_its_hand_wrapped_line_structure(
