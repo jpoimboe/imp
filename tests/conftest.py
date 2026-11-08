@@ -79,7 +79,7 @@ _IMPTY_E2E_TIMEOUT = 240
 _SESSION_SOCKET_TEST_TIMEOUT = 240
 _SESSION_SOCKET_TEST_FILES = frozenset({
     "test_session_daemon.py", "test_session_run.py", "test_session_attach.py",
-    "test_agent_save_session.py",
+    "test_agent_save_session.py", "test_edit_resident.py",
 })
 # These files' group-liveness probes go through wait_pgid_gone, whose 120 s
 # HANG_BACKSTOP is unreachable under the global timeout = 60 (signal method,
