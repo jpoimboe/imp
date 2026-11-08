@@ -2,6 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import textwrap
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -386,22 +387,27 @@ def summary_notes(cells: list[str],
     return notes
 
 
-def _sub_body(sub: SubagentRow) -> str:
-    """The subagent's left-column label: '↳ name (title|label)', then ' · <stop word>'."""
+def _sub_label(sub: SubagentRow) -> tuple[str, str]:
+    """The subagent's left-column label as ('↳ name (title|label)', ' · <stop word>' or '')."""
     text = f"↳ {sub.name}"
     paren = display_subagent_title(sub.title) or sub.label
     if paren:
         text += f" ({paren})"
-    if sub.stop is not None:
-        text += f" · {STOP_WORDS[sub.stop]}"
-    return text
+    return text, "" if sub.stop is None else f" · {STOP_WORDS[sub.stop]}"
+
+
+def _sub_body(sub: SubagentRow) -> str:
+    return "".join(_sub_label(sub))
+
+
+def _step_label(row: StepRow) -> tuple[str, str]:
+    """(step text, stop suffix); an open span's duration cell already names its state."""
+    ended_in_error = row.errored and row.end_ts is not None
+    return row.step_text, f" · {STOP_WORDS['failed']}" if ended_in_error else ""
 
 
 def _step_body(row: StepRow) -> str:
-    """The step's left-column label; an open span's duration cell already names its state."""
-    if row.errored and row.end_ts is not None:
-        return f"{row.step_text} · {STOP_WORDS['failed']}"
-    return row.step_text
+    return "".join(_step_label(row))
 
 
 def rows_charge(summary: list[StepRow]) -> Charge:
@@ -502,13 +508,20 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
     return elapsed_seconds(stamps[0], stamps[-1])
 
 
-def _header_line(h: SummaryHeader, *, color: bool) -> str:
-    quest_id = pal.ansi(h.quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+_HEADER_SEP = "  ·  "
+_HEADER_NAME_FLOOR = 10
+
+
+def _header_line(h: SummaryHeader, *, color: bool, width: int) -> str:
+    status_word = display_word(h.status)
+    room = width - pal.display_width(_HEADER_SEP.join((h.quest_id, "", status_word)))
     name = h.name
     name_codes = () if name.kind is NameKind.TITLE else ("dim",)
-    name_text = pal.ansi(name.text, *name_codes, enabled=color)
-    status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
-    return f"{quest_id}  ·  {name_text}  ·  {status}"
+    name_text = _fit(name.text, max(_HEADER_NAME_FLOOR, room))
+    return _HEADER_SEP.join((
+        pal.ansi(h.quest_id, *pal.NODE_COLORS["quest_id"], enabled=color),
+        pal.ansi(name_text, *name_codes, enabled=color),
+        pal.ansi(status_word, *STATUS_COLORS.get(h.status, ()), enabled=color)))
 
 
 _TITLES = ("time", "in", "out", "cost")
@@ -516,6 +529,7 @@ _TOKENS_TITLE = "tokens"
 _QUOTA_TITLE = "quota"
 _WEEKLY_TITLE = "weekly"
 _TOTAL_LABEL = "total"
+_LABEL_FLOOR = 20
 
 
 def _last_cell(usage: RowUsage, charge: Charge,
@@ -527,11 +541,12 @@ def _last_cell(usage: RowUsage, charge: Charge,
 
 def _column_widths(summary: list[StepRow], open_label: str,
                    total_work: float | None, total_usage: RowUsage,
-                   total_last: str,
-                   column: QuotaColumn | None) -> tuple[int, int, int, int, int]:
-    """Widths measured across step rows, subagent rows, the totals row, and title labels."""
-    names = [len(_step_body(r)) for r in summary]
-    names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
+                   total_last: str, column: QuotaColumn | None,
+                   width: int) -> tuple[int, int, int, int, int]:
+    """Widths measured across step rows, subagent rows, the totals row, and title
+    labels; the label column alone gives way so the table fits `width`."""
+    names = [pal.display_width(_step_body(r)) for r in summary]
+    names += [pal.display_width(_sub_body(s)) + 2 for r in summary for s in r.subagents]
     names.append(len(_TOTAL_LABEL))
     names += [len(p) + 2 for p, _ in (column.breakdown if column else ())]
     durs = [len(_dur_text(total_work)), len(_TITLES[0])]
@@ -550,7 +565,11 @@ def _column_widths(summary: list[StepRow], open_label: str,
             ins.append(len(_fmt_tokens(s.usage.input_total)))
             outs.append(len(_fmt_tokens(s.usage.output)))
             lasts.append(len(_last_cell(s.usage, s.charge, column)))
-    return (max(names), max(durs), max(ins), max(outs), max(lasts))
+    dur_w, in_w, out_w, last_w = max(durs), max(ins), max(outs), max(lasts)
+    # Every table line is the label plus these; quota mode's title row hangs a `*`.
+    fixed = 10 + dur_w + in_w + out_w + last_w + (0 if column is None else 1)
+    name_w = min(max(names), max(_LABEL_FLOOR, width - fixed))
+    return (name_w, dur_w, in_w, out_w, last_w)
 
 
 def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
@@ -562,11 +581,28 @@ def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
     return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color and dim)
 
 
+def _fit(text: str, width: int) -> str:
+    # clip_display reserves the ellipsis column even for text that fits exactly.
+    return text if pal.display_width(text) <= width else pal.clip_display(text, width)
+
+
+def _fit_padded(label: tuple[str, str], width: int) -> str:
+    # The stop suffix survives whole so a clipped row never loses its failure signal.
+    text, stop = label
+    fitted = _fit(_fit(text, width - pal.display_width(stop)) + stop, width)
+    return fitted + " " * (width - pal.display_width(fitted))
+
+
+def _note_lines(text: str, width: int) -> list[str]:
+    return textwrap.wrap(text, width, initial_indent="  ", subsequent_indent="    ",
+                         break_long_words=False, break_on_hyphens=False)
+
+
 def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else ("step",)
-    name = pal.ansi(f"{_step_body(row):<{name_w}}", *codes, enabled=color)
+    name = pal.ansi(_fit_padded(_step_label(row), name_w), *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
     return f"  {name}  {dur}  {cells}"
@@ -581,7 +617,8 @@ def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int
     dur_codes = codes if errored else pal.NODE_COLORS["metadata"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
-    body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
+    body_w = name_w - 2
+    body = pal.ansi(_fit_padded(_sub_label(sub), body_w), *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *dur_codes,
                    enabled=color)
     cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w,
@@ -633,8 +670,8 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     column = quota if isinstance(quota, QuotaColumn) else None
     total_last = total_cell(summary, quota)
     name_w, dur_w, in_w, out_w, last_w = _column_widths(
-        summary, open_label, work, total, total_last, column)
-    lines = [_header_line(header, color=color)] if header_line else []
+        summary, open_label, work, total, total_last, column, width)
+    lines = [_header_line(header, color=color, width=width)] if header_line else []
     if summary:
         lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
                               out_w=out_w, last_w=last_w,
@@ -672,6 +709,6 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                               out_w=out_w, last_w=last_w)
               for p, cell in (column.breakdown if column else ())]
     notes = summary_notes(cells, quota)
-    lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
-              for t in notes]
+    lines += [pal.ansi(ln, *pal.NODE_COLORS["metadata"], enabled=color)
+              for t in notes for ln in _note_lines(t, width)]
     return lines

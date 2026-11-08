@@ -131,14 +131,15 @@ _IDLE_GATE_EVENTS: list[dict[str, object]] = [
 
 
 def _quest(control: Path, slug: str, *, events: list[dict[str, object]],
-           workflow: str | None = None, summary: str | None = None) -> str:
+           workflow: str | None = None, summary: str | None = None,
+           title: str = "Ledger fixture") -> str:
     """A live quest home whose event log is exactly `events`."""
     from imp.engine.state import State
 
     quest_dir = project_state_dir(control) / "quests" / slug
     (quest_dir / "state").mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
-        json.dumps({"id": slug, "title": "Ledger fixture", "base_branch": "main",
+        json.dumps({"id": slug, "title": title, "base_branch": "main",
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "workflow": workflow,
                     "layout_version": LAYOUT_VERSION}))
@@ -155,10 +156,12 @@ def _quest(control: Path, slug: str, *, events: list[dict[str, object]],
 
 def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
            events: list[dict[str, object]], *, slug: str = "ledgerq",
-           workflow: str | None = None, summary: str | None = None) -> str:
+           workflow: str | None = None, summary: str | None = None,
+           title: str = "Ledger fixture") -> str:
     import imp.cli.main as m
 
-    _quest(tmp_path, slug, events=events, workflow=workflow, summary=summary)
+    _quest(tmp_path, slug, events=events, workflow=workflow, summary=summary,
+           title=title)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
     return slug
@@ -643,3 +646,48 @@ def test_a_no_work_resume_leaves_the_ledger_byte_identical(
     assert before[1].endswith("· 4.00% weekly*")
     assert before[0].endswith("4.00%")
     assert after == before
+
+
+_WIDE_QUEST_TITLE = ("Fit the run ledger and every note under it inside an 80-column"
+                     " terminal")
+_WIDE_SUB_TITLE = "map every ledger row that overflows an eighty column terminal"
+
+
+def _wide_events() -> list[dict[str, object]]:
+    """The D1 report scenario with a long-titled explorer dispatched mid-step."""
+    paused, _ = _report_scenario()
+    aid = "step:spec/spec-writer"
+    call: dict[str, object] = {
+        "type": "tool_call", "id": "ev-wide", "agent_id": aid,
+        "timestamp": paused[6]["timestamp"],
+        "payload": {"name": "sub_agent", "id": "b-wide", "id_ns": "block",
+                    "input": {"subagent_name": "explorer", "title": _WIDE_SUB_TITLE}}}
+    done: dict[str, object] = {
+        "type": "tool_result", "agent_id": aid, "timestamp": paused[8]["timestamp"],
+        "payload": {"id": "b-wide", "id_ns": "block"}}
+    return [*paused[:7], call, *paused[7:9], done, *paused[9:]]
+
+
+def test_log_summary_and_the_show_ledger_fit_80_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 7: no ledger or note line exceeds 80 columns on either surface."""
+    from imp.cli import palette as pal
+
+    slug = _setup(tmp_path, monkeypatch, _wide_events(), title=_WIDE_QUEST_TITLE)
+    monkeypatch.setenv("COLUMNS", "80")
+    assert main(["log", "-s", slug, "--no-pager"]) == 0
+    log = _out(capsys)
+    assert main(["show", slug, "--no-pager"]) == 0
+    card = _out(capsys)
+    ledger = card[card.index("ledger:"):]
+
+    assert log[0].endswith("…  ·  paused")
+    assert any("↳ explorer (map every ledger row" in ln and "…" in ln for ln in log)
+    assert log[-2:] == [
+        "  * this quest's part of all imp work this week, applied to the week's gauge;",
+        "    final once the week resets; usage outside imp skews it high"]
+    assert max(pal.display_width(ln) for ln in log) <= 80
+    assert max(pal.display_width(ln) for ln in ledger) <= 80
+    assert ledger[1:] == log[1:]

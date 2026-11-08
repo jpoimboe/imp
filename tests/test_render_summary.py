@@ -5,12 +5,15 @@ import pytest
 from imp.cli import palette as pal
 from imp.cli.accounting import RowUsage
 from imp.cli.narrative import Exclusions, elapsed_seconds
+from imp.cli.quota_column import FOOTNOTE, quota_view
+from imp.cli.quota_share import Charge, GaugeCharge
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
     SummaryHeader,
     _dur_text,
     _fmt_tokens,
+    _note_lines,
     _sub_body,
     build_summary,
     cost_cell,
@@ -18,6 +21,7 @@ from imp.cli.render_summary import (
     legend_lines,
     open_span_label,
     render_summary,
+    rows_charge,
     summary_total,
     summary_totals,
 )
@@ -2151,10 +2155,10 @@ def test_hide_idle_drops_the_header_of_an_all_idle_phase() -> None:
 
 
 def _header(*, title: str = "", intent: str | None = None, status: str = "paused",
-            color: bool = False) -> str:
+            color: bool = False, width: int = 80) -> str:
     hdr = SummaryHeader(quest_id="kole14", title=title, status=status,
                         total_seconds=None, intent=intent)
-    return render_summary([], header=hdr, color=color, width=80)[0]
+    return render_summary([], header=hdr, color=color, width=width)[0]
 
 
 _GOLD_ID = pal.ansi("kole14", *pal.NODE_COLORS["quest_id"], enabled=True)
@@ -2165,9 +2169,9 @@ def test_header_leads_with_id_then_title_then_status():
     assert _header(title="imp doctor", color=True) == f"{_GOLD_ID}  ·  imp doctor  ·  paused"
 
 
-def test_header_never_truncates_a_title():
+def test_unbounded_header_never_truncates_a_title():
     long_title = "t" * 90
-    assert _header(title=long_title) == f"kole14  ·  {long_title}  ·  paused"
+    assert _header(title=long_title, width=10_000) == f"kole14  ·  {long_title}  ·  paused"
 
 
 def test_titleless_header_falls_back_to_the_opening_message_truncated_and_dim():
@@ -2175,9 +2179,10 @@ def test_titleless_header_falls_back_to_the_opening_message_truncated_and_dim():
     flat = " ".join(opening.split())
     shown = flat[:69] + "…"
     assert len(shown) == 70
-    assert _header(intent=opening) == f"kole14  ·  {shown}  ·  paused"
+    assert _header(intent=opening, width=10_000) == f"kole14  ·  {shown}  ·  paused"
     dim = pal.ansi(shown, "dim", enabled=True)
-    assert _header(intent=opening, color=True) == f"{_GOLD_ID}  ·  {dim}  ·  paused"
+    assert (_header(intent=opening, color=True, width=10_000)
+            == f"{_GOLD_ID}  ·  {dim}  ·  paused")
 
 
 def test_short_opening_message_is_not_truncated():
@@ -2234,10 +2239,256 @@ def test_ledger_row_caret_escapes_the_title():
 
 
 def test_ledger_row_clips_a_long_title_and_keeps_columns_aligned():
-    out = render_summary(_titled_rows("x" * 60), header=_HDR, color=False, width=80)
+    rows = _titled_rows("x" * 60)
+    unbounded = render_summary(rows, header=_HDR, color=False, width=10_000)
+    assert "↳ explorer (" + "x" * 40 + "…)" in next(
+        ln for ln in unbounded if "explorer" in ln)
+    out = render_summary(rows, header=_HDR, color=False, width=80)
     sub = next(ln for ln in out if "explorer" in ln)
-    assert "↳ explorer (" + "x" * 40 + "…)" in sub
-    assert "x" * 41 not in sub
+    assert sub.startswith("    ↳ explorer (" + "x" * 35 + "…  ")
+    assert "x" * 36 not in sub
+    assert all(len(ln) <= 80 for ln in out)
     step = next(ln for ln in out if ln.strip().startswith("spec"))
     total = next(ln for ln in out if ln.strip().startswith("total"))
     assert step.index("—") == sub.index("—") == total.index("—")
+
+
+def _at(secs: int) -> str:
+    return f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
+
+
+def _pts(gauge: str, points: float) -> Charge:
+    return Charge.of(gauge, GaugeCharge.resolved(points))
+
+
+def _notional(fresh: int, out: int, dollars: float) -> RowUsage:
+    return RowUsage(fresh_input=fresh, output=out, dollars=dollars, priced=1,
+                    notional=1)
+
+
+def _threshold_rows(second_title: str = "map escalation and notice mechanisms"
+                    ) -> list[StepRow]:
+    subs = [SubagentRow(name="explorer", title="map spec phase decision flow",
+                        start_ts=_START, end_ts=_at(71),
+                        usage=RowUsage(fresh_input=409_000, output=9_300),
+                        charge=_pts("claude", 0.02)),
+            SubagentRow(name="explorer", title=second_title,
+                        start_ts=_START, end_ts=_at(79),
+                        usage=RowUsage(fresh_input=552_800, output=9_700),
+                        charge=_pts("claude", 0.02))]
+    return [StepRow(phase="threshold", step="threshold", start_ts=_START,
+                    subagents=subs)]
+
+
+_THRESHOLD_HDR = SummaryHeader(
+    quest_id="defi21", title="Stop specs silently reversing user-approved decisions",
+    status="running", total_seconds=153.0)
+
+
+def _dollar_rows() -> list[StepRow]:
+    sub = SubagentRow(name="explorer", title="map the ledger renderer and every caller",
+                      start_ts=_START, end_ts=_at(420),
+                      usage=_notional(350_000, 4_000, 0.40))
+    return [StepRow(phase="spec", step="spec-finalizer",
+                    label="addressing spec review feedback from the second lap",
+                    start_ts=_START, end_ts=_at(90),
+                    usage=_notional(163_000, 3_000, 0.27), subagents=[sub])]
+
+
+def _mixed_rows() -> list[StepRow]:
+    return [StepRow(phase="plan", step="plan-writer",
+                    label="writing the implementation plan for part one of two",
+                    start_ts=_START, end_ts=_at(90),
+                    usage=_notional(1_000_000, 20_000, 3.0),
+                    charge=_pts("claude", 0.9)),
+            StepRow(phase="plan", step="coder", start_ts=_START, end_ts=_at(120),
+                    usage=_notional(500_000, 9_000, 3.0),
+                    charge=_pts("codex", 60.0))]
+
+
+def _quota_render(rows: list[StepRow], header: SummaryHeader,
+                  width: int) -> list[str]:
+    return render_summary(rows, header=header, color=False, width=width,
+                          quota=quota_view(rows_charge(rows)))
+
+
+def test_unbounded_width_keeps_a_quota_ledger_byte_identical():
+    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 10_000) == [
+        "defi21  ·  Stop specs silently reversing user-approved decisions  ·  running",
+        "                                                                   tokens       quota",
+        "                                                          time      in    out  weekly*",
+        "threshold phase",
+        "  threshold                                            running  961.8k  19.0k   0.04%",
+        "    ↳ explorer (map spec phase decision flow)           1m 11s  409.0k   9.3k   0.02%",
+        "    ↳ explorer (map escalation and notice mechanisms)   1m 19s  552.8k   9.7k   0.02%",
+        "",
+        "  total                                                 2m 33s  961.8k  19.0k   0.04%",
+        f"  {FOOTNOTE}",
+    ]
+
+
+def test_unbounded_width_keeps_a_dollar_ledger_byte_identical():
+    assert render_summary(_dollar_rows(), header=_HDR, color=False, width=10_000) == [
+        "abc  ·  feature  ·  completed",
+        "                                                             time      in   out    cost",
+        "spec phase",
+        "  addressing spec review feedback from the second lap      1m 30s  513.0k  7.0k  $0.67*",
+        "    ↳ explorer (map the ledger renderer and every caller)   7m 0s  350.0k  4.0k  $0.40*",
+        "",
+        "  total                                                    39m 2s  513.0k  7.0k  $0.67*",
+        "  * theoretical API list price; actual subscription usage is much lower",
+    ]
+
+
+def test_unbounded_width_keeps_a_mixed_provider_ledger_byte_identical():
+    assert _quota_render(_mixed_rows(), _HDR, 10_000) == [
+        "abc  ·  feature  ·  completed",
+        "                                                                  tokens       quota",
+        "                                                         time      in    out  weekly*",
+        "plan phase",
+        "  writing the implementation plan for part one of two  1m 30s    1.0M  20.0k   0.90%",
+        "  coder                                                 2m 0s  500.0k   9.0k  60.00%",
+        "",
+        "  total                                                39m 2s    1.5M  29.0k       —",
+        "    claude                                                                     0.90%",
+        "    codex                                                                     60.00%",
+        f"  {FOOTNOTE}",
+    ]
+
+
+_PINNED_80 = [
+    "defi21  ·  Stop specs silently reversing user-approved decisions  ·  running",
+    "                                                             tokens       quota",
+    "                                                    time      in    out  weekly*",
+    "threshold phase",
+    "  threshold                                      running  961.8k  19.0k   0.04%",
+    "    ↳ explorer (map spec phase decision flow)     1m 11s  409.0k   9.3k   0.02%",
+    "    ↳ explorer (map escalation and notice mech…   1m 19s  552.8k   9.7k   0.02%",
+    "",
+    "  total                                           2m 33s  961.8k  19.0k   0.04%",
+    "  * this quest's part of all imp work this week, applied to the week's gauge;",
+    "    final once the week resets; usage outside imp skews it high",
+]
+
+
+def test_the_label_column_takes_exactly_the_width_left_at_80_columns():
+    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 80) == _PINNED_80
+
+
+def test_a_long_subagent_body_clips_so_every_table_line_fits_80_columns():
+    rows = _threshold_rows("maps escalation and notice mechanisms")
+    assert len(_sub_body(rows[0].subagents[1])) == 50
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    table = out[:9]
+    assert "↳ explorer (maps escalation and notice mec…  " in table[6]
+    assert {pal.display_width(table[i]) for i in (4, 5, 6, 8)} == {79}
+
+
+def test_a_clipped_label_keeps_its_stop_word_whole():
+    rows = _threshold_rows("map every ledger row that overflows an eighty col terminal")
+    step, sub = rows[0], rows[0].subagents[1]
+    step.label, step.errored, step.end_ts = "x" * 80, True, _at(90)
+    sub.stop = "failed"
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    assert "x… · failed  " in out[4]
+    assert "↳ explorer (map every ledger row t… · failed  " in out[6]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
+def _cjk_rows(step_label: str, sub_title: str) -> list[StepRow]:
+    subs = [SubagentRow(name="explorer", title=sub_title, start_ts=_START,
+                        end_ts=_at(71), usage=RowUsage(fresh_input=409_000, output=9_300),
+                        charge=_pts("claude", 0.02)),
+            SubagentRow(name="explorer", title="map the flow", start_ts=_START,
+                        end_ts=_at(79), usage=RowUsage(fresh_input=552_800, output=9_700),
+                        charge=_pts("claude", 0.02))]
+    return [StepRow(phase="threshold", step="threshold", label=step_label,
+                    start_ts=_START, subagents=subs)]
+
+
+def test_wide_labels_that_clip_keep_every_table_line_within_80_columns():
+    rows = _cjk_rows("规范阶段决策流程的全面梳理与重新评估工作" * 2,
+                     "绘制升级与通知机制的完整调用链路图" * 2)
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    assert "…" in out[4] and "…" in out[5]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
+def test_wide_labels_that_fit_pad_by_display_width_to_align_the_columns():
+    rows = _cjk_rows("规范阶段", "绘制升级机制")
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert "…" not in out[4] + out[5]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
+def test_at_40_columns_labels_clip_at_the_floor_and_lines_may_overflow():
+    out = render_summary(_dollar_rows(), header=_HDR, color=False, width=40)
+    assert out[:7] == [
+        "abc  ·  feature  ·  completed",
+        "                          time      in   out    cost",
+        "spec phase",
+        "  addressing spec rev…  1m 30s  513.0k  7.0k  $0.67*",
+        "    ↳ explorer (map t…   7m 0s  350.0k  4.0k  $0.40*",
+        "",
+        "  total                 39m 2s  513.0k  7.0k  $0.67*",
+    ]
+    assert out[3][2:22] == "addressing spec rev…"
+    assert out[4][4:22] == "↳ explorer (map t…"
+    assert max(pal.display_width(ln) for ln in out[:7]) > 40
+
+
+def test_a_label_column_narrower_than_the_floor_is_never_padded_out():
+    out = render_summary([_row("plan", "plan-writer", 90)], header=_HDR,
+                         color=False, width=40)
+    assert out == [
+        "abc  ·  feature  ·  completed",
+        "                 time  in  out  cost",
+        "plan phase",
+        "  plan-writer  1m 30s   —    —     —",
+        "",
+        "  total        39m 2s   —    —     —",
+    ]
+
+
+def test_a_ledger_that_fits_80_columns_renders_as_it_does_unbounded():
+    rows = _titled_rows("map ledger time totals")
+    at_80 = render_summary(rows, header=_HDR, color=False, width=80)
+    assert at_80 == render_summary(rows, header=_HDR, color=False, width=10_000)
+    assert any("    ↳ explorer (map ledger time totals)  " in ln for ln in at_80)
+
+
+def test_a_note_never_breaks_inside_a_word_or_at_a_hyphen():
+    assert _note_lines("see the price-table-absent models listed", 16) == [
+        "  see the",
+        "    price-table-absent",
+        "    models",
+        "    listed",
+    ]
+
+
+def test_a_long_title_clips_with_an_ellipsis_so_the_header_fits():
+    title = "Stop spec reviewers from silently reversing decisions the user approve"
+    assert len(title) == 70
+    line = _header(title=title, status="running")
+    assert line == ("kole14  ·  Stop spec reviewers from silently reversing decisions th…"
+                    "  ·  running")
+    assert pal.display_width(line) == 80
+
+
+def test_a_title_that_exactly_fills_the_header_is_not_clipped():
+    assert _header(title="t" * 58) == f"kole14  ·  {'t' * 58}  ·  paused"
+
+
+def test_a_clipped_opening_message_keeps_its_dim_around_the_clipped_text():
+    opening = "fix the summary " + "x" * 80
+    shown = pal.ansi(opening[:57] + "…", "dim", enabled=True)
+    assert _header(intent=opening, color=True) == f"{_GOLD_ID}  ·  {shown}  ·  paused"
+
+
+def test_below_the_floor_the_title_keeps_ten_columns_and_the_line_overflows():
+    line = _header(title="t" * 40, width=30)
+    assert line == f"kole14  ·  {'t' * 9}…  ·  paused"
+    assert pal.display_width(line) > 30
