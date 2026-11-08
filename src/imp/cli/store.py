@@ -111,6 +111,18 @@ class NeighbourQuota:
     agents: dict[str, tuple[str | None, str | None, str | None]]
 
 
+@dataclass(frozen=True)
+class GaugeWeek:
+    """One provider gauge's week, anchored by its `resets_at`: the highest `7d`
+    reading any quest took in it, and the subscription units every quest but the
+    subject drew in it."""
+
+    provider: str
+    resets_at: int
+    peak_pct: float
+    other_units: float
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...

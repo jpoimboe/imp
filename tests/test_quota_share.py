@@ -235,8 +235,9 @@ def test_the_span_start_splits_an_interval_but_not_an_instant() -> None:
                       dict(_CLAUDE))
     assert round(edge[0].units, 4) == 3.0
     assert units_in_span(edge, *_SPAN).get("claude") == 0.0
-    instant = Increment(index=0, agent_id="a1", session_id=None,
-                        provider="claude", units=3.0, start=None, end=_SPAN[0])
+    instant = Increment(index=0, provider="claude", auth_mode="subscription",
+                        billing=(("claude-sonnet-4-6", BillingUsage(output=200_000)),),
+                        start=None, end=_SPAN[0])
     assert instant.credit(*_SPAN) == 3.0
 
 
