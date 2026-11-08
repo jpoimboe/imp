@@ -15,6 +15,7 @@ import anyio
 
 from imp.cli.store import (
     CompletedRow,
+    GaugeWeek,
     HomeDigest,
     NeighbourQuota,
     QuestCard,
@@ -134,6 +135,15 @@ def _neighbour_from_wire(d: dict[str, Any]) -> NeighbourQuota:
         agents={a: (t[0], t[1], t[2]) for a, t in d["agents"].items()})
 
 
+def _week_to_wire(w: GaugeWeek) -> dict[str, Any]:
+    return {"provider": w.provider, "resets_at": w.resets_at,
+            "peak_pct": w.peak_pct, "other_units": w.other_units}
+
+
+def _week_from_wire(d: dict[str, Any]) -> GaugeWeek:
+    return GaugeWeek(**d)
+
+
 def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     if op == "get_events":
         return store.get_events(args["quest_id"])
@@ -155,6 +165,8 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     if op == "quota_neighbours":
         return [_neighbour_to_wire(n) for n in store.quota_neighbours(
             args["quest_id"], args["start_iso"], args["end_iso"])]
+    if op == "quota_weeks":
+        return [_week_to_wire(w) for w in store.quota_weeks(args["quest_id"])]
     raise ValueError(f"unknown store op {op!r}")
 
 
@@ -220,3 +232,7 @@ class ProxyStore:
         rows = self._call("quota_neighbours", {
             "quest_id": quest_id, "start_iso": start_iso, "end_iso": end_iso})
         return [_neighbour_from_wire(d) for d in rows]
+
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        return [_week_from_wire(d)
+                for d in self._call("quota_weeks", {"quest_id": quest_id})]

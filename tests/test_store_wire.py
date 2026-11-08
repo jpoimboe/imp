@@ -7,6 +7,7 @@ import pytest
 
 from imp.cli.store import (
     CompletedRow,
+    GaugeWeek,
     HomeDigest,
     NeighbourQuota,
     QuestCard,
@@ -27,6 +28,8 @@ from imp.cli.store_proxy import (
     _readiness_to_wire,
     _row_from_wire,
     _row_to_wire,
+    _week_from_wire,
+    _week_to_wire,
     _zones_from_wire,
     _zones_to_wire,
     run_query,
@@ -249,6 +252,57 @@ def test_run_query_quota_neighbours_ships_the_slice_not_the_log(
     assert wire[0]["agents"] == {"step:a": ["codex", "gpt-6.1-sol", "chatgpt"]}
     assert [_neighbour_from_wire(d) for d in wire] == store.quota_neighbours(
         "samo71", _QUOTA_START, _QUOTA_END)
+
+
+def test_gauge_week_survives_round_trip() -> None:
+    w = GaugeWeek(provider="claude", resets_at=1780642800, peak_pct=30.0,
+                  other_units=1.5)
+    assert _week_from_wire(_json_round_trip(_week_to_wire(w))) == w
+
+
+def test_run_query_quota_weeks_ships_only_the_week_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.store import LocalStore
+
+    reset = 1780642800
+    _neighbour_home(tmp_path, monkeypatch, "fego87", [
+        {"id": "am", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:00:00+00:00", "type": "agent_message",
+         "payload": {"provider": "claude", "model": "claude-sonnet-4-6",
+                     "auth_mode": "subscription", "stop_reason": None,
+                     "raw": {"content": [{"type": "thinking",
+                                          "thinking": "SECRETPROSE"}]}}},
+        {"id": "noise", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:10:00+00:00", "type": "tool_call",
+         "payload": {"name": "bash", "input": {"cmd": "SECRETPROSE"}}},
+        {"id": "qk", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:20:00+00:00", "type": "quota_reading",
+         "payload": {"provider": "claude",
+                     "windows": [{"label": "7d", "used_pct": 30.0,
+                                  "resets_at": reset}]}},
+        {"id": "qr", "agent_id": "step:a",
+         "timestamp": "2026-06-01T04:30:00+00:00", "type": "query_result",
+         "payload": {"session_id": "s1", "duration_ms": 30000,
+                     "model_usage": {"claude-sonnet-4-6": {"outputTokens": 200_000}}}},
+    ])
+    _seed_control(tmp_path)
+    subject = Quest.create(tmp_path, title="Subject", quest_id="samo71",
+                           base_branch="main")
+    _append_event(subject, {
+        "id": "own", "agent_id": "step:b", "timestamp": "2026-06-01T04:05:00+00:00",
+        "type": "quota_reading",
+        "payload": {"provider": "claude",
+                    "windows": [{"label": "7d", "used_pct": 10.0, "resets_at": reset}]}})
+    store = LocalStore(tmp_path)
+
+    wire = run_query(store, "quota_weeks", {"quest_id": "samo71"})
+
+    assert _json_round_trip(wire) == wire
+    assert "SECRETPROSE" not in json.dumps(wire)
+    assert wire == [{"provider": "claude", "resets_at": reset, "peak_pct": 30.0,
+                     "other_units": 3.0}]
+    assert [_week_from_wire(d) for d in wire] == store.quota_weeks("samo71")
 
 
 def test_run_query_rejects_unknown_op(tmp_path: Path) -> None:

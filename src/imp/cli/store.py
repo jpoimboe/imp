@@ -134,6 +134,7 @@ class Store(Protocol):
     def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]: ...
     def quota_neighbours(self, quest_id: str, start_iso: str,
                          end_iso: str) -> list[NeighbourQuota]: ...
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]: ...
 
 
 class LocalStore:
@@ -242,6 +243,10 @@ class LocalStore:
                          end_iso: str) -> list[NeighbourQuota]:
         from imp.cli.quota_neighbours import scan_neighbours
         return scan_neighbours(self.control_root, quest_id, start_iso, end_iso)
+
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        from imp.cli.quota_scan import scan_weeks
+        return scan_weeks(self.control_root, quest_id, self.get_events(quest_id) or [])
 
 
 # Terminal status -> resumable. Explicit, never the _INFLIGHT complement: archiving a
