@@ -532,13 +532,9 @@ CONVERGE_DIAGRAM = """flowchart TD
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
   QR --> DC{{"deferred-check"}}
-  DC -->|"nothing to drain"| CV
+  DC -->|"nothing to drain"| out([→ wait-for-head])
   DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
-  DS -->|"slow gate tolerated"| out([→ wait-for-head])
-  DS --> CV{{"converge-verify · slow"}}
-  CV -. "fail → triage" .-> DS
-  CV -. timeout .-> HUMAN
-  CV --> out"""
+  DS --> out"""
 
 INTEGRATE_DIAGRAM = """flowchart TD
   in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
@@ -591,6 +587,14 @@ def test_architecture_back_phase_diagrams_match_the_workflow() -> None:
     text = ARCH.read_text()
     for diagram in (IMPLEMENT_DIAGRAM, CONVERGE_DIAGRAM, INTEGRATE_DIAGRAM):
         assert diagram in text, diagram.splitlines()[1]
+
+
+def test_architecture_converge_phase_runs_no_slow_gate() -> None:
+    text = ARCH.read_text()
+    section = text.split("### Phase converge", 1)[1].split("### Phase integrate", 1)[0]
+    flat = " ".join(section.split())
+    assert "with nothing to drain it skips straight to `wait-for-head`" in flat
+    assert "slow" not in flat
 
 
 def test_architecture_implement_phase_disclaims_the_moved_work() -> None:
@@ -691,7 +695,8 @@ def test_architecture_agent_reference_drops_the_deleted_agents() -> None:
 
 def test_what_is_imp_lists_converge_between_implement_and_integrate() -> None:
     text = Path("docs/guide/what-is-imp.md").read_text()
-    assert "- **converge** — reviewing and testing everything built, once." in text
+    assert "- **converge** — reviewing everything built, once." in text
+    assert "- **integrate** — testing and landing the result." in text
     # user-facing copy uses only imp-canon nouns (docs/internals/conventions.md)
     # canon noun is "quest"; ban the noun sense only — "changes"/"unchanged" are fine
     assert not re.search(r"(?i)\b(?:a|the|this|each|per|your)\s+changes?\b", text)
@@ -791,8 +796,8 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
         "gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |",
         "| `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` "
         "step (merge commit body), `imp show` |",
-        "| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / "
-        "`integration-verify` gates | `imp show` |",
+        "| `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates "
+        "| `imp show` |",
         "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |",
     ):
         assert row in text, row
@@ -815,7 +820,7 @@ def _default_workflow_section(text: str) -> str:
 
 def _undocumented_steps(step_names: list[str], section: str) -> list[str]:
     # `verify`/`finalize` are substrings of longer step names, so a bare-word check would
-    # be satisfied by `converge-verify`/`plan-finalized`; demand the backticked span
+    # be satisfied by `integration-verify`/`plan-finalized`; demand the backticked span
     ambiguous = {n for n in step_names for other in step_names if n != other and n in other}
     return [n for n in step_names if (f"`{n}`" if n in ambiguous else n) not in section]
 
@@ -836,8 +841,8 @@ def test_step_guard_flags_a_step_the_doc_never_mentions() -> None:
     assert _undocumented_steps([*steps, "brand-new-step"], section) == ["brand-new-step"]
     # the longer name never satisfies the shorter one's check
     assert _undocumented_steps(
-        ["verify", "converge-verify", "finalize", "plan-finalized"],
-        "converge-verify runs, then plan-finalized",
+        ["verify", "integration-verify", "finalize", "plan-finalized"],
+        "integration-verify runs, then plan-finalized",
     ) == ["verify", "finalize"]
 
 

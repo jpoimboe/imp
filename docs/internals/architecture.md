@@ -256,12 +256,10 @@ a gap authors a corrective plan (the **supercycle**) beyond the outline, and a c
 latches `coverage_settled` so a later rework re-enters at `quest-review` and never
 re-runs the backstop. `quest-review` is the single quest-wide code review over
 `cur_base_head..HEAD`. `deferred-check` then guards the sweep — a script step, because a
-rule condition cannot read the filesystem: with nothing to drain it skips straight to the
-slow gate, and it fails closed, so any doubt dispatches. `deferred-sweep` therefore runs
-only when the quest's deferred list holds an open item, and drains the whole list once
-when it does. `converge-verify` runs the slow gate on the quest's own base; a failure
-resumes the sweep in fix-vs-tolerate triage — naming `deferred-sweep` directly, so triage
-jumps over the guard — and a toleration escapes forward so the gate never re-runs.
+rule condition cannot read the filesystem: with nothing to drain it skips straight to
+`wait-for-head`, and it fails closed, so any doubt dispatches. `deferred-sweep`
+therefore runs only when the quest's deferred list holds an open item, drains the whole
+list once when it does, and then hands the quest to the merge queue.
 
 ```mermaid
 flowchart TD
@@ -271,13 +269,9 @@ flowchart TD
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
   QR --> DC{{"deferred-check"}}
-  DC -->|"nothing to drain"| CV
+  DC -->|"nothing to drain"| out([→ wait-for-head])
   DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
-  DS -->|"slow gate tolerated"| out([→ wait-for-head])
-  DS --> CV{{"converge-verify · slow"}}
-  CV -. "fail → triage" .-> DS
-  CV -. timeout .-> HUMAN
-  CV --> out
+  DS --> out
 ```
 
 ### Phase integrate
@@ -392,7 +386,7 @@ The columns list the **principal** writers and readers, not an exhaustive census
 | `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases, `imp show` |
 | `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |
 | `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` step (merge commit body), `imp show` |
-| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / `integration-verify` gates | `imp show` |
+| `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
 | `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
 
