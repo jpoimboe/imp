@@ -320,6 +320,7 @@ class Prompt:
         from prompt_toolkit.styles import Style
 
         from imp.cli import palette as pal
+        from imp.cli.live_status import term_width
 
         if question.strip():
             rendered = _prompt_message_text(
@@ -334,7 +335,8 @@ class Prompt:
                             else _placeholder_text(color=False, text=ph_text))
         extra: dict[str, Any] = {}
         if bottom_toolbar is not None:
-            spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
+            sep = pal.status_separator(term_width(), enabled=self._color)
+            spaced = f"{sep}\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
             # Inline fragment-level noreverse beats the default reverse-video
             # bottom-toolbar class regardless of class-merge precedence.
             if self._color:
