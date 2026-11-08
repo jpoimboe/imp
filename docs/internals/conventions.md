@@ -90,11 +90,15 @@ styles its own line.
   `_emit_merge_blocked` / `_emit_startup_failed` / `_emit_lost_connection` /
   `_emit_daemon_died`. Apart from the startup check, which fires before any
   stream exists, the closing block picks among them from what the client folded
-  off the run's own event stream, never from a state it did not observe: an
+  off the run's own event stream, never from a failure it did not observe: an
   `end` frame carrying a leave disposition renders that leave's closing block
   (the one the client prints for its own leave), an `end` frame that carried no
   outcome is the daemon-died block, a stream cut before anything could be
-  witnessed is the lost-connection block. The exit code carries the error signal
+  witnessed is the lost-connection block. A deliberate mid-run leave with no
+  prompt open listens briefly (up to 2 s) after its leave frame for the
+  daemon's verdict, since the run may complete before the daemon processes the
+  leave; a completion it hears on the stream, or finds settled on disk, renders
+  the completed block, never the pause. The exit code carries the error signal
   for scripts; the codes are tabled in `guide/lifecycle.md` (*Exit codes*).
 - **Non-quest CLI usage/lookup errors → one `imp:` message.** Bad arguments, no such
   quest, unknown command, and similar usage errors emit one
