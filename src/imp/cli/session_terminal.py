@@ -59,6 +59,8 @@ AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]
 _TERMINAL_EVENT_TYPES: frozenset[str] = frozenset(
     {"quest_merged", "workflow_completed", "merge_blocked"})
 
+_RENAME_TYPES = ("quest_renamed", "user_renamed")
+
 
 @dataclass(frozen=True)
 class TerminalOutcome:
@@ -214,7 +216,7 @@ async def run_terminal_client(
         driver.on_event(event)
         replay = bool(event.get("_replay"))
         etype = event.get("type")
-        if etype == "quest_renamed" and on_title is not None:
+        if etype in _RENAME_TYPES and on_title is not None:
             on_title((event.get("payload") or {})["new_title"])
         if title is not None:
             if etype == "lane_acquired":
@@ -236,7 +238,7 @@ async def run_terminal_client(
             gate_send.send_nowait((prompt, interrupt))
             if title is not None:
                 title.idle()
-        elif etype == "quest_renamed" and not replay:
+        elif etype in _RENAME_TYPES and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
         elif (title is not None and not replay

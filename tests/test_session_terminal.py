@@ -1718,15 +1718,16 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
     assert result["r"] == "answer"   # exactly one reply reached the gate
 
 
+@pytest.mark.parametrize("etype", ["quest_renamed", "user_renamed"])
 @pytest.mark.anyio
-async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
+async def test_rename_updates_terminal_title(tmp_path: Path, etype: str) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "step_started", "payload": {}})
-        on_event({"type": "quest_renamed",
+        on_event({"type": etype,
                    "payload": {"new_title": "Renamed Quest"}})
         await anyio.sleep(0.1)
         return "done"
@@ -1767,14 +1768,15 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
     assert renamed in s.getvalue()
 
 
+@pytest.mark.parametrize("etype", ["quest_renamed", "user_renamed"])
 @pytest.mark.anyio
-async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> None:
+async def test_replayed_rename_does_not_update_title(tmp_path: Path, etype: str) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
-        on_event({"type": "quest_renamed", "_replay": True,
+        on_event({"type": etype, "_replay": True,
                    "payload": {"new_title": "Renamed Quest"}})
         on_event({"type": "step_started", "payload": {}})
         await anyio.sleep(0.1)
@@ -1816,16 +1818,17 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
     assert renamed not in s.getvalue()
 
 
+@pytest.mark.parametrize("etype", ["quest_renamed", "user_renamed"])
 @pytest.mark.anyio
-async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> None:
+async def test_rename_invokes_on_title_even_on_replay(tmp_path: Path, etype: str) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
-        on_event({"type": "quest_renamed", "_replay": True,
+        on_event({"type": etype, "_replay": True,
                    "payload": {"new_title": "First"}})
-        on_event({"type": "quest_renamed",
+        on_event({"type": etype,
                    "payload": {"new_title": "Second"}})
         await anyio.sleep(0.1)
         return "done"
