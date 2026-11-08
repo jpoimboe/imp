@@ -2095,7 +2095,7 @@ def _card_ledger(store: Store, card: QuestCard, *, color: bool,
     return _CardLedger(
         run=_run_field(rows, header, view),
         body=render_summary(rows, header=header, color=color, width=width,
-                            quota=view, header_line=False))
+                            quota=view, header_line=False, hide_idle=True))
 
 
 def _quest_card(card: QuestCard, *, now: datetime, color: bool,

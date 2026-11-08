@@ -135,6 +135,14 @@ class StepRow:
             return None
         return max(0.0, wall - self.wait_seconds)
 
+    @property
+    def idle(self) -> bool:
+        """Closed in <1s of work with no model work, no subagents and no error."""
+        work = self.work_seconds
+        return (work is not None and work < 1 and not self.subagents
+                and not self.errored
+                and self.totals.priced + self.totals.unpriced == 0)
+
     def dur_cell(self, open_label: str) -> str:
         return _dur_text(self.work_seconds, open_label, inferred=self.end_inferred)
 
@@ -574,7 +582,8 @@ def _breakdown_line(provider: str, cell: str, *, name_w: int, dur_w: int,
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int,
                    quota: QuotaColumn | QuotaFallback | None = None,
-                   header_line: bool = True) -> list[str]:
+                   header_line: bool = True,
+                   hide_idle: bool = False) -> list[str]:
     open_label = open_span_label(header.status)
     work, total = summary_totals(summary, header.total_seconds,
                                  header.exclusions)
@@ -589,18 +598,25 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                               quota=column is not None, color=color)
     cells = [total_last]
     cur_phase: str | None = None
+    phase_header: str | None = None
     hues: dict[str, str] = {}
     next_hue = 0
     for row in summary:
         if row.phase != cur_phase:
             cur_phase = row.phase
             hues, next_hue = {}, 0
-            lines.append(pal.ansi(row.phase_text, *pal.NODE_COLORS["phase"], enabled=color))
+            phase_header = row.phase_text
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
         last = _last_cell(row.totals, row.subtree_units, column)
         cells.append(last)
+        # Skipped only here, so a hidden row still advances the hue rotation.
+        if hide_idle and row.idle:
+            continue
+        if phase_header is not None:
+            lines.append(pal.ansi(phase_header, *pal.NODE_COLORS["phase"], enabled=color))
+            phase_header = None
         lines.append(_step_line(row, last=last, hue=hues[row.step],
                                 name_w=name_w, dur_w=dur_w, in_w=in_w,
                                 out_w=out_w, last_w=last_w, color=color,

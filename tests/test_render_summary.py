@@ -1929,3 +1929,64 @@ def test_two_visits_to_one_raw_step_share_a_hue_whatever_their_labels():
     assert "\x1b[34m" in line("writing spec")          # 1st hue: step-blue
     assert "\x1b[35m" in line("reviewing spec")        # 2nd hue: magenta
     assert "\x1b[34m" in line("addressing feedback")   # the raw step's hue again
+
+
+_START = "2026-01-01T00:00:00+00:00"
+
+
+def _instant(step: str, *, usage: RowUsage | None = None,
+             subagents: list[SubagentRow] | None = None) -> StepRow:
+    return StepRow(phase="plan", step=step, start_ts=_START, end_ts=_START,
+                   usage=usage or RowUsage(), subagents=subagents or [])
+
+
+@pytest.mark.parametrize(("row", "idle"), [
+    (_row("plan", "gate", 0), True),
+    (_row("plan", "gate", 90, wait=89.5), True),
+    (_row("plan", "gate", 1), False),
+    (_row("plan", "gate", 0, errored=True), False),
+    (_row("plan", "gate", 0, open_=True), False),
+    (_instant("gate", usage=RowUsage(fresh_input=10, output=5, priced=1)), False),
+    (_instant("gate", usage=RowUsage(fresh_input=10, output=5, unpriced=1)), False),
+    (_instant("gate", subagents=[SubagentRow(name="explorer", start_ts=_START,
+                                             end_ts=_START)]), False),
+], ids=["instant", "under-a-second-of-work", "one-second", "errored", "open",
+        "priced", "unpriced", "subagent"])
+def test_step_row_idle_is_closed_instant_quiet_and_clean(row: StepRow, idle: bool) -> None:
+    assert row.idle is idle
+
+
+def test_hide_idle_drops_only_idle_rows_and_keeps_the_full_tables_layout() -> None:
+    priced = _row("plan", "coder", 0)
+    priced.usage = RowUsage(fresh_input=1000, output=100, dollars=0.01, priced=1)
+    rows = [
+        _row("plan", "plan-writer", 90),               # token-free, >=1s: shown
+        _row("plan", "plan-finalized", 0),             # idle, and the widest name
+        _row("plan", "plan-review", 0, errored=True),  # errored: shown
+        priced,                                        # model work: shown
+        _instant("dispatch", subagents=[SubagentRow(name="explorer", start_ts=_START,
+                                                    end_ts=_START)]),
+        _row("plan", "task-lead", 0, open_=True),      # open: shown
+    ]
+    full = render_summary(rows, header=_HDR, color=False, width=80)
+    card = render_summary(rows, header=_HDR, color=False, width=80, hide_idle=True)
+    assert any("plan-finalized" in ln for ln in full)
+    assert card == [ln for ln in full if "plan-finalized" not in ln]
+
+
+def test_hide_idle_keeps_hues_and_drops_the_header_of_an_all_idle_phase() -> None:
+    rows = [
+        _row("spec", "spec-writer", 30),
+        _row("spec", "spec-commit", 0),
+        _row("spec", "spec-review", 40),
+        _row("merge", "rebase", 0),
+        _row("merge", "pre-merge", 0),
+        _row("implement", "verify", 20),
+    ]
+    full = render_summary(rows, header=_HDR, color=True, width=80)
+    card = render_summary(rows, header=_HDR, color=True, width=80, hide_idle=True)
+    hidden = ("spec-commit", "rebase", "pre-merge", "merge phase")
+    assert all(any(h in ln for ln in full) for h in hidden)
+    assert card == [ln for ln in full if not any(h in ln for h in hidden)]
+    # third step of its phase: cyan, even though the idle step before it is hidden
+    assert "\x1b[36m" in next(ln for ln in card if "spec-review" in ln)
