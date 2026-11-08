@@ -58,7 +58,7 @@ def test_get_events_live_archived_and_unknown(tmp_path: Path) -> None:
     assert store.get_events("nosuch") is None
 
 
-def test_get_artifact_live_and_missing(tmp_path: Path) -> None:
+def test_saved_files_live_and_missing(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Art", quest_id="artq", base_branch="main")
     spec_dir = ch.quest_dir / "artifacts" / "spec"
@@ -66,8 +66,10 @@ def test_get_artifact_live_and_missing(tmp_path: Path) -> None:
     (spec_dir / "artq.md").write_text("# the spec\n")
     store = make_store(tmp_path)
 
-    assert store.get_artifact("artq", "spec") == b"# the spec\n"
-    assert store.get_artifact("artq", "summary") is None
+    assert store.saved_files("artq") == ["spec/artq.md"]
+    assert store.read_saved_file("artq", "spec/artq.md") == b"# the spec\n"
+    assert store.read_saved_file("artq", "summary/artq.md") is None
+    assert store.saved_files("nosuch") == []
 
 
 def test_completed_rows_from_archive(tmp_path: Path) -> None:

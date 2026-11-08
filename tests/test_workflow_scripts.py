@@ -571,7 +571,7 @@ def test_run_verify_green_run_writes_no_log(tmp_path: Path) -> None:
 
 
 def test_run_verify_log_is_named_for_the_quest_id_and_overwritten(tmp_path: Path) -> None:
-    """One file per quest at the <kind>/<id>.md shape LocalStore.get_artifact
+    """One file per quest at verify/<id>.md, the one-file folder `imp show <id> verify`
     resolves; the second failing run replaces the first, tier header included."""
     project = tmp_path / "proj"
     project.mkdir()

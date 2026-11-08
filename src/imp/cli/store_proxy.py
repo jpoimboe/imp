@@ -131,8 +131,6 @@ def _week_from_wire(d: dict[str, Any]) -> GaugeWeek:
 def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     if op == "get_events":
         return store.get_events(args["quest_id"])
-    if op == "get_artifact":
-        return _b64e(store.get_artifact(args["quest_id"], args["kind"]))
     if op == "saved_files":
         return store.saved_files(args["quest_id"])
     if op == "read_saved_file":
@@ -188,9 +186,6 @@ class ProxyStore:
         return cast(
             "list[dict[str, Any]] | None",
             self._call("get_events", {"quest_id": quest_id}))
-
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
-        return _b64d(self._call("get_artifact", {"quest_id": quest_id, "kind": kind}))
 
     def saved_files(self, quest_id: str) -> list[str]:
         return cast("list[str]", self._call("saved_files", {"quest_id": quest_id}))

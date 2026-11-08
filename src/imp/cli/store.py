@@ -110,7 +110,6 @@ class GaugeWeek:
 
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
     def saved_files(self, quest_id: str) -> list[str]: ...
     def read_saved_file(self, quest_id: str, rel: str) -> bytes | None: ...
     def completed_rows(self) -> list[CompletedRow]: ...
@@ -128,9 +127,6 @@ class LocalStore:
 
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None:
         return _load_events_for_id(self.control_root, quest_id)
-
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
-        return _show_artifact(self.control_root, quest_id, f"{kind}/{quest_id}.md")
 
     def saved_files(self, quest_id: str) -> list[str]:
         from imp.engine import artifact_files
