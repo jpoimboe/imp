@@ -500,12 +500,18 @@ class LiveDriver:
                 or self._emitted_any):
             return
         self._recap_pending = False
-        text = self._builder.interrupt_recap()
+        text = self._builder.interrupt_recap(datetime.now(UTC).isoformat())
         if text is None or self._prompt_active:
             return
+        # Lazy: inert_resume pulls in the engine.
+        from imp.cli.inert_resume import render_inert_question
+        message = self._builder.latest_step_message()
         self._prev_prose = True
         was_suppressing, self._suppressing = self._suppressing, False
         try:
+            if message is not None:
+                block = render_inert_question(message, width=self._cur_width(), color=self._color)
+                self._print_lines(block.split("\n"), prose=True)
             self._print_lines([pal.ansi(text, "dim", enabled=self._color)], prose=True)
         finally:
             self._suppressing = was_suppressing
