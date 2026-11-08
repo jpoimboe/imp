@@ -552,22 +552,18 @@ These don't need to run at every point — fire each **at least once** somewhere
   session and visibly follow the redirect**; the run must **not** end `paused` (the inline
   steer consumes the pause), and no duplicate re-run of the interrupted work. A steer that
   dead-ends, is ignored, or leaves the quest paused anyway is a bug.
-- **Escalation force-quit (point C).** With a slow tool running, deliver Ctrl-C once (expect
-  the `stopping…` ack), wait **>1s** with the teardown still unwinding, then Ctrl-C again —
-  two `send_signal(2)` >1s apart. The second gesture
-  *past* the ~1s suppress window escalates to the leave path (the ack gains
-  `(interrupt again to force-quit)`): expect a clean detach (`alive=False`), quest paused and
-  resumable, orphan check clean — never a traceback or hang. (Contrast with the mashed-Ctrl-C
-  check above, which stays *within* the window and must be suppressed.) The offer follows the
-  *live delivery start*: after the >1s suppression window, a non-replayed
-  `interrupt_delivery_started` event for the round makes force eligible even while cooperative
-  teardown remains pending. Before that event, the repeat press keeps the plain `stopping…` ack
-  and forwards nothing, because a FORCE would hard-kill nothing. Such a press costs nothing: it
-  does not spend the once-per-round force latch.
+- **Escalation force-quit — automated, skip it here.** A second Ctrl-C more than 1s after the
+  first, while the agent is still stopping, hard-kills it (the `stopping…` ack becomes
+  `force-quitting…`) and lands on `interrupted · enter to continue · type to redirect · Ctrl-D to
+  leave`, still attached. No real provider holds that window open (claude and the bash tool stop
+  in milliseconds; anthropic/openai have no hard kill), so
+  `test_ctrl_c_force_quit_vs_deadline` in `tests/impty/test_e2e_interrupt.py` covers it on the
+  scripted provider (`interrupt: hard_kill`). Leave it out of the tally; a second press that
+  only reaches the steer gate here is expected, not a defect.
 - **Ctrl-\ deliberate detach (once).** Mid-run, deliver SIGQUIT — `send_signal(3)` for
   determinism (keystroke `send("\x1c", wait=False)` as a bonus check; same impty fidelity
   caveat as mid-run Ctrl-C). imp traps SIGQUIT (replacing the core-dump default): expect the
-  same teardown as a force-quit — detach, quest paused on a materialized quest (in phase 0, the
+  same teardown as a mid-run Ctrl-D — detach, quest paused on a materialized quest (in phase 0, the
   save/archive leave — `conversation_saved` or `conversation_archived`), resumable, orphan-free,
   rc 130, and
   `imp resume` continues the agent, same as after a mid-run Ctrl-D. A `Quit (core dumped)` or
@@ -659,7 +655,7 @@ per point, headline defects (or "none"), the report's absolute path.
 | **Ctrl-D** (at prompt / steer gate) | `"\x04"` | — | `EOFError` → phase-0 leave (`discarded` / `paused` / `archived`, rc 130); **materialized at inline steer gate → detach** (rc 130, resume-to-prompt) |
 | **Ctrl-D** (`imp chat`, after an exchange, not renamed) | `"\x04"` | — | `archive` disposition → **`archived`** spine, rc 130, resumable via `imp resume` (renamed: `save`, `paused` spine) |
 | **Ctrl-D** (mid-run) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, resume-to-agent). Materialized: `workflow_paused` `interrupt_reason == "ctrl-d"`; on-exit print: three-part `_pause_lines` block — `paused · Ctrl-D` head, `<id> · <name>` identity line, `resume: imp resume <id>` (no `⏸ paused (ctrl-d)` glyph line renders in the scrollback or `imp log`); phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) writes only `conversation_saved` (save) or `conversation_archived` (archive), and a leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert resume): §6 row A |
-| **Ctrl-C ×2** (>1s apart, mid-teardown) | — | `send_signal(2)` ×2 | escalation → force-quit detach; ack shows `stopping… (interrupt again to force-quit)` once the live `interrupt_delivery_started` event is observed for the round, even while cooperative teardown remains pending; before that the repeat press keeps the plain `stopping…` ack, forwards nothing, and spends no latch |
-| **Ctrl-\** (mid-run) | `"\x1c"` (bonus) | `send_signal(3)` | SIGQUIT trap → deliberate detach; same teardown as force-quit (paused on a materialized quest, resumable, rc 130, resume-to-agent like mid-run Ctrl-D); phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) writes only `conversation_saved` (save) or `conversation_archived` (archive), and a leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert resume): §6 row A |
+| **Ctrl-C ×2** (>1s apart, mid-teardown) | — | — | automated only (`tests/impty/test_e2e_interrupt.py`): hard-kills the stopping agent, ack `force-quitting…`, stays attached at the `interrupted ·` prompt; real providers stop too fast to reach it |
+| **Ctrl-\** (mid-run) | `"\x1c"` (bonus) | `send_signal(3)` | SIGQUIT trap → deliberate detach; same teardown as mid-run Ctrl-D (paused on a materialized quest, resumable, rc 130, resume-to-agent); phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) writes only `conversation_saved` (save) or `conversation_archived` (archive), and a leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert resume): §6 row A |
 | **SIGTERM** | — | `send_signal(15)` | Intent-B leave → detach (rc 130; mid-run: resume-to-agent, like mid-run Ctrl-D); on a materialized quest or at the phase-0 inert resume prompt, on-exit three-part `_pause_lines` block — `paused · SIGTERM` head, `<id> · <name>` identity line, `resume: imp resume <id>` (no `⏸ paused (sigterm)` glyph line renders in the scrollback or `imp log`); phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) writes only `conversation_saved` (save) or `conversation_archived` (archive), and a leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert resume): §6 row A |
 | **SIGHUP** | — | `send_signal(1)` | Intent-B leave (terminal closed) → detach (rc 130; mid-run: resume-to-agent, like mid-run Ctrl-D); materialized: daemon lease rule pauses; phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) writes only `conversation_saved` (save) or `conversation_archived` (archive), and a leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert resume): §6 row A |
