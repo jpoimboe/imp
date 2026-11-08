@@ -1342,6 +1342,30 @@ def test_close_subagent_success_with_marker_text_is_not_terminal_state():
     assert fold.is_error is False
 
 
+@pytest.mark.parametrize(("payload", "stop"), [
+    pytest.param({"content": "RuntimeError: subagent 'x' failed (config) [stalled]",
+                  "error": True}, "stalled", id="stalled-marker"),
+    pytest.param({"content": "subagent 'x' was interrupted before finishing — "
+                             "the run was paused. [interrupted]",
+                  "error": True}, "interrupted", id="interrupted-marker"),
+    pytest.param({"content": "subagent 'x' reached its context limit and stopped "
+                             "before finishing. [context_exhausted]",
+                  "error": True}, "context_exhausted", id="context-exhausted-marker"),
+    pytest.param({"content": [{"type": "text",
+                               "text": "its provider or retry budget ran out. [suspended]"}],
+                  "error": True}, "suspended", id="suspended-marker-in-block-list"),
+    pytest.param({"content": "whatever", "error": True, "kind": "interrupted"},
+                 "interrupted", id="explicit-kind"),
+    pytest.param({"content": "RuntimeError: subagent 'x' failed (config)", "error": True},
+                 "failed", id="plain-failure"),
+    pytest.param({"content": "finding: the build looked [stalled] for a while",
+                  "error": False}, None, id="clean-result-with-marker-text"),
+    pytest.param({"content": '{"status":"Success"}'}, None, id="clean"),
+])
+def test_subagent_result_stop(payload, stop):
+    assert nv.subagent_result_stop(payload) == stop
+
+
 def test_quest_renamed_updates_root_title() -> None:
     # The narrative builder must reflect the settled title after quest_renamed.
     b = nv.NarrativeBuilder()

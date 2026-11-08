@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from imp.engine.feedback import truncate_detail
 from imp.engine.test_lane import WAIT_LABEL
@@ -436,6 +436,18 @@ class SubagentFold:
     @property
     def tree(self) -> NarrativeTree:
         return self.nested.tree
+
+
+StopKind = Literal["stalled", "interrupted", "context_exhausted", "suspended"]
+SubagentStop = Literal[StopKind, "failed"]
+_STOP_KINDS: tuple[StopKind, ...] = get_args(StopKind)
+STOP_WORDS: Mapping[SubagentStop, str] = {
+    "interrupted": "interrupted",
+    "stalled": "stalled",
+    "context_exhausted": "context exhausted",
+    "suspended": "suspended",
+    "failed": "failed",
+}
 
 
 @dataclass
@@ -2446,6 +2458,24 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
     burst.calls.append(call)
 
 
+def subagent_stop_kind(p: dict[str, Any]) -> StopKind | None:
+    """A subagent tool_result's explicit `kind`, else the [marker] its error text embeds."""
+    # Success content is agent-controlled and may legitimately contain "[stalled]"; never scan it.
+    explicit = next((k for k in _STOP_KINDS if p.get("kind") == k), None)
+    if explicit is not None or not p.get("error"):
+        return explicit
+    text = _summarize_result(p.get("content"))
+    return next((k for k in _STOP_KINDS if f"[{k}]" in text), None)
+
+
+def subagent_result_stop(p: dict[str, Any]) -> SubagentStop | None:
+    """How a subagent's tool_result ended it: a stop kind, `failed` for other errors, else None."""
+    kind = subagent_stop_kind(p)
+    if kind is not None:
+        return kind
+    return "failed" if p.get("error") else None
+
+
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
                          end_ts: str | None = None) -> None:
     was_running = fold.running
@@ -2454,21 +2484,8 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     fold.end_ts = end_ts
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
-    # Terminal state for Part D's glyph. Prefer an explicit payload kind (the
-    # claude degraded-pause path sets kind="interrupted"); else detect the
-    # bracketed marker an is_error failure message embeds ("... [stalled]" /
-    # "... [interrupted]" — the codex degraded-pause path appends the latter).
-    # The brackets keep the match precise (low false-positive).
-    kind = p.get("kind")
-    if kind not in ("stalled", "interrupted", "context_exhausted", "suspended"):
-        # The bracketed marker only originates from the failure path; a
-        # SUCCESSFUL subagent's content is agent-controlled JSON that may
-        # legitimately contain "[stalled]". Gate the scan on is_error so such
-        # text can't false-positive into a terminal state.
-        text = fold.outcome if fold.is_error else ""
-        _kinds = ("stalled", "interrupted", "context_exhausted", "suspended")
-        kind = next((s for s in _kinds if f"[{s}]" in (text or "")), None)
-    if kind in ("stalled", "interrupted", "context_exhausted", "suspended"):
+    kind = subagent_stop_kind(p)
+    if kind is not None:
         fold.terminal_state = kind
     _record_cut_off(fold, was_running)
 
