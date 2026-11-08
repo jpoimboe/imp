@@ -102,24 +102,24 @@ class Quest:
     vars: dict[str, object] = field(default_factory=dict)  # per-quest workflow var overrides
     provider: str | None = None  # per-quest provider pin; None = follow configured order
 
-    def rename(self, name: str, *, by: Literal["agent", "user"],
+    def rename(self, title: str, *, by: Literal["agent", "user"],
                log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json in the
         out-of-tree state dir (never dirties the tracked worktree), emit
         quest_renamed (agent) or user_renamed (user). An unchanged title writes
         nothing. Returns the id. The id is immutable, so nothing else moves."""
-        if name == self.title:
+        if title == self.title:
             return self.id
         old_title = self.title
-        self.title = name
+        self.title = title
         meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
-        meta["title"] = name
+        meta["title"] = title
         _write_quest_json(meta_path, meta)
         log.append(agent_id=None,
                    type="quest_renamed" if by == "agent" else "user_renamed",
                    payload={"id": self.id, "old_title": old_title,
-                            "new_title": name})
+                            "new_title": title})
         return self.id
 
     def set_project_root(self, new_root: Path) -> None:
@@ -182,12 +182,12 @@ class Quest:
         meta = json.loads((self.quest_dir / "quest.json").read_text())
         self.provider = meta.get("provider")
 
-    def set_title(self, name: str) -> None:
+    def set_title(self, title: str) -> None:
         """Metadata-only rename: set title, rewrite quest.json, emit no event."""
-        self.title = name
+        self.title = title
         meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
-        meta["title"] = name
+        meta["title"] = title
         _write_quest_json(meta_path, meta)
 
     def materialize(self) -> bool:
