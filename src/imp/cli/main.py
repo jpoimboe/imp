@@ -2341,6 +2341,7 @@ def _row_display_intent(control: Path, r: _Row) -> str | None:
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
+_NO_ACTIVE_QUESTS_MESSAGE = "No active quests — see imp list -a for history"
 
 
 def _emit_missing_quest_id(command: str) -> None:
@@ -3644,7 +3645,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
             name_width=name_width, status_width=status_width,
             intent=intents.get(r[0])))
     if backlog_rows:
-        lines.append("")
+        if len(lines) > 1:
+            lines.append("")
         lines.append(pal.ansi("backlog:", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(quest_row.format_quest_line(
@@ -3653,7 +3655,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                 color=color, name_width=name_width, status_width=status_width,
                 intent=intents.get(r[0])))
     if history:
-        lines.append("")
+        if len(lines) > 1:
+            lines.append("")
         lines.append(pal.ansi(history_label, "dim", enabled=color))
         for r in history:
             lines.append(quest_row.format_quest_line(
@@ -3669,6 +3672,10 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     rows = _overview_rows(control, dispositions=_board_dispositions(show_all=show_all),
                           cutoff=None)
     if not rows.inflight and not rows.backlog and not rows.history:
+        if not show_all and _history_by_disposition(
+                control, dispositions={"abandoned", "archived"},
+                live_ids=set()):
+            return [_NO_ACTIVE_QUESTS_MESSAGE]
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "completed:"
     return _overview_body(rows.inflight, rows.backlog, rows.history,
