@@ -21,7 +21,7 @@ def _md(events: list[dict[str, Any]], *, full: bool = False,
 
 def _html(events: list[dict[str, Any]], *, full: bool = False,
           show: frozenset[str] | None = None) -> str:
-    return render_html(_md(events, full=full, show=show))
+    return render_html(_md(events, full=full, show=show), title="t")
 
 
 @pytest.fixture(params=[_md, _html], ids=["md", "html"])

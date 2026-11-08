@@ -494,7 +494,7 @@ def test_replay_suppressed_driver_keeps_a_script_steps_later_output() -> None:
 def test_markdown_and_html_carry_the_marker() -> None:
     md = rm.render_markdown(nv.build_tree(_agent_run()), full=False)
     assert f"**{MARKER_2M}**" in md.splitlines()
-    assert f"<strong>{MARKER_2M}</strong>" in render_html(md)
+    assert f"<strong>{MARKER_2M}</strong>" in render_html(md, title="t")
 
 
 # AC12(c)
