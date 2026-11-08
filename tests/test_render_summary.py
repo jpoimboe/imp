@@ -2237,10 +2237,15 @@ def test_ledger_row_caret_escapes_the_title():
 
 
 def test_ledger_row_clips_a_long_title_and_keeps_columns_aligned():
-    out = render_summary(_titled_rows("x" * 60), header=_HDR, color=False, width=80)
+    rows = _titled_rows("x" * 60)
+    unbounded = render_summary(rows, header=_HDR, color=False, width=10_000)
+    assert "↳ explorer (" + "x" * 40 + "…)" in next(
+        ln for ln in unbounded if "explorer" in ln)
+    out = render_summary(rows, header=_HDR, color=False, width=80)
     sub = next(ln for ln in out if "explorer" in ln)
-    assert "↳ explorer (" + "x" * 40 + "…)" in sub
-    assert "x" * 41 not in sub
+    assert sub.startswith("    ↳ explorer (" + "x" * 35 + "…  ")
+    assert "x" * 36 not in sub
+    assert all(len(ln) <= 80 for ln in out)
     step = next(ln for ln in out if ln.strip().startswith("spec"))
     total = next(ln for ln in out if ln.strip().startswith("total"))
     assert step.index("—") == sub.index("—") == total.index("—")
@@ -2347,3 +2352,94 @@ def test_unbounded_width_keeps_a_mixed_provider_ledger_byte_identical():
         "    codex                                                                     60.00%",
         f"  {FOOTNOTE}",
     ]
+
+
+_PINNED_80 = [
+    "defi21  ·  Stop specs silently reversing user-approved decisions  ·  running",
+    "                                                             tokens       quota",
+    "                                                    time      in    out  weekly*",
+    "threshold phase",
+    "  threshold                                      running  961.8k  19.0k   0.04%",
+    "    ↳ explorer (map spec phase decision flow)     1m 11s  409.0k   9.3k   0.02%",
+    "    ↳ explorer (map escalation and notice mech…   1m 19s  552.8k   9.7k   0.02%",
+    "",
+    "  total                                           2m 33s  961.8k  19.0k   0.04%",
+    "  * this quest's part of all imp work this week, applied to the week's gauge;",
+    "    final once the week resets; usage outside imp skews it high",
+]
+
+
+def test_the_label_column_takes_exactly_the_width_left_at_80_columns():
+    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 80)[:9] == _PINNED_80[:9]
+
+
+def test_a_long_subagent_body_clips_so_every_table_line_fits_80_columns():
+    rows = _threshold_rows("maps escalation and notice mechanisms")
+    assert len(_sub_body(rows[0].subagents[1])) == 50
+    table = _quota_render(rows, _THRESHOLD_HDR, 80)[:9]
+    assert all(pal.display_width(ln) <= 80 for ln in table)
+    assert "↳ explorer (maps escalation and notice mec…  " in table[6]
+    assert {pal.display_width(table[i]) for i in (4, 5, 6, 8)} == {79}
+
+
+def _cjk_rows(step_label: str, sub_title: str) -> list[StepRow]:
+    subs = [SubagentRow(name="explorer", title=sub_title, start_ts=_START,
+                        end_ts=_at(71), usage=RowUsage(fresh_input=409_000, output=9_300),
+                        charge=_pts("claude", 0.02)),
+            SubagentRow(name="explorer", title="map the flow", start_ts=_START,
+                        end_ts=_at(79), usage=RowUsage(fresh_input=552_800, output=9_700),
+                        charge=_pts("claude", 0.02))]
+    return [StepRow(phase="threshold", step="threshold", label=step_label,
+                    start_ts=_START, subagents=subs)]
+
+
+def test_wide_labels_that_clip_keep_every_table_line_within_80_columns():
+    rows = _cjk_rows("规范阶段决策流程的全面梳理与重新评估工作" * 2,
+                     "绘制升级与通知机制的完整调用链路图" * 2)
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    assert "…" in out[4] and "…" in out[5]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
+def test_wide_labels_that_fit_pad_by_display_width_to_align_the_columns():
+    rows = _cjk_rows("规范阶段", "绘制升级机制")
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert "…" not in out[4] + out[5]
+    assert len({pal.display_width(out[i]) for i in (4, 5, 6, 8)}) == 1
+
+
+def test_at_40_columns_labels_clip_at_the_floor_and_lines_may_overflow():
+    out = render_summary(_dollar_rows(), header=_HDR, color=False, width=40)
+    assert out[:7] == [
+        "abc  ·  feature  ·  completed",
+        "                          time      in   out    cost",
+        "spec phase",
+        "  addressing spec rev…  1m 30s  513.0k  7.0k  $0.67*",
+        "    ↳ explorer (map t…   7m 0s  350.0k  4.0k  $0.40*",
+        "",
+        "  total                 39m 2s  513.0k  7.0k  $0.67*",
+    ]
+    assert out[3][2:22] == "addressing spec rev…"
+    assert out[4][4:22] == "↳ explorer (map t…"
+    assert max(pal.display_width(ln) for ln in out[:7]) > 40
+
+
+def test_a_label_column_narrower_than_the_floor_is_never_padded_out():
+    out = render_summary([_row("plan", "plan-writer", 90)], header=_HDR,
+                         color=False, width=40)
+    assert out == [
+        "abc  ·  feature  ·  completed",
+        "                 time  in  out  cost",
+        "plan phase",
+        "  plan-writer  1m 30s   —    —     —",
+        "",
+        "  total        39m 2s   —    —     —",
+    ]
+
+
+def test_a_ledger_that_fits_80_columns_renders_as_it_does_unbounded():
+    rows = _titled_rows("map ledger time totals")
+    at_80 = render_summary(rows, header=_HDR, color=False, width=80)
+    assert at_80 == render_summary(rows, header=_HDR, color=False, width=10_000)
+    assert any("    ↳ explorer (map ledger time totals)  " in ln for ln in at_80)

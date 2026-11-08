@@ -516,6 +516,7 @@ _TOKENS_TITLE = "tokens"
 _QUOTA_TITLE = "quota"
 _WEEKLY_TITLE = "weekly"
 _TOTAL_LABEL = "total"
+_LABEL_FLOOR = 20
 
 
 def _last_cell(usage: RowUsage, charge: Charge,
@@ -527,11 +528,12 @@ def _last_cell(usage: RowUsage, charge: Charge,
 
 def _column_widths(summary: list[StepRow], open_label: str,
                    total_work: float | None, total_usage: RowUsage,
-                   total_last: str,
-                   column: QuotaColumn | None) -> tuple[int, int, int, int, int]:
-    """Widths measured across step rows, subagent rows, the totals row, and title labels."""
-    names = [len(_step_body(r)) for r in summary]
-    names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
+                   total_last: str, column: QuotaColumn | None,
+                   width: int) -> tuple[int, int, int, int, int]:
+    """Widths measured across step rows, subagent rows, the totals row, and title
+    labels; the label column alone gives way so the table fits `width`."""
+    names = [pal.display_width(_step_body(r)) for r in summary]
+    names += [pal.display_width(_sub_body(s)) + 2 for r in summary for s in r.subagents]
     names.append(len(_TOTAL_LABEL))
     names += [len(p) + 2 for p, _ in (column.breakdown if column else ())]
     durs = [len(_dur_text(total_work)), len(_TITLES[0])]
@@ -550,7 +552,11 @@ def _column_widths(summary: list[StepRow], open_label: str,
             ins.append(len(_fmt_tokens(s.usage.input_total)))
             outs.append(len(_fmt_tokens(s.usage.output)))
             lasts.append(len(_last_cell(s.usage, s.charge, column)))
-    return (max(names), max(durs), max(ins), max(outs), max(lasts))
+    dur_w, in_w, out_w, last_w = max(durs), max(ins), max(outs), max(lasts)
+    # Every table line is the label plus these; quota mode's title row hangs a `*`.
+    fixed = 10 + dur_w + in_w + out_w + last_w + (0 if column is None else 1)
+    name_w = min(max(names), max(_LABEL_FLOOR, width - fixed))
+    return (name_w, dur_w, in_w, out_w, last_w)
 
 
 def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
@@ -562,11 +568,21 @@ def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
     return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color and dim)
 
 
+def _fit(text: str, width: int) -> str:
+    # clip_display reserves the ellipsis column even for text that fits exactly.
+    return text if pal.display_width(text) <= width else pal.clip_display(text, width)
+
+
+def _fit_padded(text: str, width: int) -> str:
+    fitted = _fit(text, width)
+    return fitted + " " * (width - pal.display_width(fitted))
+
+
 def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else ("step",)
-    name = pal.ansi(f"{_step_body(row):<{name_w}}", *codes, enabled=color)
+    name = pal.ansi(_fit_padded(_step_body(row), name_w), *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
     return f"  {name}  {dur}  {cells}"
@@ -581,7 +597,8 @@ def _sub_line(sub: SubagentRow, *, last: str, name_w: int, dur_w: int, in_w: int
     dur_codes = codes if errored else pal.NODE_COLORS["metadata"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
-    body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
+    body_w = name_w - 2
+    body = pal.ansi(_fit_padded(_sub_body(sub), body_w), *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *dur_codes,
                    enabled=color)
     cells = _cells(sub.usage, last, in_w=in_w, out_w=out_w, last_w=last_w,
@@ -633,7 +650,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     column = quota if isinstance(quota, QuotaColumn) else None
     total_last = total_cell(summary, quota)
     name_w, dur_w, in_w, out_w, last_w = _column_widths(
-        summary, open_label, work, total, total_last, column)
+        summary, open_label, work, total, total_last, column, width)
     lines = [_header_line(header, color=color)] if header_line else []
     if summary:
         lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
