@@ -31,7 +31,9 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 2. To check the spec keeps faith with what was decided, read the threshold
    dialogue with `imp log {{ quest.id }} --step threshold` — the human-and-agent
    brainstorm prose (tool noise elided), the provenance record of what was
-   decided, not current state.
+   decided, not current state. Also read `{{ quest.home }}/deferred.md` if
+   present — a `— needs-decision:` item there records a departure (see
+   **Calibration**).
 3. This is review lap {{ step.lap }}.{% if step.prior_laps %} Prior laps ended — {% for l in step.prior_laps %}{{ l.lap }}: {{ l.outcome }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %} Outcomes only, not prior findings: judge the spec yourself, and use the laps only to notice an area that keeps returning.
 4. Read `{{ quest.home }}/spike/` if it exists — empirical evidence a spiker captured. A recorded result is settled fact: don't re-derive it, don't flag a claim it supports.
 5. Evaluate against the checks below.
@@ -61,8 +63,9 @@ checklist — do the real reasoning:
   reached with the human at the threshold, not a plausible-looking substitute.
   Read the brainstorm dialogue with `imp log {{ quest.id }} --step threshold`
   (human and agent prose, tool noise elided) and confirm every load-bearing
-  decision settled there survives into the spec. A decision the conversation
-  reached that the spec silently drops or reverses misleads planning exactly as
+  decision settled there survives into the spec, or that its departure is
+  recorded (see **Calibration**). A decision the conversation reached that the
+  spec drops or reverses without that record misleads planning exactly as
   a false claim about existing code does — planning builds from the spec, not the
   transcript, so the drift ships unless caught here.
 - **Would building this satisfy the intent?** Does the spec address the quest title and
@@ -108,11 +111,7 @@ Symmetrically, an *accurate* reference to a seam that does not deliver the
 behavior the spec describes is **Major** too — planning rests on the mechanism
 being sound, not merely on the citation being real.
 
-A load-bearing decision reached with the human at the threshold — a mechanism,
-constraint, or approach the conversation explicitly settled — that the spec
-silently drops or contradicts is **Major**: a reversed decision becomes a wrong
-implementation however cleanly the spec reads. Check the spec against the
-recorded dialogue, not your assumption of what was decided.
+A load-bearing decision reached with the human at the threshold — a mechanism, constraint, or approach the conversation explicitly settled — that the spec drops or contradicts is **Major** unless `{{ quest.home }}/deferred.md` carries a matching `— needs-decision:` open item for it. With the item, note it non-blocking; the user ratifies it at the merge gate. A review marker such as "*(decided during review)*" is not that record. Check the spec against the recorded dialogue, not your assumption of what was decided.
 
 The Decisions summary may carry review markers — "*(decided during review)*" and
 "*(user-confirmed during review)*". These are an **expected** part of the spec's

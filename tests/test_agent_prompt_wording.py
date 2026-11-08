@@ -256,7 +256,7 @@ def test_spec_reviewer_checks_threshold_decision_fidelity() -> None:
     # it reads the clean threshold dialogue via imp log --step threshold
     assert "imp log {{ quest.id }} --step threshold" in body
     # the new Calibration paragraph classes a dropped/reversed decision as Major
-    assert "silently drops or contradicts is **Major**" in body
+    assert "drops or contradicts is **Major** unless" in body
     assert (
         "recorded dialogue, not your assumption of what was decided." in body
     )

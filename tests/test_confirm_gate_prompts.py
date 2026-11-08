@@ -144,6 +144,34 @@ def test_spec_reviewer_briefed_on_decision_markers() -> None:
     assert "meta-commentary" in text.lower()
 
 
+_REVIEWER_KEEP_FAITH = (
+    "confirm every load-bearing decision settled there survives into the spec, "
+    "or that its departure is recorded (see **Calibration**). A decision the "
+    "conversation reached that the spec drops or reverses without that record "
+    "misleads planning"
+)
+
+_REVIEWER_CALIBRATION = (
+    "A load-bearing decision reached with the human at the threshold — a "
+    "mechanism, constraint, or approach the conversation explicitly settled — "
+    "that the spec drops or contradicts is **Major** unless "
+    "`{{ quest.home }}/deferred.md` carries a matching `— needs-decision:` open "
+    "item for it. With the item, note it non-blocking; the user ratifies it at "
+    "the merge gate. A review marker such as \"*(decided during review)*\" is not "
+    "that record. Check the spec against the recorded dialogue, not your "
+    "assumption of what was decided."
+)
+
+
+def test_spec_reviewer_blocks_only_an_unrecorded_decision_departure() -> None:
+    text = (AGENTS / "spec-reviewer.md").read_text()
+    assert "silently drops" not in text
+    assert _REVIEWER_KEEP_FAITH in _flat(text)
+    assert _REVIEWER_CALIBRATION in _flat(text)
+    assert ("A review marker such as \"*(decided during review)*\" is not that "
+            "record.") in text
+
+
 def _plan_writer() -> str:
     return (AGENTS / "plan-writer.md").read_text()
 
