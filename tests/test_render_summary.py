@@ -1109,7 +1109,18 @@ def test_duration_renders_in_step_hue():
     rows = [_row("plan", "plan-writer", 90)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
-    assert "\x1b[34m1m 30s\x1b[0m" in line   # first hue: step-blue on the duration
+    assert "\x1b[94m1m 30s\x1b[0m" in line   # step hue (ansi bright blue) on the duration
+
+
+def test_ansi_summary_phase_and_step_rows_are_bright_blue():
+    rows = [_row("plan", "plan-writer", 90), _row("plan", "plan-review", 30)]
+    pal.set_theme("ansi")
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    assert "\x1b[1m\x1b[94mplan phase\x1b[0m" in out
+    review = next(ln for ln in out if "plan-review" in ln)
+    assert review.startswith("  \x1b[94mplan-review")
+    assert "\x1b[94m   30s\x1b[0m" in review
+    assert not any("\x1b[34m" in ln for ln in out)
 
 
 def test_token_and_cost_columns_carry_no_color():
@@ -1123,7 +1134,7 @@ def test_token_and_cost_columns_carry_no_color():
     # Duration is hued for contrast, but the token/cost columns stay default
     # foreground: the line ends with the plain "12.0k  345  ~$0.34" and no SGR reset.
     assert line.endswith("  12.0k  345  ~$0.34")
-    assert "\x1b[34m1m 30s\x1b[0m" in line
+    assert "\x1b[94m1m 30s\x1b[0m" in line
 
 
 def test_errored_step_duration_follows_error_color():

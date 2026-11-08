@@ -118,6 +118,17 @@ def test_node_colors_calm_scheme() -> None:
     assert pal.NODE_COLORS["lifecycle"] == ("wordmark",)
 
 
+def test_ansi_phase_and_step_are_bright_blue_truecolor_untouched() -> None:
+    assert pal._ANSI["blue"] == "\x1b[94m"
+    assert pal._ANSI["step"] == "\x1b[94m"
+    assert pal.ansi("x", *pal.NODE_COLORS["phase"]) == "\x1b[1m\x1b[94mx\x1b[0m"
+    assert pal.ansi("x", *pal.NODE_COLORS["step"]) == "\x1b[1m\x1b[94mx\x1b[0m"
+    assert pal.theme_escapes("dark")["blue"] == "\x1b[38;2;120;152;190m"
+    assert pal.theme_escapes("dark")["step"] == "\x1b[38;2;112;144;176m"
+    assert pal.theme_escapes("light")["blue"] == "\x1b[38;2;30;68;126m"
+    assert pal.theme_escapes("light")["step"] == "\x1b[38;2;53;85;128m"
+
+
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     # agent = () means pal.ansi returns prose unwrapped even when color is on.
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"

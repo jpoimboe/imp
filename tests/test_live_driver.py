@@ -2680,10 +2680,11 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     # Flat order: id · title · phase · plan · counter · (model bar).
     assert "\x1b[33m" in parts[0]                                  # id: wordmark gold
     assert "\x1b[" not in parts[1]                                 # title: unpainted default fg
-    assert "\x1b[34m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: step-blue
-    assert "\x1b[34m" in parts[3]                                  # plan: step-blue
-    assert "\x1b[34m" in parts[4]                                  # counter: step-blue
-    assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
+    assert "\x1b[1m\x1b[94m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: bold 94
+    assert "\x1b[1m\x1b[94m" in parts[3]                                  # plan: bold 94
+    assert "\x1b[1m\x1b[94m" in parts[4]                                  # counter: bold 94
+    assert "\x1b[90m" in parts[5] and "\x1b[94m" not in parts[5]          # model: gray
+    assert "\x1b[34m" not in row
 
 
 def test_compose_position_row_leads_with_the_project_segment() -> None:
@@ -2722,7 +2723,7 @@ def test_compose_position_row_project_is_gray_like_the_model_segment() -> None:
     assert parts[0] == "\x1b[90mimp\x1b[0m"        # project: gray, model's tone
     assert "\x1b[33m" in parts[1]                  # id: still wordmark gold
     assert "\x1b[" not in parts[2]                 # title: still unpainted
-    assert "\x1b[34m" in parts[3]                  # phase: still step-blue
+    assert "\x1b[1m\x1b[94m" in parts[3]           # phase: still bold bright blue
     assert "\x1b[90m" in parts[-1]                 # model: the same gray
 
 

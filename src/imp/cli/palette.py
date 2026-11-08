@@ -22,8 +22,8 @@ _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m",
 # the only theme that's correct without knowing the terminal's background.
 _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
-    "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[34m",
+    "blue": "\x1b[94m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
+    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[94m",
     "wordmark": "\x1b[33m",  # 16-color has no warm gold; plain yellow is closest
 }
 

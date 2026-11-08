@@ -179,7 +179,7 @@ def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
     assert lines[1] == "\x1b[2m                           tokens       quota\x1b[0m"
     assert lines[2] == "\x1b[2m                  time      in    out  weekly*\x1b[0m"
     # The step's own cells stay undimmed; the subagent's go dim as one block.
-    assert lines[4] == ("  \x1b[34mtask-lead   \x1b[0m  \x1b[34m1m 30s\x1b[0m"
+    assert lines[4] == ("  \x1b[94mtask-lead   \x1b[0m  \x1b[94m1m 30s\x1b[0m"
                         "    1.1M  23.0k   1.12%")
     assert lines[5] == ("    \x1b[35m↳ explorer\x1b[0m  \x1b[2m   45s\x1b[0m"
                         "  \x1b[2m100.0k   2.0k   0.15%\x1b[0m")
