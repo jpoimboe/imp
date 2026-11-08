@@ -67,6 +67,74 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
     assert REWORK_RESULT_FRAME in text
 
 
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    end = text.find("\n## ", start + len(heading))
+    return text[start:] if end == -1 else text[start:end]
+
+
+_FINALIZER_DECISIONS_SECTION = """## Decisions reached with the user
+
+A decision the brainstorm settled with the user binds the spec on every turn, first write and rework
+alike. Check it against `imp log {{ quest.id }} --step threshold`.
+
+- Dropped or drifted by mistake → restore it.
+- New information shows it is wrong → make the better call, record the rationale in the Decisions
+  summary, and append one open item for the user to ratify at the merge gate (reader form under
+  **Surfacing a decision you cannot resolve**):
+  `- [ ] DEFERRED spec-finalizer: <decision made with the user> → <what the spec does instead>
+  [scope: quest] — needs-decision: <the new information>`
+
+Never yield for it. A departure with no open item is a defect the reviewer blocks."""
+
+_FINALIZER_ESCALATION = (
+    "**Escalate by ending your turn with the question** only when the decision is "
+    "genuinely the user's to make: the finding exposes a real fork in *user intent* "
+    "— plausible readings with materially different outcomes that nothing in the "
+    "brainstorm, spec, or codebase settles. A departure from a decision already "
+    "reached with the user never qualifies; it follows **Decisions reached with "
+    "the user**."
+)
+
+
+def test_spec_finalizer_verifies_decision_claims_against_dialogue() -> None:
+    rework = _flat(_section(_spec_writer(), "## Rework Resumption"))
+    assert (
+        "use `read_file`/`grep` to check any code claim, and "
+        "`imp log {{ quest.id }} --step threshold` (the brainstorm dialogue) to "
+        "check a claim about what was decided."
+    ) in rework
+
+
+def test_spec_finalizer_routes_user_decision_departures_to_merge_gate() -> None:
+    text = _spec_writer()
+    assert "## Decisions reached with the user" in text
+    assert text.index("## Decisions reached with the user") < text.index(
+        "## Ask vs. decide")
+    assert _flat(_FINALIZER_DECISIONS_SECTION) in _flat(text)
+    # the deferred line form sits on one line so an agent can copy it whole
+    assert (
+        "`- [ ] DEFERRED spec-finalizer: <decision made with the user> → <what the "
+        "spec does instead> [scope: quest] — needs-decision: <the new information>`"
+    ) in text
+
+
+def test_spec_finalizer_escalates_only_on_a_user_intent_fork() -> None:
+    text = _spec_writer()
+    assert "user-stated requirement" not in text
+    ask = _section(text, "## Ask vs. decide")
+    assert "conflicting directives" not in ask
+    assert _FINALIZER_ESCALATION in _flat(ask)
+    for kept in ("*(decided during review)*", "*(user-confirmed during review)*",
+                 "Escalate by ending your turn with the question",
+                 "decide and record"):
+        assert kept in ask, kept
+
+
 def test_spec_reviewer_briefed_on_decision_markers() -> None:
     text = (AGENTS / "spec-reviewer.md").read_text()
     assert "*(decided during review)*" in text
@@ -74,6 +142,34 @@ def test_spec_reviewer_briefed_on_decision_markers() -> None:
     assert "expected" in text.lower()
     # must not be flagged as a placeholder/meta-commentary defect
     assert "meta-commentary" in text.lower()
+
+
+_REVIEWER_KEEP_FAITH = (
+    "confirm every load-bearing decision settled there survives into the spec, "
+    "or that its departure is recorded (see **Calibration**). A decision the "
+    "conversation reached that the spec drops or reverses without that record "
+    "misleads planning"
+)
+
+_REVIEWER_CALIBRATION = (
+    "A load-bearing decision reached with the human at the threshold — a "
+    "mechanism, constraint, or approach the conversation explicitly settled — "
+    "that the spec drops or contradicts is **Major** unless "
+    "`{{ quest.home }}/deferred.md` carries a matching `— needs-decision:` open "
+    "item for it. With the item, note it non-blocking; the user ratifies it at "
+    "the merge gate. A review marker such as \"*(decided during review)*\" is not "
+    "that record. Check the spec against the recorded dialogue, not your "
+    "assumption of what was decided."
+)
+
+
+def test_spec_reviewer_blocks_only_an_unrecorded_decision_departure() -> None:
+    text = (AGENTS / "spec-reviewer.md").read_text()
+    assert "silently drops" not in text
+    assert _REVIEWER_KEEP_FAITH in _flat(text)
+    assert _REVIEWER_CALIBRATION in _flat(text)
+    assert ("A review marker such as \"*(decided during review)*\" is not that "
+            "record.") in text
 
 
 def _plan_writer() -> str:
