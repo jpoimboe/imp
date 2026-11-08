@@ -69,18 +69,19 @@ bookkeeping. Ask the CLI instead:
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
   completed quests; `--all` adds abandoned and archived quests, `--json` emits
   the board as a structured array.
-- `imp show <id>` — a quest's card: status, why it halted, current step, intent,
-  summary, and the run ledger — a `run:` line of time, tokens, and charge (the
-  run's share of the weekly quota window, or its cost when that window is
-  unmeasurable), `workflow:`, and the per-step `ledger:` table (`show <id> spec`
-  for the raw spec, `show <id> verify` for the last failing gate run, `--json` for
-  a structured card, no ledger).
+- `imp show <id>` — a quest's card: status, why it halted, current step, `--var`
+  values (`vars:`), intent, summary, and the run ledger — a `run:` line of time,
+  tokens, and charge (the run's share of the weekly quota window, or its cost
+  when that window is unmeasurable), `workflow:`, and the per-step `ledger:`
+  table minus idle steps (`show <id> spec` for the raw spec, `show <id> verify`
+  for the last failing gate run, `--json` for a structured card with every
+  effective var, no ledger).
 - `imp search <query>` — case-insensitive substring search across in-flight,
   backlog, and history quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;
-  `--step <name>` scopes it to one step, `-s` swaps the story for the per-step
-  ledger `imp show` also carries (rows show labels, `--step` takes ids), and owns
-  its windowing and `--md`/`--html` export.
+  `--step <name>` scopes it to one step, `-s` swaps the story for the full
+  per-step ledger, idle steps included (rows show labels, `--step` takes ids),
+  and owns its windowing and `--md`/`--html` export.
 - `imp events <id>` — the agent-facing digest, where event content actually
   lives: bare prints an index (steps, subagents, types); add a leaf selector
   (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact

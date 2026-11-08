@@ -127,16 +127,69 @@ def test_show_json_carries_the_raw_pause_token(
     assert data["pause_reason"] == "detached"      # the token, not the card phrase
 
 
-@pytest.mark.parametrize("token", ["ctrl-c", "ctrl-d"])
-def test_show_card_prints_a_keystroke_interrupt_as_its_bare_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str,
+@pytest.mark.parametrize(("token", "phrase"), [
+    ("ctrl-c", "Ctrl-C"),
+    ("ctrl-d", "Ctrl-D"),
+])
+def test_show_card_names_a_keystroke_interrupt_in_display_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str, phrase: str,
 ) -> None:
     _seed_control(tmp_path)
     _seed_quest(tmp_path, status="paused",
                 events=[_paused(reason="interrupt", interrupt_reason=token)])
     lines = _run(monkeypatch, tmp_path, "show", _QID).splitlines()
     i = lines.index(_status_line("paused"))
-    assert lines[i + 1] == _reason_line(token)
+    assert lines[i + 1] == _reason_line(phrase)
+
+
+_CARD_REASONS = [
+    ("ctrl-d", "Ctrl-D"),
+    ("ctrl-c", "Ctrl-C"),
+    ("pause", "/pause"),
+    ("sighup", "SIGHUP"),
+    ("sigquit", "SIGQUIT"),
+    ("sigterm", "interrupted"),
+    ("detached", "the terminal went away"),
+    ("max_loops", "a step hit its loop limit"),
+    ("quota", "quota exhausted"),
+    ("reauth_needed", "provider login expired"),
+    ("sandbox_spawn_failed", "the sandbox could not start"),
+    ("terminated", "agent error"),
+    ("internal_error", "internal error"),
+    ("api", "API error"),
+    ("context_window", "context limit"),
+    ("config", "config error"),
+    ("content_filter", "content filtered"),
+    ("loop", "loop detected"),
+    ("unknown", "unknown error"),
+    ("retry_ceiling", "retries exhausted"),
+    ("auth", "auth failed"),
+    ("auth_terminal", "auth failed"),
+    ("rate_limit", "rate limited"),
+    ("network", "network error"),
+    ("stalled", "stalled"),
+    ("agent_output_missing", "no output"),
+    ("script_blocked", "a script step was blocked"),
+    ("clean_tree", "a step left uncommitted changes"),
+    ("unknown_step", "the current step is missing from the workflow"),
+    ("interrupt", "interrupted"),
+    ("model-override", "model switch"),
+    ("compact", "/compact"),
+    ("awaiting_turn", "waiting for its turn to merge"),
+]
+
+
+@pytest.mark.parametrize(("token", "phrase"), _CARD_REASONS)
+def test_show_card_phrases_every_halt_token_and_json_keeps_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str, phrase: str,
+) -> None:
+    _seed_control(tmp_path)
+    _seed_quest(tmp_path, status="paused", events=[_paused(reason=token)])
+    lines = _run(monkeypatch, tmp_path, "show", _QID).splitlines()
+    i = lines.index(_status_line("paused"))
+    assert lines[i + 1] == _reason_line(phrase)
+    data = json.loads(_run(monkeypatch, tmp_path, "show", _QID, "--json"))
+    assert data["pause_reason"] == token
 
 
 @pytest.mark.parametrize(("reason", "phrase"), [

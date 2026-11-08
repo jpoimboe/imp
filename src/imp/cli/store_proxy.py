@@ -79,7 +79,8 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
             "parent": c.parent,
             "depends_on": list(c.depends_on), "intent": c.intent,
             "seed_opening": c.seed_opening,
-            "summary": _b64e(c.summary), "vars": dict(c.vars)}
+            "summary": _b64e(c.summary), "vars": dict(c.vars),
+            "seeded_vars": dict(c.seeded_vars)}
 
 
 def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
@@ -95,7 +96,8 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         parent=d["parent"],
         depends_on=list(d["depends_on"]), intent=d["intent"],
         seed_opening=d["seed_opening"],
-        summary=_b64d(d["summary"]), vars=dict(d["vars"]))
+        summary=_b64d(d["summary"]), vars=dict(d["vars"]),
+        seeded_vars=dict(d["seeded_vars"]))
 
 
 def _hit_to_wire(h: SearchHit) -> dict[str, Any]:

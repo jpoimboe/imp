@@ -107,6 +107,15 @@ _USAGE_EVENTS: list[dict[str, object]] = [
 
 _NO_STEP_EVENTS: list[dict[str, object]] = [_USAGE_EVENTS[0]]
 _STEP_ONLY_EVENTS: list[dict[str, object]] = _USAGE_EVENTS[1:]
+_IDLE_GATE_EVENTS: list[dict[str, object]] = [
+    *_USAGE_EVENTS[:4],
+    {"type": "step_started", "timestamp": "2026-01-01T00:01:35+00:00",
+     "agent_id": None, "payload": {"step": "plan-gate", "phase": "plan"}},
+    {"type": "step_completed", "timestamp": "2026-01-01T00:01:35+00:00",
+     "agent_id": None,
+     "payload": {"step": "plan-gate", "action": {"verb": "continue"}}},
+    *_USAGE_EVENTS[4:],
+]
 
 
 def _quest(control: Path, slug: str, *, events: list[dict[str, object]],
@@ -154,7 +163,7 @@ def test_the_run_field_restates_the_ledger_total_row(
     """Spec AC 1 + AC 2: the `run:` line sits between `last activity:` and
     `workflow:`, its four segments are cross-checked against `imp log -s`'s
     own total row, and the fixture's expected value is additionally pinned."""
-    slug = _setup(tmp_path, monkeypatch, _USAGE_EVENTS)
+    slug = _setup(tmp_path, monkeypatch, _IDLE_GATE_EVENTS)
     assert main(["show", slug, "--no-pager"]) == 0
     card = _out(capsys)
     assert main(["log", "-s", slug, "--no-pager"]) == 0
@@ -176,14 +185,14 @@ def test_the_run_field_restates_the_ledger_total_row(
 
 
 @pytest.mark.parametrize("color", [False, True], ids=["plain", "color"])
-def test_the_ledger_section_is_the_log_summary_minus_its_header_line(
+def test_the_ledger_section_is_the_log_summary_minus_its_header_and_idle_rows(
     color: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Spec AC 3: the section is `imp log -s`'s own output with the run header line
-    dropped — same palette, same rows, under color on and off alike; and it is last
-    on the card, after the `summary:` block."""
-    slug = _setup(tmp_path, monkeypatch, _USAGE_EVENTS,
+    """The section is `imp log -s`'s own output with the run header line and the
+    idle rows dropped — every surviving line byte-identical (widths, hues), under
+    color on and off alike; and it is last on the card, after `summary:`."""
+    slug = _setup(tmp_path, monkeypatch, _IDLE_GATE_EVENTS,
                   summary="Shipped the widget.\n")
     if color:
         monkeypatch.delenv("NO_COLOR", raising=False)
@@ -199,7 +208,9 @@ def test_the_ledger_section_is_the_log_summary_minus_its_header_line(
     assert card.count(header) == 1
     idx = card.index(header)
     assert card[idx - 1] == ""
-    assert card[idx:] == [header, *log[1:]]
+    gate = [ln for ln in log if "plan-gate" in ln]
+    assert len(gate) == 1
+    assert card[idx:] == [header, *[ln for ln in log[1:] if ln not in gate]]
     assert card.index(pal.ansi("summary:", "dim", enabled=color)) < idx
 
 
@@ -403,6 +414,24 @@ _LABELED_LEDGER = [
     "  total                              58m 50s   —    —     —",
 ]
 
+_LABELED_CARD_LEDGER = [
+    "                                        time  in  out  cost",
+    "scoping phase",
+    "  chatting                            5m 54s   —    —     —",
+    "    ↳ explorer (exploring codebase)   1m 37s   —    —     —",
+    "spec phase",
+    "  writing spec                           53s   —    —     —",
+    "  reviewing spec                      5m 31s   —    —     —",
+    "  addressing spec review feedback     1m 53s   —    —     —",
+    "planning phase · plan 1/3",
+    "  writing plan                       25m 50s   —    —     —",
+    "implementation phase · plan 1/3",
+    "  task 2/2                           18m 11s   —    —     —",
+    "  fixing test failures                   38s   —    —     —",
+    "",
+    "  total                              58m 50s   —    —     —",
+]
+
 _PRE_UPGRADE_EVENTS: list[dict[str, object]] = [
     *_visit(0, 60, "threshold", "threshold", None, None),
     *_visit(60, 0, "scope-code-check", "threshold", None, None),
@@ -426,7 +455,7 @@ def test_show_and_log_summary_render_the_labeled_ledger(
     card = _out(capsys)
     assert log[1:1 + len(_LABELED_LEDGER)] == _LABELED_LEDGER
     start = card.index("ledger:") + 1
-    assert card[start:start + len(_LABELED_LEDGER)] == _LABELED_LEDGER
+    assert card[start:start + len(_LABELED_CARD_LEDGER)] == _LABELED_CARD_LEDGER
 
 
 def test_a_pre_upgrade_log_shows_raw_ids_under_the_phase_fallback(
