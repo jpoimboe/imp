@@ -44,6 +44,7 @@ from imp.engine.agent_run import (
     drain_all_interjects_at_resume,
     last_assistant_text,
     most_recent_assistant_text,
+    parked_question_text,
 )
 from imp.engine.reincarnation import (
     handoff_instruction,
@@ -182,7 +183,7 @@ class PushSession:
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
                     resume_cause=invocation.resume_cause,
-                    last_agent_message=last_assistant_text(messages),
+                    last_agent_message=parked_question_text(messages),
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
                 if source == "nudge":

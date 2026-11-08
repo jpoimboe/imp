@@ -2361,3 +2361,77 @@ async def test_drive_invocation_dependency_wait_is_not_journaled(
     # A control signal: never journaled, and terminal — the trailing
     # agent_result was never drained.
     assert log.types == ["thinking"]
+
+
+def _turn(role: str, text: str | None = None) -> Message:
+    return Message(role=role, content=() if text is None else (TextBlock(text=text),))
+
+
+_PARKED_Q = "Which DB should I use?"
+
+
+@pytest.mark.parametrize("seed", [
+    [_turn("user", "go"), _turn("assistant", _PARKED_Q),
+     "NUDGE", _turn("assistant", "WAITING")],
+    [_turn("user", "go"), _turn("assistant", _PARKED_Q),
+     "NUDGE", _turn("assistant", "ok, waiting on you")],
+    [_turn("user", "go"), _turn("assistant", _PARKED_Q),
+     "NUDGE", _turn("assistant"), _turn("assistant", "WAITING")],
+    [_turn("user", "go"), _turn("assistant"), _turn("assistant", _PARKED_Q),
+     "NUDGE", _turn("assistant", "WAITING")],
+], ids=["waiting", "other_reply", "thinking_fragment_reply", "thinking_fragment_question"])
+def test_parked_question_text_skips_back_over_the_completion_nudge(seed) -> None:
+    from imp.engine.agent_run import parked_question_text
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    msgs = [_turn("user", COMPLETION_NUDGE) if m == "NUDGE" else m for m in seed]
+    assert parked_question_text(msgs) == _PARKED_Q
+
+
+@pytest.mark.parametrize("msgs, newest", [
+    ([_turn("user", "x"), _turn("assistant", _PARKED_Q)], _PARKED_Q),
+    ([_turn("assistant", "a"), _turn("user", "other text"), _turn("assistant", "b")], "b"),
+    ([_turn("assistant", "a"), _turn("assistant", "b"), _turn("assistant")], "b"),
+    ([], ""),
+], ids=["user_then_question", "non_nudge_user_between", "trailing_empty", "empty"])
+def test_parked_question_text_without_a_nudge_matches_last_assistant_text(
+    msgs, newest,
+) -> None:
+    from imp.engine.agent_run import last_assistant_text, parked_question_text
+
+    assert parked_question_text(msgs) == newest == last_assistant_text(msgs)
+
+
+def test_parked_question_text_requires_the_exact_nudge() -> None:
+    from imp.engine.agent_run import parked_question_text
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    msgs = [_turn("assistant", _PARKED_Q), _turn("user", COMPLETION_NUDGE + " "),
+            _turn("assistant", "WAITING")]
+    assert parked_question_text(msgs) == "WAITING"
+
+
+def test_parked_question_text_is_empty_when_the_nudged_turn_said_nothing() -> None:
+    from imp.engine.agent_run import parked_question_text
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    msgs = [_turn("user", "go"), _turn("assistant", "stale prose"), _turn("user", "more"),
+            _turn("assistant"), _turn("user", COMPLETION_NUDGE), _turn("assistant", "WAITING")]
+    assert parked_question_text(msgs) == ""
+
+
+def test_parked_question_text_takes_the_nudged_turns_newest_text() -> None:
+    from imp.engine.agent_run import parked_question_text
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    msgs = [_turn("assistant", "preamble"), _turn("assistant", _PARKED_Q), _turn("assistant"),
+            _turn("user", COMPLETION_NUDGE), _turn("assistant", "WAITING")]
+    assert parked_question_text(msgs) == _PARKED_Q
+
+
+def test_parked_question_text_is_empty_when_nothing_precedes_the_nudge() -> None:
+    from imp.engine.agent_run import parked_question_text
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    assert parked_question_text([_turn("user", COMPLETION_NUDGE),
+                                 _turn("assistant", "WAITING")]) == ""

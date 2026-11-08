@@ -16,7 +16,9 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.agents.runner import Message, TextBlock
 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+from imp.engine.feedback import COMPLETION_NUDGE
 from imp.paths import project_state_dir
 from tests.async_wait import HANG_BACKSTOP, wait_until
 
@@ -77,20 +79,31 @@ class _Coord:
         pass
 
 
-def _seed_parked_transcript(inv_dir: Path) -> None:
-    """The crash-at-a-question shape: the step's transcript ends on the agent's own
-    question with nothing after it -> classify_resume AWAITING_USER."""
-    from imp.agents.runner import Message, TextBlock
+def _turn(role: str, text: str | None = None) -> Message:
+    return Message(role=role, content=() if text is None else (TextBlock(text=text),))
+
+
+# The crash-at-a-question shape: the transcript ends on the agent's own question
+# with nothing after it -> classify_resume AWAITING_USER.
+_PARKED = (_turn("user", "go"), _turn("assistant", _QUESTION))
+_NUDGED = (_turn("user", "go"), _turn("assistant", _QUESTION),
+           _turn("user", COMPLETION_NUDGE), _turn("assistant", "WAITING"))
+# A thinking claude model persists its thinking-only chunk as an empty assistant message.
+_NUDGED_THINKING = (_turn("user", "go"), _turn("assistant", _QUESTION),
+                    _turn("user", COMPLETION_NUDGE), _turn("assistant"),
+                    _turn("assistant", "WAITING"))
+
+
+def _seed_parked_transcript(inv_dir: Path, seed: tuple[Message, ...]) -> None:
     from imp.agents.transcript import Transcript
 
     transcript = Transcript(inv_dir / "transcript.jsonl")
-    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
-    transcript.append(
-        Message(role="assistant", content=(TextBlock(text=_QUESTION),)))
+    for m in seed:
+        transcript.append(m)
 
 
 async def _resume_at_the_gate(
-    tmp_path: Path, solicit: Any, coord: Any,
+    tmp_path: Path, solicit: Any, coord: Any, seed: tuple[Message, ...] = _PARKED,
 ) -> tuple[Any, list[Any]]:
     """Resume a claude step parked at a question with resume_should_continue=False
     — the disposition a crash at a gate now arms. Returns (event log, transcript)."""
@@ -104,7 +117,7 @@ async def _resume_at_the_gate(
 
     inv_dir = tmp_path / "step"
     inv_dir.mkdir(parents=True, exist_ok=True)
-    _seed_parked_transcript(inv_dir)
+    _seed_parked_transcript(inv_dir, seed)
 
     scripted = [
         assistant(cc_text("thanks"),
@@ -211,3 +224,19 @@ async def test_headless_resume_with_no_message_parks_at_the_gate() -> None:
             assert gates[0]["payload"]["last_agent_message"] == _QUESTION
             assert "reply" not in resolved       # parked: nothing was answered
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("seed", [_NUDGED, _NUDGED_THINKING],
+                         ids=["text_reply", "thinking_fragment_reply"])
+async def test_resume_after_the_completion_nudge_re_poses_the_real_question(
+    tmp_path: Path, seed: tuple[Message, ...],
+) -> None:
+    """A run parked on WAITING after the completion nudge re-opens its gate on the
+    question the agent actually asked, not on the WAITING reply."""
+    async def _solicit(prompt: str, interrupt: bool = False) -> str:
+        return _ANSWER
+
+    log, _ = await _resume_at_the_gate(tmp_path, _solicit, _Coord(), seed)
+    gates = [e for e in log.read() if e["type"] == "awaiting_user_input"]
+    assert [g["payload"]["last_agent_message"] for g in gates] == [_QUESTION]

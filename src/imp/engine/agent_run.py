@@ -59,6 +59,7 @@ from imp.engine.completion import (
     build_inline_solicit as build_inline_solicit,
 )
 from imp.engine.env import ALL_DECIDED, TestGates, Undecided
+from imp.engine.feedback import COMPLETION_NUDGE
 from imp.engine.types import AgentDef, OutputField, ResumeCause
 
 if TYPE_CHECKING:
@@ -317,6 +318,32 @@ def last_assistant_text(messages: list[Message]) -> str:
             if text:
                 return text
     return ""
+
+
+def _message_text(m: Message) -> str:
+    return "".join(b.text for b in m.content if isinstance(b, TextBlock))
+
+
+def _assistant_run_start(messages: list[Message], end: int) -> int:
+    """Index of the first message in the consecutive assistant run ending just before `end`."""
+    i = end
+    while i > 0 and messages[i - 1].role == "assistant":
+        i -= 1
+    return i
+
+
+def parked_question_text(messages: list[Message]) -> str:
+    """last_assistant_text, but a COMPLETION_NUDGE reply yields the nudged turn's text."""
+    reply = next((i for i in range(len(messages) - 1, -1, -1)
+                  if messages[i].role == "assistant" and _message_text(messages[i])), None)
+    if reply is None:
+        return ""
+    nudge = _assistant_run_start(messages, reply) - 1
+    if (nudge < 0 or messages[nudge].role != "user"
+            or _message_text(messages[nudge]) != COMPLETION_NUDGE):
+        return _message_text(messages[reply])
+    nudged_turn = messages[_assistant_run_start(messages, nudge):nudge]
+    return next((t for m in reversed(nudged_turn) if (t := _message_text(m))), "")
 
 
 def most_recent_assistant_text(messages: list[Message]) -> str:
