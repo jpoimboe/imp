@@ -14,6 +14,7 @@ import imp.cli.main as m
 import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.providers import BUILTIN_FLOOR
 from imp.providers.config import ProviderModel
 from tests.conftest import _seed_control
@@ -91,7 +92,26 @@ def test_an_unknown_provider_exits_two_before_touching_the_quest(
     assert rc == 2
     assert capsys.readouterr().err.strip() == (
         "imp: --provider: unknown provider 'bogus' "
-        "(available here: claude, codex; needs setup: anthropic, openai)")
+        "(also installed: claude, codex; needs setup: anthropic, openai)")
+    assert _pin_of(quest) is None
+
+
+def test_the_unknown_name_groups_come_from_the_quests_config(
+    tmp_path, monkeypatch, capsys, floor_availability,
+) -> None:
+    quest = _seed(tmp_path)
+    (project_state_dir(quest.control_root) / "config.yaml").write_text(
+        "providers: [codex]\n")
+    monkeypatch.chdir(tmp_path)
+    _stub_headless(monkeypatch)
+    floor_availability({"claude", "codex"})
+
+    rc = anyio.run(m._async_cmd_resume, _ns(provider="bogus"))
+
+    assert rc == 2
+    assert capsys.readouterr().err.strip() == (
+        "imp: --provider: unknown provider 'bogus' "
+        "(configured: codex; also installed: claude; needs setup: anthropic, openai)")
     assert _pin_of(quest) is None
 
 

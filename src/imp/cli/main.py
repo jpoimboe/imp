@@ -1189,7 +1189,10 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     provider_arg = getattr(args, "provider", None)
     if provider_arg is not None:
         from imp.providers import provider_choice_error
-        reason = provider_choice_error(provider_arg)
+        from imp.providers.effective import load_effective_config
+        reason = provider_choice_error(
+            provider_arg,
+            load_effective_config(control_root=_control_root()).config)
         if reason is not None:
             _emit_cli_error(f"--provider: {reason}")
             return 2
@@ -1510,7 +1513,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     provider_arg = getattr(args, "provider", None)
     if provider_arg is not None:
         from imp.providers import provider_choice_error
-        reason = provider_choice_error(provider_arg)
+        from imp.providers.effective import load_effective_config
+        reason = provider_choice_error(
+            provider_arg,
+            load_effective_config(control_root=quest.control_root).config)
         if reason is not None:
             _emit_cli_error(f"--provider: {reason}")
             return 2

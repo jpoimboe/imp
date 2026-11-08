@@ -101,8 +101,8 @@ def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
 
     assert handle_slash_line("/provider bogus", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == ("unknown provider 'bogus' (available here: claude, "
-                       "codex; needs setup: anthropic, openai)")
+    assert out[-1] == ("unknown provider 'bogus' (configured: claude; "
+                       "also installed: codex; needs setup: anthropic, openai)")
 
 
 def test_an_unavailable_name_is_refused_with_its_auth_hint(

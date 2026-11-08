@@ -142,7 +142,10 @@ def handle_slash_line(
             print_provider_roster,
         )
         from imp.providers import provider_choice_error
-        err = provider_choice_error(args) if args else None
+        from imp.providers.effective import load_effective_config
+        err = (provider_choice_error(
+            args, load_effective_config(control_root=quest.control_root).config)
+            if args else None)
         redundant = (bool(args) and err is None
                      and args == current_provider_for(quest))
         if args and err is None and not redundant and not pre_session:

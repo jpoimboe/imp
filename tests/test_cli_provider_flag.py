@@ -8,6 +8,7 @@ import pytest
 
 import imp.cli.main as main
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -87,7 +88,7 @@ def test_provider_defaults_to_none_on_both_parsers() -> None:
 
 
 @pytest.mark.anyio
-async def test_an_unknown_provider_exits_two_and_names_both_groups(
+async def test_an_unknown_provider_exits_two_and_names_the_groups(
     tmp_path, monkeypatch, capsys, floor_availability, stub_session,
 ) -> None:
     _seed_control(tmp_path)
@@ -97,10 +98,32 @@ async def test_an_unknown_provider_exits_two_and_names_both_groups(
     rc = await main._async_cmd_new(_ns(provider="bogus"))
 
     assert rc == 2
+    # anthropic is configured but not installed, so it sits under needs setup.
     assert capsys.readouterr().err == (
-        "imp: --provider: unknown provider 'bogus' (available here: claude, "
+        "imp: --provider: unknown provider 'bogus' (also installed: claude, "
         "codex; needs setup: anthropic, openai)\n")
     assert stub_session == []          # refused before any quest was created
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("leave_mode", ["new", "chat"])
+async def test_the_unknown_name_groups_come_from_the_control_roots_config(
+    tmp_path, monkeypatch, capsys, floor_availability, stub_session,
+    leave_mode,
+) -> None:
+    _seed_control(tmp_path)
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
+        "providers: [codex]\n")
+    monkeypatch.chdir(tmp_path)
+    floor_availability({"claude", "codex"})
+
+    rc = await main._async_cmd_new(_ns(provider="bogus"), leave_mode=leave_mode)
+
+    assert rc == 2
+    assert capsys.readouterr().err == (
+        "imp: --provider: unknown provider 'bogus' (configured: codex; "
+        "also installed: claude; needs setup: anthropic, openai)\n")
+    assert stub_session == []
 
 
 @pytest.mark.anyio
@@ -115,8 +138,8 @@ async def test_every_vendor_available_drops_the_needs_setup_clause(
 
     assert rc == 2
     assert capsys.readouterr().err == (
-        "imp: --provider: unknown provider 'bogus' (available here: anthropic, "
-        "openai, claude, codex)\n")
+        "imp: --provider: unknown provider 'bogus' (configured: anthropic; "
+        "also installed: openai, claude, codex)\n")
     assert stub_session == []
 
 
