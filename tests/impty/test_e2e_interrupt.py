@@ -13,13 +13,16 @@ from pathlib import Path
 import pytest
 
 from imp.cli.prompt import OPENING_HINTS
+from imp.engine.completion import INTERRUPT_STEER_HINT
 from imp.paths import project_state_dir
 from impty import TerminalSession
+from impty.journal import Journal
 from tests._live import _await_change_dir
 from tests.impty.e2e_support import (
     _MINIMAL_CONFIG,
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
+    E2E_RENDER_POLL_TIMEOUT,
     _flock_free,
     _git,
     _poll,
@@ -265,3 +268,78 @@ def test_sigint_hint_at_opening_prompt_under_a_non_exec_wrapper(tmp_path: Path) 
         assert rc == 130, "\n".join(rows)
         at = rows.index(hint)
         assert rows[at + 1:at + 3] == ["", f"{qid} · (unnamed) · discarded"], "\n".join(rows)
+
+
+def _quest_events(root: Path) -> list[dict]:
+    paths = list((project_state_dir(root) / "quests").glob("*/events.jsonl"))
+    if len(paths) != 1:
+        return []
+    return [json.loads(ln) for ln in paths[0].read_text().splitlines() if ln.strip()]
+
+
+def _cooperative_outcome(evs: list[dict]) -> str | None:
+    return next((e["payload"]["outcome"] for e in evs
+                 if e["type"] == "interrupt_delivered"
+                 and e["payload"]["tier"] == "cooperative"), None)
+
+
+def _sleep_alive(dur: str) -> bool:
+    # The bash tool runs the command via $IMP_COMMAND, so match the sleep child's own argv.
+    return subprocess.run(["pgrep", "-fx", f"sleep {dur}"],
+                          capture_output=True).returncode == 0
+
+
+@pytest.mark.parametrize("presses", [2, 1], ids=["force", "deadline"])
+def test_ctrl_c_force_quit_vs_deadline(tmp_path: Path, presses: int) -> None:
+    dur = f"30.{os.getpid()}{presses}"
+    script = {"interrupt": "hard_kill", "default": [
+        # bash alone in its turn: a same-turn complete_step would run instead of parking.
+        {"text": "working", "tools": [
+            {"name": "bash", "input": {"command": f"echo running; sleep {dur}"}}]},
+        {"text": "done", "tools": [
+            {"name": "complete_step", "input": {"status": "Success", "outcome": "ok"}}]},
+    ]}
+    root = tmp_path / "repo"
+    root.mkdir()
+    script_path = seed_minimal_repo(root, script=script)
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
+    jdir = tmp_path / "journal"
+    jdir.mkdir()
+
+    with TerminalSession([sys.executable, "-m", "imp", "new", "demo"],
+                         cwd=str(root), env=env, cols=80, rows=24,
+                         journal=Journal(jdir, 0)) as s:
+        assert _poll(lambda: _sleep_alive(dur), timeout=E2E_POLL_TIMEOUT), \
+            "\n".join(s.lines())
+        s.send_signal(signal.SIGINT)
+        t_first = time.monotonic()
+        assert _poll(lambda: any(e["type"] == "interrupt_delivery_started"
+                                 for e in _quest_events(root)), timeout=E2E_POLL_TIMEOUT)
+        assert _poll(lambda: "stopping…" in "\n".join(s.lines()), timeout=E2E_POLL_TIMEOUT)
+        if presses == 2:
+            # Force window is [1s, 2s) after the first press.
+            time.sleep(max(0.0, t_first + 1.2 - time.monotonic()))
+            s.send_signal(signal.SIGINT)
+        assert _poll(lambda: any(r.startswith("> " + INTERRUPT_STEER_HINT) for r in s.lines()),
+                     timeout=E2E_RENDER_POLL_TIMEOUT), "\n".join(s.lines())
+        assert s.is_alive()
+        # Landing precedes the 2s cooperative deadline; escalations are final only once it resolves.
+        assert _poll(lambda: _cooperative_outcome(_quest_events(root)) is not None
+                     and any(e["type"] == "interrupt_escalated" for e in _quest_events(root)),
+                     timeout=E2E_POLL_TIMEOUT)
+        evs = _quest_events(root)
+        reasons = [e["payload"]["reason"] for e in evs if e["type"] == "interrupt_escalated"]
+        forced_ack = "force-quitting…".encode() in (jdir / "pty-0.raw").read_bytes()
+        if presses == 2:
+            assert _cooperative_outcome(evs) == "ok", [e["type"] for e in evs]
+            assert reasons == ["second_gesture"]
+            assert forced_ack
+        else:
+            assert _cooperative_outcome(evs) == "timeout", [e["type"] for e in evs]
+            assert reasons == ["cooperative_timeout"]
+            assert not forced_ack
+        assert not _sleep_alive(dur)
+        s.send("\x04")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+        assert rc == 130, "\n".join(s.lines())
+        assert any("resume: imp resume" in r for r in s.lines()), "\n".join(s.lines())
