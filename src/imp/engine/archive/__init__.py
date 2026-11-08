@@ -21,7 +21,7 @@ from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import live_quest_ids
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir
 
 
 def archive_root(control_root: Path) -> Path:
@@ -269,6 +269,8 @@ def check_data_floor(control_root: Path) -> None:
     choke point every blob-backed operation passes, so no entry point can observe
     an un-migrated archive. Every other mismatch still refuses.
     """
+    if claimed_state_dir(control_root) is None:
+        return
     stored = _read_data_version(control_root)
     if stored == _UPGRADABLE_FROM:
         _upgrade_to_current(control_root)
@@ -279,6 +281,8 @@ def check_data_floor(control_root: Path) -> None:
 
 def check_index_floor(control_root: Path) -> None:
     """Refuse an index query whose schema floor is newer than this install knows."""
+    if claimed_state_dir(control_root) is None:
+        return
     stored = _read_user_version(control_root)
     if stored > index._SCHEMA_VERSION:
         raise ArchiveMismatch(
@@ -309,6 +313,8 @@ def ensure_current(control_root: Path) -> None:
     A marker at _UPGRADABLE_FROM is migrated first via _upgrade_to_current, so
     index-only readers see migrated data.
     """
+    if claimed_state_dir(control_root) is None:
+        return
     root = archive_root(control_root)
     if root.exists() and not os.access(root, os.W_OK):
         return

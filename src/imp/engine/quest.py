@@ -21,7 +21,7 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir
 
 LAYOUT_VERSION = 23  # bump in the SAME commit as any breaking quest-home layout/schema change
 
@@ -69,7 +69,10 @@ def _imp_commit(control_root: Path) -> str:
 def live_quest_ids(control_root: Path) -> list[str]:
     """Live quest-home ids: dirs under <state dir>/quests/ holding a quest.json
     (archive excluded)."""
-    root = project_state_dir(control_root) / "quests"
+    state = claimed_state_dir(control_root)
+    if state is None:
+        return []
+    root = state / "quests"
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir()

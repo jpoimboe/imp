@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir
 from imp.providers.config import Config, parse_config_layer
 from imp.providers.memory import validate_memory_tree
 from imp.providers.paths import global_config_path, project_rename_pending
@@ -142,7 +142,8 @@ def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfi
       quest worktree. Skipped when control_root is None; raises when only the
       pre-rename `imp/project.yaml` is present.
     - global layer: `global_config_path()` (live).
-    - local layer: `project_state_dir(control_root)/config.yaml` (live).
+    - local layer: `claimed_state_dir(control_root)/config.yaml` (live), skipped
+      while the project is unclaimed.
 
     control_root=None is floor + global only (`cli/pythonpath_detect.py` and the
     quest-less subagent fallback rely on that).
@@ -157,8 +158,8 @@ def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfi
     g = parse_config_layer(global_config_path())
     if g is not None:
         layers.append(g)
-    if control_root is not None:
-        local = parse_config_layer(project_state_dir(control_root) / "config.yaml")
+    if control_root is not None and (state := claimed_state_dir(control_root)) is not None:
+        local = parse_config_layer(state / "config.yaml")
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
