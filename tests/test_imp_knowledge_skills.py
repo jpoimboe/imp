@@ -469,3 +469,14 @@ def test_knowledge_and_introspection_name_the_verify_artifact_view() -> None:
     assert "`imp show <id> verify` for the last failing test-gate run" in intro
     # the cross-quest reader list enumerates the facets a second time
     assert "Add `spec` for the raw spec, `verify` for the last failing gate run" in intro
+
+
+def test_show_card_vars_are_documented_as_var_seeded_only() -> None:
+    intro = " ".join(_introspection_doc().split())
+    assert ("A quest card shows a `vars:` line of the variables you set with "
+            "`--var`") in intro
+    assert "A quest's `--json` carries its full effective set under a `vars` key" in intro
+    assert "effective workflow variables;" not in intro
+    knowledge = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert "`--var` values (`vars:`)" in knowledge
+    assert "`--json` for a structured card with every effective var" in knowledge

@@ -92,15 +92,17 @@ A quest that completed with a recorded merge SHA also shows a `merge_commit:`
 line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
 when the quest has none). A quest halted as paused or error shows a
 `reason:` line beneath `status:` naming why it stopped; `--json` carries the
-raw token as `pause_reason`. A running quest shows a `vars:` line of its
-effective workflow variables; one still in the backlog shows the overrides it
-was filed with, or no line at all if it was filed with none. Values are never
+raw token as `pause_reason`. A quest card shows a `vars:` line of the
+variables you set with `--var`, and a backlog card the ones it was filed
+with; either shows no line at all when there are none. Values are never
 clipped: the line wraps between entries onto indented continuation lines at
 the terminal width, and stays on one line when piped, so `imp show <id> |
 grep vars:` returns it whole. A var whose value spans several lines or runs
 past 80 characters leaves that line and gets its own `vars.<name>:` section
 holding the value verbatim — after `summary:` on a quest card, after
-`intent:` on a backlog card. `--json` carries the same under a `vars` key.
+`intent:` on a backlog card. A quest's `--json` carries its full effective
+set under a `vars` key — workflow defaults, config overrides, and vars the
+engine sets as it runs — and a backlog quest's carries its filed values.
 Add a subcommand to narrow to one facet:
 `imp show <id> spec` for the raw spec and `imp show <id> verify` for the last
 failing test-gate run, or add `--json` to get the overview card as a structured
