@@ -411,7 +411,7 @@ _WORKTREE_SETUP_COMMENT = (
 )
 
 _PYTHONPATH_BLOCK_COMMENT = (
-    "\n# Worktree-relative import roots prepended to gate/agent\n"
+    "\n# Worktree-relative Python import paths prepended to gate/agent\n"
     "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
     "# to the worktree under test, not the stale main checkout.\n"
 )
@@ -427,7 +427,7 @@ def _memory_pointer() -> str:
 
 def _pythonpath_hint() -> str:
     return (
-        "\n# pythonpath: worktree-relative import roots prepended to the gate/agent\n"
+        "\n# pythonpath: worktree-relative Python import paths prepended to the gate/agent\n"
         "# subprocess PYTHONPATH. Set this when this project is installed editable\n"
         "# (pip install -e) and imported by package name — without it imp's test gate\n"
         "# runs the STALE main-checkout code instead of the worktree under test.\n"
@@ -605,7 +605,7 @@ _ROW_LABELS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "branch",
     ScreenRow.TESTS: "tests",
     ScreenRow.WORKTREE_SETUP: "worktree setup",
-    ScreenRow.IMPORT_ROOT: "import root",
+    ScreenRow.IMPORT_ROOT: "Python import path",
 }
 
 
@@ -718,7 +718,7 @@ _EDIT_PROMPTS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "Integration branch: ",
     ScreenRow.TESTS: "Fast test command: ",
     ScreenRow.WORKTREE_SETUP: "Worktree setup command: ",
-    ScreenRow.IMPORT_ROOT: "Import roots (comma-separated): ",
+    ScreenRow.IMPORT_ROOT: "Python import paths (comma-separated): ",
 }
 
 
@@ -1219,7 +1219,7 @@ def run_init_noninteractive(
         if not validated:
             output_fn(
                 f"--pythonpath: no such directory in this repo: "
-                f"{', '.join(pythonpath)} — leaving import roots unset.")
+                f"{', '.join(pythonpath)} — leaving the Python import path unset.")
             roots = None
         else:
             roots = validated

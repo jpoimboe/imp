@@ -610,7 +610,43 @@ def test_use_defaults_all_invalid_pythonpath_reports_and_leaves_unset(tmp_path):
     report = "\n".join(msgs)
     assert "srcc" in report
     assert "no such directory" in report
-    assert "leaving import roots unset" in report
+    assert ("--pythonpath: no such directory in this repo: srcc — leaving the "
+            "Python import path unset.") in msgs
+
+
+def test_written_config_comments_say_python_import_paths(tmp_path: Path) -> None:
+    from imp.cli.init import run_init_noninteractive
+    decided = tmp_path / "decided"
+    (decided / "src").mkdir(parents=True)
+    run_init_noninteractive(
+        decided, output_fn=lambda _m: None,
+        pythonpath=["src"], detect_verify_fn=lambda _r: None)
+    decided_text = (decided / "imp" / "config.yaml").read_text()
+    assert "# Worktree-relative Python import paths prepended to gate/agent\n" in decided_text
+
+    undecided = tmp_path / "undecided"
+    undecided.mkdir()
+    run_init_noninteractive(
+        undecided, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    undecided_text = (undecided / "imp" / "config.yaml").read_text()
+    assert ("# pythonpath: worktree-relative Python import paths prepended to the "
+            "gate/agent\n") in undecided_text
+
+    for text in (decided_text, undecided_text):
+        assert "import root" not in text
+
+
+def test_init_help_documents_pythonpath_as_python_import_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.main import _build_parser
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["init", "-h"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert ("Comma-separated worktree-relative Python import paths recorded as "
+            "pythonpath in the non-interactive path; validated against disk.") in help_text
+    assert "import root" not in help_text
 
 
 def test_use_defaults_fills_offline_test_command(tmp_path):

@@ -4507,7 +4507,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "non-interactive path (otherwise resolved from git).")
     p_init.add_argument(
         "--pythonpath", metavar="CSV", default=None,
-        help="Comma-separated worktree-relative import roots recorded as "
+        help="Comma-separated worktree-relative Python import paths recorded as "
              "pythonpath in the non-interactive path; validated against disk.")
 
     p_new = sub.add_parser(
