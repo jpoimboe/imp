@@ -153,10 +153,11 @@ def _done(log: _Log) -> _Log:
                    action={"verb": "continue"}, var_mutations={})
 
 
-def test_open_pause_and_late_rename_then_a_no_work_resume_keep_the_total() -> None:
+@pytest.mark.parametrize("rename", ["quest_renamed", "user_renamed"])
+def test_open_pause_and_late_rename_then_a_no_work_resume_keep_the_total(rename: str) -> None:
     log = _interrupt_at_a_wait(_first_run(_Log(), 1.3))
     assert _work(log.snapshot()) == pytest.approx(10.3)
-    log.add(3600.0, "quest_renamed", new_title="renamed while paused")
+    log.add(3600.0, rename, new_title="renamed while paused")
     before = _work(log.snapshot())
     _resume_at_a_wait(log, 6395.7).add(13968.1, "workflow_paused", reason="awaiting_user")
     assert before == pytest.approx(10.3)
@@ -184,7 +185,8 @@ def test_a_saved_drafts_gap_before_the_re_run_is_excluded() -> None:
     assert _work(full.events) == pytest.approx(14.9 + 7.4)
 
 
-@pytest.mark.parametrize("tail", ["quest_abandoned", "conversation_archived", "quest_renamed"])
+@pytest.mark.parametrize("tail", ["quest_abandoned", "conversation_archived", "quest_renamed",
+                                  "user_renamed"])
 @pytest.mark.parametrize("at_wait", [True, False], ids=["at-a-wait", "mid-turn"])
 def test_trailing_lifecycle_events_days_later_leave_the_total(tail: str, at_wait: bool) -> None:
     log = _first_run(_Log(), 1.3)
@@ -192,7 +194,8 @@ def test_trailing_lifecycle_events_days_later_leave_the_total(tail: str, at_wait
         _ask(log)
     expected = 18.9 if at_wait else 5.4
     assert _work(log.snapshot()) == pytest.approx(expected)
-    log.add(3 * 86400.0, tail, **({"new_title": "later"} if tail == "quest_renamed" else {}))
+    log.add(3 * 86400.0, tail,
+            **({"new_title": "later"} if tail.endswith("_renamed") else {}))
     assert _work(log.events) == pytest.approx(expected)
 
 

@@ -2153,7 +2153,7 @@ class Exclusions:
 
 
 INERT_EVENTS = frozenset({
-    "quest_created", "quest_renamed", "quest_abandoned",
+    "quest_created", "quest_renamed", "user_renamed", "quest_abandoned",
     "conversation_archived", "conversation_saved", "cli_attached"})
 _RUN_STARTS = frozenset({"tiers_resolved", "workflow_resumed"})
 _MODEL_TURN_EVENTS = frozenset({
