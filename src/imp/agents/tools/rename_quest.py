@@ -32,7 +32,7 @@ def rename_quest(ctx: Any, name: str) -> str:
         raise RuntimeError("rename_quest is only available to top-level quest steps")
     quest = ctx.quest
     if title == quest.title:
-        return f"already named {quest.id}"
+        return f"already titled {quest.id}"
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     quest.rename(title, by="agent", log=log)
     return (f"renamed to {title!r}; use "
