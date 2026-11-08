@@ -125,8 +125,9 @@ _STATUSES = pytest.mark.parametrize("status", ["paused", "completed"])
 
 @_STATUSES
 @pytest.mark.parametrize(("name", "whole_row"), [
-    pytest.param("build", "build ~50s — — —", id="step-inferred-end"),
+    pytest.param("build", "build · failed ~50s — — —", id="step-inferred-end"),
     pytest.param("explorer", "↳ explorer 1m 15s — — —", id="subagent"),
+    pytest.param("scout", "↳ scout · failed 48s — — —", id="failed-subagent"),
 ])
 def test_range_summary_row_matches_whole_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str, name: str,
@@ -142,7 +143,7 @@ def test_range_summary_row_matches_whole_log(
 def test_range_summary_marks_cut_off_failed_subagent_errored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str,
 ) -> None:
-    # errored shows only as color, so compare the colored rows.
+    # The error color survives the slice too.
     whole = _row(_summary(monkeypatch, tmp_path, status, color=True), "scout")
     sliced = _row(_summary(monkeypatch, tmp_path, status, "--range", "1-3", color=True),
                   "scout")

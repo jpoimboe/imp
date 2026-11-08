@@ -18,6 +18,7 @@ from imp.cli.accounting import (
 )
 from imp.cli.narrative import (
     INERT_EVENTS,
+    STOP_WORDS,
     Exclusions,
     ExclusionTracker,
     SubagentStop,
@@ -386,12 +387,21 @@ def summary_notes(cells: list[str],
 
 
 def _sub_body(sub: SubagentRow) -> str:
-    """The subagent's left-column label: '↳ name' plus ' (title)', else ' (label)'."""
+    """The subagent's left-column label: '↳ name (title|label)', then ' · <stop word>'."""
     text = f"↳ {sub.name}"
     paren = display_subagent_title(sub.title) or sub.label
     if paren:
         text += f" ({paren})"
+    if sub.stop is not None:
+        text += f" · {STOP_WORDS[sub.stop]}"
     return text
+
+
+def _step_body(row: StepRow) -> str:
+    """The step's left-column label; an open span's duration cell already names its state."""
+    if row.errored and row.end_ts is not None:
+        return f"{row.step_text} · {STOP_WORDS['failed']}"
+    return row.step_text
 
 
 def rows_charge(summary: list[StepRow]) -> Charge:
@@ -520,7 +530,7 @@ def _column_widths(summary: list[StepRow], open_label: str,
                    total_last: str,
                    column: QuotaColumn | None) -> tuple[int, int, int, int, int]:
     """Widths measured across step rows, subagent rows, the totals row, and title labels."""
-    names = [len(r.step_text) for r in summary]
+    names = [len(_step_body(r)) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
     names.append(len(_TOTAL_LABEL))
     names += [len(p) + 2 for p, _ in (column.breakdown if column else ())]
@@ -556,7 +566,7 @@ def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else ("step",)
-    name = pal.ansi(f"{row.step_text:<{name_w}}", *codes, enabled=color)
+    name = pal.ansi(f"{_step_body(row):<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
     return f"  {name}  {dur}  {cells}"
