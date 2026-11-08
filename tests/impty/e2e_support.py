@@ -200,9 +200,6 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(more_plans=False, plan_total=1,
                      rationale="single plan covers the spec"),
             ]}],
-            "integration-review": [{"text": "integration review", "tools": [
-                done(findings="No findings.", critical=0, major=0, minor=0, tolerated=False),
-            ]}],
             "finalize": [{"text": "finalize", "tools": [
                 done(decision="merge", comments="", built="sentinel",
                      verify_status="n/a", open_items="none", next_steps="none"),

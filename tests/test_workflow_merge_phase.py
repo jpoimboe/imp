@@ -41,13 +41,16 @@ def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "validate-memory"
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
+    assert m.var_mutations.get("integration_review_needed") is True
     m = evaluate_rules(rules, vars={}, output={"exit": 7, "stdout": "forkSHA"})
     assert isinstance(m.action, Goto) and m.action.target == "validate-memory"
     assert m.var_mutations.get("integration_fork") == "forkSHA"
+    assert m.var_mutations.get("integration_review_needed") is False
     m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA"})
     assert isinstance(m.action, Continue)
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
+    assert "integration_review_needed" not in m.var_mutations
     m = evaluate_rules(rules, vars={}, output={"exit": 5, "stdout": ""})
     assert isinstance(m.action, Pause)
 
@@ -61,6 +64,8 @@ def test_reconciler_stuck_pauses_and_else_continues() -> None:
     m = evaluate_rules(rules, vars={},
                        output={"status": "Success", "stuck": False, "summary": ""})
     assert isinstance(m.action, Continue)
+    # Every route into the reconciler re-arms the merge review, so its fix is reviewed.
+    assert m.var_mutations == {"integration_review_needed": True}
 
 
 def test_only_finalize_routes_to_planning_and_releases_the_lane() -> None:
@@ -82,13 +87,29 @@ def test_only_finalize_routes_to_planning_and_releases_the_lane() -> None:
 def test_integration_verify_routes_failure_to_integration_reviewer() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-verify")
-    m = evaluate_rules(rules, vars={}, output={"exit": 0})
+    m = evaluate_rules(rules, vars={"integration_review_needed": True}, output={"exit": 0})
     assert isinstance(m.action, Continue)
     m = evaluate_rules(rules, vars={}, output={"exit": 124})
     assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars={}, output={"exit": 1})
     assert isinstance(m.action, Goto) and m.action.target == "integration-reviewer"
     assert m.action.release is None
+
+
+def test_integration_verify_skips_review_only_on_a_green_unarmed_pass() -> None:
+    wf = load_workflow(WF)
+    rules = _rules(wf, "integration-verify")
+    skip = evaluate_rules(rules, vars={"integration_review_needed": False},
+                          output={"exit": 0})
+    assert skip.rule == rules[0]
+    assert isinstance(skip.action, Goto) and skip.action.target == "check-cleared"
+    assert skip.action.resume is False
+    assert skip.var_mutations == {}
+    # A failure is always triaged by the reviewer, armed or not.
+    for needed in (True, False):
+        m = evaluate_rules(rules, vars={"integration_review_needed": needed},
+                           output={"exit": 1})
+        assert isinstance(m.action, Goto) and m.action.target == "integration-reviewer"
 
 
 def test_integration_review_routes_counts_to_reconciler() -> None:
@@ -264,8 +285,8 @@ def test_unverified_tree_reruns_the_gate_with_no_human_in_the_loop() -> None:
     back = evaluate_rules(_rules(wf, "check-cleared"), vars={}, output={"exit": 3})
     assert isinstance(back.action, Goto)
     assert back.action.target == "integration-verify"
-    passed = evaluate_rules(_rules(wf, "integration-verify"), vars={},
-                            output={"exit": 0})
+    passed = evaluate_rules(_rules(wf, "integration-verify"),
+                            vars={"integration_review_needed": True}, output={"exit": 0})
     assert isinstance(passed.action, Continue)
     assert names[names.index("integration-verify") + 1] == "integration-reviewer"
     ok = evaluate_rules(_rules(wf, "check-cleared"), vars={}, output={"exit": 0})

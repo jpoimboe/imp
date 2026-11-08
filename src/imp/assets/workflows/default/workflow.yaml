@@ -24,6 +24,7 @@ vars:
   plan_review_notes:      {type: string, default: ""}
   integration_fork:       {type: string, default: ""}
   slow_verify_tolerated:  {type: bool, default: false}
+  integration_review_needed: {type: bool, default: true}
   plan_index:             {type: int, default: 1}
   plan_total:             {type: int, default: 1}
   task_total:             {type: int, default: 0}
@@ -256,8 +257,8 @@ phases:
         command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: validate-memory}
-          - {if: {exit: 7}, set: {integration_fork: output.stdout}, goto: validate-memory}
+          - {if: {exit: 0}, set: {integration_fork: output.stdout, integration_review_needed: true}, goto: validate-memory}
+          - {if: {exit: 7}, set: {integration_fork: output.stdout, integration_review_needed: false}, goto: validate-memory}
           - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
 
@@ -267,7 +268,7 @@ phases:
         label: resolving merge conflicts
         rules:
           - {if: {stuck: true}, pause: true}
-          - {else: true, continue: true}
+          - {else: true, set: {integration_review_needed: true}, continue: true}
 
       # Post-rebase memory gate: re-runs imp's own load-time memory validation over
       # the fully-merged worktree (quest changes + latest base) against the rebased
@@ -288,6 +289,7 @@ phases:
         acquire: test-lane
         label: running tests
         rules:
+          - {if: {exit: 0, integration_review_needed: false}, goto: check-cleared}
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
           - {else: true, goto: integration-reviewer, label: "triaging slow test failures on the merged tree", feedback: "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"}

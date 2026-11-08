@@ -18,6 +18,7 @@ import contextlib
 import json
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -867,3 +868,112 @@ async def test_full_workflow_merges_while_the_user_is_mid_rebase(tmp_path: Path)
     assert _git(tmp_path, "log", "--format=%s", "side").stdout.splitlines()[:2] == [
         "user commit B", "user commit A"]
 
+
+async def _run_integrate(
+    tmp_path: Path, *, rebase_exit: int, red_slow_runs: tuple[int, ...] = (),
+    ir_replies: tuple[dict, ...] = (),
+    on_started: Callable[[str], None] | None = None,
+) -> tuple[Quest, RunResult, list[str]]:
+    """Run the default workflow with integrate-rebase stubbed to `rebase_exit` (0: base
+    moved, clean rebase; 7: base unmoved, tree not cleared). Slow verify run N fails when
+    N is in red_slow_runs. integration-reviewer runs consume ir_replies in order, then
+    answer clean."""
+    quest = _seed_default_workflow(tmp_path)
+    scripts = tmp_path / "imp" / "workflows" / "imp" / "scripts"
+    (scripts / "integrate-rebase.sh").write_text(f"#!/bin/sh\necho fork\nexit {rebase_exit}\n")
+    reds = " ".join(map(str, red_slow_runs))
+    (scripts / "run-verify.sh").write_text(
+        '#!/usr/bin/env bash\n[ "$1" = slow ] || exit 0\n'
+        'f="$IMP_QUEST_DIR/slow-runs"; n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo "$n" > "$f"\nfor r in {reds}; do [ "$n" = "$r" ] && exit 1; done\nexit 0\n')
+    replies = list(ir_replies)
+    reply: dict = {}
+    started: list[str] = []
+
+    def on_event(rec: dict) -> None:
+        nonlocal reply
+        if rec["type"] == "step_started":
+            step = rec["payload"]["step"]
+            started.append(step)
+            if step == "integration-reviewer":
+                reply = replies.pop(0) if replies else {}
+            if on_started:
+                on_started(step)
+
+    def respond(**kwargs):
+        if started and started[-1] == "integration-reviewer":
+            return _canned_anthropic(**{"verdict": "ok", **reply})
+        return _canned_anthropic()
+
+    fake = FakeAsyncAnthropic([], default_response=respond)
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake))
+    result = await run_quest(quest, on_event=on_event)
+    return quest, result, started
+
+
+def _integrate_tail(started: list[str]) -> list[str]:
+    return started[started.index("integrate-rebase"):]
+
+
+@pytest.mark.anyio
+async def test_unmoved_base_green_gate_skips_integration_review(tmp_path: Path) -> None:
+    quest, result, started = await _run_integrate(tmp_path, rebase_exit=7)
+    assert result is RunResult.COMPLETED
+    tail = _integrate_tail(started)
+    assert "integration-verify" in tail, tail
+    assert "integration-reviewer" not in tail, tail
+    assert tail.index("integration-verify") < tail.index("summarizer"), tail
+    assert "quest_merged" in [e.get("type") for e in _run_events(quest)]
+
+
+@pytest.mark.anyio
+async def test_moved_base_runs_integration_review_after_gate(tmp_path: Path) -> None:
+    _, result, started = await _run_integrate(tmp_path, rebase_exit=0)
+    assert result is RunResult.COMPLETED
+    tail = _integrate_tail(started)
+    assert tail.index("integration-verify") < tail.index("integration-reviewer"), tail
+
+
+@pytest.mark.anyio
+async def test_unmoved_base_red_gate_triages_through_integration_review(tmp_path: Path) -> None:
+    _, result, started = await _run_integrate(
+        tmp_path, rebase_exit=7, red_slow_runs=(1,), ir_replies=({"tolerated": True},))
+    assert result is RunResult.COMPLETED
+    tail = _integrate_tail(started)
+    assert tail.count("integration-reviewer") == 1, tail
+    assert (tail.index("integration-verify") < tail.index("integration-reviewer")
+            < tail.index("check-cleared") < tail.index("summarizer")), tail
+
+
+@pytest.mark.anyio
+async def test_reconciled_review_finding_is_re_reviewed(tmp_path: Path) -> None:
+    _, result, started = await _run_integrate(
+        tmp_path, rebase_exit=7, red_slow_runs=(1,), ir_replies=({"major": 1},))
+    assert result is RunResult.COMPLETED
+    tail = _integrate_tail(started)
+    assert tail.count("integration-reviewer") == 2, tail
+    first = tail.index("integration-reviewer")
+    assert tail[first:].index("reconciler") < tail[first:].index("integration-verify"), tail
+
+
+@pytest.mark.anyio
+async def test_reconciled_memory_fix_is_reviewed(tmp_path: Path) -> None:
+    bad = tmp_path / "imp" / "memory" / "no-such-workflow" / "x.md"
+
+    def on_started(step: str) -> None:
+        if step == "integrate-rebase":
+            bad.parent.mkdir(parents=True)
+            bad.write_text("stray\n")
+        elif step == "reconciler":
+            bad.unlink()
+
+    _, result, started = await _run_integrate(tmp_path, rebase_exit=7, on_started=on_started)
+    assert result is RunResult.COMPLETED
+    tail = _integrate_tail(started)
+    assert tail[:4] == [
+        "integrate-rebase", "validate-memory", "reconciler", "validate-memory"], tail
+    assert tail.index("integration-verify") < tail.index("integration-reviewer"), tail

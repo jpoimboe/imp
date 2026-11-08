@@ -179,7 +179,8 @@ def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) ->
 
 def _merged_tree_gate_rule(exit_code: int) -> Rule:
     rule = evaluate_rules(_step("default", "integration-verify").rules,
-                          vars={}, output={"exit": exit_code}).rule
+                          vars={"integration_review_needed": True},
+                          output={"exit": exit_code}).rule
     assert rule is not None
     return rule
 

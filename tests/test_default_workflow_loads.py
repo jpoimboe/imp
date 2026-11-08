@@ -224,6 +224,13 @@ def test_slow_verify_tolerated_var_declared_default_false() -> None:
     assert wf.vars.defaults()["slow_verify_tolerated"] is False
 
 
+def test_integration_review_needed_var_declared_bool_default_true() -> None:
+    wf = _wf()
+    # Default true: an in-flight quest already past integrate-rebase keeps its review.
+    assert wf.vars.types()["integration_review_needed"] == "bool"
+    assert wf.vars.defaults()["integration_review_needed"] is True
+
+
 def test_integration_reviewer_accept_edge_records_tolerated() -> None:
     from imp.engine.gates import evaluate_rules
     from imp.engine.types import Goto
