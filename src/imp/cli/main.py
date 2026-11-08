@@ -764,6 +764,13 @@ def _run_header_line(quest_id: str, title: str, marker: str | None = None,
     return head + ansi(tail, "dim", enabled=color) if tail else head
 
 
+def _cleared_divider(quest_id: str, leave_mode: str, *, color: bool) -> str:
+    kind = {"chat": "chat", "new": "quest"}[leave_mode]
+    return (ansi(f"── new {kind} ", "dim", enabled=color)
+            + ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+            + ansi(" ───", "dim", enabled=color))
+
+
 def _print_run_header(quest_id: str, title: str, marker: str,
                       *, color: bool) -> None:
     print(_run_header_line(quest_id, title, marker, color=color))
@@ -870,11 +877,11 @@ async def _run_cleared_session(
     watched = WatchedStream(sys.stdout)
     quest = Quest.create_draft(
         control, title="", quest_id=new_quest_id(existing_stems=live_stems(control)),
-        base_branch=base, origin="draft")
+        base_branch=base, origin="draft", create_mode=leave_mode)
     _session_started = False
     try:
-        print(_run_header_line(quest.id, quest.title, leave_mode, color=color))
-        _print_splash_banner(interactive=True)
+        print(_cleared_divider(quest.id, leave_mode, color=color))
+        print()
         term_title = TerminalTitle(
             watched, quest.id, quest.title, initial="idle",
             project=quest.control_root.name)

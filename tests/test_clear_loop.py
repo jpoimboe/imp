@@ -16,6 +16,7 @@ import pytest
 
 import imp.cli.main as m
 import imp.cli.signals as sig
+from imp.cli import palette as pal
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
@@ -40,14 +41,6 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    splash_calls: list[bool] = []
-
-    def _fake_splash(*, interactive: bool) -> bool:
-        splash_calls.append(interactive)
-        return False
-
-    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
-
     class _FakePrompt:
         def __init__(self, *a: object, **k: object) -> None: ...
         async def ask_async(self, *a: object, **k: object) -> str:
@@ -70,7 +63,6 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls)
 
     assert rc == 0
-    assert splash_calls == [True]                     # the splash was re-rendered (AC 5b)
     assert captured["leave_mode"] == "new"            # parks like imp new, not abandon
     assert captured["leave_state"] is ls              # threads the loop's dict
     quest = captured["change"]
@@ -417,42 +409,6 @@ def test_fresh_session_line_routes_through_clear_loop(
     assert seen["base"] == "topic"          # quest.base_branch, not the checkout
 
 
-@pytest.mark.anyio
-async def test_run_cleared_session_leads_with_header_before_splash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    def _fake_splash(*, interactive: bool) -> bool:
-        print("SCENE")
-        return True
-
-    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
-    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
-
-    class _FakePrompt:
-        def __init__(self, *a: object, **k: object) -> None: ...
-        async def ask_async(self, *a: object, **k: object) -> str:
-            return "build a parser"
-
-    monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
-                        lambda *a, **k: (lambda _p: None))
-
-    async def _fake_client(quest: object, **kwargs: object) -> int:
-        return 0
-
-    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
-
-    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
-
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert " · new" in out                       # the run header (minted id · new)
-    assert out.index(" · new") < out.index("SCENE")   # header precedes the splash
-
-
 def test_resume_interactive_routes_through_clear_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -668,42 +624,6 @@ async def test_run_cleared_session_cancel_resets_title(
 
 
 @pytest.mark.anyio
-async def test_run_cleared_session_chat_marks_header_chat(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
-
-    class _FakePrompt:
-        def __init__(self, *a: object, **k: object) -> None: ...
-        async def ask_async(self, *a: object, **k: object) -> str:
-            return "build a parser"
-
-    monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
-                        lambda *a, **k: (lambda _p: None))
-
-    captured: dict[str, object] = {}
-
-    async def _fake_client(quest: object, **kwargs: object) -> int:
-        captured.update(kwargs)
-        return 0
-
-    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
-
-    buf = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", buf)
-    ls: dict[str, str] = {}
-    rc = await m._run_cleared_session(
-        tmp_path, "main", leave_state=ls, leave_mode="chat")
-
-    assert rc == 0
-    assert " · chat" in buf.getvalue()          # header reflects the chat surface
-    assert captured["leave_mode"] == "chat"     # disposition threaded too, not "new"
-
-
-@pytest.mark.anyio
 async def test_run_cleared_session_intercepts_help(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -803,3 +723,92 @@ async def test_clear_loop_records_caller_base_on_detached_head(
     # The reopened draft forks from the caller's base, never from the string the
     # detached checkout reports for its own HEAD.
     assert Quest.load(tmp_path, quest.id).base_branch == "main"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("leave_mode", "label"),
+                         [("chat", "new chat"), ("new", "new quest")])
+async def test_run_cleared_session_opens_under_divider_and_keeps_kind(
+    leave_mode: str, label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    def _forbidden(*a: object, **k: object) -> object:
+        raise AssertionError("the /clear opening must not print the run header or splash")
+
+    monkeypatch.setattr(m, "_print_splash_banner", _forbidden)
+    monkeypatch.setattr(m, "_run_header_line", _forbidden)
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    at_prompt: dict[str, str] = {}
+
+    class _CapturePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            at_prompt["value"] = buf.getvalue()
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _CapturePrompt)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+    captured: dict[str, object] = {}
+
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["change"] = quest
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
+
+    rc = await m._run_cleared_session(
+        tmp_path, "main", leave_state={}, leave_mode=leave_mode)
+
+    assert rc == 0
+    quest = captured["change"]
+    assert at_prompt["value"] == f"── {label} {quest.id} ───\n\n"
+    assert Quest.load(tmp_path, quest.id).create_mode == leave_mode
+    assert captured["leave_mode"] == leave_mode
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_divider_colors_id_gold_and_rule_dim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: True)
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    at_prompt: dict[str, str] = {}
+
+    class _CapturePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            at_prompt["value"] = buf.getvalue()
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _CapturePrompt)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+    captured: dict[str, object] = {}
+
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["change"] = quest
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
+
+    rc = await m._run_cleared_session(
+        tmp_path, "main", leave_state={}, leave_mode="chat")
+
+    assert rc == 0
+    quest_id = captured["change"].id
+    assert at_prompt["value"] == (
+        pal.ansi("── new chat ", "dim")
+        + pal.ansi(quest_id, *pal.NODE_COLORS["quest_id"])
+        + pal.ansi(" ───", "dim")
+        + "\n\n")
