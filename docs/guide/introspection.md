@@ -122,7 +122,9 @@ answers the question, and never dump the raw log as your default.
   shows, `--show <cat>` adds a category as a collapsed `<details>` fold, and
   `--full` expands every fold inline. `--follow` takes no windowing filters
   but composes with the content flags. For example,
-  `imp log <id> --step threshold` reads just the seed conversation.
+  `imp log <id> --step threshold` reads just the seed conversation. A
+  subagent (or `-s` summary row) whose end falls outside the window still
+  shows the state and duration it reached in the whole log.
 - **Digest** — `imp events <id>`. A bare `imp events <id>` call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`,
   `--limit N`, or `--all`) to get one compact line per event. On a TTY each compact line is

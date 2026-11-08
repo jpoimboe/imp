@@ -2732,6 +2732,16 @@ def _log_tree(events: list[dict[str, Any]],
     return tree
 
 
+def _log_summary(events: list[dict[str, Any]],
+                 unfiltered: list[dict[str, Any]]) -> list[StepRow]:
+    """The summary rows of `events`, each span ending where it did in the whole log."""
+    from imp.cli.render_summary import build_summary, overlay_spans
+    rows = build_summary(events)
+    if events is not unfiltered:
+        overlay_spans(rows, build_summary(unfiltered))
+    return rows
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
     from imp.cli.store import _quest_home, make_store
@@ -2800,13 +2810,10 @@ def _cmd_log(args: argparse.Namespace) -> int:
     color = should_use_color(sys.stdout)
 
     if args.summary:
-        from imp.cli.render_summary import (
-            build_summary,
-            render_summary,
-        )
+        from imp.cli.render_summary import render_summary
         card = store.quest_card(quest_id)
         header = _summary_header(quest_id, card, events)
-        rows = build_summary(events)
+        rows = _log_summary(events, unfiltered)
         view = _attribute_quota(store, quest_id, unfiltered, rows)
         if isinstance(view, int):
             return view
@@ -2869,10 +2876,9 @@ def _write_log_export(args: argparse.Namespace, store: Store,
                       show: frozenset[str]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
-        from imp.cli.render_summary import build_summary
         card = store.quest_card(quest_id)
         header = _summary_header(quest_id, card, events)
-        rows = build_summary(events)
+        rows = _log_summary(events, unfiltered)
         view = _attribute_quota(store, quest_id, unfiltered, rows)
         if isinstance(view, int):
             return view
