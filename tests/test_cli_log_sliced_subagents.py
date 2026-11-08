@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import io
+import json
 from collections.abc import Iterable
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from imp.cli import narrative as nv
 from imp.cli.render_text import render_tree
+from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _PARENT = "step:code/build"
@@ -103,3 +111,104 @@ def test_overlay_leaves_fold_without_full_counterpart_as_sliced() -> None:
     nv.overlay_subagent_state(tree, nv.build_tree([]))
     assert _rows(render_tree(tree, full=False, color=False, width=200), "explorer") == [
         "  explorer · sub-m · running"]
+
+
+def _write_quest(control: Path, cid: str, events: list[dict[str, Any]]) -> None:
+    home = project_state_dir(control) / "quests" / cid
+    home.mkdir(parents=True)
+    (home / "quest.json").write_text(json.dumps({
+        "id": cid, "title": cid, "base_branch": "main", "layout_version": LAYOUT_VERSION}))
+    (home / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+
+
+def _log(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: control)
+    monkeypatch.setenv("NO_COLOR", "1")
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        rc = m.main(["log", "slc01", *argv])
+    assert rc == 0, err.getvalue()
+    return out.getvalue()
+
+
+def _log_row(monkeypatch: pytest.MonkeyPatch, control: Path, name: str, *argv: str) -> str:
+    rows = _rows(_log(monkeypatch, control, *argv).splitlines(), name)
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+@pytest.mark.parametrize(("close", "tag"), [
+    pytest.param(_SUCCESS, "", id="success"),
+    pytest.param({"content": "x", "error": True, "kind": "stalled"}, " · stalled",
+                 id="stalled"),
+    pytest.param({"content": "x", "error": True, "kind": "interrupted"}, " · interrupted",
+                 id="interrupted"),
+    pytest.param({"content": "boom", "error": True}, " · failed", id="failed"),
+])
+def test_range_cut_off_subagent_shows_final_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, close: dict[str, Any], tag: str,
+) -> None:
+    _write_quest(tmp_path, "slc01", _closed_log(**close))
+    sliced = _log_row(monkeypatch, tmp_path, "explorer", "--range", "1-3")
+    whole = _log_row(monkeypatch, tmp_path, "explorer")
+    assert whole == f"  explorer · sub-m · 1m 15s{tag}"
+    assert sliced == whole
+    assert "running" not in sliced
+
+
+def test_range_cut_off_nested_subagent_shows_final_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_quest(tmp_path, "slc01", _nested_log())
+    shown = ("--show", "subagents", "--md", "-")
+    sliced = _log(monkeypatch, tmp_path, "--range", "1-4", *shown)
+    whole = _log(monkeypatch, tmp_path, *shown)
+    assert "<summary>· scout · sub-m · 30s</summary>" in whole
+    assert "<summary>· scout · sub-m · 30s</summary>" in sliced
+    assert "(running)" not in sliced
+
+
+def test_agent_filter_subagent_closed_by_pause_shows_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_quest(tmp_path, "slc01", [
+        _start(0), _dispatch("tk1", "blk1", _PARENT, "explorer", 1),
+        _turn("m1", "sub:tk1", 2),
+        _ev("wp", "workflow_paused", None, 76, reason="ctrl-c")])
+    sliced = _log_row(monkeypatch, tmp_path, "explorer", "--agent", "build")
+    whole = _log_row(monkeypatch, tmp_path, "explorer")
+    # --agent build drops the subagent's own events, so the sliced row has no model.
+    assert whole.endswith(" · 1m 15s · interrupted")
+    assert sliced.endswith(" · 1m 15s · interrupted")
+
+
+def test_step_filter_subagent_with_late_result_matches_whole_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_quest(tmp_path, "slc01", [
+        _start(0), _dispatch("tk1", "blk1", _PARENT, "explorer", 1),
+        _turn("m1", "sub:tk1", 2), _done(10), _start(11, "review"),
+        _result("r1", "blk1", _PARENT, 76, **_SUCCESS), _done(80, "review")])
+    sliced = _log_row(monkeypatch, tmp_path, "explorer", "--step", "build")
+    whole = _log_row(monkeypatch, tmp_path, "explorer")
+    assert whole == "  explorer · sub-m · 1m 15s"
+    assert sliced == whole
+
+
+def test_range_keeps_genuinely_running_subagent_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_quest(tmp_path, "slc01", _running_log())
+    assert _log_row(monkeypatch, tmp_path, "explorer", "--range", "1-3") == (
+        "  explorer · sub-m · running")
+
+
+@pytest.mark.parametrize("export", ["--md", "--html"])
+def test_range_export_shows_cut_off_subagent_final_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, export: str,
+) -> None:
+    _write_quest(tmp_path, "slc01", _closed_log(content="x", error=True, kind="stalled"))
+    out = _log(monkeypatch, tmp_path, "--range", "1-3", export, "-")
+    assert "explorer · sub-m (stalled) · 1m 15s" in out
+    assert "(running)" not in out

@@ -50,6 +50,7 @@ from imp.remote.session.protocol import (
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
+    from imp.cli.narrative import NarrativeTree
     from imp.cli.quota_column import QuotaColumn, QuotaFallback
     from imp.cli.render_summary import StepRow, SummaryHeader
     from imp.cli.store import QuestCard, SearchHit, Store, Zone, _Row
@@ -2721,8 +2722,17 @@ def _select_log_events(
     return [ev for _, ev in selected]
 
 
-def _cmd_log(args: argparse.Namespace) -> int:
+def _log_tree(events: list[dict[str, Any]],
+              unfiltered: list[dict[str, Any]]) -> NarrativeTree:
+    """The narrative of `events`, each subagent showing the state it reached in the whole log."""
     from imp.cli import narrative
+    tree = narrative.build_tree(events)
+    if events is not unfiltered:
+        narrative.overlay_subagent_state(tree, narrative.build_tree(unfiltered))
+    return tree
+
+
+def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
     from imp.cli.store import _quest_home, make_store
 
@@ -2805,7 +2815,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
-    tree = narrative.build_tree(events)
+    tree = _log_tree(events, unfiltered)
     card = store.quest_card(quest_id)
     title = card.title if card is not None else ""
     intent = (quest_row.fallback_intent(card.intent, card.seed_opening)
@@ -2868,9 +2878,8 @@ def _write_log_export(args: argparse.Namespace, store: Store,
             return view
         document = render_summary_markdown(rows, header=header, quota=view)
     else:
-        from imp.cli import narrative
         from imp.cli.render_markdown import render_markdown
-        document = render_markdown(narrative.build_tree(events), full=args.full,
+        document = render_markdown(_log_tree(events, unfiltered), full=args.full,
                                    show=show)
     if args.html is not None:
         from imp.cli.render_html import render_html
