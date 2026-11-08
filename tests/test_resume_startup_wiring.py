@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import anyio
 import pytest
@@ -12,6 +13,7 @@ import imp.cli.main as m
 import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from tests._event_fixtures import agent_text, ev, task_lead_started
 from tests.conftest import _seed_control
 
 
@@ -147,3 +149,29 @@ def test_build_resume_driver_carries_the_project_name(
     m._build_resume_driver(quest=ch, state=st, status=SimpleNamespace(), color=False,
                            stream=SimpleNamespace())
     assert captured["project"] == ch.control_root.name == tmp_path.name
+
+
+# Resume tail AC5(a): headless builds the same tail-rendering driver (no echo opt-out).
+def test_headless_resume_renders_the_resume_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+
+    async def _replay_into(quest: object, *, driver: Any, **k: object) -> int:
+        for e in [ev("1", "quest_created", quest_id=1, title="t"), task_lead_started("2"),
+                  agent_text("3", "Lead-in before the long tool.")]:
+            driver.on_event({**e, "_replay": True})
+        driver.on_event({"type": "replay_complete"})
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _replay_into)
+
+    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+        token="feat", non_interactive=True, message="go", autonomous=False))
+
+    assert rc == 0
+    assert capsys.readouterr().out.count("• Lead-in before the long tool.") == 1

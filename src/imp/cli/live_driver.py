@@ -413,15 +413,16 @@ class LiveDriver:
         self._suppressing = suppress_replay
         # The footer is decoupled from scrollback suppression: it lights at the
         # replay_complete boundary (see on_event) even though _suppressing stays
-        # True until the first live continuation node. Starts True for the non-
-        # suppressing paths (imp new/chat/log --follow) so their footer is live
-        # from the first event with no boundary.
+        # True until the resume tail's start or the first live continuation
+        # node. Starts True for the non-suppressing paths (imp new/chat/log
+        # --follow) so their footer is live from the first event with no
+        # boundary.
         self._footer_live = not suppress_replay
         # Snapshot of every tree-node id present at the replay_complete boundary
-        # — i.e. the whole replayed prefix. The walk lifts suppression only when
-        # it reaches a node NOT in this set (a live continuation node), so a prior
-        # phase's completion breadcrumb (emitted when a live event closes the
-        # replayed phase) stays suppressed. None until the boundary arrives.
+        # — i.e. the whole replayed prefix. The walk lifts suppression at the
+        # resume tail's start (_tail_start) or at a node NOT in this set (a live
+        # continuation node); other replayed nodes, e.g. a prior phase's
+        # completion breadcrumb, stay suppressed. None until the boundary arrives.
         self._replayed_node_ids: set[int] | None = None
         # True after the last emitted block was agent prose, so the next prose
         # block gets one blank-line separator — matching render_text's lean spacing
@@ -437,6 +438,11 @@ class LiveDriver:
         self._unsandboxed = False
         self._pending_provider: str | None = None
         self._emitted_any = False
+        # Set by any emission except a replayed resume-tail row; gates the interrupt recap.
+        self._live_emitted = False
+        self._emitting_replayed = False
+        self._tail_start: nv.AgentTextNode | None = None
+        self._show_tail = suppress_replay
         self._recap_pending = suppress_replay
         self._emissions = 0
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -458,13 +464,17 @@ class LiveDriver:
             # event). It is the SOLE freeze/light point. Freeze the replayed tree —
             # every node that exists now is replayed and stays suppressed, including
             # a prior phase's completion breadcrumb — so the walk lifts scrollback
-            # suppression only at a node created after this point (see _maybe_lift).
+            # suppression only at the resume tail's start or at a node created
+            # after this point (see _maybe_lift).
             # Light the footer NOW so a resume into a live step that emits no fresh
             # event (a merge-queue wait) still paints its working footer. Return
             # before _builder.add: the payload-less marker would otherwise trip the
             # builder's malformed-payload ErrorNode.
             self._replayed_node_ids = self._snapshot_node_ids()
             self._footer_live = True
+            if self._suppressing and self._show_tail:
+                self._arm_resume_tail()
+                self._walk()
             self._refresh_status()
             return
         if isinstance(event, dict):
@@ -484,6 +494,7 @@ class LiveDriver:
         self._refresh_status()
 
     def echo_submitted_reply(self, text: str) -> None:
+        self._show_tail = False   # the inert path already printed the question this answers
         # Force this node past suppress_replay now; survives replay, reconciles the live turn.
         self._builder.seed_pending_reply(text)
         was_suppressing, self._suppressing = self._suppressing, False
@@ -493,25 +504,34 @@ class LiveDriver:
             self._suppressing = was_suppressing
         self._refresh_status()
 
+    def _arm_resume_tail(self) -> None:
+        found = self._builder.latest_step_message_at()
+        if found is None:
+            return
+        step, index = found
+        self._tail_start = step.children[index]
+        for depth, cur in enumerate(self._frontier):
+            if cur.container is step:
+                # Jump (back, or past a blocked replayed node) to the tail;
+                # skipped nodes stay hidden.
+                del self._frontier[depth + 1:]
+                cur.index = index
+                return
+
     def print_interrupt_recap(self) -> None:
-        # Keyed on an empty post-attach scrollback, not _suppressing: a live non-rendering
-        # node (interrupt bookkeeping) lifts suppression with nothing on screen.
+        # Keyed on no live emission since attach, not _suppressing: a live non-rendering
+        # node (interrupt bookkeeping) lifts suppression with nothing on screen, and the
+        # resume tail above is replayed context, not live output.
         if (not self._recap_pending or self._replayed_node_ids is None
-                or self._emitted_any):
+                or self._live_emitted):
             return
         self._recap_pending = False
         text = self._builder.interrupt_recap(datetime.now(UTC).isoformat())
         if text is None or self._prompt_active:
             return
-        # Lazy: inert_resume pulls in the engine.
-        from imp.cli.inert_resume import render_inert_question
-        message = self._builder.latest_step_message()
         self._prev_prose = True
         was_suppressing, self._suppressing = self._suppressing, False
         try:
-            if message is not None:
-                block = render_inert_question(message, width=self._cur_width(), color=self._color)
-                self._print_lines(block.split("\n"), prose=True)
             self._print_lines([pal.ansi(text, "dim", enabled=self._color)], prose=True)
         finally:
             self._suppressing = was_suppressing
@@ -706,6 +726,7 @@ class LiveDriver:
                 return                          # block on a not-final child
             cur.index += 1
             self._maybe_lift(child)
+            self._emitting_replayed = self._is_replayed(child)
             if _is_container(child):
                 # PhaseNode/StepNode: print the header now and descend, streaming
                 # the container's children as their events route in. The transcript
@@ -731,6 +752,7 @@ class LiveDriver:
                 if not (isinstance(child, nv.BreadcrumbLine)
                         and rt.frame_suppressed(cur.container)):
                     self._emit_leaf(child, cur.depth, gutters=self._gutters())
+            self._emitting_replayed = False
 
     def _snapshot_node_ids(self) -> set[int]:
         acc: set[int] = set()
@@ -741,16 +763,17 @@ class LiveDriver:
             stack.extend(getattr(node, "children", ()))
         return acc
 
+    def _is_replayed(self, node: Any) -> bool:
+        return self._replayed_node_ids is not None and id(node) in self._replayed_node_ids
+
     def _maybe_lift(self, node: Any) -> None:
-        # Lift suppression the moment the walk reaches a node created after the
-        # replay boundary (a live continuation node). Replayed nodes — and the
-        # prior phase's breadcrumb, emitted at the pop site while still
-        # suppressed — are left hidden.
+        # Lift suppression at the resume tail's first node, or at the first node created
+        # after the replay boundary. Earlier replayed nodes stay hidden.
         if (self._suppressing and self._replayed_node_ids is not None
-                and id(node) not in self._replayed_node_ids):
+                and (node is self._tail_start or not self._is_replayed(node))):
             self._suppressing = False
-            # _emitted_any is True only from the boot echo or resume recap — keep its armed blank.
-            self._prev_prose = self._emitted_any
+            # The tail always opens on a blank under a bare header; else keep the boot echo's.
+            self._prev_prose = self._emitted_any or node is self._tail_start
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.StepNode) and nv.deferred_leaf(node):
@@ -838,6 +861,8 @@ class LiveDriver:
             return
         if not lines:
             return
+        if not self._emitting_replayed:
+            self._live_emitted = True
         self._emissions += 1
         if self._prompt_active:
             self._deferred.append((lines, prose, separator_indent))

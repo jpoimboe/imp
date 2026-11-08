@@ -68,8 +68,10 @@ failure pauses the quest with the command's output.
 - `imp new` — start a fresh quest; a left draft stays in the active list (not the
   backlog), resumable later.
 - `imp chat` — open the threshold conversation.
-- `imp resume <id>` — pick a parked or left quest back up; resuming one whose
-  session is still live attaches to (joins) that live run.
+- `imp resume <id>` — pick a parked or left quest back up. It first replays the
+  agent's last message and what followed, then continues; the full history stays
+  in `imp log <id>`. Resuming one whose session is still live attaches to (joins)
+  that live run.
 
 ## What happens to a left draft
 

@@ -2256,7 +2256,7 @@ def test_reemitted_header_marks_an_in_session_resume() -> None:
     assert not any("task 2/2 (resume)" in ln for ln in body)
 
 
-def test_attach_resume_prints_the_resume_header_first() -> None:
+def test_attach_resume_prints_the_tail_then_the_resume_header() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True)
@@ -2271,7 +2271,7 @@ def test_attach_resume_prints_the_resume_header_first() -> None:
     drv.on_event(agent_text("7", "after"))
     drv.finish()
     assert [ln for ln in _body(out) if ln] == [
-        "implementation phase · plan 1/1 · task 1/2 (resume) · m", "• after"]
+        "• first", "implementation phase · plan 1/1 · task 1/2 (resume) · m", "• after"]
 
 
 def test_live_headers_match_imp_log_across_a_resume_and_a_position_change() -> None:

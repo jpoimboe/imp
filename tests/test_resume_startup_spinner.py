@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-from tests._event_fixtures import _TTY, _two_phase_events
+from tests._event_fixtures import _TTY, _two_phase_events, agent_text, ev, task_lead_started
 
 _CSI = re.compile(r"\x1b\[([0-9?]*)([A-Za-z])")
 
@@ -193,3 +195,36 @@ def test_echoed_reply_then_spinner_one_blank() -> None:
     i = _spinner_index(lines)
     assert lines[i - 1] == ""                                        # the footer's own blank
     assert lines[i - 2].strip() == "> sandbox is off, go ahead and try"
+
+
+# ---- resume tail: one blank below the header, one above the spinner --------
+
+_TAIL_PROSE = "Latest prose before the pause."
+
+
+def _tail_screen(*, committed: str, preceded_by_blank: bool) -> list[str]:
+    drv, out, status = _build(
+        committed=committed, preceded_by_blank=preceded_by_blank, startup_verb="resuming")
+    drv.install_startup_status()
+    for e in [ev("1", "quest_created", quest_id=1, title="t"), task_lead_started("2"),
+              agent_text("3", _TAIL_PROSE)]:
+        drv.on_event({**e, "_replay": True})
+    drv.on_event({"type": "replay_complete"})
+    status._frame += 1
+    status._draw()
+    screen = Screen()
+    screen.feed(out.getvalue())
+    return _trimmed(screen)
+
+
+@pytest.mark.parametrize(("committed", "preceded_by_blank", "top"), [
+    pytest.param("tagline\n\n", True, "tagline", id="splash"),
+    pytest.param("feat · demo · resuming\n", False, "feat · demo · resuming",
+                 id="bare-header"),
+])
+def test_tail_sits_one_blank_below_the_header_and_above_the_spinner(
+    committed: str, preceded_by_blank: bool, top: str,
+) -> None:
+    lines = _tail_screen(committed=committed, preceded_by_blank=preceded_by_blank)
+    assert lines[:4] == [top, "", f"• {_TAIL_PROSE}", ""]
+    assert lines[4] != ""                           # the footer's activity row

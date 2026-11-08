@@ -156,9 +156,20 @@ def _resumed(events: Events, *, cut: int) -> str:
     return out.getvalue()
 
 
-def test_replayed_user_rename_is_not_reprinted_on_resume() -> None:
+def test_replayed_user_rename_after_the_last_prose_prints_once_in_the_tail() -> None:
     out = _resumed([*_PAUSED_WITH_RENAME, _GATE], cut=len(_PAUSED_WITH_RENAME))
+    assert out.count(LINE) == 1
+    assert out.index("• before") < out.index(LINE)
+
+
+def test_replayed_user_rename_before_the_tail_start_is_not_reprinted() -> None:
+    events = [*_PAUSED_WITH_RENAME,
+              ev("5", "workflow_resumed", timestamp=_at(20)),
+              ev("6", "step_started", **AGENT, resumed=True, restarted=False, timestamp=_at(20)),
+              agent_text("7", "later", agent_id=AID)]
+    out = _resumed(events, cut=len(events))
     assert "title set to" not in out
+    assert "• later" in out
 
 
 def test_live_user_rename_after_the_boundary_prints_once() -> None:

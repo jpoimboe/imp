@@ -113,3 +113,10 @@ def test_lifecycle_exit_code_table_matches_the_exit_code_constants() -> None:
     assert "| 130 | You ended it and nothing failed" in section
     assert ("left, paused, archived, discarded, abandoned or cancelled. "
             "A left quest is resumable") in section
+
+
+def test_lifecycle_resume_replays_the_last_message() -> None:
+    flat = " ".join(DOC.read_text().split())
+    assert ("- `imp resume <id>` — pick a parked or left quest back up. It first replays"
+            " the agent's last message and what followed, then continues; the full history"
+            " stays in `imp log <id>`.") in flat

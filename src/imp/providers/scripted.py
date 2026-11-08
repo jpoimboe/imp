@@ -178,7 +178,9 @@ class ScriptedAgentRunner:
                 transcript.append(assistant)
                 elog.append_agent_message(
                     agent_id=aid, provider=invocation.provider_name,
-                    model=self.model, raw={"content": []}, usage={},
+                    model=self.model,
+                    raw={"content": [{"type": "text", "text": text}] if text else []},
+                    usage={},
                     stop_reason=None)
 
                 tool_results: list[Any] = []

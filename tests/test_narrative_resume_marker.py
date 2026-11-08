@@ -471,14 +471,35 @@ def test_live_restart_prints_one_marker_and_is_otherwise_unchanged() -> None:
 
 # AC11
 @pytest.mark.parametrize("make", [
-    _agent_run,
     _script_run,
     lambda **kw: _script_run(show_label=False, **kw),
-], ids=["agent", "visible-script", "hidden-script"])
+], ids=["visible-script", "hidden-script"])
 def test_replay_suppressed_driver_prints_no_marker_and_an_unchanged_body(make: Any) -> None:
     shown = _replayed(make())
     assert MARKER not in shown
     assert shown == _replayed(make(resumed={"in_process": True}))
+
+
+# Resume tail AC4(a): a marker after the step's last prose is part of the tail, as in imp log.
+def test_replay_suppressed_driver_shows_a_marker_inside_the_resume_tail() -> None:
+    shown = _replayed(_agent_run()).splitlines()
+    log = _log(_agent_run())
+    assert MARKER_2M in shown
+    assert shown[0] == ""                   # the bare-header blank
+    assert shown[1:] == log[log.index("• before"):]
+
+
+# Resume tail AC4(b): a marker before the tail start stays hidden.
+def test_replay_suppressed_driver_hides_a_marker_before_the_tail_start() -> None:
+    events = _agent_run()
+    cut = next(i for i, e in enumerate(events) if e["id"] == "7")   # attach before the close
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True, preceded_by_blank=True)
+    for e in events[:cut]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    assert out.getvalue() == "• after\n"
 
 
 # AC11(b): the two script shapes above replay to nothing, so pin one with a body.
