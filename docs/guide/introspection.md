@@ -223,7 +223,8 @@ with `imp search` / `imp events search`, which the daemon resolves. The
 `imp` CLI reaches another project only with both env pins cleared —
 `cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>` — since
 the socket pins reads to this quest's daemon and `IMP_STATE_DIR` to this
-project.
+project. Running `imp` from another project's directory without clearing both
+pins is refused.
 
 ## Linking a related backlog quest
 
