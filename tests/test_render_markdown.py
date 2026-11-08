@@ -35,6 +35,7 @@ from imp.cli.render_summary import (
 from imp.cli.render_text import LOG_CATEGORIES
 from tests._event_fixtures import (
     INTERNAL_TOOLS,
+    INTERRUPTED_SUBAGENT,
     ev,
     interrupted_task_lead_events,
     subagent_then_bash_events,
@@ -350,6 +351,35 @@ def test_titled_subagent_markdown_row_and_full_header() -> None:
     assert rows(_md(titled_subagent_events(None))) == [
         "· explorer · claude-sonnet-5-5 · 55s"]
     assert rows(_md(titled_subagent_events(None), full=True)) == ["**explorer**"]
+
+
+def test_full_markdown_and_html_subagent_header_carries_the_tag() -> None:
+    title = "map ledger time totals"
+    interrupted = _md(titled_subagent_events(title, error_content=INTERRUPTED_SUBAGENT),
+                      full=True)
+    assert f"**explorer · {title} (interrupted)**" in interrupted.split("\n")
+    html = render_html(interrupted, title="t")
+    assert f"<strong>explorer · {title} (interrupted)</strong>" in html
+    running = _md(titled_subagent_events(title, finished=False), full=True)
+    assert f"**explorer · {title} (running)**" in running.split("\n")
+
+
+@pytest.mark.parametrize(("content", "word"), [
+    pytest.param("RuntimeError: subagent 'explorer' failed (config) [stalled]", "stalled",
+                 id="stalled"),
+    pytest.param("RuntimeError: subagent 'explorer' reached its context limit and stopped "
+                 "before finishing. [context_exhausted]", "context exhausted",
+                 id="context-exhausted"),
+    pytest.param("RuntimeError: subagent 'explorer' was suspended before finishing — its "
+                 "provider or retry budget ran out. [suspended]", "suspended", id="suspended"),
+    pytest.param("RuntimeError: subagent 'explorer' failed (config)", "failed",
+                 id="plain-failure"),
+])
+def test_full_markdown_subagent_header_tag_matches_the_lean_label(content, word) -> None:
+    events = titled_subagent_events(None, error_content=content)
+    lean = [ln for ln in _md(events).split("\n") if "explorer" in ln]
+    assert lean == [f"· explorer · claude-sonnet-5-5 ({word}) · 55s"]
+    assert f"**explorer ({word})**" in _md(events, full=True).split("\n")
 
 
 def test_markdown_subagent_title_is_html_escaped() -> None:

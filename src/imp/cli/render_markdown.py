@@ -308,7 +308,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         if not inner_text and not full:
             yield "· " + esc(label)
             return
-        summary = _subagent_heading(node) if full else "· " + label
+        summary = (_subagent_heading(node) + _subagent_tag(node)) if full else "· " + label
         yield _details(summary, inner_text, full=full, esc=esc)
         return
     if isinstance(node, nv.OutcomeLine):
