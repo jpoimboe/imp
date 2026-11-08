@@ -224,7 +224,9 @@ A correct imp does **all** of:
 > A leave from a prompt already under an open pause
 > (the hold prompt after a Ctrl-C or gate pause, before any `imp resume`) records
 > `interrupt_requested` (`source: "ctrl-d"`) but no second `workflow_paused` — the open-pause
-> dedup in `pause_and_exit` (`signals.py`); expected, not a defect. Mid-run Ctrl-D on a materialized quest suspends the
+> dedup in `pause_and_exit` (`signals.py`); expected, not a defect. That dedup covers only a leave
+> before any `imp resume`: a leave at a *resumed* hold prompt writes a fresh `workflow_paused`
+> (`interrupt_reason` = the leave key, e.g. `ctrl-d`). Mid-run Ctrl-D on a materialized quest suspends the
 > agent and detaches immediately (rc 130, paused, resume_target = None); its guaranteed on-exit
 > print is the three-part `_pause_lines` block (`paused · Ctrl-D` head, `<id> · <name>` identity line, `resume: imp resume <id>`, `main.py`), not the `⏸ paused (ctrl-d)` glyph. In phase 0, a
 > mid-run Ctrl-D is a leave like any other: the save or archive spine and only
@@ -501,7 +503,7 @@ once each:
      (transcript replays, the next agent turn runs) — no hold prompt is shown.
    - **Ctrl-D at the resumed hold prompt** on a materialized quest (after Ctrl-C → inline steer
      gate → Ctrl-D, then `imp resume`) → the next `imp resume <id>` lands on that same hold
-     prompt again — **not** the agent.
+     prompt again — **not** the agent — and `imp log <id>` then ends with `paused · Ctrl-D`.
    - **An answer typed at a re-asked question** (leave at an agent's question, `imp resume`,
      answer it) reaches the agent: it appears in the event log as a `user_message` for the
      step, and no hold prompt intervenes.
