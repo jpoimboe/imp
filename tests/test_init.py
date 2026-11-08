@@ -328,8 +328,74 @@ def test_post_init_manifest_notes_the_commit(tmp_path: Path) -> None:
         output_fn=lines.append,
     )
     manifest = "\n".join(lines)
-    assert "Committed imp/config.yaml." in manifest
+    assert ("Committed imp/config.yaml, imp/memory/all.md, "
+            "imp/memory/default/all.md, .gitignore.") in manifest
     assert "track in git" not in manifest
+
+
+_HEAD_FILES = ("show", "--name-only", "--format=", "HEAD")
+
+
+def test_fresh_init_commit_line_names_exactly_the_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.providers.paths import global_config_path
+
+    _plain(monkeypatch)
+    _stub_screen(monkeypatch, workflow="imp")
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+
+    assert ("Committed imp/config.yaml, imp/memory/all.md, "
+            "imp/memory/imp/all.md, .gitignore.") in msgs
+    created = msgs.index("Created:")
+    assert msgs[created + 1:created + 4] == [
+        "  imp/config.yaml", "  imp/memory/all.md", "  imp/memory/imp/all.md"]
+    assert msgs[created + 4].startswith(f"  {display_path(global_config_path())}")
+    assert sorted(_git(tmp_path, *_HEAD_FILES).stdout.split()) == sorted([
+        "imp/config.yaml", "imp/memory/all.md", "imp/memory/imp/all.md",
+        ".gitignore"])
+
+
+def test_fresh_init_omits_an_already_committed_gitignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    _git(tmp_path, "add", ".gitignore")
+    _git(tmp_path, "commit", "-qm", "seed")
+    _stub_screen(monkeypatch, workflow="imp")
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+
+    assert ("Committed imp/config.yaml, imp/memory/all.md, "
+            "imp/memory/imp/all.md.") in msgs
+    assert ".gitignore" not in _git(tmp_path, *_HEAD_FILES).stdout.split()
+
+
+def test_reinit_names_only_the_gitignore_it_committed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    (tmp_path / "imp" / "memory" / "imp").mkdir(parents=True)
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "memory" / "all.md").write_text("")
+    (tmp_path / "imp" / "memory" / "imp" / "all.md").write_text("")
+    _git(tmp_path, "add", "imp")
+    _git(tmp_path, "commit", "-qm", "seed")
+
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+    assert [m for m in msgs if m.startswith("Committed")] == ["Committed .gitignore."]
+    assert _git(tmp_path, *_HEAD_FILES).stdout.split() == [".gitignore"]
+
+    again: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=again.append)
+    assert not any(m.startswith("Committed") for m in again)
 
 
 def test_already_initialized_with_existing_user_config_claims_no_write(
@@ -490,7 +556,9 @@ def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> N
     assert data["pythonpath"] == ["src"]
     # Memory scaffold written; commit created for a fresh tree.
     assert (tmp_path / "imp" / "memory" / "all.md").is_file()
-    assert committed is True
+    assert committed == (
+        "imp/config.yaml", "imp/memory/all.md", "imp/memory/light/all.md",
+        ".gitignore")
     # Workflow scaffold uses the chosen workflow, not the hardcoded default.
     assert (tmp_path / "imp" / "memory" / "light" / "all.md").is_file()
     assert not (tmp_path / "imp" / "memory" / "default").exists()
@@ -1121,8 +1189,11 @@ def test_host_success_lines_carry_engine_chrome(
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
+    assert f"{DIM}  imp/memory/all.md{RESET}" in msgs
+    assert f"{DIM}  imp/memory/default/all.md{RESET}" in msgs
     assert f"{DIM}  {display_path(user_path)}  (your machine: providers, theme){RESET}" in msgs
-    assert f"{DIM}Committed imp/config.yaml.{RESET}" in msgs
+    assert (f"{DIM}Committed imp/config.yaml, imp/memory/all.md, "
+            f"imp/memory/default/all.md, .gitignore.{RESET}") in msgs
     assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
 
 
@@ -1179,7 +1250,7 @@ def test_already_initialized_rerun_block_stays_bare(
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
     # the same two strings the fresh path chromes — bare here
     assert f"  {display_path(user_path)}  (your machine: providers, theme)" in msgs
-    assert "Committed imp/config.yaml." in msgs
+    assert "Committed imp/config.yaml, .gitignore." in msgs
 
 
 def test_noninteractive_output_stays_bare_under_forced_color(
@@ -1192,8 +1263,11 @@ def test_noninteractive_output_stays_bare_under_forced_color(
     run_init_noninteractive(
         tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
 
-    assert "Created:" in msgs
-    assert "  imp/config.yaml" in msgs
+    created = msgs.index("Created:")
+    assert msgs[created + 1:] == [
+        "  imp/config.yaml", "  imp/memory/all.md", "  imp/memory/default/all.md",
+        "Committed imp/config.yaml, imp/memory/all.md, "
+        "imp/memory/default/all.md, .gitignore."]
     assert not any("\x1b" in m for m in msgs)
 
 
@@ -1928,7 +2002,8 @@ def test_hint_step_degrades_to_floor_key_names_on_a_bad_config(
     ]
     assert msgs[enabled + 1:enabled + 1 + len(expected)] == expected
     assert [m for m in msgs if m.startswith(("  claude — ", "  anthropic — "))] == expected
-    assert "Committed imp/config.yaml." in msgs
+    assert ("Committed imp/config.yaml, imp/memory/all.md, "
+            "imp/memory/default/all.md, .gitignore.") in msgs
 
 
 def test_reinit_hints_honor_the_project_layer_provider_envs(

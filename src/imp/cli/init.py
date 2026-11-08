@@ -58,7 +58,6 @@ _DEFAULT_WORKFLOW = "default"
 
 _INIT_COMMIT_PATHS: tuple[str, ...] = (
     "imp/config.yaml",
-    ".gitignore",
     "imp/memory/all.md",
 )
 
@@ -195,26 +194,39 @@ def _resolve_init_base(
     return BaseDetection(current, "current branch")
 
 
-def _commit_init_files(project_root: Path, *, extra_paths: tuple[str, ...] = ()) -> bool:
-    """Stage and commit init files by explicit pathspec; return True iff a commit
-    was created. Only paths that exist on disk are staged — the imp/memory/
-    scaffolds are absent on an already-initialized re-init, and `git add` with a
-    pathspec matching no file exits non-zero."""
-    paths = [p for p in list(_INIT_COMMIT_PATHS) + list(extra_paths) if (project_root / p).exists()]
+def _commit_init_files(
+    project_root: Path, *, extra_paths: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Stage and commit init files by explicit pathspec; return the paths the new
+    commit holds, in display order, or () when no commit was made. Only paths that
+    exist on disk are staged — the imp/memory/ scaffolds are absent on an
+    already-initialized re-init, and `git add` with a pathspec matching no file
+    exits non-zero."""
+    candidates = (*_INIT_COMMIT_PATHS, *extra_paths, ".gitignore")
+    paths = [p for p in candidates if (project_root / p).exists()]
     if not paths:
-        return False
+        return ()
     status = subprocess.run(
         ["git", "status", "--porcelain", "--", *paths],
         cwd=project_root, capture_output=True, text=True, check=True)
     if not status.stdout.strip():
-        return False
+        return ()
     subprocess.run(["git", "add", "--", *paths],
                    cwd=project_root, check=True, capture_output=True, text=True)
     subprocess.run(
         ["git", "commit", "-m", "imp: initialize project",
          "--", *paths],
         cwd=project_root, check=True, capture_output=True, text=True)
-    return True
+    tree = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "--root",
+         "-z", "HEAD"],
+        cwd=project_root, capture_output=True, text=True, check=True)
+    in_commit = set(tree.stdout.split("\0"))
+    return tuple(p for p in candidates if p in in_commit)
+
+
+def _committed_line(paths: tuple[str, ...]) -> str:
+    return f"Committed {', '.join(paths)}."
 
 
 # The order providers are presented in the picker. Bindings (tier→model) are
@@ -859,10 +871,11 @@ def _interactive_confirm_screen(
             prompt_fn(_EDIT_PROMPTS[cursor], _edit_default(state, cursor)))
 
 
-def write_init_files(project_root: Path, settings: InitSettings) -> bool:
+def write_init_files(project_root: Path, settings: InitSettings) -> tuple[str, ...]:
     """Write imp/config.yaml + the memory scaffold from `settings`, ensure `.imp/`
-    is gitignored, and commit the init files. Returns True iff a commit was created.
-    Callers ensure the git repo exists first (base resolution needs it)."""
+    is gitignored, and commit the init files. Returns the committed paths (empty
+    when no commit was made). Callers ensure the git repo exists first (base
+    resolution needs it)."""
     imp_dir = project_root / "imp"
     imp_dir.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(
@@ -957,6 +970,11 @@ def _machine_path_lines(user_path: Path) -> list[str]:
     path = display_path(user_path)
     line = f"  {path}  {_MACHINE_NOTE}"
     return [line] if _fits(line) else [f"  {path}", f"    {_MACHINE_NOTE}"]
+
+
+def _created_repo_lines(workflow: str) -> list[str]:
+    return ["  imp/config.yaml", "  imp/memory/all.md",
+            f"  imp/memory/{workflow}/all.md"]
 
 
 def run_init(
@@ -1056,7 +1074,7 @@ def run_init(
             output_fn(
                 "Change providers later: imp config set providers <name>,<name>")
         if committed:
-            output_fn("Committed imp/config.yaml.")
+            output_fn(_committed_line(committed))
         return
 
     if repaired:
@@ -1129,11 +1147,12 @@ def run_init(
         output_fn(pal.ansi(line, "dim", enabled=color_on))
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
-    output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))
+    for line in _created_repo_lines(settings.default_workflow):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
     for line in _machine_path_lines(user_path):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
     if committed:
-        output_fn(pal.ansi("Committed imp/config.yaml.", "dim", enabled=color_on))
+        output_fn(pal.ansi(_committed_line(committed), "dim", enabled=color_on))
     output_fn("")
     output_fn("Try: " + pal.ansi(
         'imp new "Add a dark-mode toggle"', "wordmark", enabled=color_on))
@@ -1238,6 +1257,7 @@ def run_init_noninteractive(
         _set_user_providers(user_path, providers)
 
     output_fn("Created:")
-    output_fn("  imp/config.yaml")
+    for line in _created_repo_lines(settings.default_workflow):
+        output_fn(line)
     if committed:
-        output_fn("Committed imp/config.yaml.")
+        output_fn(_committed_line(committed))
