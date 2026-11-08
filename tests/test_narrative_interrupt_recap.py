@@ -8,7 +8,7 @@ import pytest
 
 from imp.cli.narrative import NarrativeBuilder, build_tree
 from imp.cli.render_text import render_tree
-from tests._event_fixtures import ev
+from tests._event_fixtures import agent_text, ev
 from tests.test_narrative_resume_marker import SHARED_DURATIONS
 
 Event = dict[str, Any]
@@ -95,6 +95,12 @@ def _leave_and_resume(tag: str) -> list[Event]:
     return [ev(f"{tag}-wp", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
             ev(f"{tag}-wr", "workflow_resumed"),
             ev(f"{tag}-ca", "cli_attached")]
+
+
+def _saying(events: list[Event], agent: str, *texts: str) -> list[Event]:
+    """`events` with `agent`'s prose turns inserted right after its step_started (events[0])."""
+    said = [agent_text(f"said{i}", text, agent_id=agent) for i, text in enumerate(texts)]
+    return [events[0], *said, *events[1:]]
 
 
 # The daemon hold prompt: agent-less, untagged, after the replay boundary.
@@ -444,3 +450,37 @@ _LOG_PREFIX = [
 ])
 def test_imp_log_rendering_ignores_the_anchor(events: list[Event], expected: list[str]) -> None:
     assert list(render_tree(build_tree(events), full=True, color=False, width=80)) == expected
+
+
+def _message(events: list[Event]) -> str | None:
+    b = NarrativeBuilder()
+    for e in events:
+        b.add(e)
+    return b.latest_step_message()
+
+
+def _coder_said() -> list[Event]:
+    """The single-cut-off coder scenario where only the coder (a subagent) wrote prose."""
+    return [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"),
+            agent_text("sp", "Coder prose.", agent_id="sub:d1"),
+            *_ctrl_c("a", LEAD, "sub:d1"), _interrupted_result("d1", LEAD, "coder"),
+            *_leave_and_resume("a")]
+
+
+# AC6
+@pytest.mark.parametrize(("events", "expected"), [
+    pytest.param([*_saying(_spec_review(), SPEC_REVIEW, "Reading the spec.",
+                           "Checking criterion 4."), LIVE_GATE],
+                 "Checking criterion 4.", id="latest-of-several"),
+    pytest.param([*_lead_cut_off_mid(ev("t1", "thinking", LEAD, content="hmm")), LIVE_GATE],
+                 None, id="thinking-only"),
+    pytest.param([*_lead_cut_off_mid(ev("t1", "tool_call", LEAD, id="tc1", name="bash",
+                                        input={"command": "make check"})), LIVE_GATE],
+                 None, id="tool-only"),
+    pytest.param([*_coder_said(), LIVE_GATE], None, id="subagent-prose-only"),
+    pytest.param([*_saying(_coder_said(), LEAD, "Dispatching the coder."), LIVE_GATE],
+                 "Dispatching the coder.", id="subagent-prose-ignored"),
+    pytest.param([], None, id="no-step"),
+])
+def test_latest_step_message(events: list[Event], expected: str | None) -> None:
+    assert _message(events) == expected

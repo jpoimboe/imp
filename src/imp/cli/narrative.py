@@ -809,6 +809,11 @@ class NarrativeBuilder:
         age = f"paused {_pause_gap_text(int(gap))} ago" if gap is not None and gap >= 1 else None
         return _join(f"was: {body}" if body else None, age)
 
+    def latest_step_message(self) -> str | None:
+        """The top step's last top-level agent prose; None when it has none."""
+        children = self._step_stack[-1].children if self._step_stack else []
+        return next((c.text for c in reversed(children) if isinstance(c, AgentTextNode)), None)
+
     def backoff_wait_seconds(self, ref_iso: str | None) -> float:
         """Total backoff-wait seconds for this builder's agent: completed spans
         plus any in-progress span resolved against `ref_iso` (a live `now` or a
