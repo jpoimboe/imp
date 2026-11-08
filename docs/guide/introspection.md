@@ -169,7 +169,9 @@ live.
 
 Rows and phase headings show the workflow's friendly labels (`finalizing spec`
 under `spec phase`), and a step with no label shows its id. `--step` and
-`imp events` take step ids, which a bare `imp events <id>` lists.
+`imp events` take step ids, which a bare `imp events <id>` lists. A failed step
+reads `· failed` after its name; a subagent that ended abnormally reads
+`· interrupted`, `· stalled`, `· context exhausted`, `· suspended`, or `· failed`.
 
 On a subscription run that right-most column is `weekly`: the share of its
 week's quota this quest consumed, charged to *this* quest rather than read off

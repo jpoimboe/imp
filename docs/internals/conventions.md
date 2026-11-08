@@ -131,6 +131,10 @@ and cursor moves included.
 
 Color-off output keeps inline code's source backticks, since color is otherwise its only marker.
 
+## Color never carries meaning alone
+
+Every state a color marks also shows as a word or glyph, so `NO_COLOR` and color-off output lose nothing. Dim and highlight may de-emphasize or emphasize; they never stand in for a state.
+
 ## See also
 
 - `internals/architecture.md` — the engine and renderer these surfaces are built on.
