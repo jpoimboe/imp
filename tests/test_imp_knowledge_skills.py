@@ -424,7 +424,7 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ('- `imp log <id>` — the human "read the story" narrative, tool bursts '
             "folded; `--step <name>` scopes it to one step, `-s` swaps the story "
-            "for the per-step ledger `imp show` also carries (rows show labels, "
+            "for the full per-step ledger, idle steps included (rows show labels, "
             "`--step` takes ids), and owns its windowing and `--md`/`--html` "
             "export.") in flat
     assert ("- `imp events <id>` — the agent-facing digest, where event content "
@@ -480,3 +480,13 @@ def test_show_card_vars_are_documented_as_var_seeded_only() -> None:
     knowledge = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert "`--var` values (`vars:`)" in knowledge
     assert "`--json` for a structured card with every effective var" in knowledge
+
+
+def test_card_ledger_is_documented_as_omitting_idle_steps() -> None:
+    intro = " ".join(_introspection_doc().split())
+    assert ("`ledger:` section holding the per-step table, minus steps that "
+            "finished instantly with nothing to report") in intro
+    assert "`imp log <id> -s` lists every step" in intro
+    assert "holding the full per-step table" not in intro
+    knowledge = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert "the per-step `ledger:` table minus idle steps" in knowledge

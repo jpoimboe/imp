@@ -86,8 +86,9 @@ dependencies, opening intent, the summary inlined, and the run ledger. A quest
 with recorded steps carries a `run:` line — work time, tokens in and out, and
 the charge (its share of the weekly quota window, or the dollar cost) — then a
 `workflow:` line naming the workflow it ran under, and last on the card a
-`ledger:` section holding the full per-step table. A quest that has not run a
-step yet shows none of the three, and neither does one still in the backlog.
+`ledger:` section holding the per-step table, minus steps that finished
+instantly with nothing to report. A quest that has not run a step yet shows
+none of the three, and neither does one still in the backlog.
 A quest that completed with a recorded merge SHA also shows a `merge_commit:`
 line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
 when the quest has none). A quest halted as paused or error shows a
@@ -152,9 +153,11 @@ column that is either money or quota. The windowing filters above narrow the
 rows, and `--md` / `--html` export the same table (`--summary` is the long form
 of `-s`).
 The same table is on `imp show <id>` — a `ledger:` section at the foot of the
-card, with its total row restated as a one-line `run:` field high up — so
-`imp log <id> -s` is where the windowing and export flags live rather than
-where the numbers live.
+card, with its total row restated as a one-line `run:` field high up — except
+that the card omits steps that finished instantly with nothing to report (under
+a second, no model work, no subagents, no error); its total still counts them.
+`imp log <id> -s` lists every step, and is where the windowing and export flags
+live.
 
 Rows and phase headings show the workflow's friendly labels (`finalizing spec`
 under `spec phase`), and a step with no label shows its id. `--step` and
@@ -194,8 +197,8 @@ answers them — not the sandbox floor:
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
   read: the quest's detail card (id, title, status, why it halted, timing, dependencies, the
   opening intent, the summary inlined, and the run ledger — a `run:` totals line
-  and the per-step `ledger:` table). Add `spec` for the raw spec, `verify`
-  for the last failing gate run, or `--json` for the card as a structured object
+  and the per-step `ledger:` table minus idle steps). Add `spec` for the raw spec,
+  `verify` for the last failing gate run, or `--json` for the card as a structured object
   (which carries no ledger).
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
