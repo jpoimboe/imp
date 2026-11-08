@@ -40,12 +40,12 @@ def test_finalize_pause_route_drops_human_availability_reasoning() -> None:
     assert "non-converging verify-triage" in body
 
 
-def test_finalize_enumerates_all_four_toleration_sources() -> None:
+def test_finalize_enumerates_the_two_gate_toleration_sources() -> None:
     body = (WF / "agents" / "finalize.md").read_text()
-    assert "converge-verify" in body and "integration-verify" in body
-    # Both enumeration spots (the audit-field read and the merge-gate walk) name the new gates.
-    assert body.count("converge-verify") >= 2
-    assert body.count("integration-verify") >= 2
+    assert "converge-verify" not in body
+    # The audit-field read, the already-tracked check and the merge-gate walk each name both gates.
+    flat = " ".join(body.split())
+    assert flat.count("`verify` / `integration-verify`") == 3
 
 
 def _render_finalize(tmp_path: Path, *, auto_merge: bool, autonomous: bool) -> str:

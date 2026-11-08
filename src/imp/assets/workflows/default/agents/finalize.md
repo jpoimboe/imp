@@ -64,8 +64,7 @@ Populate the audit fields:
   `— needs-decision: <why>` items, one per line with its reason. These
   include items `spec-finalizer`/`plan-writer` appended directly in reader form (reaching
   you even on a `fast_path` quest where `deferred-sweep` never ran) **and tolerations**
-  the `verify` / `converge-verify` / `integration-verify` gates recorded as
-  `- [ ] DEFERRED verify: …` / `- [ ] DEFERRED converge-verify: …` /
+  the `verify` / `integration-verify` gates recorded as `- [ ] DEFERRED verify: …` /
   `- [ ] DEFERRED integration-verify: … — needs-decision: …` lines; present them all
   identically. A toleration admits non-attribution: do **not** re-run the failure and do
   **not** editorialize about its current status (no "already fixed", no "now green") — present
@@ -90,7 +89,7 @@ nor tolerated. Read it as a non-converging triage needing a human, not a transie
 
 Before §2 decides, run an **already-tracked check** over the **verify-family tolerations** in the
 §1 surfaced set — the `— needs-decision:` lines whose source is `verify` /
-`converge-verify` / `integration-verify`. Design/spec `— needs-decision:` items authored
+`integration-verify`. Design/spec `— needs-decision:` items authored
 by `spec-finalizer` / `plan-writer` are **never** checked for an existing tracker; they always surface.
 Per toleration, ask: is the failing test **already tracked or fixed by another
 active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
@@ -177,7 +176,7 @@ surface, load `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) i
 
 Then work through the **needs-decision** items. This walk has a **closed set** of inputs:
 the `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md` (including
-tolerations the `verify` / `converge-verify` / `integration-verify` gates recorded there)
+tolerations the `verify` / `integration-verify` gates recorded there)
 — and nothing else. Do not add an item from something you noticed reading the diff. Drive
 the conversation however reads best — there is no required one-item-per-turn cadence;
 take the items in whatever order and grouping the discussion warrants. For each item:

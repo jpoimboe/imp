@@ -382,9 +382,10 @@ def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     assert "tolerated-failures.md" not in text
     assert "Surface tolerated verification failures" not in text
     assert "<signature>: <justification>" not in text
-    # They reach finalize as DEFERRED verify: / DEFERRED converge-verify: needs-decision lines.
+    # They reach finalize as DEFERRED verify: / DEFERRED integration-verify: needs-decision lines.
     assert "DEFERRED verify:" in text
-    assert "DEFERRED converge-verify:" in text
+    assert "DEFERRED integration-verify:" in text
+    assert "converge-verify" not in text
     assert "sweep-verify" not in text
     assert "needs-decision" in low
     # finalize must not re-run the failure or editorialize its current status.
