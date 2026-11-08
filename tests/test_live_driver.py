@@ -2168,6 +2168,46 @@ def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     assert "thinking" not in block[2]
 
 
+_THEME_COLOR = [(t, c) for t in pal.THEMES for c in (True, False)]
+
+
+def _expected_separator(theme: str, color: bool, columns: int) -> str:
+    return ("\x1b[90m" + "─" * (columns - 2) + "\x1b[0m") if (theme == "ansi" and color) else ""
+
+
+@pytest.mark.parametrize(("theme", "color"), _THEME_COLOR)
+def test_compose_status_rules_off_the_position_row_only_under_ansi_with_color(
+        theme: str, color: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "60")       # compose_status reads term_width()
+    pal.set_theme(theme)
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=color, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    block = drv.compose_status(0)
+    assert block is not None and len(block) == 3     # row count is theme-independent
+    assert "thinking" in block[0]
+    assert block[1] == _expected_separator(theme, color, 60)
+    assert "implementation phase" in block[2] and "task 1/3" in block[2]
+
+
+@pytest.mark.parametrize(("theme", "color"), _THEME_COLOR)
+def test_compose_startup_rules_off_the_identity_row_only_under_ansi_with_color(
+        theme: str, color: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "60")
+    pal.set_theme(theme)
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=color, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", quest_id="lufu50", title="t")
+    rows = drv.compose_startup(0)
+    assert rows is not None and len(rows) == 3       # row count is theme-independent
+    assert "resuming" in rows[0]
+    assert rows[1] == _expected_separator(theme, color, 60)
+    assert "lufu50" in rows[2]
+
+
 def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "quest_created", id="z9gixx", title="t"))

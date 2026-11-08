@@ -589,7 +589,7 @@ class LiveDriver:
             carrier=self._builder.carrier_for(activity.provider),
             cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
-        rows = [a_line, "", p_row]
+        rows = [a_line, pal.status_separator(w, enabled=self._color), p_row]
         rows += compose_subagent_rows(
             self._builder, color=self._color, width=w, now_iso=now_iso)
         return rows
@@ -598,17 +598,18 @@ class LiveDriver:
         if self._startup_verb is None:
             return None
         now_iso = datetime.now(UTC).isoformat()
+        w = term_width()
         a_line = compose_activity_line(
             activity=nv.Activity(verb=self._startup_verb,
                                  start_ts=self._startup_start_iso),
-            frame=frame, color=self._color, now_iso=now_iso, width=term_width())
+            frame=frame, color=self._color, now_iso=now_iso, width=w)
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
             quest_id=root.id, title=root.title, project=self._project,
-            color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
+            color=self._color, width=w, unsandboxed=self._unsandboxed)
         if identity_row is None:
             return [a_line]
-        return [a_line, "", identity_row]
+        return [a_line, pal.status_separator(w, enabled=self._color), identity_row]
 
     def install_startup_status(self) -> None:
         if self._startup_verb is None:
