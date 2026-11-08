@@ -558,6 +558,39 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
 
 
 @pytest.mark.anyio
+async def test_resume_after_the_completion_nudge_gates_on_the_real_question(
+    tmp_path: Path,
+) -> None:
+    """A transcript parked on WAITING after the completion nudge resumes with a
+    gate carrying the question asked before the nudge."""
+    from dataclasses import replace
+
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for role, said in (("user", "go"), ("assistant", "which DB?"),
+                       ("user", COMPLETION_NUDGE), ("assistant", "WAITING")):
+        t.append(Message(role=role, content=(TextBlock(text=said),)))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success"}),
+                 stop_reason="tool_use"),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake)
+    runner._user_input_fn = lambda _prompt: "postgres"
+
+    async for _ in runner.run(replace(inv, event_log=log, balance_on_resume=True)):
+        pass
+
+    gates = [e for e in log.read() if e["type"] == "awaiting_user_input"]
+    assert [g["payload"]["last_agent_message"] for g in gates] == ["which DB?"]
+
+
+@pytest.mark.anyio
 async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
     tmp_path: Path,
 ) -> None:
