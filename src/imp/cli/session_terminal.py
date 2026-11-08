@@ -277,13 +277,15 @@ async def run_terminal_client(
                             gate_state["elsewhere"] = True
                             scope.cancel()
 
-                def _removal() -> str | None:
+                def _removal() -> tuple[str, str] | None:
                     if control_root is None:
                         return None
                     try:
-                        return removal_description(Quest.load(control_root, quest_id))
+                        quest = Quest.load(control_root, quest_id)
                     except (LoadError, LoadErrors):
                         return None
+                    removed = removal_description(quest)
+                    return None if removed is None else (quest.title, removed)
 
                 async def _solicit_reply(
                     prompt: str, interrupt: bool,
@@ -294,11 +296,12 @@ async def run_terminal_client(
                         reply = await solicit(prompt, interrupt)
                         if not (isinstance(reply, str) and reply.strip() == "/abandon"):
                             return reply, None
-                        removed = _removal()
-                        if removed is None:
+                        built = _removal()
+                        if built is None:
                             return reply, None
+                        title, removed = built
                         driver.append_committed_reply("/abandon")
-                        if await confirm(abandon_question(quest_id, removed)):
+                        if await confirm(abandon_question(quest_id, title, removed)):
                             # No await before the gate exits: late remote answers read as elsewhere.
                             return reply, removed
                         driver.emit_lines([f"Kept {quest_id}."])

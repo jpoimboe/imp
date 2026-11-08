@@ -22,8 +22,8 @@ def removal_description(quest: Quest) -> str | None:
     return f"worktree and branch imp/{quest.id} ({count})"
 
 
-def abandon_question(quest_id: str, removed: str) -> str:
-    return f"Abandon {quest_id}? This removes its {removed}. [y/N] "
+def abandon_question(quest_id: str, title: str, removed: str) -> str:
+    return f'Abandon "{quest_id} · {title}"? This removes its {removed}. [y/N] '
 
 
 async def ask_keypress_confirm(

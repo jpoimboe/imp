@@ -813,7 +813,8 @@ async def _read_intent_line(
             removed = removal_description(quest)
             if removed is not None:
                 print(pal.caret(enabled=color) + line)
-                if not await ask_keypress_confirm(abandon_question(quest.id, removed)):
+                if not await ask_keypress_confirm(
+                        abandon_question(quest.id, quest.title, removed)):
                     print(f"Kept {quest.id}.")
                     print()
                     continue
@@ -3421,7 +3422,7 @@ def _abandon_approved(control: Path, quest_id: str) -> bool:
     prev = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, signal.default_int_handler)
     try:
-        answer = input(abandon_question(quest.id, removed))
+        answer = input(abandon_question(quest.id, quest.title, removed))
     except (EOFError, KeyboardInterrupt):
         print()
         return False
