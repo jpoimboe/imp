@@ -1636,8 +1636,8 @@ def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
 
 async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | None:
     """Read one line at inert resume through the shared slash-aware reader
-    (session-verb rejection, /help, /skills, empty-submit guard). EOF / Ctrl-C
-    retains the `> ` caret; a leave signal prints its pause block. Both map to
+    (session-verb rejection, /help, /skills, empty-submit guard). Ctrl-D, Ctrl-C
+    or a leave signal prints its trigger-qualified pause block and maps to
     None — the quest stays parked."""
     from imp.cli.signals import PromptLeave, prompt_signal_guard
     from imp.cli.store import _resolve_intent
@@ -1656,9 +1656,11 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
     except PromptLeave as leave:
         _emit_leave_pause(quest, leave.trigger, intent=_resolve_intent(events))
         return None
-    except (EOFError, KeyboardInterrupt):
-        print(pal.caret(enabled=color))
-        print()
+    except EOFError:
+        _emit_leave_pause(quest, "ctrl-d", intent=_resolve_intent(events))
+        return None
+    except KeyboardInterrupt:
+        _emit_leave_pause(quest, "ctrl-c", intent=_resolve_intent(events))
         return None
     return line
 
