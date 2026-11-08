@@ -51,9 +51,9 @@ def _last_gate_index(records: list[dict[str, Any]]) -> int | None:
 def derive_codex_resume_state(
     events_path: Path, agent_id: str, *, subagent_depth: int = 0,
 ) -> tuple[ResumeState, str]:
-    """Return (state, last_agent_text). last_agent_text is the tail
-    agent_message text (needed by the resume seam, since proc_state is empty on
-    a fresh resume process)."""
+    """Return (state, last_agent_text): the tail prose — for AWAITING_USER, the
+    question the completion nudge followed — needed by the resume seam, since
+    proc_state is empty on a fresh resume process."""
     if not events_path.exists():
         return ResumeState.FRESH, ""
     records = _read_agent_records(events_path, agent_id)
@@ -77,11 +77,11 @@ def derive_codex_resume_state(
     # must not shadow the turn's real prose with "". The `is None` gate keys on
     # this same lookup: no prose-bearing response anywhere -> nothing to replay
     # -> SEND_TO_LLM (subsumes the old empty-history case).
-    last_prose_msg = None
-    for rec in records:
-        if rec.get("type") == "agent_message" and _text_of(rec):
-            last_prose_msg = rec
-    if has_complete_step or last_prose_msg is None:
+    last_prose = None
+    for i, rec in enumerate(records):
+        if _is_prose(rec):
+            last_prose = i
+    if has_complete_step or last_prose is None:
         return ResumeState.SEND_TO_LLM, ""
     # Anchored on the LAST gate, unlike the presence-based checks above: a
     # tool_call after it means the agent took the reply and went back to work,
@@ -89,9 +89,9 @@ def derive_codex_resume_state(
     last_gate = _last_gate_index(records)
     has_awaiting = last_gate is not None and not any(
         rec.get("type") == "tool_call" for rec in records[last_gate + 1:])
-    last_text = _text_of(last_prose_msg)
     if has_awaiting:
-        return ResumeState.AWAITING_USER, last_text
+        return ResumeState.AWAITING_USER, _parked_question_text(records, last_prose)
+    last_text = _text_of(records[last_prose])
     if subagent_depth > 0:
         # A subagent never calls complete_step; its bare-turn-end terminal IS
         # the done-signal. Resume normally with no continue-nudge — the live
@@ -105,6 +105,29 @@ def _text_of(rec: dict[str, Any]) -> str:
     content = rec.get("payload", {}).get("raw", {}).get("content", [])
     return " ".join(
         b.get("text", "") for b in content if b.get("type") == "text").strip()
+
+
+def _is_prose(rec: dict[str, Any]) -> bool:
+    return rec.get("type") == "agent_message" and bool(_text_of(rec))
+
+
+def _is_completion_nudge(rec: dict[str, Any]) -> bool:
+    return (rec.get("type") == "engine_message"
+            and rec.get("payload", {}).get("subtype") == "completion")
+
+
+def _parked_question_text(records: list[dict[str, Any]], last_prose: int) -> str:
+    """The last prose, or — past a completion nudge — the nudged turn's prose ("" if none)."""
+    prev = next((i for i in range(last_prose - 1, -1, -1)
+                 if _is_prose(records[i]) or _is_completion_nudge(records[i])), None)
+    if prev is None or _is_prose(records[prev]):
+        return _text_of(records[last_prose])
+    for j in range(prev - 1, -1, -1):
+        if _is_prose(records[j]):
+            return _text_of(records[j])
+        if records[j].get("type") in ("user_message", "engine_message"):
+            break
+    return ""
 
 
 def _user_text_of(rec: dict[str, Any]) -> str | None:

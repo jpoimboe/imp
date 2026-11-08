@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import imp.providers.codex_resume as codex_resume
 from imp.agents.classify import ResumeState
 from imp.providers.codex_resume import (
@@ -325,3 +327,80 @@ def test_module_docstring_tracks_the_pairing_and_anchor_rules() -> None:
     assert "codex always emits paired" not in doc
     assert "teardown" in doc
     assert "last awaiting_user_input gate has no tool_call after it" in doc
+
+
+_PARKED_Q = "Which DB should I use?"
+
+
+def _engine_msg(subtype: str, text: str = "nudge") -> dict:
+    return {"agent_id": "step:t", "type": "engine_message",
+            "payload": {"role": "user", "subtype": subtype,
+                        "content": [{"type": "text", "text": text}]}}
+
+
+def _gate(text: str) -> dict:
+    return {"agent_id": "step:t", "type": "awaiting_user_input",
+            "payload": {"steer_hint": "", "last_agent_message": text, "interrupt": False}}
+
+
+_CARRIER = {"agent_id": "step:t", "type": "agent_message", "payload": {"raw": {"content": []}}}
+
+
+@pytest.mark.parametrize("records", [
+    [_agent_msg(_PARKED_Q), _engine_msg("completion"), _engine_msg("continuation"),
+     _agent_msg("WAITING"), _gate(_PARKED_Q)],
+    [_agent_msg(_PARKED_Q), _engine_msg("completion"), _engine_msg("continuation"),
+     _agent_msg("ok, waiting on you"), _gate(_PARKED_Q)],
+    [_agent_msg("let me check"),
+     {"agent_id": "step:t", "type": "tool_call", "payload": {"name": "read_file"}},
+     {"agent_id": "step:t", "type": "tool_result", "payload": {"content": "ok"}},
+     _agent_msg(_PARKED_Q), _engine_msg("completion"), _engine_msg("continuation"),
+     _agent_msg("WAITING"), _gate(_PARKED_Q)],
+    [_agent_msg(_PARKED_Q),
+     {"agent_id": "step:t", "type": "tool_call", "payload": {"name": "read_file"}},
+     {"agent_id": "step:t", "type": "tool_result", "payload": {"content": "ok"}},
+     _engine_msg("completion"), _engine_msg("continuation"),
+     _agent_msg("WAITING"), _gate(_PARKED_Q)],
+    [_agent_msg(_PARKED_Q), _engine_msg("completion"), _engine_msg("continuation"),
+     _agent_msg("WAITING"), _gate("WAITING"), _gate("WAITING")],
+], ids=["waiting", "other_reply", "earlier_prose_in_nudged_turn", "tool_call_after_question",
+        "re_parked_after_buggy_resume"])
+def test_awaiting_user_skips_back_over_the_completion_nudge(
+    tmp_path: Path, records: list[dict],
+) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, records)
+    assert derive_codex_resume_state(ev, "step:t") == (ResumeState.AWAITING_USER, _PARKED_Q)
+
+
+@pytest.mark.parametrize("records, newest", [
+    ([_agent_msg("a"), _gate("a"), _reply("other text"), _agent_msg("b"), _gate("b")], "b"),
+    ([_agent_msg("a"), _engine_msg("continuation"), _agent_msg("b"), _gate("b")], "b"),
+], ids=["reply_between", "continuation_only_between"])
+def test_awaiting_user_without_a_completion_nudge_keeps_the_newest_prose(
+    tmp_path: Path, records: list[dict], newest: str,
+) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, records)
+    assert derive_codex_resume_state(ev, "step:t") == (ResumeState.AWAITING_USER, newest)
+
+
+def test_awaiting_user_after_a_prose_less_nudged_turn_is_empty(tmp_path: Path) -> None:
+    # Live park re-poses "" here; don't dig up an earlier, already-answered turn's prose.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _agent_msg("stale prose"), _gate("stale prose"), _reply("more"),
+        _CARRIER, _engine_msg("completion"), _engine_msg("continuation"),
+        _agent_msg("WAITING"), _gate(""),
+    ])
+    assert derive_codex_resume_state(ev, "step:t") == (ResumeState.AWAITING_USER, "")
+
+
+def test_missing_complete_step_ignores_the_completion_nudge(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _agent_msg(_PARKED_Q), _engine_msg("completion"), _engine_msg("continuation"),
+        _agent_msg("WAITING"),
+    ])
+    assert derive_codex_resume_state(ev, "step:t") == (
+        ResumeState.MISSING_COMPLETE_STEP, "WAITING")

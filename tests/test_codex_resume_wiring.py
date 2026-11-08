@@ -575,6 +575,59 @@ async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
 
 
 @pytest.mark.anyio
+async def test_awaiting_user_resume_after_the_completion_nudge_re_poses_the_real_question(
+    tmp_path: Path,
+) -> None:
+    """A codex run parked on WAITING after the completion nudge re-opens its gate on
+    the question asked before the nudge."""
+    from imp.engine.feedback import COMPLETION_NUDGE
+
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    thread_id = "thr-n-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
+
+    def _msg(type_: str, payload: dict) -> dict:
+        return {"agent_id": "step:t", "type": type_, "payload": payload}
+
+    def _text(t: str) -> list[dict]:
+        return [{"type": "text", "text": t}]
+
+    _write_events(tmp_path / "events.jsonl", [
+        _msg("agent_message", {"raw": {"content": _text("which file?")}}),
+        _msg("engine_message", {"role": "user", "subtype": "completion",
+                                "content": _text(COMPLETION_NUDGE)}),
+        _msg("engine_message", {"role": "user", "subtype": "continuation",
+                                "content": _text(COMPLETION_NUDGE)}),
+        _msg("agent_message", {"raw": {"content": _text("WAITING")}}),
+        _msg("awaiting_user_input", {"steer_hint": "", "last_agent_message": "which file?",
+                                     "interrupt": False}),
+    ])
+
+    elog = InMemoryEventLog()
+    fake = FakeCodex(scripted_turns=[[
+        thread_started(thread_id),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "foo.py"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]])
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    object.__setattr__(inv, "resume_should_continue", False)
+    object.__setattr__(inv, "user_input_fn", lambda _p: "foo.py")
+
+    _ = [ev async for ev in runner.run(inv)]
+
+    gates = [e for e in elog.read() if e["type"] == "awaiting_user_input"]
+    assert [g["payload"]["last_agent_message"] for g in gates] == ["which file?"]
+
+
+@pytest.mark.anyio
 async def test_resume_missing_complete_step_under_retry_uses_the_retry_note(
     tmp_path: Path,
 ) -> None:
