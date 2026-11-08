@@ -71,6 +71,12 @@ def _stub_theme_detection(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _wide_terminal(monkeypatch):
+    # Host width varies (tty vs pipe); tests that exercise wrapping narrow it.
+    monkeypatch.setenv("COLUMNS", "500")
+
+
+@pytest.fixture(autouse=True)
 def _pinned_readiness(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
@@ -1719,6 +1725,67 @@ def test_init_shows_paths_under_home_with_a_tilde(
     # The autouse fixture puts IMP_HOME at tmp_path/imphome.
     assert msgs[0] == f"Setting up imp in {root}", msgs
     assert f"  {root}/imphome/config.yaml  {_NOTE}" in msgs, msgs
+
+
+@pytest.mark.parametrize("already_initialized", [False, True])
+def test_a_machine_path_too_wide_for_its_note_puts_the_note_on_the_next_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, already_initialized: bool,
+) -> None:
+    from imp.cli import palette as pal
+
+    _plain(monkeypatch)
+    monkeypatch.setenv("COLUMNS", "100")
+    home = tmp_path / "h"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("IMP_HOME", str(home / ("a" * 64)))
+    if already_initialized:
+        _mark_initialized(tmp_path)
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    path_line = f"  ~/{'a' * 64}/config.yaml"
+    assert len(path_line) <= 100 < len(f"{path_line}  {_NOTE}")
+    at = msgs.index(path_line)
+    assert msgs[at + 1] == f"    {_NOTE}", msgs
+    assert all(pal.display_width(m) <= 100 for m in msgs[at:at + 2])
+
+
+def test_a_header_too_wide_for_the_terminal_puts_the_path_on_its_own_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from imp.cli import palette as pal
+
+    _plain(monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("elsewhere")))
+    cols = len(f"Setting up imp in {tmp_path}") - 1
+    monkeypatch.setenv("COLUMNS", str(cols))
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    assert msgs[:3] == ["Setting up imp in", f"  {tmp_path}", ""], msgs
+    assert all(pal.display_width(m) <= cols for m in msgs[:2])
+
+
+def test_the_header_fit_ignores_color_escapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("elsewhere")))
+    monkeypatch.setenv("COLUMNS", str(len(f"Setting up imp in {tmp_path}")))
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    assert msgs[0] == f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}", msgs
 
 
 _MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"

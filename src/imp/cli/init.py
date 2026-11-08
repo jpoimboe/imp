@@ -940,6 +940,25 @@ def _confirm_init_settings(
         pythonpath=state.pythonpath)
 
 
+_MACHINE_NOTE = "(your machine: providers, theme)"
+
+
+def _fits(line: str) -> bool:
+    return pal.display_width(line) <= shutil.get_terminal_size((80, 24)).columns
+
+
+def _header_lines(project_root: Path, *, color_on: bool) -> list[str]:
+    path = pal.ansi(display_path(project_root), "wordmark", enabled=color_on)
+    line = f"Setting up imp in {path}"
+    return [line] if _fits(line) else ["Setting up imp in", f"  {path}"]
+
+
+def _machine_path_lines(user_path: Path) -> list[str]:
+    path = display_path(user_path)
+    line = f"  {path}  {_MACHINE_NOTE}"
+    return [line] if _fits(line) else [f"  {path}", f"    {_MACHINE_NOTE}"]
+
+
 def run_init(
     project_root: Path,
     *,
@@ -960,8 +979,8 @@ def run_init(
     project_file = imp_dir / "config.yaml"
     already_initialized = project_file.is_file()
 
-    output_fn("Setting up imp in "
-              + pal.ansi(display_path(project_root), "wordmark", enabled=color_on))
+    for line in _header_lines(project_root, color_on=color_on):
+        output_fn(line)
     output_fn("")
 
     user_path = global_config_path()
@@ -1031,7 +1050,8 @@ def run_init(
                 f"Set providers in your machine config: {', '.join(providers)}.")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
-        output_fn(f"  {display_path(user_path)}  (your machine: providers, theme)")
+        for line in _machine_path_lines(user_path):
+            output_fn(line)
         if reused:
             output_fn(
                 "Change providers later: imp config set providers <name>,<name>")
@@ -1110,9 +1130,8 @@ def run_init(
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
     output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))
-    output_fn(pal.ansi(
-        f"  {display_path(user_path)}  (your machine: providers, theme)",
-        "dim", enabled=color_on))
+    for line in _machine_path_lines(user_path):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
     if committed:
         output_fn(pal.ansi("Committed imp/config.yaml.", "dim", enabled=color_on))
     output_fn("")
