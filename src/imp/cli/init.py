@@ -48,6 +48,7 @@ from imp.cli.verify_detect import (
 from imp.engine import worktree
 from imp.engine._yaml import config_yaml_error, load_config_yaml
 from imp.engine.sandbox import sandbox_available
+from imp.paths import display_path
 from imp.remote.drivers import REGISTRY
 
 if TYPE_CHECKING:
@@ -960,7 +961,7 @@ def run_init(
     already_initialized = project_file.is_file()
 
     output_fn("Setting up imp in "
-              + pal.ansi(str(project_root), "wordmark", enabled=color_on))
+              + pal.ansi(display_path(project_root), "wordmark", enabled=color_on))
     output_fn("")
 
     user_path = global_config_path()
@@ -1030,7 +1031,7 @@ def run_init(
                 f"Set providers in your machine config: {', '.join(providers)}.")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
-        output_fn(f"  {user_path}  (your machine: providers, theme)")
+        output_fn(f"  {display_path(user_path)}  (your machine: providers, theme)")
         if reused:
             output_fn(
                 "Change providers later: imp config set providers <name>,<name>")
@@ -1110,7 +1111,8 @@ def run_init(
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
     output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))
     output_fn(pal.ansi(
-        f"  {user_path}  (your machine: providers, theme)", "dim", enabled=color_on))
+        f"  {display_path(user_path)}  (your machine: providers, theme)",
+        "dim", enabled=color_on))
     if committed:
         output_fn(pal.ansi("Committed imp/config.yaml.", "dim", enabled=color_on))
     output_fn("")

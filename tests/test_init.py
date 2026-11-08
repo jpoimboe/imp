@@ -13,6 +13,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from imp.cli.init import run_init
+from imp.paths import display_path
 from imp.providers import ProviderStatus, Readiness
 from tests._readiness import pin_readiness
 from tests.conftest import _git, _init_repo
@@ -1059,13 +1060,13 @@ def test_host_success_lines_carry_engine_chrome(
     user_path = global_config_path()
 
     # This one prints before the theme is applied, so its gold is the ansi gold.
-    assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
+    assert f"Setting up imp in {GOLD_ANSI}{display_path(tmp_path)}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
     assert f"{DIM}  anthropic — ANTHROPIC_API_KEY not set{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
-    assert f"{DIM}  {user_path}  (your machine: providers, theme){RESET}" in msgs
+    assert f"{DIM}  {display_path(user_path)}  (your machine: providers, theme){RESET}" in msgs
     assert f"{DIM}Committed imp/config.yaml.{RESET}" in msgs
     assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
 
@@ -1083,7 +1084,7 @@ def test_host_success_lines_stay_bare_without_color(
         detect_theme_fn=lambda: "dark",
     )
 
-    assert f"Setting up imp in {tmp_path}" in msgs
+    assert f"Setting up imp in {display_path(tmp_path)}" in msgs
     assert "Created:" in msgs
     assert not any("\x1b" in m for m in msgs)
 
@@ -1122,7 +1123,7 @@ def test_already_initialized_rerun_block_stays_bare(
     user_path = global_config_path()
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
     # the same two strings the fresh path chromes — bare here
-    assert f"  {user_path}  (your machine: providers, theme)" in msgs
+    assert f"  {display_path(user_path)}  (your machine: providers, theme)" in msgs
     assert "Committed imp/config.yaml." in msgs
 
 
@@ -1689,6 +1690,37 @@ def test_the_picker_opens_one_blank_line_below_the_header(
     assert "" not in before_picker[:-1]
 
 
+_NOTE = "(your machine: providers, theme)"
+
+
+def _mark_initialized(root: Path) -> None:
+    (root / "imp").mkdir()
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+
+
+@pytest.mark.parametrize("already_initialized", [False, True])
+@pytest.mark.parametrize("under_home", [True, False])
+def test_init_shows_paths_under_home_with_a_tilde(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+    under_home: bool, already_initialized: bool,
+) -> None:
+    _plain(monkeypatch)
+    home = tmp_path.parent if under_home else tmp_path_factory.mktemp("elsewhere")
+    monkeypatch.setenv("HOME", str(home))
+    if already_initialized:
+        _mark_initialized(tmp_path)
+    root = f"~/{tmp_path.name}" if under_home else str(tmp_path)
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    # The autouse fixture puts IMP_HOME at tmp_path/imphome.
+    assert msgs[0] == f"Setting up imp in {root}", msgs
+    assert f"  {root}/imphome/config.yaml  {_NOTE}" in msgs, msgs
+
+
 _MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"
 _MY_KEY = "provider_envs: {anthropic: {env: MY_KEY}}\n"
 
@@ -2015,7 +2047,7 @@ def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
     assert (home / "config.yaml").read_text() == before   # never silently rewritten
     assert "Your machine config is already set up — nothing to do." in msgs
     path_line = msgs.index(
-        f"  {home / 'config.yaml'}  (your machine: providers, theme)")
+        f"  {display_path(home / 'config.yaml')}  (your machine: providers, theme)")
     assert msgs[path_line + 1] == (
         "Change providers later: imp config set providers <name>,<name>")
 
