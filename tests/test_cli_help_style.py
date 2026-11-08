@@ -287,8 +287,8 @@ positional arguments:
     log             Show the narrative for a quest.
     events          Slice and dice a quest's event log (imp events <id>).
     list            List your quests: in-flight, backlog, and completed.
-    show            Show one quest's detail or a named artifact (imp show
-                    <id>).
+    show            Show one quest's detail or one of its saved files (imp
+                    show <id>).
     search          Search quests by id, title, or conversation content.
     config          Show the effective config and per-setting provenance; set
                     or unset a value.

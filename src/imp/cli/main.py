@@ -2290,17 +2290,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-class _ShowArtifact(NamedTuple):
-    absent: str
-    noun: str
-
-
-# The keys are `show`'s artifact choices; a choice cannot exist without both the
-# absent-artifact message and the noun the backlog path names it by.
-_SHOW_ARTIFACTS = {
-    "spec": _ShowArtifact("no spec for", "spec"),
-    "verify": _ShowArtifact("no failed test run recorded for", "failed test run"),
-}
+def _saved_file_matches(files: list[str], name: str) -> list[str]:
+    key = name.removesuffix("/")
+    if key in files:
+        return [key]
+    return [f for f in files if f.startswith(f"{key}/")]
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
@@ -2314,10 +2308,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
         quest_id = _resolve_id(control, token)
     except SystemExit:
         return 2
-    artifact = args.artifact
+    name = args.name
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        if artifact is None:
+        if name is None:
             if args.json:
                 _page_or_print(
                     json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
@@ -2328,10 +2322,9 @@ def _cmd_show(args: argparse.Namespace) -> int:
                               color=should_use_color(sys.stdout)),
                 no_pager=args.no_pager, trailing_blank=True)
             return 0
-        _emit_cli_error(
-            f"{quest_id} is in the backlog (not started); no {_SHOW_ARTIFACTS[artifact].noun} yet")
+        _emit_cli_error(f"{quest_id} is in the backlog (not started); no saved files yet")
         return 2
-    if artifact is None:
+    if name is None:
         if args.json:
             card = _quest_json(control, quest_id)
             if card is None:
@@ -2346,12 +2339,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
             return lines
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
-    data = make_store(control).get_artifact(quest_id, artifact)
+    store = make_store(control)
+    matches = _saved_file_matches(store.saved_files(quest_id), name)
+    if len(matches) > 1:
+        _page_or_print(matches, no_pager=args.no_pager, trailing_blank=True)
+        return 0
+    data = store.read_saved_file(quest_id, matches[0]) if matches else None
     if data is None:
-        _emit_cli_error(f"{_SHOW_ARTIFACTS[artifact].absent} {quest_id!r}")
+        _emit_cli_error(f"{quest_id} has no saved file '{name}'\n"
+                        f"  list its saved files with: imp show {quest_id}")
         return 2
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
+    _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
+                   no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -4828,20 +4827,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser(
         "show",
-        help="Show one quest's detail or a named artifact (imp show <id>).",
+        help="Show one quest's detail or one of its saved files (imp show <id>).",
         description=(
-            "Print a quest's detail card, or name an artifact to print just "
-            "that: spec for the spec, verify for the output of the last failed "
-            "test run. Reads the live quest files while a quest is in flight and "
-            "falls back to the archive once it is finished."),
+            "Print a quest's detail card, which lists its saved files, or name "
+            "one to print just that. A name is a file path, or a folder: a folder "
+            "holding one file (such as spec, verify or summary) prints that file, "
+            "and a folder holding several lists them. Reads the live quest files "
+            "while a quest is in flight and the copy saved in git once it is "
+            "finished."),
     )
     p_show.add_argument(
         "token", nargs="?", default=None, metavar="ID",
         help="Quest id, or any unique part of it.")
     p_show.add_argument(
-        "artifact", nargs="?", default=None,
-        choices=list(_SHOW_ARTIFACTS),
-        help="Which artifact to print (default: a detail card).")
+        "name", nargs="?", default=None, metavar="NAME",
+        help="A saved file or folder to print (default: the detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")

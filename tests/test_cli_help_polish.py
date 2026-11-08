@@ -76,15 +76,19 @@ def test_log_follow_help_documents_content_flag_composition() -> None:
             "--full/--show/--hide; implies --no-pager.") in help_text
 
 
-def test_show_documents_the_verify_artifact() -> None:
+def test_show_documents_saved_files() -> None:
     sp = _subparser("show")
     assert " ".join((sp.description or "").split()) == (
-        "Print a quest's detail card, or name an artifact to print just that: "
-        "spec for the spec, verify for the output of the last failed test run. "
-        "Reads the live quest files while a quest is in flight and falls back "
-        "to the archive once it is finished."
+        "Print a quest's detail card, which lists its saved files, or name one "
+        "to print just that. A name is a file path, or a folder: a folder "
+        "holding one file (such as spec, verify or summary) prints that file, "
+        "and a folder holding several lists them. Reads the live quest files "
+        "while a quest is in flight and the copy saved in git once it is "
+        "finished."
     )
-    assert "{spec,verify}" in sp.format_help()
+    help_text = " ".join(sp.format_help().split())
+    assert "NAME A saved file or folder to print (default: the detail card)." in help_text
+    assert "{spec,verify}" not in help_text
 
 
 def _walk_subparsers(
