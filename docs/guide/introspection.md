@@ -149,10 +149,12 @@ touched — distinct files opened, overlap with the previous attempt — over ca
 
 `imp log <id> -s` reads a run as a ledger rather than a story: one row per step,
 each subagent it dispatched indented beneath it, carrying the step's working
-time (human waits and pauses deducted), its tokens in and out, and a right-most
-column that is either money or quota. The windowing filters above narrow the
-rows, and `--md` / `--html` export the same table (`--summary` is the long form
-of `-s`).
+time, its tokens in and out, and a right-most column that is either money or
+quota. Working time runs only while a run is live: human waits, pauses, the
+dormancy before a first run or a resume, and the gap after a crash are all
+excluded, so attaching to, leaving, or renaming a quest never moves it. The
+windowing filters above narrow the rows, and `--md` / `--html` export the same
+table (`--summary` is the long form of `-s`).
 The same table is on `imp show <id>` — a `ledger:` section at the foot of the
 card, with its total row restated as a one-line `run:` field high up — except
 that the card omits steps that finished instantly with nothing to report (under
