@@ -4132,6 +4132,306 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     assert cap_event["payload"]["action"]["verb"] == "pause"
 
 
+_CAP_NOTE = "# Handoff\nGoal: land the parser\nRemains: wire `--json` output\n"
+
+_RESUMED_FROM_NOTE = "resumed from the last handoff note"
+
+_RESUMED_AFTER_LIMIT = "resumed after the context limit"
+
+_NO_NOTE = "It left no handoff note"
+
+_NOTE_MARKER = "HANDOFF NOTE FROM THE PREVIOUS ATTEMPT"
+
+
+class _HardKill(BaseException):
+    """Stands in for SIGKILL: escapes run_quest's `except Exception` guard."""
+
+
+def _register_entries(sink: list[AgentInvocation], script: Any) -> None:
+    """Fake provider whose Nth entry (1-based) yields `script(n, invocation)`'s events."""
+    from imp.providers import resolve
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
+            _persist_initial(invocation)
+            for ev in script(len(sink), invocation):
+                yield ev
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+
+_OK: Event = {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
+
+
+def _register_cap_then(
+    sink: list[AgentInvocation], *, note: str | None, kill_third: bool = False,
+) -> None:
+    """Entries 1-2 hand off (cap 1), writing `note`; entry 3 dies if `kill_third`; rest complete."""
+    from imp.engine.reincarnation import handoff_path_for
+
+    def script(n: int, invocation: AgentInvocation) -> list[Event]:
+        if n <= 2:
+            hp = handoff_path_for(invocation.transcript_dir)
+            if note is not None:
+                hp.write_text(note)
+            return [{"type": "handoff", "payload": {"handoff_path": str(hp)}}]
+        if n == 3 and kill_third:
+            raise _HardKill
+        return [_OK]
+
+    _register_entries(sink, script)
+
+
+def _cap_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Quest, Path]:
+    """Cap-1 single-step quest whose home survives completion for disk assertions."""
+    from imp.engine import executor as ex
+
+    monkeypatch.setattr(ex, "_archive_and_reap", lambda _quest, _log: None)
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    return quest, quest.quest_dir / "steps" / phase / step
+
+
+def _reincarnating_reasons(quest: Quest, since: int = 0) -> list[str]:
+    return [e["payload"]["reason"] for e in list(quest.event_log().read())[since:]
+            if e["type"] == "reincarnating"]
+
+
+def _first_text(invocation: AgentInvocation) -> str:
+    block = invocation.initial_messages[0].content[0]
+    assert isinstance(block, TextBlock)
+    return block.text
+
+
+@pytest.mark.anyio
+async def test_resume_after_handoff_cap_continues_fresh_from_the_note(tmp_path, monkeypatch):
+    """Resume runs a new session seeded from the note, with the old session and note stashed."""
+    from imp.engine.reincarnation import handoff_path_for, reincarnation_seed
+
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=_CAP_NOTE)
+    assert await run_quest(quest) is RunResult.PAUSED
+    paused_at = len(list(quest.event_log().read()))
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert len(sink) == 3
+    resumed = sink[2]
+    assert resumed.balance_on_resume is False
+    assert _first_text(resumed).endswith(reincarnation_seed(
+        handoff_text=_CAP_NOTE, quest_id=quest.id, step_name=session.name,
+        last_user_text=None))
+    stash = session.parent / f"{session.name}.attempt-2"
+    assert (stash / "transcript.jsonl").exists()
+    assert not handoff_path_for(session).exists()
+    assert (stash / handoff_path_for(session).name).read_text() == _CAP_NOTE
+    after = list(quest.event_log().read())[paused_at:]
+    types = [e["type"] for e in after]
+    re_idx = types.index("reincarnating")
+    assert after[re_idx]["payload"]["reason"] == _RESUMED_FROM_NOTE
+    assert types.index("step_started") > re_idx
+
+
+@pytest.mark.anyio
+async def test_a_hard_kill_after_the_fresh_start_reopens_the_fresh_session(tmp_path, monkeypatch):
+    """The fresh step_started answers the pause: a later kill-resume keeps the fresh session."""
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=_CAP_NOTE, kill_third=True)
+    assert await run_quest(quest) is RunResult.PAUSED
+    with pytest.raises(_HardKill):
+        await run_quest(quest)
+    assert State.load(quest.state_dir).resume_pending == session.name
+    killed_at = len(list(quest.event_log().read()))
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert len(sink) == 4
+    assert sink[2].balance_on_resume is False
+    assert sink[3].balance_on_resume is True
+    assert sink[3].initial_messages == ()
+    assert not (session.parent / f"{session.name}.attempt-3").exists()
+    assert _reincarnating_reasons(quest, killed_at) == []
+
+
+@pytest.mark.anyio
+async def test_resume_after_a_noteless_cap_continues_fresh(tmp_path, monkeypatch):
+    """A cap pause whose handoff wrote no note resumes fresh, note-less, no new pause."""
+    quest, _session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=None)
+    assert await run_quest(quest) is RunResult.PAUSED
+    paused_at = len(list(quest.event_log().read()))
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert sink[2].balance_on_resume is False
+    msg = _first_text(sink[2])
+    assert _NO_NOTE in msg
+    assert _NOTE_MARKER not in msg
+    assert _reincarnating_reasons(quest)[-1] == _RESUMED_AFTER_LIMIT
+    after = list(quest.event_log().read())[paused_at:]
+    assert "workflow_paused" not in [e["type"] for e in after]
+
+
+@pytest.mark.anyio
+async def test_an_intervening_pause_does_not_hide_the_cap(tmp_path, monkeypatch):
+    """A later non-context pause with resume still armed still resumes fresh from the note."""
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=_CAP_NOTE)
+    assert await run_quest(quest) is RunResult.PAUSED
+    assert State.load(quest.state_dir).resume_pending == session.name
+    quest.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "config"})
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert sink[2].balance_on_resume is False
+    assert _first_text(sink[2]).endswith(_CAP_NOTE)
+
+
+@pytest.mark.anyio
+async def test_a_provider_switch_at_a_cap_resume_keeps_the_context_seed(tmp_path, monkeypatch):
+    """A switch pending at a cap resume yields only the context event and the note seed."""
+    from imp.engine.reincarnation import reincarnation_seed, write_session_owner
+
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=_CAP_NOTE)
+    assert await run_quest(quest) is RunResult.PAUSED
+    paused_at = len(list(quest.event_log().read()))
+    write_session_owner(session, "other")
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert _reincarnating_reasons(quest, paused_at) == [_RESUMED_FROM_NOTE]
+    assert _first_text(sink[2]).endswith(reincarnation_seed(
+        handoff_text=_CAP_NOTE, quest_id=quest.id, step_name=session.name,
+        last_user_text=None))
+
+
+@pytest.mark.anyio
+async def test_a_crash_after_the_cap_resume_never_reseeds_from_the_note(
+        tmp_path, monkeypatch):
+    """A crash before step_started re-fires note-less on the next resume, with no new stash."""
+    from imp.engine import executor as ex
+
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+    _register_cap_then(sink, note=_CAP_NOTE)
+    assert await run_quest(quest) is RunResult.PAUSED
+
+    class _EngineBug(Exception):
+        pass
+
+    real = ex._run_agent_invocation
+
+    async def _crash(**_kw: Any) -> Any:
+        raise _EngineBug
+
+    monkeypatch.setattr(ex, "_run_agent_invocation", _crash)
+    assert await run_quest(quest) is RunResult.PAUSED
+    monkeypatch.setattr(ex, "_run_agent_invocation", real)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert _reincarnating_reasons(quest) == [
+        "context threshold crossed", _RESUMED_FROM_NOTE, _RESUMED_AFTER_LIMIT]
+    assert _NO_NOTE in _first_text(sink[-1])
+    assert not (session.parent / f"{session.name}.attempt-3").exists()
+
+
+@pytest.mark.anyio
+async def test_resume_after_a_provider_overflow_at_the_cap_ignores_a_stale_note(
+        tmp_path, monkeypatch):
+    """An overflow cap pause resumes note-less even with a note on disk, which is stashed."""
+    from imp.engine.reincarnation import handoff_path_for
+
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    sink: list[AgentInvocation] = []
+
+    def script(n: int, invocation: AgentInvocation) -> list[Event]:
+        if n == 1:
+            handoff_path_for(invocation.transcript_dir).write_text(_CAP_NOTE)
+        if n <= 2:
+            return [{"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}]
+        return [_OK]
+
+    _register_entries(sink, script)
+    assert await run_quest(quest) is RunResult.PAUSED
+    paused = [e["payload"] for e in quest.event_log().read()
+              if e["type"] == "workflow_paused"]
+    assert paused[-1] == {"reason": "context_window", "kind": "prompt_too_long"}
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert sink[2].balance_on_resume is False
+    msg = _first_text(sink[2])
+    assert _NO_NOTE in msg
+    assert _NOTE_MARKER not in msg
+    assert _reincarnating_reasons(quest)[-1] == _RESUMED_AFTER_LIMIT
+    stash = session.parent / f"{session.name}.attempt-2"
+    assert (stash / handoff_path_for(session).name).read_text() == _CAP_NOTE
+
+
+@pytest.mark.anyio
+async def test_a_non_context_pause_resumes_in_place_past_a_stale_note(
+        tmp_path, monkeypatch):
+    """A note on disk does not trigger a fresh start: a retry_ceiling pause resumes in place."""
+    from imp.engine import executor as ex
+    from imp.engine.reincarnation import handoff_path_for
+
+    quest, session = _cap_one(tmp_path, monkeypatch)
+    monkeypatch.setattr(ex, "budget_for", lambda _c: 0.0)
+
+    async def _instant(*_a: Any, **_kw: Any) -> None:
+        pass
+
+    monkeypatch.setattr(ex, "_interruptible_sleep", _instant)
+    sink: list[AgentInvocation] = []
+
+    def script(n: int, invocation: AgentInvocation) -> list[Event]:
+        if n == 1:
+            handoff_path_for(invocation.transcript_dir).write_text(_CAP_NOTE)
+            return [{"type": "error", "payload": {
+                "category": "rate_limit", "kind": "RateLimitError", "message": "429"}}]
+        return [_OK]
+
+    _register_entries(sink, script)
+    assert await run_quest(quest) is RunResult.PAUSED
+    paused = [e["payload"] for e in quest.event_log().read()
+              if e["type"] == "workflow_paused"]
+    assert paused[-1]["reason"] == "retry_ceiling"
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    assert sink[1].balance_on_resume is True
+    assert sink[1].initial_messages == ()
+    assert _reincarnating_reasons(quest) == []
+    assert not (session.parent / f"{session.name}.attempt-1").exists()
+    assert handoff_path_for(session).read_text() == _CAP_NOTE
+
+
 _LAST_REPLY = "Two questions: does the daemon retry, and where does it log?"
 
 _USER_OPEN = "--- THE USER'S MOST RECENT MESSAGE (verbatim) ---"

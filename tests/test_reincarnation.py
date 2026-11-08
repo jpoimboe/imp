@@ -11,6 +11,7 @@ from imp.engine.reincarnation import (
     read_session_owner,
     reincarnation_seed,
     stash_session,
+    unanswered_context_pause,
     write_handoff_note,
     write_session_owner,
 )
@@ -367,3 +368,50 @@ def test_the_text_blocks_of_one_message_join_in_order() -> None:
     log = InMemoryEventLog()
     _user(log, "first line\n", "second line")
     assert last_user_message(log, step_name="spec") == "first line\nsecond line"
+
+
+def _paused(log: InMemoryEventLog, reason: str, kind: str | None = None) -> None:
+    payload = {"reason": reason} if kind is None else {"reason": reason, "kind": kind}
+    log.append(agent_id=None, type="workflow_paused", payload=payload)
+
+
+def test_a_context_pause_after_the_last_start_is_unanswered() -> None:
+    log = InMemoryEventLog()
+    _step_started(log, "spec")
+    _paused(log, "context_window", "reincarnation_cap")
+    assert unanswered_context_pause(log) == {
+        "reason": "context_window", "kind": "reincarnation_cap"}
+
+
+def test_a_later_unrelated_pause_does_not_hide_the_context_pause() -> None:
+    log = InMemoryEventLog()
+    _step_started(log, "spec")
+    _paused(log, "context_window", "prompt_too_long")
+    _paused(log, "config")
+    _paused(log, "interrupt")
+    assert unanswered_context_pause(log) == {
+        "reason": "context_window", "kind": "prompt_too_long"}
+
+
+def test_the_latest_context_pause_picks_the_kind() -> None:
+    log = InMemoryEventLog()
+    _step_started(log, "spec")
+    _paused(log, "context_window", "prompt_too_long")
+    _paused(log, "context_window", "reincarnation_cap")
+    assert unanswered_context_pause(log) == {
+        "reason": "context_window", "kind": "reincarnation_cap"}
+
+
+def test_a_step_start_answers_the_context_pause() -> None:
+    log = InMemoryEventLog()
+    _paused(log, "context_window", "reincarnation_cap")
+    _step_started(log, "spec")
+    assert unanswered_context_pause(log) is None
+
+
+def test_other_pause_reasons_are_not_context_pauses() -> None:
+    log = InMemoryEventLog()
+    _step_started(log, "spec")
+    _paused(log, "retry_ceiling", "RateLimitError")
+    assert unanswered_context_pause(log) is None
+    assert unanswered_context_pause(InMemoryEventLog()) is None

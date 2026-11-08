@@ -1,3 +1,5 @@
+import pytest
+
 from imp.cli import palette as pal
 from imp.cli.narrative import NarrativeBuilder, build_tree
 from imp.cli.render_text import render_tree
@@ -10,14 +12,15 @@ def test_reincarnating_renders_lifecycle_line_with_reason() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed" in out
+    assert "fresh session — context threshold crossed" in out
 
 
 def test_reincarnating_renders_bare_when_no_reason() -> None:
     b = NarrativeBuilder()
     b.add({"type": "reincarnating", "agent_id": None, "payload": {}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating" in out
+    assert "fresh session" in out
+    assert "reincarnating" not in out
     assert "—" not in out
 
 
@@ -34,7 +37,7 @@ def test_reincarnating_reports_crossing_context_from_subagent_turn() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed" in out
+    assert "fresh session — context threshold crossed" in out
     # the denominator is the handoff limit (80% of this 200k window), not the window
     assert "167k/160k" in out
 
@@ -50,7 +53,7 @@ def test_reincarnating_reports_the_handoff_limit_not_the_window() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed (203k/200k)" in out
+    assert "fresh session — context threshold crossed (203k/200k)" in out
 
 
 def test_reincarnating_omits_context_when_no_prior_llm_turn() -> None:
@@ -58,7 +61,7 @@ def test_reincarnating_omits_context_when_no_prior_llm_turn() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed" in out
+    assert "fresh session — context threshold crossed" in out
     assert "/160k" not in out and "(" not in out
 
 
@@ -71,8 +74,30 @@ def test_reincarnating_omits_context_when_the_turn_reported_no_window() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed" in out
+    assert "fresh session — context threshold crossed" in out
     assert "203k" not in out and "(" not in out
+
+
+@pytest.mark.parametrize("reason", ["resumed from the last handoff note",
+                                    "resumed after the context limit"])
+def test_resume_fresh_session_line_without_prior_context(reason: str) -> None:
+    b = NarrativeBuilder()
+    b.add({"type": "reincarnating", "agent_id": None, "payload": {"reason": reason}})
+    out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
+    assert f"fresh session — {reason}" in out
+    assert "(" not in out
+
+
+def test_resume_fresh_session_line_names_the_overfull_session() -> None:
+    b = NarrativeBuilder()
+    b.add({"type": "agent_message", "agent_id": "step:p/s",
+           "payload": {"provider": "claude", "model": "claude-opus-5[1m]",
+                       "context_tokens": 204_000, "context_window": 1_000_000,
+                       "usage": {}}})
+    b.add({"type": "reincarnating", "agent_id": None,
+           "payload": {"reason": "resumed from the last handoff note"}})
+    out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
+    assert "fresh session — resumed from the last handoff note (204k/200k)" in out
 
 
 def test_reincarnating_uses_lifecycle_color() -> None:
@@ -118,8 +143,8 @@ def test_flagged_handoff_note_renders_in_neither_lean_nor_full() -> None:
     assert _SENTINEL not in lean
     assert _SENTINEL not in full
     # only the note goes: the lifecycle line and the surrounding prose stay.
-    assert "reincarnating — context threshold crossed" in lean
-    assert "reincarnating — context threshold crossed" in full
+    assert "fresh session — context threshold crossed" in lean
+    assert "fresh session — context threshold crossed" in full
     assert "ordinary prose" in lean
     # the dropped turn is still the source of the crossing occupancy: the drop is
     # at node-build time, downstream of the intake that reads it.

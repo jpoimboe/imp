@@ -62,7 +62,7 @@ _PAUSE_SILENT_REASONS = frozenset({
 # reasons only — silenced reasons return "" from _pause_is_silent before this map
 # is consulted). An unmapped reason falls back to `paused (<reason>)`.
 _PAUSE_REASON_BODIES = {
-    "context_window": "hit the context limit",  # reincarnation-cap stop (companion-less)
+    "context_window": "used up its context handoffs",  # reincarnation-cap stop (companion-less)
     "max_loops": "stuck in a loop",
     "unknown_step": "workflow error",
     "reauth_needed": "needs you to re-authenticate",

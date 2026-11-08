@@ -82,6 +82,7 @@ from imp.engine.reincarnation import (
     reincarnation_seed,
     session_has_resume_state,
     stash_session,
+    unanswered_context_pause,
     write_session_owner,
 )
 from imp.engine.resume_state import read_native_resume_state
@@ -1701,6 +1702,34 @@ def _retire_foreign_session(
     return seed
 
 
+def _resume_after_context_pause(
+    session_dir: Path, step: Step, quest: Quest, log: EventLog, *, is_resume: bool,
+) -> str | None:
+    """Seed a fresh session when this resume answers a `context_window` pause."""
+    if not is_resume:
+        return None
+    pause = unanswered_context_pause(log)
+    if pause is None:
+        return None
+    stash = stash_session(session_dir)
+    note = handoff_path_for(session_dir)
+    handoff_text = None
+    if note.exists():
+        if pause.get("kind") == "reincarnation_cap":
+            handoff_text = note.read_text()
+        # Never reusable: a re-fire after a crash must not seed from it again.
+        if stash is not None:
+            note.rename(stash / note.name)
+        else:
+            note.unlink()
+    reason = ("resumed from the last handoff note" if handoff_text is not None
+              else "resumed after the context limit")
+    _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
+    return reincarnation_seed(
+        handoff_text=handoff_text, quest_id=quest.id, step_name=step.name,
+        last_user_text=last_user_message(log, step_name=step.name))
+
+
 async def _route_agent(
     step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *,
@@ -1727,6 +1756,13 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     resolved_provider = current_provider_model(
         state, workflow, step.name).provider
+
+    resumed_seed = _resume_after_context_pause(
+        session_dir, step, quest, log, is_resume=is_resume)
+    if resumed_seed is not None:
+        reincarnation_text = resumed_seed
+        native_resume_state = None
+        resumable = False
 
     # The one chokepoint every dispatch and re-entry crosses. Retiring here
     # renames the directory, so keep and balance_on_resume both recompute False

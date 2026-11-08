@@ -50,7 +50,7 @@ def test_patch_row_names_the_context_on_the_reincarnation_line() -> None:
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "reincarnating — context threshold crossed (22k/200k)" in out
+    assert "fresh session — context threshold crossed (22k/200k)" in out
 
 
 # AC 7(d)

@@ -28,6 +28,9 @@ Runbook for operating a running imp quest.
   invariant, producing an infinite remove/restore loop; `max_loops` is the only
   backstop. Recognize it when a quest loops on "removing/restoring its own
   plan/workflow file"; unblock by editing the snapshot.
+- A step that uses up its context handoffs pauses as `context handoff limit`.
+  `imp resume <id>` continues it in a fresh session from its last handoff note;
+  raise `context.max_reincarnations` if a step routinely needs more.
 
 ## Recovering a dead provider login
 

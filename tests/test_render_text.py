@@ -31,6 +31,11 @@ _MAX_LOOPS_COPY = (
     "a step kept sending work back and hit its loop limit; the quest is "
     "paused and resumable — resume to continue with a fresh loop budget"
 )
+_CONTEXT_WINDOW_COPY = (
+    "a step kept filling its context and used up its handoffs; the quest is "
+    "paused and resumable — resume to continue in a fresh session with a "
+    "fresh handoff budget"
+)
 
 
 class _FakeRendered:
@@ -1618,6 +1623,13 @@ def test_non_interrupt_pause_reason_still_renders_line() -> None:
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=200))
     assert f"paused — {_MAX_LOOPS_COPY}" in out
+
+
+def test_context_window_pause_renders_plain_words_copy() -> None:
+    node = nv.PauseNode(reason="context_window")
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=300))
+    assert plain == f"paused — {_CONTEXT_WINDOW_COPY}"
+    assert "context_window" not in plain
 
 
 def test_intentional_pause_still_renders_complete_pause() -> None:

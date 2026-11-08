@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from imp.engine.state import EventLog
@@ -55,6 +55,20 @@ def last_user_message(log: EventLog, *, step_name: str) -> str | None:
                 b.get("text", "") for b in (payload.get("content") or [])
                 if isinstance(b, dict) and b.get("type") == "text")
     return (found or "").strip() or None
+
+
+def unanswered_context_pause(log: EventLog) -> dict[str, Any] | None:
+    """Latest `context_window` workflow_paused payload since the last step_started, else None."""
+    found: dict[str, Any] | None = None
+    for e in log.read():
+        etype = e.get("type")
+        if etype == "step_started":
+            found = None
+        elif etype == "workflow_paused":
+            payload = e.get("payload") or {}
+            if payload.get("reason") == "context_window":
+                found = payload
+    return found
 
 
 _SEED_OPENINGS = {

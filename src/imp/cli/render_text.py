@@ -52,6 +52,10 @@ _PAUSE_REASON_COPY: dict[str, str] = {
     "max_loops":
         "a step kept sending work back and hit its loop limit; the quest is "
         "paused and resumable — resume to continue with a fresh loop budget",
+    "context_window":
+        "a step kept filling its context and used up its handoffs; the quest is "
+        "paused and resumable — resume to continue in a fresh session with a "
+        "fresh handoff budget",
     "quota":
         "quota is exhausted; the quest is paused and resumable — wait for the "
         "limit to reset or add credits, then resume",

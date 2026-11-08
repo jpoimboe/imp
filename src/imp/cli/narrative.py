@@ -1565,7 +1565,7 @@ def fmt_ctx_tokens(n: int) -> str:
 def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     reason = p.get("reason")
-    text = f"reincarnating — {reason}" if reason else "reincarnating"
+    text = f"fresh session — {reason}" if reason else "fresh session"
     # Name the occupancy that crossed the handoff limit (tokens/limit), so the
     # line is self-explaining and the denominator is unambiguous — no re-deriving
     # it from cumulative token counters, which read far larger than live context.
