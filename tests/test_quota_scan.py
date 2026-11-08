@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from imp.cli.quota_scan import other_logs, scan_weeks
+from imp.cli.quota_cache import cache_dir
+from imp.cli.quota_scan import other_extracts, scan_weeks
 from imp.cli.quota_share import parse_ts
 from imp.engine import archive
 from tests.conftest import _archive_with_event
@@ -75,7 +76,7 @@ def _subject_project(tmp_path: Path, home: Path) -> Path:
 
 
 def _found(root: Path) -> list[tuple[str, str]]:
-    return [(p, q) for p, q, _events in other_logs(root, "samo71", _START, _END)]
+    return [(p, q) for p, q, _found in other_extracts(root, "samo71", _START, _END)]
 
 
 def test_others_come_from_the_archive_and_live_homes_of_every_project(
@@ -265,7 +266,8 @@ def _snapshot(root: Path) -> dict[str, bytes]:
 def test_the_walk_writes_nothing_in_another_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC 9(h)."""
+    """AC 9(h): a cold scan, which writes the cache, and a warm one, which reads
+    it, touch nothing outside `~/.imp/cache/quota/`."""
     home = _imp_home(tmp_path, monkeypatch)
     root = _subject_project(tmp_path, home)
     # a REAL archive, so the walk runs past archive_is_current into the index
@@ -280,7 +282,7 @@ def test_the_walk_writes_nothing_in_another_project(
     # a second project with no archive at all: index.connect() would create one
     bare = _project(home, "bare-project")
     _live_home(bare, "neigh2", [_qr("2026-06-01T04:20:00+00:00")])
-    before = _snapshot(odir)
+    before = _snapshot(home / "projects")
 
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("a write path was reached for a foreign project")
@@ -297,8 +299,15 @@ def test_the_walk_writes_nothing_in_another_project(
     monkeypatch.setattr("imp.engine.archive.archive_quest", _boom)
     monkeypatch.setattr("imp.engine.archive.maintenance.reap_archived_homes", _boom)
 
+    subject = [_reading("2026-06-01T04:05:00+00:00", 7.0)]
+    cold = scan_weeks(root, "samo71", subject)
+    assert len(list(cache_dir().glob("*.json"))) == 3       # arch01, neigh1, neigh2
+    warm = scan_weeks(root, "samo71", subject)
+    assert [w.peak_pct for w in cold] == [7.0]
+    assert warm == cold
     assert sorted(q for _p, q in _found(root)) == ["arch01", "neigh1", "neigh2"]
-    weeks = scan_weeks(root, "samo71", [_reading("2026-06-01T04:05:00+00:00", 7.0)])
-    assert [w.peak_pct for w in weeks] == [7.0]
-    assert _snapshot(odir) == before
+    assert _snapshot(home / "projects") == before
     assert not (bare / "archive").exists()
+    outside = {p.parent for p in home.rglob("*")
+               if p.is_file() and not p.is_relative_to(home / "projects")}
+    assert outside == {cache_dir()}

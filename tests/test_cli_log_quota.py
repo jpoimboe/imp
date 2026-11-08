@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,8 @@ import anyio
 import pytest
 
 import imp.cli.main as m
+from imp.cli import quota_cache
+from imp.cli.quota_cache import cache_dir
 from imp.cli.quota_column import FOOTNOTE, LEGEND_BELOW, LEGEND_UNREAD, QuotaColumn
 from imp.cli.quota_scan import scan_weeks
 from imp.cli.quota_share import extract, gauge_weeks
@@ -518,3 +521,43 @@ def test_an_unreachable_store_fails_the_export_too(
     assert captured.err == ("imp: cannot reach the quest store for quota "
                             "attribution (quota_weeks): no such socket\n")
     assert captured.out == ""
+
+
+def test_a_warm_cache_renders_the_same_bytes_as_a_cold_one(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """AC 9(b): the warm render parses no neighbour log at all."""
+    _quest_home(tmp_path, monkeypatch)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    cold = capsys.readouterr().out
+    assert "  total                 2h 6m   28.0M  531.1k  67.68%" in cold.splitlines()
+    assert len(list(cache_dir().glob("*.json"))) == 1
+
+    def _boom(_raw: bytes) -> list[dict[str, Any]]:
+        raise AssertionError("a warm render re-read a neighbour's log")
+
+    monkeypatch.setattr(quota_cache, "_parse_jsonl", _boom)
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    assert capsys.readouterr().out == cold
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "delete"])
+def test_a_damaged_cache_is_rebuilt_silently_with_the_same_bytes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str], damage: str) -> None:
+    """AC 9(c)."""
+    _quest_home(tmp_path, monkeypatch)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    cold = capsys.readouterr()
+    (entry,) = cache_dir().glob("*.json")
+    if damage == "corrupt":
+        entry.write_bytes(b'{"key": [')
+    else:
+        shutil.rmtree(cache_dir())
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    rebuilt = capsys.readouterr()
+    assert (rebuilt.out, rebuilt.err) == (cold.out, cold.err)
+    (entry,) = cache_dir().glob("*.json")
+    assert json.loads(entry.read_bytes())["key"][0] == quota_cache.EXTRACT_VERSION

@@ -10,23 +10,21 @@ addressed as a path already found: no `project_state_dir()` claim, no
 another project's archive. A directory that cannot be read contributes what it
 can and is skipped silently.
 
-Only the week figures cross the seam, never a log."""
+Each quest's facts come through `quota_cache`, so a warm scan parses no log
+whose key is unchanged. Only the week figures cross the seam, never a log."""
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from imp.cli.quota_share import extract, gauge_weeks, parse_ts
-from imp.cli.store import (
-    GaugeWeek,
-    _iso_from_line,
-    _last_event_iso,
-    _parse_jsonl,
-)
+from imp.cli.quota_cache import cached_extract
+from imp.cli.quota_share import QuotaExtract, extract, gauge_weeks, parse_ts
+from imp.cli.store import GaugeWeek, _iso_from_line, _last_event_iso
 from imp.engine.archive import archive_is_current, index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.paths import claimed_state_dir, imp_home
@@ -46,15 +44,15 @@ def scan_weeks(control_root: Path, quest_id: str,
               *(r.when for r in subject.readings)]
     if not stamps:
         return gauge_weeks(subject, [])
-    others = [extract(events) for _project, _cid, events in other_logs(
+    others = [found for _project, _cid, found in other_extracts(
         control_root, quest_id, min(stamps) - _REACH, max(stamps) + _REACH)]
     return gauge_weeks(subject, others)
 
 
-def other_logs(
+def other_extracts(
     control_root: Path, quest_id: str, start: datetime, end: datetime,
-) -> Iterator[tuple[str, str, list[dict[str, Any]]]]:
-    """`(project, quest id, events)` for every quest whose activity may touch
+) -> Iterator[tuple[str, str, QuotaExtract]]:
+    """`(project, quest id, extract)` for every quest whose activity may touch
     `[start, end]`, each once, except the subject in its own project."""
     own = claimed_state_dir(control_root)
     own_resolved = own.resolve() if own is not None else None
@@ -64,9 +62,8 @@ def other_logs(
         return
     for pdir in pdirs:
         subject = quest_id if _same_dir(pdir, own_resolved) else None
-        for cid, events in _project_logs(pdir, start, end):
-            if cid != subject:
-                yield pdir.name, cid, events
+        for cid, found in _project_extracts(pdir, start, end, subject):
+            yield pdir.name, cid, found
 
 
 def _same_dir(pdir: Path, own_resolved: Path | None) -> bool:
@@ -78,20 +75,24 @@ def _same_dir(pdir: Path, own_resolved: Path | None) -> bool:
         return False
 
 
-def _project_logs(
-    pdir: Path, start: datetime, end: datetime,
-) -> Iterator[tuple[str, list[dict[str, Any]]]]:
-    """Each quest once, live home first — the same precedence `_load_events_for_id`
-    keeps. A home already durable in the archive stays on disk until a daemon for
-    that project reaps it, so both copies are readable at once and counting them
-    twice would deflate the subject's share."""
-    seen: set[str] = set()
-    for cid, events in _live_logs(pdir / "quests", start, end):
-        seen.add(cid)
-        yield cid, events
-    for cid, events in _archived_logs(pdir / "archive", start, end):
-        if cid not in seen:
-            yield cid, events
+def _project_extracts(
+    pdir: Path, start: datetime, end: datetime, subject: str | None,
+) -> Iterator[tuple[str, QuotaExtract]]:
+    """Each quest once, never `subject`. A live home shadows its archived copy,
+    the precedence `_load_events_for_id` keeps: a home already durable in the
+    archive stays on disk until a daemon for that project reaps it, and counting
+    both would deflate the subject's share."""
+    homes = _live_homes(pdir / "quests")
+    for home in homes:
+        if home.name == subject:
+            continue
+        found = _live_extract(pdir.name, home, start, end)
+        if found is not None:
+            yield home.name, found
+    skip = {home.name for home in homes}
+    if subject is not None:
+        skip.add(subject)
+    yield from _archived_extracts(pdir, start, end, skip)
 
 
 def _window_intersects(
@@ -105,25 +106,28 @@ def _window_intersects(
     return not (hi is not None and hi < start)
 
 
-def _live_logs(
-    quests: Path, start: datetime, end: datetime,
-) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+def _live_homes(quests: Path) -> list[Path]:
     try:
-        homes = sorted(p for p in quests.iterdir() if (p / "quest.json").is_file())
+        return sorted(p for p in quests.iterdir() if (p / "quest.json").is_file())
     except OSError:
-        return
-    for home in homes:
-        events_path = home / "events.jsonl"
-        try:
-            window = (_first_event_iso(events_path), _last_event_iso(events_path))
-        except OSError:
-            continue
-        if not _window_intersects(*window, start, end):
-            continue
-        try:
-            yield home.name, _parse_jsonl(events_path.read_bytes())
-        except OSError:
-            continue
+        return []
+
+
+def _live_extract(
+    project: str, home: Path, start: datetime, end: datetime,
+) -> QuotaExtract | None:
+    """Stat before read: a log appended in between is cached under its older key,
+    so the next scan re-reads it."""
+    events_path = home / "events.jsonl"
+    try:
+        if not _window_intersects(_first_event_iso(events_path),
+                                  _last_event_iso(events_path), start, end):
+            return None
+        st = events_path.stat()
+        return cached_extract(project, home.name, ["live", st.st_size, st.st_mtime_ns],
+                              events_path.read_bytes)
+    except OSError:
+        return None
 
 
 def _first_event_iso(events_path: Path) -> str | None:
@@ -140,9 +144,10 @@ def _first_event_iso(events_path: Path) -> str | None:
     return None
 
 
-def _archived_logs(
-    adir: Path, start: datetime, end: datetime,
-) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+def _archived_extracts(
+    pdir: Path, start: datetime, end: datetime, skip: set[str],
+) -> Iterator[tuple[str, QuotaExtract]]:
+    adir = pdir / "archive"
     if not archive_is_current(adir):
         return
     conn = index.open_readonly(adir / "index.db")
@@ -156,12 +161,14 @@ def _archived_logs(
         conn.close()
     blobs = LocalBlobStore(adir / "blobs")
     for cid, created, last in spans:
-        if not _window_intersects(created, last, start, end):
+        if cid in skip or not _window_intersects(created, last, start, end):
             continue
         try:
             rec = record.read_record(adir / "records", cid)
-            raw = blobs.get(str((rec or {}).get("events_hash") or ""))
+            digest = str((rec or {}).get("events_hash") or "")
+            found = cached_extract(pdir.name, cid, ["blob", digest],
+                                   partial(blobs.get, digest))
         except (OSError, ValueError):
             continue
-        if raw is not None:
-            yield cid, _parse_jsonl(raw)
+        if found is not None:
+            yield cid, found

@@ -3,6 +3,8 @@ quota facts."""
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,23 @@ import pytest
 
 from imp.cli import quota_cache
 from imp.cli.quota_cache import cache_dir, cached_extract
+from imp.cli.quota_scan import scan_weeks
 from imp.cli.quota_share import extract
+from imp.cli.store import GaugeWeek
+from imp.engine.archive.blobstore import LocalBlobStore
+from imp.providers.catalog import MODEL_PRICES, ModelPrices
+from tests.conftest import _archive_with_event
+from tests.test_quota_scan import (
+    _RESET,
+    _imp_home,
+    _jsonl,
+    _live_home,
+    _msg,
+    _project,
+    _qr,
+    _reading,
+    _subject_project,
+)
 
 _EVENTS: list[dict[str, Any]] = [
     {"type": "agent_message", "agent_id": "step:a",
@@ -155,3 +173,158 @@ def test_an_unwritable_cache_still_answers(tmp_path: Path) -> None:
 def test_a_missing_log_is_none_and_caches_nothing() -> None:
     assert cached_extract("proj", "q1", ["blob", "gone"], _Reader(None)) is None
     assert not cache_dir().exists()
+
+
+_SUBJECT = [_msg("2026-06-01T03:59:00+00:00"),
+            _qr("2026-06-01T04:01:00+00:00", tokens=1_000_000)]
+
+
+@pytest.fixture
+def parsed(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The byte length of every log the cache fell through to and parsed."""
+    calls: list[int] = []
+    real = quota_cache._parse_jsonl
+
+    def counting(raw: bytes) -> list[dict[str, Any]]:
+        calls.append(len(raw))
+        return real(raw)
+
+    monkeypatch.setattr(quota_cache, "_parse_jsonl", counting)
+    return calls
+
+
+@pytest.fixture
+def blob_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    reads: list[str] = []
+    real = LocalBlobStore.get
+
+    def get(self: LocalBlobStore, digest: str) -> bytes | None:
+        reads.append(digest)
+        return real(self, digest)
+
+    monkeypatch.setattr(LocalBlobStore, "get", get)
+    return reads
+
+
+def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The subject's project and two others. liveq (3.0 units and a 30-point
+    reading) is live in `elsewhere`. archq (1.5) is archived in `other`, and
+    bothq (6.0) is both live and archived there."""
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    _live_home(home / "projects" / "subject", "samo71", _SUBJECT)
+    _live_home(_project(home, "elsewhere"), "liveq",
+               [_msg("2026-06-01T04:09:00+00:00"),
+                _qr("2026-06-01T04:10:00+00:00", tokens=200_000),
+                _reading("2026-06-01T04:11:00+00:00", 30.0)])
+    other = tmp_path / "other"
+    other.mkdir()
+    _archive_with_event(other, "archq", "Archived", _jsonl(
+        [_msg("2026-06-01T04:19:00+00:00"),
+         _qr("2026-06-01T04:20:00+00:00", tokens=100_000)]))
+    both = [_msg("2026-06-01T04:29:00+00:00"),
+            _qr("2026-06-01T04:30:00+00:00", tokens=400_000)]
+    _archive_with_event(other, "bothq", "Both", _jsonl(both))
+    _live_home(home / "projects" / "other", "bothq", both)
+    return root
+
+
+def _figures(weeks: list[GaugeWeek]) -> list[tuple[str, int, float, float]]:
+    return [(w.provider, w.resets_at, w.peak_pct, round(w.other_units, 6)) for w in weeks]
+
+
+def test_a_warm_scan_reads_no_other_quests_log_or_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    parsed: list[int], blob_reads: list[str],
+) -> None:
+    """AC 9(a). The cold scan already reads one blob, archq's: bothq's live home
+    shadows its archived copy, and the subject is never read."""
+    root = _world(tmp_path, monkeypatch)
+    parsed.clear()
+    blob_reads.clear()
+    cold = scan_weeks(root, "samo71", _SUBJECT)
+    assert _figures(cold) == [("claude", _RESET, 30.0, 10.5)]
+    assert (len(parsed), len(blob_reads)) == (3, 1)
+    assert len(list(cache_dir().glob("*.json"))) == 3
+    parsed.clear()
+    blob_reads.clear()
+    assert scan_weeks(root, "samo71", _SUBJECT) == cold
+    assert (parsed, blob_reads) == ([], [])
+
+
+def test_a_live_log_that_changes_is_reread_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed: list[int],
+) -> None:
+    """AC 9(d): a size change and an mtime-only change each re-read that log and
+    no other."""
+    root = _world(tmp_path, monkeypatch)
+    scan_weeks(root, "samo71", _SUBJECT)
+    events = tmp_path / "imphome" / "projects" / "elsewhere" / "quests" / "liveq" / "events.jsonl"
+    with events.open("a") as fh:
+        fh.write(_jsonl([_reading("2026-06-01T04:12:00+00:00", 45.0)]))
+    parsed.clear()
+    assert _figures(scan_weeks(root, "samo71", _SUBJECT)) == [("claude", _RESET, 45.0, 10.5)]
+    assert parsed == [events.stat().st_size]
+    st = events.stat()
+    os.utime(events, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    parsed.clear()
+    scan_weeks(root, "samo71", _SUBJECT)
+    assert parsed == [st.st_size]
+
+
+def test_a_new_anchor_from_another_quest_reaches_a_warm_neighbour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed: list[int],
+) -> None:
+    """AC 9(e): unitq's 3.0 units sit in its warm entry with no week to fall in.
+    When anchorq gains a reading, those units join the new week, and only
+    anchorq's log is re-read."""
+    home = _imp_home(tmp_path, monkeypatch)
+    root = _subject_project(tmp_path, home)
+    elsewhere = _project(home, "elsewhere")
+    _live_home(elsewhere, "unitq", [_msg("2026-06-01T04:09:00+00:00"),
+                                    _qr("2026-06-01T04:10:00+00:00", tokens=200_000)])
+    anchor = _live_home(elsewhere, "anchorq", [_msg("2026-06-01T04:20:00+00:00")])
+    assert scan_weeks(root, "samo71", _SUBJECT) == []
+    with (anchor / "events.jsonl").open("a") as fh:
+        fh.write(_jsonl([_reading("2026-06-01T04:21:00+00:00", 40.0)]))
+    parsed.clear()
+    warm = scan_weeks(root, "samo71", _SUBJECT)
+    assert _figures(warm) == [("claude", _RESET, 40.0, 3.0)]
+    assert parsed == [(anchor / "events.jsonl").stat().st_size]
+    shutil.rmtree(cache_dir())
+    assert scan_weeks(root, "samo71", _SUBJECT) == warm
+
+
+def test_a_price_change_reaches_warm_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed: list[int],
+) -> None:
+    """AC 9(f). Sonnet's output rate doubles, so liveq, archq and bothq go from
+    10.5 to 21.0 units. newq's model was unpriced (0 units) and now prices
+    200k output at $15/M (3.0). None of the four logs is re-read."""
+    root = _world(tmp_path, monkeypatch)
+    msg = _msg("2026-06-01T04:39:00+00:00")
+    msg["payload"]["model"] = "claude-imaginary-9"
+    qr = _qr("2026-06-01T04:40:00+00:00")
+    qr["payload"]["model_usage"] = {"claude-imaginary-9": {"outputTokens": 200_000}}
+    _live_home(tmp_path / "imphome" / "projects" / "elsewhere", "newq", [msg, qr])
+    assert _figures(scan_weeks(root, "samo71", _SUBJECT)) == [("claude", _RESET, 30.0, 10.5)]
+    monkeypatch.setitem(MODEL_PRICES, "claude-sonnet-4-6", ModelPrices(3.00, 30.00, 0.30, 6.00))
+    monkeypatch.setitem(MODEL_PRICES, "claude-imaginary-9", ModelPrices(3.00, 15.00, 0.30, 6.00))
+    parsed.clear()
+    warm = scan_weeks(root, "samo71", _SUBJECT)
+    assert _figures(warm) == [("claude", _RESET, 30.0, 24.0)]
+    assert parsed == []
+    shutil.rmtree(cache_dir())
+    assert scan_weeks(root, "samo71", _SUBJECT) == warm
+
+
+def test_a_scan_after_an_extract_version_bump_rereads_every_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed: list[int],
+) -> None:
+    """AC 9(g)."""
+    root = _world(tmp_path, monkeypatch)
+    cold = scan_weeks(root, "samo71", _SUBJECT)
+    monkeypatch.setattr(quota_cache, "EXTRACT_VERSION", quota_cache.EXTRACT_VERSION + 1)
+    parsed.clear()
+    assert scan_weeks(root, "samo71", _SUBJECT) == cold
+    assert len(parsed) == 3
