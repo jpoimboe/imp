@@ -30,7 +30,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
         (ch.quest_dir / "quest.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
-    returned = ch.rename("Add OAuth", log=ch.event_log())
+    returned = ch.rename("Add OAuth", by="agent", log=ch.event_log())
 
     assert returned == "aaa111"                     # rename returns the id
     assert ch.title == "Add OAuth"
@@ -55,7 +55,8 @@ class _RenamingRunner:
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
         ch = invocation.quest
         if ch is not None and ch.title == "x":
-            ch.rename("Renamed Thing", log=invocation.event_log or ch.event_log())
+            ch.rename("Renamed Thing", by="agent",
+                      log=invocation.event_log or ch.event_log())
         yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
@@ -263,3 +264,26 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_rename_by_user_emits_user_renamed(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="orig", quest_id="aaa113", base_branch="main")
+    ch.rename("Mine", by="user", log=ch.event_log())
+    renames = [e for e in ch.event_log().read()
+               if e["type"] in ("quest_renamed", "user_renamed")]
+    assert [e["type"] for e in renames] == ["user_renamed"]
+    assert renames[0]["payload"] == {
+        "id": "aaa113", "old_title": "orig", "new_title": "Mine"}
+
+
+def test_rename_to_current_title_is_a_no_op(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="orig", quest_id="aaa114", base_branch="main")
+    meta_before = (ch.quest_dir / "quest.json").read_text()
+    events_before = list(ch.event_log().read())
+    assert ch.rename("orig", by="user", log=ch.event_log()) == "aaa114"
+    assert list(ch.event_log().read()) == events_before
+    assert (ch.quest_dir / "quest.json").read_text() == meta_before

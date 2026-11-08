@@ -58,7 +58,7 @@ def test_rename_setter_preserves_quest_json_on_replace_failure(
     # Patch AFTER create/state seeding so only the rename write is intercepted.
     monkeypatch.setattr(os, "replace", _boom)
     with pytest.raises(OSError):
-        ch.rename("Renamed", log=ch.event_log())
+        ch.rename("Renamed", by="agent", log=ch.event_log())
 
     # The setter routed through the atomic helper: os.replace raised, so the
     # live quest.json is byte-for-byte the pre-rename content and no temp leaks.

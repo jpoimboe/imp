@@ -465,6 +465,12 @@ class RenameNode:
     collapsible = False
 
 
+@dataclass(frozen=True)
+class UserRenameNode:
+    name: str
+    collapsible = False
+
+
 @dataclass
 class StepContextNode:
     payload: dict[str, Any]
@@ -1389,6 +1395,17 @@ def _h_quest_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["quest_renamed"] = _h_quest_renamed
 
 
+def _h_user_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # The user's own action: rendered at its log position, never deferred or coalesced.
+    self._root.title = p["new_title"]
+    self._flush_pending_rename()
+    self._flush_burst()
+    _place_beside_held_step(self, UserRenameNode(name=p["new_title"]))
+
+
+NarrativeBuilder._HANDLERS["user_renamed"] = _h_user_renamed
+
+
 def _h_quest_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_pending_rename()
     self._flush_burst()
@@ -1688,7 +1705,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.lane_wait = False
                 existing.lane_wait_start_ts = None
                 existing.children[:] = [c for c in existing.children
-                                        if isinstance(c, ResumeMarkerNode)]
+                                        if isinstance(c, (ResumeMarkerNode, UserRenameNode))]
                 existing.kind = kind
                 existing.model = p.get("model")
                 existing.provider = p.get("provider")
@@ -1824,17 +1841,18 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         self._pause_outcome_shown = True
 
 
-def _place_resume_marker(self: NarrativeBuilder, marker: ResumeMarkerNode) -> None:
+def _place_beside_held_step(self: NarrativeBuilder,
+                            node: ResumeMarkerNode | UserRenameNode) -> None:
     held = self._step_stack[-1] if self._step_stack else None
     if held is None or not deferred_leaf(held):
-        self._append(marker)
+        self._append(node)
         return
-    # Inside a held step the marker would expand the step, or vanish with a hidden one.
+    # Inside a held step the node would expand the step, or vanish with a hidden one.
     parent = self._step_stack[-2] if len(self._step_stack) > 1 else self._current_phase
     assert parent is not None
     # By identity: StepNode equality compares fields.
     index = next(i for i, c in enumerate(parent.children) if c is held)
-    parent.children.insert(index, marker)
+    parent.children.insert(index, node)
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1849,7 +1867,7 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         return
     gap = elapsed_seconds(opened.timestamp, event.get("timestamp"))
     if gap is not None and gap >= 1:
-        _place_resume_marker(self, ResumeMarkerNode(gap_s=int(gap)))
+        _place_beside_held_step(self, ResumeMarkerNode(gap_s=int(gap)))
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
@@ -2896,6 +2914,8 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "reason": node.reason}
     if isinstance(node, ResumeMarkerNode):
         return {"t": t, "gap_s": node.gap_s}
+    if isinstance(node, UserRenameNode):
+        return {"t": t, "name": node.name}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):

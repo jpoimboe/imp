@@ -34,6 +34,6 @@ def rename_quest(ctx: Any, name: str) -> str:
     if title == quest.title:
         return f"already named {quest.id}"
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
-    quest.rename(title, log=log)
+    quest.rename(title, by="agent", log=log)
     return (f"renamed to {title!r}; use "
             f"{quest.quest_dir}/artifacts/spec/{quest.id}.md for the spec")

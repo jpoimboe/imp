@@ -192,6 +192,10 @@ def test_was_renamed_false_without_quest_renamed_event() -> None:
     assert _was_renamed(log) is False
 
 
+def test_was_renamed_false_for_user_renamed_only() -> None:
+    assert _was_renamed(_Log([{"type": "user_renamed"}])) is False
+
+
 def test_archive_intent_with_exchange_archives(tmp_path: Path) -> None:
     # /archive is chat-style: archive (not save), like /clear.
     _seed_control(tmp_path)

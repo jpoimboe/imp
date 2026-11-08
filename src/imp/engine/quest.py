@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from imp.engine import durable, worktree
 from imp.engine.env import quest_var_tmp_root
@@ -102,17 +102,22 @@ class Quest:
     vars: dict[str, object] = field(default_factory=dict)  # per-quest workflow var overrides
     provider: str | None = None  # per-quest provider pin; None = follow configured order
 
-    def rename(self, name: str, *, log: JsonlEventLog) -> str:
+    def rename(self, name: str, *, by: Literal["agent", "user"],
+               log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json in the
-        out-of-tree state dir (never dirties the tracked worktree), emit quest_renamed.
-        Returns the id. The id is immutable, so nothing else moves."""
+        out-of-tree state dir (never dirties the tracked worktree), emit
+        quest_renamed (agent) or user_renamed (user). An unchanged title writes
+        nothing. Returns the id. The id is immutable, so nothing else moves."""
+        if name == self.title:
+            return self.id
         old_title = self.title
         self.title = name
         meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         _write_quest_json(meta_path, meta)
-        log.append(agent_id=None, type="quest_renamed",
+        log.append(agent_id=None,
+                   type="quest_renamed" if by == "agent" else "user_renamed",
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name})
         return self.id

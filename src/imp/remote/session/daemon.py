@@ -44,7 +44,7 @@ from imp.paths import project_state_dir
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.pin import pin_source_snapshot
-from imp.remote.session.protocol import SIDE_EFFECT_REASONS
+from imp.remote.session.protocol import QUERY_USER_RENAME, SIDE_EFFECT_REASONS
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
 from imp.remote.session.warmup import warm_module_graph
 
@@ -181,6 +181,19 @@ async def serve_quest_session(
     def _set_provider(name: str) -> None:
         quest.set_provider(name)
 
+    session_handler = build_session_handler(quest.control_root, parent_id=quest.id)
+
+    async def _on_query(op: str, args: dict[str, Any]) -> Any:
+        # On the loop: broadcast is loop-thread only, and `quest` is the run's own object.
+        if op != QUERY_USER_RENAME:
+            return await session_handler(op, args)
+        if quest.materialized:
+            quest.rename(args["title"], by="user",
+                         log=broadcast_log)
+        else:
+            quest.set_title(args["title"])
+        return None
+
     server = SessionServer(
         socket_path,
         coordinator=coordinator,
@@ -191,14 +204,14 @@ async def serve_quest_session(
         first_attach_timeout=first_attach_timeout,
         skill_loader=lambda name: load_user_skill(
             quest.workflow_dir / "skills", name),
-        on_query=build_session_handler(quest.control_root, parent_id=quest.id),
+        on_query=_on_query,
         set_provider=_set_provider,
         current_step=lambda: State.load(quest.state_dir).step,
     )
+    broadcast_log = JsonlEventLog(quest.events_path, on_event=server._emit)
     # Raw broadcast, not the liveness fan-out: interrupt records must not pulse
     # note_activity().
-    coordinator.set_event_log(
-        JsonlEventLog(quest.events_path, on_event=server._emit))
+    coordinator.set_event_log(broadcast_log)
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.engine.awaiting_user_input import AwaitingUserInput

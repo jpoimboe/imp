@@ -136,6 +136,9 @@ def encode_control(action: str, reason: str | None = None) -> str:
     return json.dumps(payload)
 
 
+QUERY_USER_RENAME = "user_rename"
+
+
 def encode_query(op: str, args: dict[str, Any]) -> str:
     return json.dumps({"kind": "query", "op": op, "args": args})
 
