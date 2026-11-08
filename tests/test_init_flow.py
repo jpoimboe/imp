@@ -158,7 +158,7 @@ def test_one_enter_echoes_configured_block_above_created(
     assert "tests" in msgs[configured_idx + 3] and "make check" in msgs[configured_idx + 3]
     assert ("worktree setup" in msgs[configured_idx + 4]
             and "(none)" in msgs[configured_idx + 4])
-    assert "import root" in msgs[configured_idx + 5] and "src" in msgs[configured_idx + 5]
+    assert "Python import path" in msgs[configured_idx + 5] and "src" in msgs[configured_idx + 5]
 
 
 def test_settings_summary_empty_values_render_as_none() -> None:
@@ -169,7 +169,7 @@ def test_settings_summary_empty_values_render_as_none() -> None:
     assert len(lines) == 5
     tests_line = next(line for line in lines if "tests" in line)
     setup_line = next(line for line in lines if "worktree setup" in line)
-    roots_line = next(line for line in lines if "import root" in line)
+    roots_line = next(line for line in lines if "Python import path" in line)
     assert "(none)" in tests_line
     assert "(none)" in setup_line
     assert "(none)" in roots_line
@@ -187,7 +187,7 @@ def test_settings_summary_empty_values_render_as_none() -> None:
     lines_false = _settings_summary(decided_none)
     assert "(none needed)" in next(ln for ln in lines_false if "tests" in ln)
     assert "(none needed)" in next(ln for ln in lines_false if "worktree setup" in ln)
-    assert "(none needed)" in next(ln for ln in lines_false if "import root" in ln)
+    assert "(none needed)" in next(ln for ln in lines_false if "Python import path" in ln)
 
 
 def test_init_finishes_with_no_provider_credential_at_all(

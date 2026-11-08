@@ -32,7 +32,7 @@ from imp.cli.setup_detect import DetectedSetupCommand
 from imp.cli.verify_detect import DetectedTestCommand
 
 _WORKFLOWS = ["default", "minimal"]
-_LABELS = ["workflow", "branch", "tests", "worktree setup", "import root"]
+_LABELS = ["workflow", "branch", "tests", "worktree setup", "Python import path"]
 
 
 def _detected_state() -> InitScreenState:
@@ -257,7 +257,7 @@ def test_edit_prompt_labels_are_verbatim() -> None:
     assert _EDIT_PROMPTS[ScreenRow.BRANCH] == "Integration branch: "
     assert _EDIT_PROMPTS[ScreenRow.TESTS] == "Fast test command: "
     assert _EDIT_PROMPTS[ScreenRow.WORKTREE_SETUP] == "Worktree setup command: "
-    assert _EDIT_PROMPTS[ScreenRow.IMPORT_ROOT] == "Import roots (comma-separated): "
+    assert _EDIT_PROMPTS[ScreenRow.IMPORT_ROOT] == "Python import paths (comma-separated): "
     assert ScreenRow.WORKFLOW not in _EDIT_PROMPTS
 
 
@@ -319,7 +319,7 @@ def test_up_wraps_from_the_first_row_to_import_root(tmp_path: Path) -> None:
         outcome = _interactive_confirm_screen(
             tmp_path, _detected_state(), workflows=_WORKFLOWS,
             prompt_fn=_fake_prompt)
-    assert asked == [("Import roots (comma-separated): ", "src")]
+    assert asked == [("Python import paths (comma-separated): ", "src")]
     assert isinstance(outcome, ScreenAccepted)
     assert outcome.state.pythonpath == ["lib"]
 

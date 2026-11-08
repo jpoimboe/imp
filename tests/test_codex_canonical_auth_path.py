@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers import codex_token_refresh as ctr
 from imp.providers.codex_runner import CodexAgentRunner
+from imp.providers.paths import codex_canonical_dir
 
 
 def _runner() -> CodexAgentRunner:
@@ -22,7 +22,7 @@ def test_canonical_auth_path_honors_codex_home(
     assert runner._canonical_auth_path() == tmp_path / "auth.json"
     # Runner and refresh module resolve the SAME auth.json under a set CODEX_HOME.
     assert (runner._canonical_auth_path()
-            == ctr.canonical_dir(os.environ) / "auth.json")
+            == codex_canonical_dir(os.environ) / "auth.json")
 
 
 def test_canonical_auth_path_falls_back_to_home(
@@ -33,7 +33,7 @@ def test_canonical_auth_path_falls_back_to_home(
     runner = _runner()
     assert runner._canonical_auth_path() == tmp_path / ".codex" / "auth.json"
     assert (runner._canonical_auth_path()
-            == ctr.canonical_dir({}) / "auth.json")
+            == codex_canonical_dir({}) / "auth.json")
 
 
 def test_canonical_auth_override_still_wins(

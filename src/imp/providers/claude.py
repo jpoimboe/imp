@@ -145,7 +145,6 @@ from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     SKIPPED_ROTATED,
     RefreshOutcome,
-    canonical_dir,
     canonical_expires_at,
     refresh_canonical_token,
 )
@@ -155,6 +154,7 @@ from imp.providers.observe_classify import (
     matches_error_prose,
 )
 from imp.providers.observe_session import ObserveSession
+from imp.providers.paths import claude_canonical_dir
 from imp.providers.quota import QuotaReading, QuotaWindow
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -187,7 +187,7 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
     base = config_dir
     if base is None:
         with contextlib.suppress(RuntimeError):     # no resolvable home dir
-            base = canonical_dir(os.environ)
+            base = claude_canonical_dir(os.environ)
     expires_at: int | None = None
     if base is not None:
         try:

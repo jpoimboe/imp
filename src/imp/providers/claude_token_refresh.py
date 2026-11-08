@@ -22,6 +22,8 @@ from typing import Any
 import filelock
 import httpx
 
+from imp.providers.paths import claude_canonical_dir
+
 REFRESHED = "refreshed"
 SKIPPED_FRESH = "skipped_fresh"
 SKIPPED_ROTATED = "skipped_rotated"
@@ -55,11 +57,6 @@ class LockTimeout(Exception):
 class RefreshOutcome:
     outcome: str
     expires_at: int | None = None
-
-
-def canonical_dir(env: Mapping[str, str]) -> Path:
-    override = env.get("CLAUDE_CONFIG_DIR")
-    return Path(override) if override else Path.home() / ".claude"
 
 
 def _load_credentials(creds_path: Path) -> dict[str, Any] | None:
@@ -176,7 +173,7 @@ def refresh_canonical_token(
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return RefreshOutcome(NOT_APPLICABLE)
     try:
-        base = canonical_dir(env)
+        base = claude_canonical_dir(env)
     except RuntimeError:
         return RefreshOutcome(NOT_APPLICABLE)
     creds_path = base / ".credentials.json"
@@ -225,7 +222,7 @@ def _oauth_timestamp(key: str, env: Mapping[str, str] | None) -> int | None:
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return None
     try:
-        base = canonical_dir(env)
+        base = claude_canonical_dir(env)
     except RuntimeError:
         return None
     oauth = _oauth_of(_load_credentials(base / ".credentials.json"))

@@ -20,6 +20,7 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.sandbox import force_rmtree
 from imp.providers import claude_token_refresh, codex_token_refresh
+from imp.providers.paths import claude_canonical_dir, codex_canonical_dir
 from imp.providers.provider_auth import stage_provider_auth
 from tests.conftest import _git
 
@@ -27,6 +28,7 @@ _ENV_VAR = {sub: var for var, sub in PROVIDER_AUTH_ENV}
 _CREDS = {"claude": ".credentials.json", "codex": "auth.json"}
 _REFRESH = {"claude": ("claudeAiOauth", "refreshToken"), "codex": ("tokens", "refresh_token")}
 _MODULES = {"claude": claude_token_refresh, "codex": codex_token_refresh}
+_CANONICAL_DIR = {"claude": claude_canonical_dir, "codex": codex_canonical_dir}
 _MODELS = {"claude": "claude-haiku-4-5-20251001", "codex": "gpt-6-luna"}
 _LOGIN = {"claude": "run `claude` and /login", "codex": "run `codex login`"}
 _MIN_TOKEN_LIFE_MS = 5 * 60 * 1000
@@ -127,7 +129,7 @@ async def test_one_step_run_authenticates_from_the_read_only_copy(
 ) -> None:
     copy = provider_auth_copy
     module = _MODULES[provider]
-    canonical = module.canonical_dir(os.environ) / _CREDS[provider]
+    canonical = _CANONICAL_DIR[provider](os.environ) / _CREDS[provider]
     canonical_refresh = _refresh_token_digest(provider, canonical)
 
     staged = copy / provider / _CREDS[provider]

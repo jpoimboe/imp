@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -417,6 +418,57 @@ def test_read_only_command_dispatches_without_the_provider_stack(
     )
     assert reported["LEAKED"] == "", f"imp {cmd} imported {reported['LEAKED']}"
     assert reported["PROVIDERS"] == "", f"imp {cmd} imported {reported['PROVIDERS']}"
+
+
+def test_config_readiness_stays_off_the_provider_stack(tmp_path: Path) -> None:
+    """The guard above runs with no providers configured, so it never reaches the
+    sign-in check; here claude and codex are configured and on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("claude", "codex"):
+        exe = bin_dir / name
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    (imp_home / "config.yaml").write_text("providers: [claude, codex, anthropic]\n")
+    (tmp_path / "home").mkdir()
+    (tmp_path / "codex-home").mkdir()
+    unset = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+             "CLAUDE_CONFIG_DIR"}
+    env = {k: v for k, v in os.environ.items() if k not in unset}
+    env.update(
+        PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        HOME=str(tmp_path / "home"), CODEX_HOME=str(tmp_path / "codex-home"),
+        IMP_HOME=str(imp_home), PYTHONIOENCODING="utf-8", NO_COLOR="1",
+    )
+    code = (
+        "import runpy, sys\n"
+        "sys.argv = ['imp', 'config']\n"
+        "try:\n"
+        "    runpy.run_module('imp', run_name='__main__')\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        "heavy = {'httpx', 'anyio', 'claude_agent_sdk'}\n"
+        "providers = {'imp.providers.claude', 'imp.providers.codex'}\n"
+        "loaded = ({n.split('.')[0] for n in sys.modules} & heavy)"
+        " | (providers & sys.modules.keys())\n"
+        "sys.stderr.write('LOADED:' + ','.join(sorted(loaded)) + '\\n')\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, cwd=tmp_path, env=env)
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert "providers (local check):" in lines, proc.stdout
+    block = lines[lines.index("providers (local check):") + 1:]
+    block = block[:block.index("")]
+    assert "  ✗ codex          not signed in" in block
+    assert any(r.split()[1:2] == ["claude"] for r in block)
+    if platform.system() != "Darwin":   # macOS reads the Keychain through the SDK
+        assert "  ✗ claude         not signed in" in block
+        loaded = next(ln.partition(":")[2] for ln in proc.stderr.splitlines()
+                      if ln.startswith("LOADED:"))
+        assert loaded == "", f"imp config imported {loaded}"
 
 
 @pytest.mark.parametrize(

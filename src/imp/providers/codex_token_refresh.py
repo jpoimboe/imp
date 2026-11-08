@@ -24,6 +24,8 @@ from typing import Any
 import filelock
 import httpx
 
+from imp.providers.paths import codex_canonical_dir
+
 _BUFFER_MS = 5 * 60 * 1000
 _REFRESH_INTERVAL_DAYS = 8
 _DAY_MS = 24 * 60 * 60 * 1000
@@ -182,11 +184,6 @@ class RefreshOutcome:
     expires_at: int | None = None
 
 
-def canonical_dir(env: Mapping[str, str]) -> Path:
-    override = env.get("CODEX_HOME")
-    return Path(override) if override else Path.home() / ".codex"
-
-
 def _load_auth(auth_path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(auth_path.read_text(encoding="utf-8"))
@@ -263,7 +260,7 @@ def refresh_canonical_token(
     """`force` ignores expiry; `spawn_expires_at` still skips a peer's rotation."""
     env = os.environ if env is None else env
     try:
-        base = canonical_dir(env)
+        base = codex_canonical_dir(env)
     except RuntimeError:
         return RefreshOutcome(NOT_APPLICABLE)
     auth_path = base / "auth.json"
@@ -315,7 +312,7 @@ def canonical_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
     """The canonical access token's expiry — the value a rotation race moves."""
     env = os.environ if env is None else env
     try:
-        base = canonical_dir(env)
+        base = codex_canonical_dir(env)
     except RuntimeError:
         return None
     data = _load_auth(base / "auth.json")

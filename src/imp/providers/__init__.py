@@ -16,12 +16,15 @@ isolation is owned by conftest's autouse _reset_provider_registry fixture).
 from __future__ import annotations
 
 import importlib
+import json
 import os
+import platform
 from enum import Enum, auto
+from shutil import which
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
     from imp.providers.base import Provider
     from imp.providers.config import Config
@@ -91,35 +94,103 @@ def auth_hint_lines(names: Iterable[str]) -> list[str]:
 
 
 class Readiness(Enum):
-    """`imp config`'s local auth verdict for one provider."""
+    """One provider's local, read-only sign-in verdict."""
 
-    CLI_AUTHENTICATED = auto()
+    SIGNED_IN = auto()
+    NOT_SIGNED_IN = auto()
+    CLI_NOT_FOUND = auto()
     KEY_SET = auto()
     KEY_UNSET = auto()
 
     @property
     def ready(self) -> bool:
-        return self is not Readiness.KEY_UNSET
+        return self in (Readiness.SIGNED_IN, Readiness.KEY_SET)
 
 
-def provider_readiness(name: str, config: Config) -> Readiness:
-    """Logins (floor env_var None) are CLI-authenticated unless provider_envs opts into a key."""
-    from imp.providers.resolve import iter_provider_defaults
+class ProviderStatus(NamedTuple):
+    """A verdict plus the label every surface shows for it."""
+    readiness: Readiness
+    label: str
 
-    d = iter_provider_defaults().get(name)
-    if d is not None and d.env_var is None and name not in config.provider_envs:
-        return Readiness.CLI_AUTHENTICATED
-    return Readiness.KEY_SET if os.environ.get(config.env_for(name)) else Readiness.KEY_UNSET
+
+def _has_claude_oauth(raw: str | None) -> bool:
+    if raw is None:
+        return False
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and isinstance(data.get("claudeAiOauth"), dict)
+
+
+def _claude_login_found(env: Mapping[str, str]) -> bool:
+    """Cheapest first; the Keychain only where the SDK keeps the login (macOS, default dir)."""
+    from imp.providers.paths import claude_canonical_dir
+
+    if env.get("CLAUDE_CODE_OAUTH_TOKEN") or env.get("ANTHROPIC_API_KEY"):
+        return True
+    try:
+        raw = (claude_canonical_dir(env) / ".credentials.json").read_text(encoding="utf-8")
+    except (OSError, ValueError, RuntimeError):     # RuntimeError: no resolvable home dir
+        raw = None
+    if _has_claude_oauth(raw):
+        return True
+    if platform.system() != "Darwin" or env.get("CLAUDE_CONFIG_DIR"):
+        return False
+    from claude_agent_sdk._internal.session_resume import _read_keychain_credentials
+    return _has_claude_oauth(_read_keychain_credentials())
+
+
+def _codex_login_found(env: Mapping[str, str]) -> bool:
+    from imp.providers.codex_config import detect_auth_mode
+    from imp.providers.paths import codex_canonical_dir
+
+    try:
+        auth_path = codex_canonical_dir(env) / "auth.json"
+    except RuntimeError:                # no resolvable home dir
+        return bool(env.get("OPENAI_API_KEY"))
+    return detect_auth_mode(canonical_path=auth_path, env=env) is not None
+
+
+_LOGIN_FOUND: dict[str, Callable[[Mapping[str, str]], bool]] = {
+    "claude": _claude_login_found,
+    "codex": _codex_login_found,
+}
+
+
+def provider_readiness(name: str, config: Config) -> ProviderStatus:
+    """Local and read-only. A floor login CLI (unless provider_envs opts it into a
+    key) needs to be on PATH with a stored login; everything else needs its key."""
+    floor = BUILTIN_FLOOR.get(name)
+    if floor is not None and floor.env_var is None and name not in config.provider_envs:
+        if which(name) is None:
+            return ProviderStatus(Readiness.CLI_NOT_FOUND, "CLI not found")
+        if _LOGIN_FOUND[name](os.environ):
+            return ProviderStatus(Readiness.SIGNED_IN, "signed in")
+        return ProviderStatus(Readiness.NOT_SIGNED_IN, "not signed in")
+    var = config.env_for(name)
+    if os.environ.get(var):
+        return ProviderStatus(Readiness.KEY_SET, f"{var} set")
+    return ProviderStatus(Readiness.KEY_UNSET, f"{var} not set")
+
+
+def _summary_hint(name: str, readiness: Readiness) -> str:
+    if readiness is Readiness.NOT_SIGNED_IN:
+        return f" · {BUILTIN_FLOOR[name].auth_hint}"
+    if readiness is Readiness.CLI_NOT_FOUND:
+        return f" · install it, then {BUILTIN_FLOOR[name].auth_hint}"
+    return ""
 
 
 def readiness_lines(names: Iterable[str], config: Config) -> list[str]:
-    """`  <name> — ready` or `  <name> — <auth hint>`; names outside the floor get no line."""
+    """`  <name> — <label><hint>` per floor provider that isn't ready; others get no line."""
     lines: list[str] = []
     for n in names:
         if n not in BUILTIN_FLOOR:
             continue
-        status = "ready" if provider_readiness(n, config).ready else BUILTIN_FLOOR[n].auth_hint
-        lines.append(f"  {n} — {status}")
+        status = provider_readiness(n, config)
+        if not status.readiness.ready:
+            lines.append(f"  {n} — {status.label}{_summary_hint(n, status.readiness)}")
     return lines
 
 

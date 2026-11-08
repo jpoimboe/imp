@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pytest
 import yaml
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from imp.cli.init import run_init
+from imp.paths import display_path
+from imp.providers import ProviderStatus, Readiness
+from tests._readiness import pin_readiness
 from tests.conftest import _git, _init_repo
 
 
@@ -20,6 +26,12 @@ def _inputs(*answers: str) -> object:
 
 def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
+
+
+_TWO_STATUSES = {
+    "claude": ProviderStatus(Readiness.SIGNED_IN, "signed in"),
+    "anthropic": ProviderStatus(Readiness.KEY_SET, "ANTHROPIC_API_KEY set"),
+}
 
 
 def _stub_screen(monkeypatch, **overrides) -> None:
@@ -56,6 +68,19 @@ def _isolate_global_config(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _stub_theme_detection(monkeypatch):
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
+
+
+@pytest.fixture(autouse=True)
+def _wide_terminal(monkeypatch):
+    # Host width varies (tty vs pipe); tests that exercise wrapping narrow it.
+    monkeypatch.setenv("COLUMNS", "500")
+
+
+@pytest.fixture(autouse=True)
+def _pinned_readiness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("readiness"))
 
 
 @pytest.fixture(autouse=True)
@@ -346,7 +371,7 @@ def test_init_suggestion_reads_as_opening_message(tmp_path: Path) -> None:
 def test_picker_cursor_uses_render_safe_caret() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], _TWO_STATUSES, cursor=0, selected={0})
     active = rows[1][1]
     inactive = rows[2][1]
     assert active.startswith("> ")
@@ -585,7 +610,43 @@ def test_use_defaults_all_invalid_pythonpath_reports_and_leaves_unset(tmp_path):
     report = "\n".join(msgs)
     assert "srcc" in report
     assert "no such directory" in report
-    assert "leaving import roots unset" in report
+    assert ("--pythonpath: no such directory in this repo: srcc — leaving the "
+            "Python import path unset.") in msgs
+
+
+def test_written_config_comments_say_python_import_paths(tmp_path: Path) -> None:
+    from imp.cli.init import run_init_noninteractive
+    decided = tmp_path / "decided"
+    (decided / "src").mkdir(parents=True)
+    run_init_noninteractive(
+        decided, output_fn=lambda _m: None,
+        pythonpath=["src"], detect_verify_fn=lambda _r: None)
+    decided_text = (decided / "imp" / "config.yaml").read_text()
+    assert "# Worktree-relative Python import paths prepended to gate/agent\n" in decided_text
+
+    undecided = tmp_path / "undecided"
+    undecided.mkdir()
+    run_init_noninteractive(
+        undecided, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    undecided_text = (undecided / "imp" / "config.yaml").read_text()
+    assert ("# pythonpath: worktree-relative Python import paths prepended to the "
+            "gate/agent\n") in undecided_text
+
+    for text in (decided_text, undecided_text):
+        assert "import root" not in text
+
+
+def test_init_help_documents_pythonpath_as_python_import_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.main import _build_parser
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["init", "-h"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert ("Comma-separated worktree-relative Python import paths recorded as "
+            "pythonpath in the non-interactive path; validated against disk.") in help_text
+    assert "import root" not in help_text
 
 
 def test_use_defaults_fills_offline_test_command(tmp_path):
@@ -840,7 +901,20 @@ def test_cmd_init_ctrl_c_prints_cancelled_and_exits_user_ended(
     rc = m._cmd_init(_init_args())
 
     assert rc == ExitCode.USER_ENDED
-    assert "imp: init cancelled" in capsys.readouterr().err.splitlines()
+    assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+
+
+def test_init_input_ends_the_line_when_cancelled(monkeypatch, capsys):
+    import imp.cli.main as m
+
+    def interrupted(prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        m._init_input("x: ")
+
+    assert capsys.readouterr().err == "\n"
 
 
 def test_cmd_init_rejects_bad_workflow_on_the_interactive_path(
@@ -1035,19 +1109,19 @@ def test_host_success_lines_carry_engine_chrome(
 ) -> None:
     from imp.providers.paths import global_config_path
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
     user_path = global_config_path()
 
     # This one prints before the theme is applied, so its gold is the ansi gold.
-    assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
+    assert f"Setting up imp in {GOLD_ANSI}{display_path(tmp_path)}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
-    assert f"{DIM}  anthropic — ready{RESET}" in msgs
+    assert f"{DIM}  anthropic — ANTHROPIC_API_KEY not set{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
-    assert f"{DIM}  {user_path}  (your machine: providers, theme){RESET}" in msgs
+    assert f"{DIM}  {display_path(user_path)}  (your machine: providers, theme){RESET}" in msgs
     assert f"{DIM}Committed imp/config.yaml.{RESET}" in msgs
     assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
 
@@ -1065,7 +1139,7 @@ def test_host_success_lines_stay_bare_without_color(
         detect_theme_fn=lambda: "dark",
     )
 
-    assert f"Setting up imp in {tmp_path}" in msgs
+    assert f"Setting up imp in {display_path(tmp_path)}" in msgs
     assert "Created:" in msgs
     assert not any("\x1b" in m for m in msgs)
 
@@ -1104,7 +1178,7 @@ def test_already_initialized_rerun_block_stays_bare(
     user_path = global_config_path()
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
     # the same two strings the fresh path chromes — bare here
-    assert f"  {user_path}  (your machine: providers, theme)" in msgs
+    assert f"  {display_path(user_path)}  (your machine: providers, theme)" in msgs
     assert "Committed imp/config.yaml." in msgs
 
 
@@ -1246,24 +1320,9 @@ def test_already_initialized_rerun_prints_no_splash(
 def test_picker_cursor_row_is_gold_not_cyan() -> None:
     from imp.cli.init import _picker_rows
 
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
+    rows = _picker_rows(["claude", "anthropic"], _TWO_STATUSES, cursor=0, selected={0})
     assert rows[1][0] == "ansiyellow bold"
     assert rows[2][0] == ""
-
-
-def test_picker_block_has_a_blank_line_around_the_options() -> None:
-    from imp.cli.init import _picker_rows
-
-    rows = _picker_rows(["claude", "anthropic"], cursor=0, selected={0})
-    text = "".join(t for _style, t in rows)
-    assert text.splitlines() == [
-        "Which providers do you want to enable?",
-        "",
-        "> [x] claude",
-        "  [ ] anthropic",
-        "",
-        "↑↓ move · space toggle · enter confirm · esc cancel",
-    ]
 
 
 def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
@@ -1272,6 +1331,155 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     doc = _interactive_provider_picker.__doc__ or ""
     assert "ansicyan" not in doc
     assert "ansiyellow" in doc
+
+
+_PICKER_HINT = "↑↓ move · space toggle · enter confirm · esc cancel"
+_ORDER = ["claude", "anthropic", "openai", "codex"]
+
+
+def _mockup_statuses(
+    monkeypatch: pytest.MonkeyPatch, base: Path,
+) -> dict[str, ProviderStatus]:
+    """The spec mockup's machine: claude on PATH and signed in, codex absent, no keys."""
+    from imp.providers import provider_readiness
+    from imp.providers.effective import floor_config
+
+    claude_dir, _ = pin_readiness(monkeypatch, base, on_path=("claude",), keys=())
+    (claude_dir / ".credentials.json").write_text('{"claudeAiOauth": {}}')
+    return {n: provider_readiness(n, floor_config()) for n in _ORDER}
+
+
+def _fragment_lines(rows: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    lines: list[list[tuple[str, str]]] = [[]]
+    for style, text in rows:
+        for i, part in enumerate(text.split("\n")):
+            if i:
+                lines.append([])
+            if part:
+                lines[-1].append((style, part))
+    return lines
+
+
+def test_picker_rows_show_each_status_in_one_aligned_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import _picker_rows
+
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    rows = _picker_rows(_ORDER, statuses, cursor=0, selected={0})
+
+    text = "".join(t for _style, t in rows).splitlines()
+    assert text == [
+        "Which providers do you want to enable?",
+        "",
+        "> [x] claude      signed in",
+        "  [ ] anthropic   ANTHROPIC_API_KEY not set",
+        "  [ ] openai      OPENAI_API_KEY not set",
+        "  [ ] codex       CLI not found",
+        "",
+        _PICKER_HINT,
+    ]
+    labels = ["signed in", "ANTHROPIC_API_KEY not set", "OPENAI_API_KEY not set",
+              "CLI not found"]
+    assert len({line.index(label) for line, label in zip(text[2:6], labels, strict=True)}) == 1
+
+
+def test_picker_label_is_dim_except_on_the_cursor_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import _picker_rows
+
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    rows = _picker_rows(_ORDER, statuses, cursor=1, selected={0})
+
+    options = _fragment_lines(rows)[2:6]
+    for i, (line, name) in enumerate(zip(options, _ORDER, strict=True)):
+        label = statuses[name].label
+        if i == 1:
+            assert {style for style, _t in line} == {"ansiyellow bold"}
+            assert "".join(t for _s, t in line).endswith(label)
+        else:
+            assert ("ansibrightblack", label) in line
+            assert line[0][0] == ""
+
+
+def test_provider_picker_erases_itself_on_confirm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import prompt_toolkit as pt
+
+    from imp.cli.init import _interactive_provider_picker
+
+    real_application = pt.Application
+    captured: dict[str, object] = {}
+
+    def spy(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return real_application(*args, **kwargs)
+
+    monkeypatch.setattr(pt, "Application", spy)
+    statuses = _mockup_statuses(monkeypatch, tmp_path)
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")             # confirm the pre-selected claude
+        picked = _interactive_provider_picker(_ORDER, statuses)
+
+    assert picked == ["claude"]
+    assert captured.get("erase_when_done") is True
+
+
+def _capture_default_picker(
+    monkeypatch: pytest.MonkeyPatch, seen: dict[str, object], pick: list[str],
+) -> None:
+    def _picker(available: list[str], statuses: dict[str, ProviderStatus]) -> list[str]:
+        seen["available"] = list(available)
+        seen["labels"] = {n: s.label for n, s in statuses.items()}
+        return pick
+
+    monkeypatch.setattr("imp.cli.init._interactive_provider_picker", _picker)
+
+
+def test_default_picker_gets_statuses_from_the_effective_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    seen: dict[str, object] = {}
+    _capture_default_picker(monkeypatch, seen, ["anthropic"])
+
+    run_init(
+        project_root=tmp_path, settings_root=tmp_path,
+        input_fn=_inputs(), output_fn=lambda _m: None,
+    )
+
+    assert seen["available"] == _ORDER
+    assert seen["labels"] == {
+        "claude": "signed in",
+        "anthropic": "MY_KEY not set",
+        "openai": "OPENAI_API_KEY set",
+        "codex": "signed in",
+    }
+
+
+def test_picker_falls_back_to_the_floor_but_the_repaired_summary_keeps_provider_envs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # providers: [] fails to load until repaired; the picker falls back to the floor.
+    _plain(monkeypatch)
+    _write_machine_config("providers: []\nprovider_envs: {anthropic: {env: MY_KEY}}\n")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    seen: dict[str, object] = {}
+    _capture_default_picker(monkeypatch, seen, ["anthropic"])
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, input_fn=_inputs(), output_fn=msgs.append)
+
+    labels = seen["labels"]
+    assert isinstance(labels, dict)
+    assert labels["anthropic"] == "ANTHROPIC_API_KEY set"
+    enabled = msgs.index("Enabled: anthropic")
+    assert msgs[enabled + 1] == "  anthropic — MY_KEY not set"
 
 
 def test_read_user_config_refuses_unparseable_yaml(tmp_path: Path) -> None:
@@ -1381,17 +1589,16 @@ def test_cmd_init_hands_run_init_the_imp_config_settings_root(
     assert seen["settings_root"] == (tmp_path.resolve() if initialized else None)
 
 
-@pytest.mark.parametrize(("key", "anthropic_line"), [
-    (None, "  anthropic — set ANTHROPIC_API_KEY"),
-    ("sk-test", "  anthropic — ready"),
+@pytest.mark.parametrize(("key", "expected"), [
+    (None, ["  claude — not signed in · run `claude login`",
+            "  anthropic — ANTHROPIC_API_KEY not set"]),
+    ("sk-test", []),
 ])
-def test_picker_confirmation_hints_every_enabled_provider(
+def test_init_summary_lists_only_providers_that_need_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    key: str | None, anthropic_line: str,
+    key: str | None, expected: list[str],
 ) -> None:
-    """Every enabled provider gets a line: `ready`, or its floor auth hint."""
-    monkeypatch.delenv("FORCE_COLOR", raising=False)
-    monkeypatch.setenv("NO_COLOR", "1")
+    _plain(monkeypatch)
     if key is None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     else:
@@ -1405,7 +1612,9 @@ def test_picker_confirmation_hints_every_enabled_provider(
     )
 
     enabled = msgs.index("Enabled: claude, anthropic")
-    assert msgs[enabled + 1:enabled + 3] == ["  claude — ready", anthropic_line]
+    assert msgs[enabled + 1:enabled + 1 + len(expected)] == expected
+    assert [m for m in msgs if m.startswith(("  claude — ", "  anthropic — "))] == expected
+    assert not any(m.endswith(" — ready") for m in msgs)
     assert not any("set this env var" in m for m in msgs)
 
 
@@ -1422,7 +1631,7 @@ def _write_machine_config(text: str) -> None:
     cfg.write_text(text)
 
 
-def test_fresh_init_reports_claude_ready_without_a_login_hint(
+def test_fresh_init_prints_no_line_for_a_signed_in_claude(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _plain(monkeypatch)
@@ -1434,33 +1643,229 @@ def test_fresh_init_reports_claude_ready_without_a_login_hint(
         detect_theme_fn=lambda: "ansi",
     )
 
-    enabled = msgs.index("Enabled: claude")
-    assert msgs[enabled + 1] == "  claude — ready"
+    assert "Enabled: claude" in msgs
+    assert not any(m.startswith("  claude — ") for m in msgs)
     assert not any("claude login" in m for m in msgs)
+
+
+def test_init_summary_names_the_fix_for_each_not_ready_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("not-ready"),
+                  on_path=("claude",), keys=())
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude", "codex"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+
+    enabled = msgs.index("Enabled: claude, codex")
+    assert msgs[enabled + 1:enabled + 3] == [
+        "  claude — not signed in · run `claude login`",
+        "  codex — CLI not found · install it, then run `codex login`",
+    ]
+    assert sum(m.startswith(("  claude — ", "  codex — ")) for m in msgs) == 2
+
+
+def test_a_provider_outside_the_floor_is_enabled_without_a_status_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("no-cli"), on_path=())
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, input_fn=_inputs(), output_fn=msgs.append,
+        providers_override=["housecat", "codex"],
+    )
+
+    enabled = msgs.index("Enabled: housecat, codex")
+    assert msgs[enabled + 1] == "  codex — CLI not found · install it, then run `codex login`"
+    assert not any(m.startswith("  housecat") for m in msgs)
+
+
+_CLAUDE_CODEX_NOT_READY = [
+    "  claude — not signed in · run `claude login`",
+    "  codex — CLI not found · install it, then run `codex login`",
+]
+
+
+@pytest.mark.parametrize("source", ["picker", "flag", "machine config"])
+def test_one_blank_line_then_the_summary_whatever_chose_the_providers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, source: str,
+) -> None:
+    _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("summary"),
+                  on_path=("claude",), keys=())
+    if source == "machine config":
+        _write_machine_config("providers: [claude, codex]\n")
+    msgs: list[str] = []
+
+    def _no_picker(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run")
+
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude", "codex") if source == "picker" else _no_picker,
+        providers_override=["claude", "codex"] if source == "flag" else None,
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    enabled = msgs.index("Enabled: claude, codex")
+    header = msgs[:enabled - 1]
+    assert header and header[0].startswith("Setting up imp in "), msgs
+    assert "" not in header, msgs
+    assert msgs[enabled - 1] == "", msgs
+    assert msgs[enabled + 1:enabled + 3] == _CLAUDE_CODEX_NOT_READY
+    assert not any(m.endswith(" — ready") for m in msgs)
+
+
+def test_the_picker_opens_one_blank_line_below_the_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plain(monkeypatch)
+    msgs: list[str] = []
+    before_picker: list[str] = []
+
+    def _pick(_available: list[str]) -> list[str]:
+        before_picker.extend(msgs)
+        return ["claude"]
+
+    run_init(project_root=tmp_path, picker_fn=_pick, input_fn=_inputs(),
+             output_fn=msgs.append)
+
+    assert before_picker[0].startswith("Setting up imp in ")
+    assert before_picker[-1] == ""
+    assert "" not in before_picker[:-1]
+
+
+_NOTE = "(your machine: providers, theme)"
+
+
+def _mark_initialized(root: Path) -> None:
+    (root / "imp").mkdir()
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+
+
+@pytest.mark.parametrize("already_initialized", [False, True])
+@pytest.mark.parametrize("under_home", [True, False])
+def test_init_shows_paths_under_home_with_a_tilde(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+    under_home: bool, already_initialized: bool,
+) -> None:
+    _plain(monkeypatch)
+    home = tmp_path.parent if under_home else tmp_path_factory.mktemp("elsewhere")
+    monkeypatch.setenv("HOME", str(home))
+    if already_initialized:
+        _mark_initialized(tmp_path)
+    root = f"~/{tmp_path.name}" if under_home else str(tmp_path)
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    # The autouse fixture puts IMP_HOME at tmp_path/imphome.
+    assert msgs[0] == f"Setting up imp in {root}", msgs
+    assert f"  {root}/imphome/config.yaml  {_NOTE}" in msgs, msgs
+
+
+@pytest.mark.parametrize("already_initialized", [False, True])
+def test_a_machine_path_too_wide_for_its_note_puts_the_note_on_the_next_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, already_initialized: bool,
+) -> None:
+    from imp.cli import palette as pal
+
+    _plain(monkeypatch)
+    monkeypatch.setenv("COLUMNS", "100")
+    home = tmp_path / "h"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("IMP_HOME", str(home / ("a" * 64)))
+    if already_initialized:
+        _mark_initialized(tmp_path)
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    path_line = f"  ~/{'a' * 64}/config.yaml"
+    assert len(path_line) <= 100 < len(f"{path_line}  {_NOTE}")
+    at = msgs.index(path_line)
+    assert msgs[at + 1] == f"    {_NOTE}", msgs
+    assert all(pal.display_width(m) <= 100 for m in msgs[at:at + 2])
+
+
+def test_a_header_too_wide_for_the_terminal_puts_the_path_on_its_own_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from imp.cli import palette as pal
+
+    _plain(monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("elsewhere")))
+    cols = len(f"Setting up imp in {tmp_path}") - 1
+    monkeypatch.setenv("COLUMNS", str(cols))
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    assert msgs[:3] == ["Setting up imp in", f"  {tmp_path}", ""], msgs
+    assert all(pal.display_width(m) <= cols for m in msgs[:2])
+
+
+def test_the_header_fit_ignores_color_escapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("elsewhere")))
+    monkeypatch.setenv("COLUMNS", str(len(f"Setting up imp in {tmp_path}")))
+    msgs: list[str] = []
+
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=msgs.append)
+
+    assert msgs[0] == f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}", msgs
 
 
 _MY_CLAUDE = "provider_envs: {claude: {env: MY_CLAUDE_KEY}}\n"
 _MY_KEY = "provider_envs: {anthropic: {env: MY_KEY}}\n"
 
 
-# One case per builtin row of the spec's decisions table (non-builtin names get
-# no init line; see test_readiness_lines_mark_ready_or_hint_and_skip_unknown_names).
-@pytest.mark.parametrize(("provider", "extra", "env", "expected"), [
-    ("claude", "", {}, "  claude — ready"),
-    ("codex", "", {}, "  codex — ready"),
-    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": "k"}, "  claude — ready"),
-    ("claude", _MY_CLAUDE, {"MY_CLAUDE_KEY": None}, "  claude — run `claude login`"),
-    ("anthropic", "", {"ANTHROPIC_API_KEY": "k"}, "  anthropic — ready"),
-    ("anthropic", "", {"ANTHROPIC_API_KEY": None}, "  anthropic — set ANTHROPIC_API_KEY"),
-    ("openai", "", {"OPENAI_API_KEY": None}, "  openai — set OPENAI_API_KEY"),
-    ("anthropic", _MY_KEY, {"MY_KEY": "k", "ANTHROPIC_API_KEY": None},
-     "  anthropic — ready"),
-    ("anthropic", _MY_KEY, {"MY_KEY": None, "ANTHROPIC_API_KEY": "k"},
-     "  anthropic — set ANTHROPIC_API_KEY"),
+_CLAUDE_LOGIN = "  claude — not signed in · run `claude login`"
+_CODEX_INSTALL = "  codex — CLI not found · install it, then run `codex login`"
+
+
+# One case per readiness state init and `imp config` share; None means ready (no init line).
+@pytest.mark.parametrize(("provider", "extra", "on_path", "env", "expected"), [
+    ("claude", "", ("claude",), {}, None),
+    ("codex", "", ("codex",), {}, None),
+    ("claude", "", ("claude",), {"ANTHROPIC_API_KEY": None}, _CLAUDE_LOGIN),
+    ("codex", "", (), {}, _CODEX_INSTALL),
+    ("claude", _MY_CLAUDE, (), {"MY_CLAUDE_KEY": "k"}, None),
+    ("claude", _MY_CLAUDE, (), {"MY_CLAUDE_KEY": None}, "  claude — MY_CLAUDE_KEY not set"),
+    ("anthropic", "", (), {"ANTHROPIC_API_KEY": "k"}, None),
+    ("anthropic", "", (), {"ANTHROPIC_API_KEY": None},
+     "  anthropic — ANTHROPIC_API_KEY not set"),
+    ("openai", "", (), {"OPENAI_API_KEY": None}, "  openai — OPENAI_API_KEY not set"),
+    ("anthropic", _MY_KEY, (), {"MY_KEY": "k", "ANTHROPIC_API_KEY": None}, None),
+    ("anthropic", _MY_KEY, (), {"MY_KEY": None, "ANTHROPIC_API_KEY": "k"},
+     "  anthropic — MY_KEY not set"),
 ])
 def test_init_readiness_verdict_matches_imp_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    provider: str, extra: str, env: dict[str, str | None], expected: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    provider: str, extra: str, on_path: tuple[str, ...],
+    env: dict[str, str | None], expected: str | None,
 ) -> None:
     import io
 
@@ -1468,6 +1873,7 @@ def test_init_readiness_verdict_matches_imp_config(
     from imp.providers.effective import load_effective_config
 
     _plain(monkeypatch)
+    pin_readiness(monkeypatch, tmp_path_factory.mktemp("parity"), on_path=on_path)
     for var, val in env.items():
         if val is None:
             monkeypatch.delenv(var, raising=False)
@@ -1478,8 +1884,8 @@ def test_init_readiness_verdict_matches_imp_config(
     out = io.StringIO()
     render_config(load_effective_config(), out, state_dir=None, color=False)
     lines = out.getvalue().splitlines()
-    key_rows = lines[lines.index("provider keys (local check):") + 1:]
-    mark = next(r.split()[0] for r in key_rows if r.split()[1:2] == [provider])
+    rows = lines[lines.index("providers (local check):") + 1:]
+    mark, _, label = next(r.split(maxsplit=2) for r in rows if r.split()[1:2] == [provider])
 
     msgs: list[str] = []
     run_init(
@@ -1487,9 +1893,12 @@ def test_init_readiness_verdict_matches_imp_config(
         input_fn=_inputs(), output_fn=msgs.append,
     )
 
-    enabled = msgs.index(f"Enabled: {provider}")
-    assert msgs[enabled + 1] == expected
-    assert (expected == f"  {provider} — ready") == (mark == "✓")
+    status_lines = [m for m in msgs if m.startswith(f"  {provider} — ")]
+    assert status_lines == ([] if expected is None else [expected])
+    assert (expected is None) == (mark == "✓")
+    if expected is not None:
+        assert msgs[msgs.index(f"Enabled: {provider}") + 1] == expected
+        assert expected.startswith(f"  {provider} — {label}")
 
 
 # The bad value sits beside a valid providers: list so init reuses it; without one,
@@ -1513,10 +1922,12 @@ def test_hint_step_degrades_to_floor_key_names_on_a_bad_config(
     )
 
     enabled = msgs.index("Enabled: claude, anthropic")
-    assert msgs[enabled + 1:enabled + 3] == [
-        "  claude — ready",
-        "  anthropic — ready" if key_set else "  anthropic — set ANTHROPIC_API_KEY",
+    expected = [] if key_set else [
+        "  claude — not signed in · run `claude login`",
+        "  anthropic — ANTHROPIC_API_KEY not set",
     ]
+    assert msgs[enabled + 1:enabled + 1 + len(expected)] == expected
+    assert [m for m in msgs if m.startswith(("  claude — ", "  anthropic — "))] == expected
     assert "Committed imp/config.yaml." in msgs
 
 
@@ -1538,7 +1949,7 @@ def test_reinit_hints_honor_the_project_layer_provider_envs(
     )
 
     enabled = msgs.index("Enabled: anthropic")
-    assert msgs[enabled + 1] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert msgs[enabled + 1] == "  anthropic — MY_KEY not set"
     assert "Project already initialized (imp/config.yaml is committed)." in msgs
 
 
@@ -1589,7 +2000,7 @@ def test_cmd_init_reports_an_unparseable_machine_config_interactively(
     # refusal must land before it, and an unpinned red run would try to draw it.
     monkeypatch.setattr(
         "imp.cli.init._interactive_provider_picker",
-        lambda _available: (_ for _ in ()).throw(
+        lambda *_args: (_ for _ in ()).throw(
             AssertionError("a config that will not parse must not reach the picker")))
 
     rc = m._cmd_init(_init_args(non_interactive=False))
@@ -1752,7 +2163,7 @@ def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
     assert (home / "config.yaml").read_text() == before   # never silently rewritten
     assert "Your machine config is already set up — nothing to do." in msgs
     path_line = msgs.index(
-        f"  {home / 'config.yaml'}  (your machine: providers, theme)")
+        f"  {display_path(home / 'config.yaml')}  (your machine: providers, theme)")
     assert msgs[path_line + 1] == (
         "Change providers later: imp config set providers <name>,<name>")
 

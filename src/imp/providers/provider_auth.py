@@ -17,6 +17,7 @@ import filelock
 from imp.engine.env import ensure_provider_auth_dir
 from imp.providers import claude_token_refresh, codex_token_refresh
 from imp.providers.codex_config import detect_auth_mode, redacted_auth_json
+from imp.providers.paths import claude_canonical_dir, codex_canonical_dir
 
 _STAGE_LOCK_TIMEOUT = 30.0   # the refresh modules' _LOCK_TIMEOUT
 _UNSET_SLOW_TIMEOUT_S = 300   # run-verify.sh's fallback for an unset test_cmd_slow_timeout
@@ -89,10 +90,10 @@ def _projection(env: Mapping[str, str]) -> dict[str, bytes | None]:
     claude_json = (Path(config_override) if config_override else Path.home()) / ".claude.json"
     return {
         "claude/.credentials.json": _claude_credentials(
-            claude_token_refresh.canonical_dir(env) / ".credentials.json", env),
+            claude_canonical_dir(env) / ".credentials.json", env),
         "claude/.claude.json": _read_optional(claude_json),
         "codex/auth.json": _codex_auth(
-            codex_token_refresh.canonical_dir(env) / "auth.json", env),
+            codex_canonical_dir(env) / "auth.json", env),
     }
 
 

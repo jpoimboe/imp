@@ -56,7 +56,7 @@ def test_setting_pythonpath_fills_the_placeholder_not_the_teaching_line(
 
     assert result.outcome is SetOutcome.UNCOMMENTED
     assert "\npythonpath: [src]\n" in result.text
-    assert ("# pythonpath: worktree-relative import roots prepended to the "
+    assert ("# pythonpath: worktree-relative Python import paths prepended to the "
             "gate/agent\n") in result.text
     assert "# pythonpath: [src]" not in result.text
     assert len(result.text.splitlines()) == len(before.splitlines())

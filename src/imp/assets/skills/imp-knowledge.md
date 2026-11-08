@@ -49,8 +49,8 @@ lands stays maintainable.
   Anthropic APIs, per-role and multi-vendor in one run; imp uses its own tools (not
   the vendor CLIs) for consistent cross-provider behavior (production-tested with
   Claude Code so far). Setup (`imp init`) detects the default workflow, integration
-  branch, fast test command, `worktree_setup`, and import root and confirms them on
-  one screen, needing no provider; `--use-defaults` (with optional
+  branch, fast test command, `worktree_setup`, and Python import path and confirms
+  them on one screen, needing no provider; `--use-defaults` (with optional
   `--workflow`/`--base`/`--pythonpath`) runs it non-interactively, no-TTY
   invocations take that path automatically, and `--providers a,b` skips the
   picker in either mode. One quest can override that order: `--provider NAME` on

@@ -15,11 +15,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 import yaml
 from ruamel.yaml.error import YAMLError
@@ -48,7 +48,11 @@ from imp.cli.verify_detect import (
 from imp.engine import worktree
 from imp.engine._yaml import config_yaml_error, load_config_yaml
 from imp.engine.sandbox import sandbox_available
+from imp.paths import display_path
 from imp.remote.drivers import REGISTRY
+
+if TYPE_CHECKING:
+    from imp.providers import ProviderStatus
 
 _DEFAULT_WORKFLOW = "default"
 
@@ -407,7 +411,7 @@ _WORKTREE_SETUP_COMMENT = (
 )
 
 _PYTHONPATH_BLOCK_COMMENT = (
-    "\n# Worktree-relative import roots prepended to gate/agent\n"
+    "\n# Worktree-relative Python import paths prepended to gate/agent\n"
     "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
     "# to the worktree under test, not the stale main checkout.\n"
 )
@@ -423,7 +427,7 @@ def _memory_pointer() -> str:
 
 def _pythonpath_hint() -> str:
     return (
-        "\n# pythonpath: worktree-relative import roots prepended to the gate/agent\n"
+        "\n# pythonpath: worktree-relative Python import paths prepended to the gate/agent\n"
         "# subprocess PYTHONPATH. Set this when this project is installed editable\n"
         "# (pip install -e) and imported by package name — without it imp's test gate\n"
         "# runs the STALE main-checkout code instead of the worktree under test.\n"
@@ -462,16 +466,22 @@ def _initial_selection(available: list[str]) -> set[int]:
 
 
 def _picker_rows(
-    available: list[str], cursor: int, selected: set[int],
+    available: list[str], statuses: Mapping[str, ProviderStatus],
+    cursor: int, selected: set[int],
 ) -> list[tuple[str, str]]:
+    width = max(map(len, available))
     out: list[tuple[str, str]] = [
         ("bold", "Which providers do you want to enable?\n\n"),
     ]
     for i, name in enumerate(available):
         arrow = "> " if i == cursor else "  "
         box = "[x] " if i in selected else "[ ] "
-        style = "ansiyellow bold" if i == cursor else ""
-        out.append((style, f"{arrow}{box}{name}\n"))
+        head = f"{arrow}{box}{name:<{width}}   "
+        label = statuses[name].label
+        if i == cursor:
+            out.append(("ansiyellow bold", f"{head}{label}\n"))
+        else:
+            out += [("", head), ("ansibrightblack", label), ("", "\n")]
     out.append((
         "ansibrightblack",
         "\n↑↓ move · space toggle · enter confirm · esc cancel",
@@ -479,15 +489,19 @@ def _picker_rows(
     return out
 
 
-def _interactive_provider_picker(available: list[str]) -> list[str]:
-    """Inline cursor picker rendered with prompt_toolkit.
+def _interactive_provider_picker(
+    available: list[str], statuses: Mapping[str, ProviderStatus],
+) -> list[str]:
+    """Inline cursor picker rendered with prompt_toolkit, erased on exit so init's
+    summary is the scrollback record.
 
-    Renders in place (not a full-screen dialog):
+    Renders in place (not a full-screen dialog), each row with its sign-in status:
         Which providers do you want to enable?
 
-        > [ ] claude
-          [ ] anthropic
-          [ ] openai
+        > [x] claude      signed in
+          [ ] anthropic   ANTHROPIC_API_KEY not set
+          [ ] openai      OPENAI_API_KEY not set
+          [ ] codex       CLI not found
 
         ↑↓ move · space toggle · enter confirm · esc cancel
 
@@ -497,7 +511,8 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     Style names match `imp log`'s palette via prompt_toolkit's ANSI aliases:
     bold for the header, ansiyellow for the active row — the hue `pal.caret()`
     emits under the `ansi` theme, which is still the active one this early in
-    init — and ansibrightblack (= our `gray`/`dim`) for the help line.
+    init — and ansibrightblack (= our `gray`/`dim`) for the status labels and
+    the help line.
     """
     from prompt_toolkit import Application
     from prompt_toolkit.formatted_text import AnyFormattedText
@@ -511,7 +526,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     selected: set[int] = _initial_selection(available)  # pre-select the recommended default
 
     def _render() -> list[tuple[str, str]]:
-        return _picker_rows(available, cursor, selected)
+        return _picker_rows(available, statuses, cursor, selected)
 
     kb = KeyBindings()
 
@@ -553,6 +568,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
         key_bindings=kb,
         full_screen=False,
         mouse_support=False,
+        erase_when_done=True,
     )
     return list(app.run())
 
@@ -589,7 +605,7 @@ _ROW_LABELS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "branch",
     ScreenRow.TESTS: "tests",
     ScreenRow.WORKTREE_SETUP: "worktree setup",
-    ScreenRow.IMPORT_ROOT: "import root",
+    ScreenRow.IMPORT_ROOT: "Python import path",
 }
 
 
@@ -702,7 +718,7 @@ _EDIT_PROMPTS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "Integration branch: ",
     ScreenRow.TESTS: "Fast test command: ",
     ScreenRow.WORKTREE_SETUP: "Worktree setup command: ",
-    ScreenRow.IMPORT_ROOT: "Import roots (comma-separated): ",
+    ScreenRow.IMPORT_ROOT: "Python import paths (comma-separated): ",
 }
 
 
@@ -924,6 +940,25 @@ def _confirm_init_settings(
         pythonpath=state.pythonpath)
 
 
+_MACHINE_NOTE = "(your machine: providers, theme)"
+
+
+def _fits(line: str) -> bool:
+    return pal.display_width(line) <= shutil.get_terminal_size((80, 24)).columns
+
+
+def _header_lines(project_root: Path, *, color_on: bool) -> list[str]:
+    path = pal.ansi(display_path(project_root), "wordmark", enabled=color_on)
+    line = f"Setting up imp in {path}"
+    return [line] if _fits(line) else ["Setting up imp in", f"  {path}"]
+
+
+def _machine_path_lines(user_path: Path) -> list[str]:
+    path = display_path(user_path)
+    line = f"  {path}  {_MACHINE_NOTE}"
+    return [line] if _fits(line) else [f"  {path}", f"    {_MACHINE_NOTE}"]
+
+
 def run_init(
     project_root: Path,
     *,
@@ -935,7 +970,7 @@ def run_init(
     settings_root: Path | None = None,
 ) -> None:
     from imp.engine.errors import LoadError
-    from imp.providers import readiness_lines
+    from imp.providers import provider_readiness, readiness_lines
     from imp.providers.effective import floor_config, load_effective_config
     from imp.providers.paths import global_config_path
 
@@ -944,8 +979,9 @@ def run_init(
     project_file = imp_dir / "config.yaml"
     already_initialized = project_file.is_file()
 
-    output_fn("Setting up imp in "
-              + pal.ansi(str(project_root), "wordmark", enabled=color_on))
+    for line in _header_lines(project_root, color_on=color_on):
+        output_fn(line)
+    output_fn("")
 
     user_path = global_config_path()
 
@@ -955,8 +991,17 @@ def run_init(
     wrote_user_config = existing_cfg is None
 
     def _pick_providers() -> list[str]:
-        pick = picker_fn or _interactive_provider_picker
-        result = pick(list(_PROVIDER_DISPLAY_ORDER))
+        available = list(_PROVIDER_DISPLAY_ORDER)
+        if picker_fn is not None:
+            result = picker_fn(available)
+        else:
+            # Its own load: an invalid providers: list raises until repair fixes it.
+            try:
+                pick_cfg = load_effective_config(control_root=settings_root).config
+            except LoadError:
+                pick_cfg = floor_config()
+            result = _interactive_provider_picker(
+                available, {n: provider_readiness(n, pick_cfg) for n in available})
         if not result:
             raise ValueError("at least one provider must be selected")
         return result
@@ -1005,7 +1050,8 @@ def run_init(
                 f"Set providers in your machine config: {', '.join(providers)}.")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
-        output_fn(f"  {user_path}  (your machine: providers, theme)")
+        for line in _machine_path_lines(user_path):
+            output_fn(line)
         if reused:
             output_fn(
                 "Change providers later: imp config set providers <name>,<name>")
@@ -1084,8 +1130,8 @@ def run_init(
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
     output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))
-    output_fn(pal.ansi(
-        f"  {user_path}  (your machine: providers, theme)", "dim", enabled=color_on))
+    for line in _machine_path_lines(user_path):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
     if committed:
         output_fn(pal.ansi("Committed imp/config.yaml.", "dim", enabled=color_on))
     output_fn("")
@@ -1173,7 +1219,7 @@ def run_init_noninteractive(
         if not validated:
             output_fn(
                 f"--pythonpath: no such directory in this repo: "
-                f"{', '.join(pythonpath)} — leaving import roots unset.")
+                f"{', '.join(pythonpath)} — leaving the Python import path unset.")
             roots = None
         else:
             roots = validated

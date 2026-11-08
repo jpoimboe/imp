@@ -30,9 +30,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
     worktree, before the first step, for toolchains that keep dependencies in a
     gitignored per-tree directory (`.venv`, `node_modules`, `vendor/bundle`) that
     `git worktree` does not materialize.
-  - `pythonpath` — worktree-relative import roots prepended to the gate/agent
-    subprocess PYTHONPATH, so an editable-installed package resolves to the
-    worktree under test instead of the stale main checkout.
+  - `pythonpath` — worktree-relative Python import paths prepended to the
+    gate/agent subprocess PYTHONPATH, so an editable-installed package resolves
+    to the worktree under test instead of the stale main checkout.
 
   Those four settings share one three-state shape, because none of them is
   answerable until the repo has a stack: **unset** means never decided, and imp
