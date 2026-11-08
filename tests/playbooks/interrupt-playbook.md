@@ -87,9 +87,10 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 
 > **Leave-banner headline — state-first.** The `_pause_lines` leave head leads with the
 > **state**: `paused` (gold) followed by a dim ` · <Display>` qualifier naming the trigger —
-> `paused · Ctrl-D` for the keystroke leave, `paused · /pause` for a typed `/pause` at a
-> built quest's prompt, and `paused · SIGTERM` / `paused · SIGHUP` / `paused · SIGQUIT` for
-> signal leaves. The internal reason stays lowercase; only the display form differs.
+> `paused · Ctrl-D` for the keystroke leave, `paused · Ctrl-C` for a Ctrl-C leave,
+> `paused · /pause` for a typed `/pause` at a built quest's prompt, and
+> `paused · SIGTERM` / `paused · SIGHUP` / `paused · SIGQUIT` for signal leaves. The
+> internal reason stays lowercase; only the display form differs.
 > No leave echoes a caret line of its own; a typed `/pause` keeps its ordinary `> /pause` echo.
 > On a terminal, the closing block has exactly one blank row above it.
 

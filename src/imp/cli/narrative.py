@@ -16,7 +16,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -48,9 +48,15 @@ _TURN_END_STOP_REASONS: frozenset[str] = frozenset(
 _OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "incomplete", "failed", "cancelled"})
 
-# Human interrupt/leave reasons: like the silent yield, they append no PauseNode.
-_HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
-    {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit", "pause"})
+# Manual-stop reason -> display label. Keys: like the silent yield, they append no PauseNode.
+MANUAL_STOP_LABELS: Mapping[str, str] = {
+    "pause": "/pause",
+    "ctrl-d": "Ctrl-D",
+    "ctrl-c": "Ctrl-C",
+    "sigterm": "SIGTERM",
+    "sighup": "SIGHUP",
+    "sigquit": "SIGQUIT",
+}
 
 # Pauses that get no resume marker: not an absence, or the key was not recorded.
 _NO_MARKER_REASONS: frozenset[str] = SIDE_EFFECT_REASONS | {"interrupt", "awaiting_turn"}
@@ -1832,7 +1838,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         # PauseNode. (Shared render path — covers both imp log and the live view.)
         if reason == "awaiting_user":
             return
-        if reason in _HUMAN_INTERRUPT_REASONS:
+        if reason in MANUAL_STOP_LABELS:
             # No PauseNode; unlike awaiting_user, keep the flag so the digest flushes.
             self._pause_outcome_shown = True
             return

@@ -104,6 +104,21 @@ def test_pause_lines_signal_leave_head_plain_is_paused_dot_display(
     ]
 
 
+def test_pause_lines_ctrl_c_leave_head_is_paused_dot_ctrl_c() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.main import _pause_lines, _PauseInfo
+    plain = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo("ctrl-c", None), color=False)
+    assert plain == [
+        "paused · Ctrl-C",
+        "dufa26 · T",
+        "resume: imp resume dufa26",
+    ]
+    colored = _pause_lines("dufa26", "dufa26", title="T",
+                           info=_PauseInfo("ctrl-c", None), color=True)
+    assert colored[0] == pal.ansi("paused", "wordmark") + pal.ansi(" · Ctrl-C", "dim")
+
+
 def test_pause_lines_non_leave_head_stays_bare_gold_reason() -> None:
     # Guard: a non-leave interrupt head is unchanged — a bare gold reason, not the
     # `paused · <Display>` leave head.
@@ -336,17 +351,25 @@ def test_pause_lines_max_loops_head_is_gold_paused_dim_qualifier() -> None:
     assert lines[2] == "resume: imp resume dufa26"
 
 
-def test_pause_qualifier_holds_exactly_its_six_entries() -> None:
+def test_pause_qualifier_holds_exactly_its_seven_entries() -> None:
     from imp.cli.main import _PAUSE_QUALIFIER, _PauseInfo
     assert _PAUSE_QUALIFIER == {
+        "pause": "/pause",
         "ctrl-d": "Ctrl-D",
+        "ctrl-c": "Ctrl-C",
         "sigterm": "SIGTERM",
         "sighup": "SIGHUP",
         "sigquit": "SIGQUIT",
-        "pause": "/pause",
         "max_loops": "loop limit",
     }
     for trigger, display in _PAUSE_QUALIFIER.items():
         lines = _pause_lines("dufa26", "dufa26", title="T",
                              info=_PauseInfo(trigger, None), color=False)
         assert lines[0] == f"paused · {display}"
+
+
+def test_pause_qualifier_derives_from_the_narrative_manual_stop_labels() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.main import _PAUSE_QUALIFIER
+    assert _PAUSE_QUALIFIER == {**nv.MANUAL_STOP_LABELS, "max_loops": "loop limit"}
+    assert not hasattr(nv, "_HUMAN_INTERRUPT_REASONS")

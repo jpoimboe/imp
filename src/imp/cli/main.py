@@ -37,6 +37,7 @@ from imp.cli.help_format import (
     ImpRawHelpFormatter,
     ImpTopLevelHelpFormatter,
 )
+from imp.cli.narrative import MANUAL_STOP_LABELS
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, OPENING_HINTS, Prompt
 from imp.paths import project_state_dir
@@ -280,14 +281,7 @@ _ERROR_LABELS: dict[str, str] = {
 
 # Pause trigger -> its banner display form. Internal reason strings stay
 # lowercase; only the banner display is transformed.
-_PAUSE_QUALIFIER: dict[str, str] = {
-    "ctrl-d": "Ctrl-D",
-    "sigterm": "SIGTERM",
-    "sighup": "SIGHUP",
-    "sigquit": "SIGQUIT",
-    "pause": "/pause",
-    "max_loops": "loop limit",
-}
+_PAUSE_QUALIFIER: dict[str, str] = {**MANUAL_STOP_LABELS, "max_loops": "loop limit"}
 
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
