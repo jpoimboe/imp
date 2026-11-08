@@ -56,3 +56,12 @@ def test_no_removed_legend_or_old_footnote_survives_in_src() -> None:
     hits = [(str(p.relative_to(_ROOT)), text) for p in sorted(_SRC.rglob("*.py"))
             for s in _strings(p) for text in _REMOVED if text in s]
     assert hits == []
+
+
+def test_the_old_footnote_is_gone_from_the_docs() -> None:
+    """AC 10(d), the prose half: every markdown file under docs/ and src/."""
+    pages = sorted([*(_ROOT / "docs").rglob("*.md"), *_SRC.rglob("*.md")])
+    assert pages
+    hits = [str(p.relative_to(_ROOT)) for p in pages
+            if _OLD_FOOTNOTE in p.read_text(encoding="utf-8")]
+    assert hits == []

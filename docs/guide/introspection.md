@@ -85,11 +85,12 @@ finished); do not invent quests that the commands did not list.
 `imp show <id>` — the overview detail card: id, title, status, timing,
 dependencies, opening intent, the summary inlined, and the run ledger. A quest
 with recorded steps carries a `run:` line — work time, tokens in and out, and
-the charge (its share of the weekly quota window, or the dollar cost) — then a
-`workflow:` line naming the workflow it ran under, and last on the card a
-`ledger:` section holding the per-step table, minus steps that finished
-instantly with nothing to report. A quest that has not run a step yet shows
-none of the three, and neither does one still in the backlog.
+the charge (its share of its week's quota, or the dollar cost when no gauge
+readings exist for that week) — then a `workflow:` line naming the workflow it
+ran under, and last on the card a `ledger:` section holding the per-step table,
+minus steps that finished instantly with nothing to report. A quest that has
+not run a step yet shows none of the three, and neither does one still in the
+backlog.
 A quest that completed with a recorded merge SHA also shows a `merge_commit:`
 line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
 when the quest has none). A quest halted as paused or error shows a
@@ -166,27 +167,32 @@ Rows and phase headings show the workflow's friendly labels (`finalizing spec`
 under `spec phase`), and a step with no label shows its id. `--step` and
 `imp events` take step ids, which a bare `imp events <id>` lists.
 
-On a subscription run that right-most column is `weekly`: the share of the
-account's weekly quota window this quest consumed, attributed to *this* quest
-rather than reported as raw gauge movement. imp divides the window's measured
-movement across every quest that was running at the same time, in proportion to
-the weighted work each one did, so a run that shared the window with a
-concurrent quest is not charged for its neighbour's usage. It is the figure the
-dollar column cannot give you — a subscription run spends no money, and list
-prices are dominated by cache reads, which draw no quota on a Claude
-subscription. A run on an API key keeps the `cost` column unchanged, and so
-does one whose weekly window could not be measured — that second case adds a
-dim legend line naming why.
+On a subscription run that right-most column is `weekly`: the share of its
+week's quota this quest consumed, charged to *this* quest rather than read off
+the gauge. For each week the run touched, imp takes the gauge's highest reading
+that week and divides it across all imp work in the week — every quest's, in
+every project — in proportion to the weighted work each did. A run is charged
+its part of the week however long it paused and whatever ran beside it, and a
+run that crosses a weekly reset is priced at each week's own rate, row by row.
+The figure refines as the week goes on and is final once the week resets. It is
+the figure the dollar column cannot give you — a subscription run spends no
+money, and list prices are dominated by cache reads, which draw no quota on a
+Claude subscription. Before the week's gauge first ticks off zero the total
+reads `<1%`. A run on an API key keeps the `cost` column unchanged, and so does
+a subscription run whose weeks have no gauge readings at all (history recorded
+before imp read the gauge) — that case adds a dim legend line naming why.
 
 Two reaches the figure does not cover:
 
-- **A project pinned outside `~/.imp/projects/`.** Overlapping quests are
-  discovered by walking that tree, so a project whose state directory is
-  hand-pinned with `$IMP_STATE_DIR` is not discoverable, and its concurrent
-  usage is absorbed into this run's share instead of being split off.
-- **The gauge's own resolution.** The provider reports the weekly window in
+- **Work imp cannot see.** The gauge counts every request on the account, but
+  the week's work is found by walking `~/.imp/projects/`. A project whose state
+  directory is hand-pinned with `$IMP_STATE_DIR` is not discoverable, so its
+  usage — like any usage outside imp — is absorbed into this run's share and
+  skews it high.
+- **The gauge's own resolution.** The provider reports the weekly gauge in
   whole points, so the figure carries ±1 point of quantization — which is why a
-  run that did not move the gauge at all reports no figure rather than `0.00%`.
+  week whose gauge has not moved yet prices nothing and reads `<1%` rather than
+  `0.00%`.
 
 ## Reading another quest
 
