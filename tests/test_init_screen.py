@@ -13,6 +13,7 @@ from prompt_toolkit.output import DummyOutput
 
 from imp.assets import bundled_assets_dir
 from imp.cli.init import (
+    _EDIT_HINTS,
     _EDIT_PROMPTS,
     BaseDetection,
     InitScreenState,
@@ -24,6 +25,7 @@ from imp.cli.init import (
     _default_row_prompt,
     _edit_default,
     _interactive_confirm_screen,
+    _row_prompt_message,
     _screen_state_from_detection,
     _workflow_blurb,
 )
@@ -189,6 +191,13 @@ def test_editing_the_branch_marks_the_row_as_user_set(tmp_path: Path) -> None:
     assert _body(state, ScreenRow.BRANCH)[1].endswith("you set this")
 
 
+def test_emptying_the_branch_still_reads_as_user_set(tmp_path: Path) -> None:
+    # An empty branch blocks accept, so it is never a "none needed" answer.
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.BRANCH, "   ")
+    assert state.branch == ""
+    assert state.branch_provenance == "you set this"
+
+
 def test_editing_tests_to_a_command_replaces_the_detected_one(tmp_path: Path) -> None:
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.TESTS, "just check")
     assert state.test_cmd_fast == "just check"
@@ -200,8 +209,9 @@ def test_editing_tests_to_empty_records_needs_none(tmp_path: Path) -> None:
     # False is the user's answer "this project needs none"; None would mean the row
     # was never decided and would have imp raise it again.
     assert state.test_cmd_fast is False
+    assert state.tests_provenance == "you left it empty"
     body = _body(state, ScreenRow.TESTS)[2]
-    assert "(none needed)" in body and body.endswith("you set this")
+    assert "(none needed)" in body and body.endswith("you left it empty")
 
 
 def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path) -> None:
@@ -217,8 +227,17 @@ def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path)
 def test_editing_import_roots_to_empty_records_needs_none(tmp_path: Path) -> None:
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, "  ")
     assert state.pythonpath is False
+    assert state.roots_provenance == "you left it empty"
     body = _body(state, ScreenRow.IMPORT_ROOT)[4]
-    assert "(none needed)" in body and body.endswith("you set this")
+    assert "(none needed)" in body and body.endswith("you left it empty")
+
+
+def test_editing_import_roots_to_only_commas_records_needs_none(tmp_path: Path) -> None:
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, " , ,")
+    assert state.pythonpath is False
+    assert state.roots_provenance == "you left it empty"
+    body = _body(state, ScreenRow.IMPORT_ROOT)[4]
+    assert "(none needed)" in body and body.endswith("you left it empty")
 
 
 def test_editing_import_roots_all_invalid_leaves_undecided_with_note(tmp_path: Path) -> None:
@@ -261,8 +280,55 @@ def test_edit_prompt_labels_are_verbatim() -> None:
     assert ScreenRow.WORKFLOW not in _EDIT_PROMPTS
 
 
-def _never_prompts(message: str, default: str) -> str:
-    raise AssertionError(f"the screen must not prompt here: {message!r}")
+def test_edit_prompt_hints_are_verbatim() -> None:
+    assert _EDIT_HINTS[ScreenRow.BRANCH] == (
+        "The branch each quest forks from and merges back into.")
+    assert _EDIT_HINTS[ScreenRow.TESTS] == (
+        "Lint, typecheck and fast tests, run after each change. Leave empty for none.")
+    assert _EDIT_HINTS[ScreenRow.WORKTREE_SETUP] == (
+        "Installs dependencies in each new worktree, e.g. uv sync. Leave empty for none.")
+    assert _EDIT_HINTS[ScreenRow.IMPORT_ROOT] == (
+        "Put on PYTHONPATH so tests import the worktree's code. Leave empty for none.")
+    assert ScreenRow.WORKFLOW not in _EDIT_HINTS
+
+
+def test_row_prompt_message_is_blank_line_dim_hint_then_plain_label() -> None:
+    assert _row_prompt_message(ScreenRow.BRANCH) == [
+        ("", "\n"),
+        ("ansibrightblack", "The branch each quest forks from and merges back into."),
+        ("", "\n"),
+        ("", "Integration branch: "),
+    ]
+
+
+def test_the_default_row_prompt_renders_the_hint_above_the_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import prompt_toolkit as pt
+
+    captured: dict[str, object] = {}
+
+    def spy(message: object, **kwargs: object) -> str:
+        captured["message"] = message
+        captured.update(kwargs)
+        return "just check"
+
+    monkeypatch.setattr(pt, "prompt", spy)
+    assert _default_row_prompt(ScreenRow.TESTS, "make check") == "just check"
+    assert captured["default"] == "make check"
+    message = captured["message"]
+    assert isinstance(message, list)  # FormattedText is a list subclass
+    assert list(message) == [
+        ("", "\n"),
+        ("ansibrightblack",
+         "Lint, typecheck and fast tests, run after each change. Leave empty for none."),
+        ("", "\n"),
+        ("", "Fast test command: "),
+    ]
+
+
+def _never_prompts(row: ScreenRow, default: str) -> str:
+    raise AssertionError(f"the screen must not prompt here: {row!r}")
 
 
 def test_space_on_the_workflow_row_cycles_without_leaving_the_screen(
@@ -283,10 +349,10 @@ def test_space_on_the_workflow_row_cycles_without_leaving_the_screen(
 def test_space_on_an_editable_row_prompts_prefilled_then_re_renders(
     tmp_path: Path,
 ) -> None:
-    asked: list[tuple[str, str]] = []
+    asked: list[tuple[ScreenRow, str]] = []
 
-    def _fake_prompt(message: str, default: str) -> str:
-        asked.append((message, default))
+    def _fake_prompt(row: ScreenRow, default: str) -> str:
+        asked.append((row, default))
         return "trunk"
 
     with create_pipe_input() as pipe, create_app_session(
@@ -297,7 +363,7 @@ def test_space_on_an_editable_row_prompts_prefilled_then_re_renders(
         outcome = _interactive_confirm_screen(
             tmp_path, _detected_state(), workflows=_WORKFLOWS,
             prompt_fn=_fake_prompt)
-    assert asked == [("Integration branch: ", "master")]
+    assert asked == [(ScreenRow.BRANCH, "master")]
     assert isinstance(outcome, ScreenAccepted)
     assert outcome.state.branch == "trunk"
     assert outcome.state.branch_provenance == "you set this"
@@ -305,10 +371,10 @@ def test_space_on_an_editable_row_prompts_prefilled_then_re_renders(
 
 def test_up_wraps_from_the_first_row_to_import_root(tmp_path: Path) -> None:
     (tmp_path / "lib").mkdir()
-    asked: list[tuple[str, str]] = []
+    asked: list[tuple[ScreenRow, str]] = []
 
-    def _fake_prompt(message: str, default: str) -> str:
-        asked.append((message, default))
+    def _fake_prompt(row: ScreenRow, default: str) -> str:
+        asked.append((row, default))
         return "lib"
 
     with create_pipe_input() as pipe, create_app_session(
@@ -319,7 +385,7 @@ def test_up_wraps_from_the_first_row_to_import_root(tmp_path: Path) -> None:
         outcome = _interactive_confirm_screen(
             tmp_path, _detected_state(), workflows=_WORKFLOWS,
             prompt_fn=_fake_prompt)
-    assert asked == [("Python import paths (comma-separated): ", "src")]
+    assert asked == [(ScreenRow.IMPORT_ROOT, "src")]
     assert isinstance(outcome, ScreenAccepted)
     assert outcome.state.pythonpath == ["lib"]
 
@@ -364,7 +430,7 @@ def test_the_row_prompt_pre_fills_the_current_value() -> None:
     with create_pipe_input() as pipe, create_app_session(
             input=pipe, output=DummyOutput()):
         pipe.send_text("\r")   # accept the pre-filled value untouched
-        assert _default_row_prompt("Integration branch: ", "master") == "master"
+        assert _default_row_prompt(ScreenRow.BRANCH, "master") == "master"
 
 
 def test_ctrl_d_at_a_row_prompt_cancels_the_screen() -> None:
@@ -373,7 +439,7 @@ def test_ctrl_d_at_a_row_prompt_cancels_the_screen() -> None:
         pipe.send_text("\x7f" * len("master"))   # clear the pre-filled value
         pipe.send_text("\x04")                   # ctrl-d on an empty buffer is EOF
         with pytest.raises(KeyboardInterrupt):
-            _default_row_prompt("Integration branch: ", "master")
+            _default_row_prompt(ScreenRow.BRANCH, "master")
 
 
 def test_the_screen_erases_itself_so_re_renders_do_not_stack(
@@ -437,8 +503,9 @@ def test_editing_worktree_setup_to_empty_records_needs_none(tmp_path: Path) -> N
         tmp_path, _detected_state(), ScreenRow.WORKTREE_SETUP, "   ")
     # False is the user's answer "this project needs none"; None would mean never decided.
     assert state.worktree_setup is False
+    assert state.setup_provenance == "you left it empty"
     body = _body(state, ScreenRow.WORKTREE_SETUP)[3]
-    assert "(none needed)" in body and body.endswith("you set this")
+    assert "(none needed)" in body and body.endswith("you left it empty")
 
 
 def test_the_worktree_setup_row_sits_between_tests_and_import_root() -> None:
