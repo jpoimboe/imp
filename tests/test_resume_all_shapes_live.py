@@ -562,3 +562,63 @@ async def test_midrun_interrupt_resume_continues_agent(
                for b in streamed[0][0].content), streamed[0][0]
     # Zero re-execution: a.txt was recalled from the loaded session, not re-read.
     assert _read_file_call_count(inv.event_log) == 0
+
+
+@pytest.mark.live("claude")
+@pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
+@pytest.mark.anyio
+async def test_midprose_interrupt_marker_resume_continues_agent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mid-run leave that lands mid-prose leaves claude-p's lone interrupt
+    marker over the partial prose; the armed resume streams the continuation
+    nudge after it and drives the agent to complete_step without soliciting."""
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
+    inv = _live_inv(tmp_path)
+    inv = replace(
+        inv, balance_on_resume=True, resume_should_continue=True,
+        user_input_fn=_must_not_solicit)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    marker = "[Request interrupted by user]"
+    msgs = [
+        Message(role="user", content=(TextBlock(text="Read a.txt, then finish."),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA-CONTENT\n",
+                            is_error=False),)),
+        Message(role="assistant", content=(
+            TextBlock(text="I read a.txt; it says ALPHA-CONTENT. Next I"),)),
+        Message(role="user", content=(TextBlock(text=marker),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    await store.append(skey, message_to_session_records(
+        msgs[:3], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
+
+    streamed: list[list[Message]] = []
+    _orig_stream = claude._stream_history
+    monkeypatch.setattr(
+        claude, "_stream_history",
+        lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
+
+    runner = ClaudeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_result", events[-1]
+    assert not any(e["type"] == "error" for e in events), [
+        e for e in events if e["type"] == "error"]
+    log_types = [ev["type"] for ev in inv.event_log.read()]
+    assert "awaiting_user_input" not in log_types, log_types
+    assert len(streamed) >= 1, streamed
+    texts = [b.text for m in streamed[0] for b in m.content
+             if isinstance(b, TextBlock)]
+    assert texts[-2:] == [marker, RESUME_CONTINUE_NUDGE], streamed[0]

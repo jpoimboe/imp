@@ -99,6 +99,7 @@ from imp.agents.transcript import (
     RESUME_REDO_NUDGE,
     RESUME_STUB_NOTE,
     Transcript,
+    _is_interrupt_marker,
     answer_complete_step_on_resume,
     answer_unanswered_tool_uses_on_resume,
     captured_result_key,
@@ -1602,6 +1603,7 @@ class ClaudeSession(ObserveSession):
             pending_human_tail = (
                 messages[-1].role == "user"
                 and not _contains_tool_result(messages[-1])
+                and not _is_interrupt_marker(messages[-1])
             )
             if (resume_state is not ResumeState.AWAITING_USER
                     and invocation.resume_should_continue and drained == 0
