@@ -13,7 +13,7 @@ import imp.cli.main as m
 import imp.cli.store as s
 from imp.cli import palette as pal
 from imp.cli.main import main
-from imp.cli.store import HomeDigest
+from imp.cli.store import HomeDigest, SearchZones
 from imp.engine import archive
 
 
@@ -25,20 +25,27 @@ def _ev(eid: str | None, etype: str, agent_id: str | None = None,
 
 def _search_ns(query: str, **over: object) -> argparse.Namespace:
     base: dict[str, object] = dict(
-        query=query, active=False, backlog=False, history=False,
+        query=query, active=False, backlog=False, completed=False, abandoned=False,
+        archived=False,
         type=None, agent=None, limit=None, all=False, list=False, json=False, no_pager=True)
     base.update(over)
     return argparse.Namespace(**base)
 
 
-def test_selected_events_search_defaults_to_all_three() -> None:
-    assert m._selected_events_search(_search_ns("q")) == (True, True, True)
+def test_selected_search_on_events_namespace_defaults_to_everything() -> None:
+    assert m._selected_search(_search_ns("q"), None) == SearchZones(
+        True, True, frozenset({"completed", "abandoned", "archived"}), None)
 
 
-def test_selected_events_search_honours_explicit_flags() -> None:
-    assert m._selected_events_search(_search_ns("q", history=True)) == (False, False, True)
-    assert m._selected_events_search(
-        _search_ns("q", active=True, backlog=True)) == (True, True, False)
+def test_selected_search_on_events_namespace_honours_explicit_flags() -> None:
+    assert m._selected_search(_search_ns("q", archived=True), None) == SearchZones(
+        False, False, frozenset({"archived"}), None)
+    assert m._selected_search(
+        _search_ns("q", active=True, completed=True, abandoned=True), None) == SearchZones(
+        True, False, frozenset({"completed", "abandoned"}), None)
+    assert m._selected_search(
+        _search_ns("q", active=True, backlog=True), None) == SearchZones(
+        True, True, frozenset(), None)
 
 
 def test_matched_events_returns_only_query_matches() -> None:
@@ -230,7 +237,8 @@ def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
                     _json.dumps({"id": "e0", "type": "tool_call",
                                  "payload": {"name": "bash",
                                              "input": {"cmd": "other"}}}) + "\n")
-    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
+                                     statuses=frozenset({"completed"}))
     assert [h.quest_id for h in hits] == ["arch01"]
     assert hits[0].zone == "history"
     assert [o for o, _ in hits[0].events] == [1]
@@ -251,11 +259,34 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
 
     monkeypatch.setattr("imp.engine.archive.read.search_archive_events_content", _boom)
 
-    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
+                                     statuses=frozenset({"completed"}))
     assert [h.quest_id for h in hits] == ["arch01"]
     assert hits[0].zone == "history"
     assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
     assert hits[0].intent is None   # titled: no quest_card load (the fake has none)
+
+
+def test_events_search_archived_keeps_only_selected_statuses(
+        monkeypatch, tmp_path: Path) -> None:
+    loaded: list[str] = []
+
+    class _FakeStore:
+        def search_event_candidates(self, query):
+            return [("cmp01", "Completed one", "completed", None),
+                    ("abn01", "Abandoned one", "abandoned", None),
+                    ("arc01", "Archived one", "archived", None)]
+
+        def get_events(self, cid):
+            loaded.append(cid)
+            return [_ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})]
+
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: _FakeStore())
+    hits = m._events_search_archived(
+        tmp_path, "greptarget", types=None, agents=None,
+        statuses=frozenset({"abandoned", "archived"}))
+    assert [h.quest_id for h in hits] == ["abn01", "arc01"]
+    assert loaded == ["abn01", "arc01"]
 
 
 def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]]],
@@ -302,13 +333,16 @@ def test_cmd_events_search_rich_header_and_digest(monkeypatch, capsys, tmp_path:
 @pytest.mark.parametrize(("flags", "hint"), [
     ({}, "Try another term."),
     ({"list": True}, "Try another term."),
-    ({"history": True, "type": ["tool_call"]},
-     "Try another term, or drop --history --type to widen the search."),
+    ({"completed": True, "type": ["tool_call"]},
+     "Try another term, or drop --completed --type to widen the search."),
+    ({"abandoned": True, "archived": True},
+     "Try another term, or drop --abandoned --archived to widen the search."),
     ({"backlog": True, "agent": ["coder"]},
      "Try another term, or drop --backlog --agent to widen the search."),
-    ({"active": True, "backlog": True, "history": True}, "Try another term."),
-    ({"active": True, "backlog": True, "history": True,
-      "type": ["tool_call"], "agent": ["coder"]},
+    ({"active": True, "backlog": True, "completed": True, "abandoned": True,
+      "archived": True}, "Try another term."),
+    ({"active": True, "backlog": True, "completed": True, "abandoned": True,
+      "archived": True, "type": ["tool_call"], "agent": ["coder"]},
      "Try another term, or drop --type --agent to widen the search."),
 ])
 def test_cmd_events_search_no_match_headline_and_hint(
@@ -604,11 +638,50 @@ def test_main_routes_events_search_against_history(monkeypatch, tmp_path: Path) 
     _archive_events(tmp_path, "arch01", "Archived one", line)
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = main(["events", "search", "GREPTARGET", "--history", "--no-pager"])
+        rc = main(["events", "search", "GREPTARGET", "--completed", "--no-pager"])
     out = buf.getvalue()
     assert rc == 0
     assert "arch01" in out
     assert '1 match in 1 quest for "GREPTARGET"' in out
+
+
+def _seed_every_zone_and_status(tmp_path: Path) -> None:
+    """GREPTARGET in act001 (active), bk0001 (backlog), and one history quest per status."""
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+    line = _json.dumps({
+        "id": "e0", "type": "tool_call", "timestamp": "2026-06-10T00:00:00+00:00",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    for cid, status in (("cmp001", "completed"), ("abn001", "abandoned"),
+                        ("arc001", "archived")):
+        _archive_events(tmp_path, cid, f"History {cid}", line, status=status)
+    _seed_control(tmp_path)
+    q = Quest.create(tmp_path, title="Active one", quest_id="act001", base_branch="main")
+    q.event_log().append(agent_id="step:impl/coder", type="tool_call",
+                         payload={"name": "bash", "input": {"cmd": "GREPTARGET"}})
+    Quest.create_draft(tmp_path, title="GREPTARGET backlog", quest_id="bk0001",
+                       base_branch="main", origin="idea", seed_opening="a brief")
+
+
+@pytest.mark.parametrize(("flags", "expected"), [
+    ([], {"act001", "bk0001", "cmp001", "abn001", "arc001"}),
+    (["--completed"], {"cmp001"}),
+    (["--abandoned"], {"abn001"}),
+    (["--archived"], {"arc001"}),
+    (["--completed", "--abandoned"], {"cmp001", "abn001"}),
+    (["--active", "--completed"], {"act001", "cmp001"}),
+    (["--backlog", "--archived"], {"bk0001", "arc001"}),
+    (["--active"], {"act001"}),
+])
+def test_main_events_search_zone_and_status_flags_select_hits(
+        monkeypatch, capsys, tmp_path: Path, flags: list[str], expected: set[str]) -> None:
+    _seed_every_zone_and_status(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_apply_theme", lambda: None)
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    assert main(["events", "search", "GREPTARGET", *flags, "--list", "--no-pager"]) == 0
+    out = capsys.readouterr().out
+    assert {ln.split(" · ")[0] for ln in out.splitlines() if ln} == expected
 
 
 def test_main_events_id_still_flat_after_search_route(monkeypatch, tmp_path: Path) -> None:
@@ -693,7 +766,9 @@ def test_events_search_hits_carry_the_titleless_name_source_in_every_zone(
         tmp_path: Path) -> None:
     _titleless_in_every_zone(tmp_path)
     hits = {h.quest_id: h for h in m._events_search(
-        tmp_path, "foo.py", (True, True, True), types=None, agents=None)}
+        tmp_path, "foo.py",
+        SearchZones(True, True, frozenset({"completed", "abandoned", "archived"}), None),
+        types=None, agents=None)}
     assert hits["act001"].intent == _OPENING
     assert hits["bk0001"].intent == _BRIEF
     assert hits["arc001"].intent == _OPENING
@@ -720,7 +795,8 @@ def test_events_search_archived_titleless_hit_falls_back_to_card_seed_opening(
         "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
     _archive_events(tmp_path, "arc003", "", line, status="archived",
                     seed_opening="seeded never-run brief")
-    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
+                                     statuses=frozenset({"archived"}))
     assert [(h.quest_id, h.intent) for h in hits] == [("arc003", "seeded never-run brief")]
 
 
@@ -770,15 +846,22 @@ def test_events_search_list_line_highlights_the_query_over_the_dim_fallback() ->
         " · \x1b[2mhistory\x1b[0m")
 
 
-def test_events_search_help_copy_names_history() -> None:
+def test_events_search_help_copy_names_the_status_flags() -> None:
     p = m._build_events_search_parser()
-    assert "Searches active, backlog, and history by default" in (p.description or "")
-    assert next(a.help for a in p._actions if "--history" in a.option_strings) == (
-        "Search history quests' events.")
+    assert p.description == (
+        "Case-insensitive substring search over structured event content (tool calls, "
+        "tool results, agent reasoning, skill loads) across quests — the structured-event "
+        "sibling of `imp search` (prose only). --active, --backlog, --completed, "
+        "--abandoned, and --archived narrow the search and combine; with none of them, "
+        "everything is searched. --type / --agent narrow which events match.")
+    helps = {a.option_strings[-1]: a.help for a in p._actions if a.option_strings}
+    assert helps["--completed"] == "Search completed quests' events."
+    assert helps["--abandoned"] == "Search abandoned quests' events."
+    assert helps["--archived"] == "Search archived conversations' events."
 
 
-def test_events_search_rejects_the_retired_archived_flag(capsys) -> None:
+def test_events_search_rejects_the_retired_history_flag(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
-        m._build_events_search_parser().parse_args(["q", "--archived"])
+        main(["events", "search", "q", "--history"])
     assert exc.value.code == 2
-    assert "--archived" in capsys.readouterr().err
+    assert "--history" in capsys.readouterr().err

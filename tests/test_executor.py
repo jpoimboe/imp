@@ -311,7 +311,8 @@ async def test_run_quest_installs_the_read_fault_sink_for_its_body(tmp_path: Pat
     assert readfault._sink is None          # the stack closed with the run
 
     from imp.cli.main import _events_search_archived
-    hits = _events_search_archived(quest.control_root, "read fault", types=None, agents=None)
+    hits = _events_search_archived(quest.control_root, "read fault", types=None, agents=None,
+                                   statuses=frozenset({"completed"}))
     assert [h.quest_id for h in hits] == ["test-quest"]
     matched = [ev for _ordinal, ev in hits[0].events]
     assert [ev["type"] for ev in matched] == ["runner_warning"]

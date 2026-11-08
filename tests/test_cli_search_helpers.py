@@ -9,6 +9,7 @@ from imp.cli.main import _selected_search
 from imp.cli.store import (
     HomeDigest,
     Readiness,
+    SearchZones,
     _merged_after,
     _search_active,
     _search_archived,
@@ -59,29 +60,34 @@ def _init_git_commits(root: Path) -> tuple[str, str]:
 
 def _ns(**kw: object) -> argparse.Namespace:
     base = {"active": False, "backlog": False, "completed": False,
-            "abandoned": False, "archived": False,
-            "merged_after": None}
+            "abandoned": False, "archived": False}
     base.update(kw)
     return argparse.Namespace(**base)
 
 
+_ALL_STATUSES = frozenset({"completed", "abandoned", "archived"})
+
+
 def test_selected_search_defaults_to_active_backlog_and_all_archive() -> None:
-    assert _selected_search(_ns()) == (True, True, {"completed", "abandoned", "archived"})
+    assert _selected_search(_ns(), None) == SearchZones(True, True, _ALL_STATUSES, None)
 
 
 def test_selected_search_single_zone_scopes() -> None:
-    assert _selected_search(_ns(backlog=True)) == (False, True, set())
-    assert _selected_search(_ns(active=True)) == (True, False, set())
+    assert _selected_search(_ns(backlog=True), None) == SearchZones(
+        False, True, frozenset(), None)
+    assert _selected_search(_ns(active=True), None) == SearchZones(
+        True, False, frozenset(), None)
 
 
 def test_selected_search_disposition_flags_map_to_statuses() -> None:
-    assert _selected_search(_ns(completed=True)) == (False, False, {"completed"})
-    assert _selected_search(_ns(abandoned=True)) == (False, False, {"abandoned"})
-    assert _selected_search(_ns(archived=True)) == (False, False, {"archived"})
+    for status in ("completed", "abandoned", "archived"):
+        assert _selected_search(_ns(**{status: True}), None) == SearchZones(
+            False, False, frozenset({status}), None)
 
 
 def test_selected_search_merged_after_self_enables_merged() -> None:
-    assert _selected_search(_ns(merged_after="abc")) == (False, False, {"completed"})
+    assert _selected_search(_ns(), "abc") == SearchZones(
+        False, False, frozenset({"completed"}), "abc")
 
 
 def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
