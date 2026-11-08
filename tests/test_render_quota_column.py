@@ -20,6 +20,9 @@ from imp.cli.quota_share import (
 )
 from imp.cli.render_markdown import render_summary_markdown
 from imp.cli.render_summary import (
+    LEGEND_FLOOR,
+    LEGEND_METERED,
+    LEGEND_NOTIONAL,
     StepRow,
     SubagentRow,
     SummaryHeader,
@@ -57,6 +60,14 @@ def _pts(gauge: str, points: float) -> Charge:
 _BELOW = Charge.of("claude", GAUGE_BELOW)
 _UNREAD = Charge.of("claude", GAUGE_UNREAD)
 _CODEX_UNREAD = Charge.of("codex", GAUGE_UNREAD)
+_FOOTNOTE_80 = [
+    "  * this quest's part of all imp work this week, applied to the week's gauge;",
+    "    final once the week resets; usage outside imp skews it high",
+]
+_BELOW_80 = [
+    "  quota below measurement resolution; the weekly gauge has not moved yet this",
+    "    week",
+]
 
 
 def _view(rows: list[StepRow]) -> QuotaColumn | QuotaFallback:
@@ -82,8 +93,8 @@ def test_a_single_gauge_replaces_the_cost_column_with_each_rows_share() -> None:
         "  coder            1m 0s  200.0k   3.0k  <0.01%",
         "  plan-finalized      0s       —      —       —"]
     # The total is the rows' sum, 2.7009 points.
-    assert lines[-2] == "  total           39m 2s    1.7M  32.0k   2.70%"
-    assert lines[-1] == f"  {FOOTNOTE}"
+    assert lines[-3] == "  total           39m 2s    1.7M  32.0k   2.70%"
+    assert lines[-2:] == _FOOTNOTE_80
     assert not any("$" in ln or "cost" in ln for ln in lines)
 
 
@@ -94,9 +105,9 @@ def test_an_unmoved_week_reads_dash_per_row_and_under_one_point_in_total() -> No
     lines = _render(rows)
     assert "weekly*" in lines[2]
     assert [ln.split()[-1] for ln in lines[4:6]] == ["—", "—"]
-    assert lines[-3].split()[0] == "total"
-    assert lines[-3].split()[-1] == "<1%"
-    assert lines[-2:] == [f"  {FOOTNOTE}", f"  {LEGEND_BELOW}"]
+    assert lines[-5].split()[0] == "total"
+    assert lines[-5].split()[-1] == "<1%"
+    assert lines[-4:] == [*_FOOTNOTE_80, *_BELOW_80]
 
 
 def test_once_one_week_resolves_the_total_is_the_resolved_rows_sum() -> None:
@@ -105,8 +116,8 @@ def test_once_one_week_resolves_the_total_is_the_resolved_rows_sum() -> None:
             _row("coder", 60, _usage(200_000, 3_000), _BELOW)]
     lines = _render(rows)
     assert [ln.split()[-1] for ln in lines[4:6]] == ["1.80%", "—"]
-    assert lines[-3].split()[-1] == "1.80%"
-    assert lines[-2:] == [f"  {FOOTNOTE}", f"  {LEGEND_BELOW}"]
+    assert lines[-5].split()[-1] == "1.80%"
+    assert lines[-4:] == [*_FOOTNOTE_80, *_BELOW_80]
 
 
 def test_a_metered_row_in_a_subscription_run_reads_dash_and_adds_nothing() -> None:
@@ -115,7 +126,7 @@ def test_a_metered_row_in_a_subscription_run_reads_dash_and_adds_nothing() -> No
             _row("task-lead", 120, _usage(), _pts("claude", 1.5))]
     lines = _render(rows)
     assert [ln.split()[-1] for ln in lines[4:6]] == ["—", "1.50%"]
-    assert lines[-2].endswith("  1.50%")
+    assert lines[-3].endswith("  1.50%")
     assert not any("$" in ln or "~" in ln for ln in lines)
 
 
@@ -160,10 +171,10 @@ def test_a_mixed_run_whose_codex_gauge_is_unread_keeps_the_column() -> None:
         "  plan-writer  1m 30s    1.0M  20.0k   0.90%",
         "  coder         2m 0s  500.0k   9.0k       —",
         "  task-lead     1m 0s  200.0k   3.0k       —"]
-    assert lines[-5] == "  total        39m 2s    1.7M  32.0k       —"
-    assert lines[-4] == "    claude                             2.70%"
-    assert lines[-3] == "    codex                                  —"
-    assert lines[-2] == f"  {FOOTNOTE}"
+    assert lines[-6] == "  total        39m 2s    1.7M  32.0k       —"
+    assert lines[-5] == "    claude                             2.70%"
+    assert lines[-4] == "    codex                                  —"
+    assert lines[-3:-1] == _FOOTNOTE_80
     assert lines[-1] == f"  codex: {LEGEND_UNREAD}"
 
 
@@ -171,10 +182,12 @@ def test_an_unmoved_codex_week_reads_under_one_point_in_its_breakdown() -> None:
     rows = [_row("plan-writer", 90, _usage(), _pts("claude", 0.9)),
             _row("coder", 120, _usage(500_000, 9_000), Charge.of("codex", GAUGE_BELOW))]
     lines = _render(rows)
-    assert lines[-4].split() == ["claude", "0.90%"]
-    assert lines[-3].split() == ["codex", "<1%"]
-    assert lines[-2] == f"  {FOOTNOTE}"
-    assert lines[-1] == f"  codex: {LEGEND_BELOW}"
+    assert lines[-6].split() == ["claude", "0.90%"]
+    assert lines[-5].split() == ["codex", "<1%"]
+    assert lines[-4:-2] == _FOOTNOTE_80
+    assert lines[-2:] == [
+        "  codex: quota below measurement resolution; the weekly gauge has not moved yet",
+        "    this week"]
 
 
 def test_a_single_gauge_run_with_an_unread_week_names_it_unprefixed() -> None:
@@ -183,8 +196,8 @@ def test_a_single_gauge_run_with_an_unread_week_names_it_unprefixed() -> None:
             _row("coder", 60, _usage(200_000, 3_000), _UNREAD)]
     lines = _render(rows)
     assert [ln.split()[-1] for ln in lines[4:6]] == ["1.80%", "—"]
-    assert lines[-3].split()[-1] == "1.80%"
-    assert lines[-2:] == [f"  {FOOTNOTE}", f"  {LEGEND_UNREAD}"]
+    assert lines[-4].split()[-1] == "1.80%"
+    assert lines[-3:] == [*_FOOTNOTE_80, f"  {LEGEND_UNREAD}"]
 
 
 def test_a_breakdown_row_can_be_the_widest_thing_in_its_column() -> None:
@@ -208,9 +221,9 @@ def test_a_breakdown_row_can_be_the_widest_thing_in_its_column() -> None:
 def test_a_single_provider_run_renders_no_breakdown_rows() -> None:
     rows = [_row("plan-writer", 90, _usage(), _pts("claude", 0.9))]
     lines = _render(rows)
-    assert lines[-3] == ""
-    assert lines[-2] == "  total        39m 2s  1.0M  20.0k   0.90%"
-    assert lines[-1] == f"  {FOOTNOTE}"
+    assert lines[-4] == ""
+    assert lines[-3] == "  total        39m 2s  1.0M  20.0k   0.90%"
+    assert lines[-2:] == _FOOTNOTE_80
 
 
 def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
@@ -234,7 +247,7 @@ def test_a_subagent_rows_numbers_and_duration_recede_behind_its_step() -> None:
     assert lines[6] == ("    \x1b[1m\x1b[31m↳ coder · failed\x1b[0m"
                         "  \x1b[1m\x1b[31m   50s\x1b[0m"
                         "  \x1b[2m 50.0k   1.0k   0.07%\x1b[0m")
-    assert lines[-1] == f"\x1b[2m  {FOOTNOTE}\x1b[0m"
+    assert lines[-2:] == [f"\x1b[2m{ln}\x1b[0m" for ln in _FOOTNOTE_80]
 
 
 def _terminal_total_cell(rows: list[StepRow],
@@ -279,3 +292,52 @@ def test_total_cell_is_the_total_rows_last_cell_in_both_renderers(
     assert total_cell(rows, quota) == expected
     assert _terminal_total_cell(rows, quota) == expected
     assert _markdown_total_cell(rows, quota) == expected
+
+
+def test_the_spec_pinned_notes_wrap_at_80_columns() -> None:
+    """Spec AC 2(a): the footnote and both gauge legends wrap exactly as pinned."""
+    below = _render([_row("plan-writer", 90, _usage(), _BELOW)])
+    assert below[-4:] == [*_FOOTNOTE_80, *_BELOW_80]
+    mixed = _render([_row("plan-writer", 90, _usage(), _BELOW),
+                     _row("coder", 120, _usage(500_000, 9_000), _pts("codex", 0.6))])
+    assert mixed[-2:] == [
+        "  claude: quota below measurement resolution; the weekly gauge has not moved yet",
+        "    this week"]
+
+
+_DOLLAR_ALL_LEGENDS = [
+    _row("coder", 90, _metered(), NO_CHARGE),
+    _row("plan-writer", 60, RowUsage(fresh_input=100_000, output=2_000, dollars=0.5,
+                                     priced=1, unpriced=1, notional=1), NO_CHARGE)]
+
+
+def _note_tail(lines: list[str]) -> list[str]:
+    return lines[next(i for i, ln in enumerate(lines) if ln.startswith("  total")) + 1:]
+
+
+@pytest.mark.parametrize("width", [80, 40])
+@pytest.mark.parametrize("rows,viewed,notes", [
+    (_BELOW_ROWS, True, [FOOTNOTE, LEGEND_BELOW]),
+    (_UNREAD_ROWS, True, [LEGEND_NOTIONAL, LEGEND_UNREAD]),
+    (_DOLLAR_ALL_LEGENDS, False, [LEGEND_METERED, LEGEND_NOTIONAL, LEGEND_FLOOR]),
+], ids=["quota", "fallback", "dollar"])
+def test_every_note_word_wraps_to_the_width_with_a_four_space_hang(
+    rows: list[StepRow], viewed: bool, notes: list[str], width: int,
+) -> None:
+    """Spec AC 2(b)(c): every note fits, continuations hang 4, copy is unchanged."""
+    lines = render_summary(rows, header=_HDR, color=False, width=width,
+                           quota=_view(rows) if viewed else None)
+    tail = _note_tail(lines)
+    assert all(len(ln) <= width for ln in tail)
+    indents = [len(ln) - len(ln.lstrip(" ")) for ln in tail]
+    assert indents[0] == 2
+    assert set(indents) <= {2, 4}
+    if width == 40:
+        assert 4 in indents
+    rejoined: list[str] = []
+    for ln, indent in zip(tail, indents, strict=True):
+        if indent == 4:
+            rejoined[-1] += " " + ln[4:]
+        else:
+            rejoined.append(ln[2:])
+    assert rejoined == notes

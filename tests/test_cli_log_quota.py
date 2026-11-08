@@ -391,7 +391,7 @@ async def test_local_and_proxied_weeks_render_the_same_bytes(
         direct = _render(local)
         proxied = await anyio.to_thread.run_sync(_render, ProxyStore(sock))
         assert proxied == direct
-        assert direct[-2].endswith("  67.68%")
+        assert next(ln for ln in direct if ln.startswith("  total")).endswith("  67.68%")
         await session.close()
         tg.cancel_scope.cancel()
 

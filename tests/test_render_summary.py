@@ -13,6 +13,7 @@ from imp.cli.render_summary import (
     SummaryHeader,
     _dur_text,
     _fmt_tokens,
+    _note_lines,
     _sub_body,
     build_summary,
     cost_cell,
@@ -2370,14 +2371,15 @@ _PINNED_80 = [
 
 
 def test_the_label_column_takes_exactly_the_width_left_at_80_columns():
-    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 80)[:9] == _PINNED_80[:9]
+    assert _quota_render(_threshold_rows(), _THRESHOLD_HDR, 80) == _PINNED_80
 
 
 def test_a_long_subagent_body_clips_so_every_table_line_fits_80_columns():
     rows = _threshold_rows("maps escalation and notice mechanisms")
     assert len(_sub_body(rows[0].subagents[1])) == 50
-    table = _quota_render(rows, _THRESHOLD_HDR, 80)[:9]
-    assert all(pal.display_width(ln) <= 80 for ln in table)
+    out = _quota_render(rows, _THRESHOLD_HDR, 80)
+    assert all(pal.display_width(ln) <= 80 for ln in out)
+    table = out[:9]
     assert "↳ explorer (maps escalation and notice mec…  " in table[6]
     assert {pal.display_width(table[i]) for i in (4, 5, 6, 8)} == {79}
 
@@ -2443,3 +2445,12 @@ def test_a_ledger_that_fits_80_columns_renders_as_it_does_unbounded():
     at_80 = render_summary(rows, header=_HDR, color=False, width=80)
     assert at_80 == render_summary(rows, header=_HDR, color=False, width=10_000)
     assert any("    ↳ explorer (map ledger time totals)  " in ln for ln in at_80)
+
+
+def test_a_note_never_breaks_inside_a_word_or_at_a_hyphen():
+    assert _note_lines("see the price-table-absent models listed", 16) == [
+        "  see the",
+        "    price-table-absent",
+        "    models",
+        "    listed",
+    ]

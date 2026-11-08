@@ -2,6 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import textwrap
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -578,6 +579,11 @@ def _fit_padded(text: str, width: int) -> str:
     return fitted + " " * (width - pal.display_width(fitted))
 
 
+def _note_lines(text: str, width: int) -> list[str]:
+    return textwrap.wrap(text, width, initial_indent="  ", subsequent_indent="    ",
+                         break_long_words=False, break_on_hyphens=False)
+
+
 def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
@@ -689,6 +695,6 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                               out_w=out_w, last_w=last_w)
               for p, cell in (column.breakdown if column else ())]
     notes = summary_notes(cells, quota)
-    lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
-              for t in notes]
+    lines += [pal.ansi(ln, *pal.NODE_COLORS["metadata"], enabled=color)
+              for t in notes for ln in _note_lines(t, width)]
     return lines
