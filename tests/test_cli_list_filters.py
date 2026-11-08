@@ -537,3 +537,27 @@ def test_list_json_all_since_includes_abandoned_and_archived(
     data = json.loads(_run_list(
         tmp_path, monkeypatch, ["list", "--json", "-a", "--since", "today"]))
     assert {e["id"] for e in data} >= {"abnd", "shlv"}
+
+
+_FINISHED_LABELS = ("completed:", "history:")
+
+
+@pytest.mark.parametrize(("argv", "label"), [
+    (["list"], "completed:"),
+    (["list", "--completed"], "completed:"),
+    (["list", "--since", "2d"], "completed:"),
+    (["list", "-a"], "history:"),
+    (["list", "-a", "--since", "2d"], "history:"),
+    (["list", "--abandoned"], "history:"),
+    (["list", "--archived"], "history:"),
+    (["list", "--completed", "--abandoned"], "history:"),
+])
+def test_finished_block_label_follows_the_shown_dispositions(
+        tmp_path, monkeypatch, argv, label) -> None:
+    _seed_control(tmp_path)
+    recent = datetime.now(UTC).isoformat()
+    _archive_status(tmp_path, "cmpd", "completed", last_ts=recent)
+    _archive_status(tmp_path, "abnd", "abandoned", last_ts=recent)
+    _archive_status(tmp_path, "shlv", "archived", last_ts=recent)
+    lines = _run_list(tmp_path, monkeypatch, argv).splitlines()
+    assert [ln for ln in lines if ln in _FINISHED_LABELS] == [label]
