@@ -1,6 +1,6 @@
 """Verify _stream_history yields stream-json dicts of the right shape.
 
-Spike 7 used three message types: assistant (with tool_use), user (with
+The three message types: assistant (with tool_use), user (with
 tool_result), and user (with text). Each maps to a specific stream-json
 envelope; this test pins the shape so future refactors don't break the
 replay path.
@@ -70,7 +70,7 @@ def test_user_text_envelope_inline() -> None:
     out = asyncio.run(_drain(_stream_history([msg])))
     inner = out[0]["message"]
     # Either inline string OR a single text block — both are accepted by claude.
-    # We chose inline for compactness (Spike 7's "new user prompt" used this form).
+    # We chose inline for compactness (the form a new user prompt takes).
     assert inner["content"] == "hi" or inner["content"] == [
         {"type": "text", "text": "hi"},
     ]
