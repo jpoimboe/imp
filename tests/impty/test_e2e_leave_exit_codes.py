@@ -170,7 +170,7 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
         assert _poll(lambda: any(
             e["type"] == "user_message" and "go on" in json.dumps(e["payload"])
             for e in _events(quest_dir)), timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
-        assert not any("interrupted ·" in ln for ln in r.lines())
+        assert not any("type to redirect" in ln for ln in r.lines())
 
 
 @pytest.mark.parametrize(("command", "tail", "resume_suffix"), [
@@ -233,7 +233,7 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: s
             for e in _after_resume()), timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
         assert not any(e["type"] == "awaiting_user_input" and e["payload"].get("interrupt")
                        for e in _after_resume())
-        assert not any("interrupted ·" in ln for ln in r.lines())
+        assert not any("type to redirect" in ln for ln in r.lines())
 
 
 def test_ctrl_d_mid_run_on_a_built_quest_exits_130(tmp_path: Path) -> None:
