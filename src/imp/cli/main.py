@@ -4890,7 +4890,12 @@ def _build_parser() -> argparse.ArgumentParser:
     config_sub = p_config.add_subparsers(dest="config_action", required=False)
     p_config_set = config_sub.add_parser(
         "set",
-        help="Set a configuration value in the project or global config file.")
+        help="Set a configuration value in the project or global config file.",
+        description=(
+            "Write one setting to a config file. Without a scope flag, the value "
+            "goes to the file that setting normally lives in; --project, --global, "
+            "or --local picks the file explicitly. Run 'imp config' to see the "
+            "result and where each value comes from."))
     p_config_set.add_argument("key", help=_CONFIG_KEY_HELP)
     p_config_set.add_argument(
         "value", help="New value; list settings take a comma-separated value.")
@@ -4899,7 +4904,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_config_unset = config_sub.add_parser(
         "unset",
         help="Comment out a configuration value in the project or global "
-             "config file.")
+             "config file.",
+        description=(
+            "Comment out one setting in a config file so the next layer down "
+            "takes effect. Without a scope flag, it edits the file that setting "
+            "normally lives in; --project, --global, or --local picks the file "
+            "explicitly."))
     p_config_unset.add_argument("key", help=_CONFIG_KEY_HELP)
     _add_config_scope(p_config_unset)
     p_config_unset.set_defaults(func=_cmd_config_unset)
@@ -4967,16 +4977,27 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rc.set_defaults(func=_cmd_remote_control, parser=p_rc)
     rc_sub = p_rc.add_subparsers(dest="rc_action", required=False)
     p_rc_start = rc_sub.add_parser(
-        "start", help="Start the remote-control daemon for this repo (foreground).")
+        "start", help="Start the remote-control daemon for this repo (foreground).",
+        description=(
+            "Start this repo's remote-control daemon in the foreground; it relays "
+            "every quest's activity to the configured chat transport until "
+            "stopped."))
     p_rc_start.set_defaults(func=_cmd_remote_control_start)
     p_rc_stop = rc_sub.add_parser(
-        "stop", help="Stop the running remote-control daemon (SIGTERM).")
+        "stop", help="Stop the running remote-control daemon (SIGTERM).",
+        description=(
+            "Stop this repo's running remote-control daemon by sending it "
+            "SIGTERM."))
     p_rc_stop.set_defaults(func=_cmd_remote_control_stop)
 
     p_help = sub.add_parser(
         "help",
-        help="Show this help, or one command's options (imp help <command>).")
-    p_help.add_argument("command", nargs="?", metavar="<command>")
+        help="Show this help, or one command's options (imp help <command>).",
+        description=(
+            "Print the top-level command list, or with <command>, that command's "
+            "full help (same as 'imp <command> -h')."))
+    p_help.add_argument("command", nargs="?", metavar="<command>",
+                        help="Command to show help for.")
 
     return parser
 

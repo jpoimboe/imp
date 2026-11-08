@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from imp.cli.main import _build_parser
 
 
@@ -83,3 +85,62 @@ def test_show_documents_the_verify_artifact() -> None:
         "to the archive once it is finished."
     )
     assert "{spec,verify}" in sp.format_help()
+
+
+def _walk_subparsers(
+    parser: argparse.ArgumentParser, path: tuple[str, ...] = (),
+) -> list[tuple[tuple[str, ...], argparse.ArgumentParser]]:
+    found: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = []
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, sub in action.choices.items():
+                found.append(((*path, name), sub))
+                found.extend(_walk_subparsers(sub, (*path, name)))
+    return found
+
+
+def test_every_subparser_has_a_description() -> None:
+    missing = [" ".join(path) for path, sub in _walk_subparsers(_build_parser())
+               if not (sub.description or "").strip()]
+    assert not missing, f"subparsers without a description: {missing}"
+
+
+def _nested(*path: str) -> argparse.ArgumentParser:
+    return dict(_walk_subparsers(_build_parser()))[path]
+
+
+@pytest.mark.parametrize(("path", "description"), [
+    (("help",),
+     "Print the top-level command list, or with <command>, that command's full "
+     "help (same as 'imp <command> -h')."),
+    (("config", "set"),
+     "Write one setting to a config file. Without a scope flag, the value goes "
+     "to the file that setting normally lives in; --project, --global, or "
+     "--local picks the file explicitly. Run 'imp config' to see the result "
+     "and where each value comes from."),
+    (("config", "unset"),
+     "Comment out one setting in a config file so the next layer down takes "
+     "effect. Without a scope flag, it edits the file that setting normally "
+     "lives in; --project, --global, or --local picks the file explicitly."),
+    (("remote-control", "start"),
+     "Start this repo's remote-control daemon in the foreground; it relays "
+     "every quest's activity to the configured chat transport until stopped."),
+    (("remote-control", "stop"),
+     "Stop this repo's running remote-control daemon by sending it SIGTERM."),
+])
+def test_subcommand_description_printed_after_usage(
+    path: tuple[str, ...], description: str,
+) -> None:
+    sub = _nested(*path)
+    assert " ".join((sub.description or "").split()) == description
+    flat = " ".join(sub.format_help().split())
+    assert flat.startswith("usage:")
+    assert description in flat
+    sections = [i for i in (flat.find("positional arguments:"),
+                            flat.find("options:")) if i != -1]
+    assert flat.index(description) < min(sections)
+
+
+def test_help_command_positional_has_help_text() -> None:
+    flat = " ".join(_subparser("help").format_help().split())
+    assert "<command> Command to show help for." in flat
