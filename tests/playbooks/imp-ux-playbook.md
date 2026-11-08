@@ -159,7 +159,9 @@ to score).
     real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME` pointed at an
     empty dir. The **provider multi-select** comes first, then the **confirmation screen**
     (detected settings, `enter` to accept) — both interactive; theme is **auto-detected
-    silently** (no prompt; under a non-truecolor pty it picks `ansi`).
+    silently** (no prompt): `ansi` unless `COLORTERM` is `truecolor`/`24bit`, else
+    `dark`/`light` from the terminal background (default `dark`). impty advertises truecolor,
+    so expect `dark`; to see the `ansi` path, spawn with `env={"COLORTERM":""}`.
   - `imp new -h` — the flag surface (`--title`, `--backlog`, `--background`, `--depends-on`,
     `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
     `--provider`): can a new user tell which they need?
@@ -172,10 +174,20 @@ to score).
     only artifacts — a bare name like `status` errors. Also `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
-  - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,
-    `imp events search`): expert-oriented, but read its `-h` and a bare invocation.
+  - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`):
+    expert-oriented, but read its `-h` and a bare invocation.
+  - `imp events search <query>` — event-content search **across** quests; it takes no quest
+    id (narrow it with the zone/status flags its `-h` lists). Read its `-h` and run a hit and
+    a miss.
   - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
   - `imp config` / `imp config --explain high` — layer/source labels legible? precedence clear?
+  - `imp config set` / `imp config unset` (and each `-h`) — **always pass `--local`**: with no
+    scope flag, machine-wide keys like `theme` land in your real `~/.imp/config.yaml`. Run
+    `imp config set --local theme light`, then `imp config` (theme now `light`, still from the
+    local layer), then `imp config unset --local theme` (comments the line out) and `imp config`
+    again (theme falls back to the global layer or default), then
+    `imp config set --local theme dark` to restore the pass's theme. Is the confirmation clear
+    about what changed and where? Is the source shift after `unset` obvious in `imp config`?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
   - `imp edit <id> --title "…"` — is the confirmation clear about what changed?
   - `imp remote-control -h` — purpose clear from help alone? (The full chat UX has its own
