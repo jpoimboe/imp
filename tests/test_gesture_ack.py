@@ -10,16 +10,16 @@ def test_first_gesture_calls_ack_hook_with_stopping() -> None:
     coord = InterruptCoordinator()
     acks: list[str] = []
     coord.set_ack_hook(acks.append)
-    coord._note_gesture_ack(force_quit_available=False)
+    coord._note_gesture_ack(forced=False)
     assert acks == ["stopping…"]
 
 
-def test_ack_appends_force_quit_after_window() -> None:
+def test_forcing_press_acks_force_quitting() -> None:
     coord = InterruptCoordinator()
     acks: list[str] = []
     coord.set_ack_hook(acks.append)
-    coord._note_gesture_ack(force_quit_available=True)
-    assert acks == ["stopping… (interrupt again to force-quit)"]
+    coord._note_gesture_ack(forced=True)
+    assert acks == ["force-quitting…"]
 
 
 def test_signal_pause_twice_acks_once() -> None:

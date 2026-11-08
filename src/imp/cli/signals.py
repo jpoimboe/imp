@@ -466,14 +466,11 @@ class InterruptCoordinator:
         status-line area (never journaled). None = no ack (tests/non-interactive)."""
         self._ack_hook = fn
 
-    def _note_gesture_ack(self, *, force_quit_available: bool) -> None:
+    def _note_gesture_ack(self, *, forced: bool) -> None:
         fn = self._ack_hook
         if fn is None:
             return
-        text = "stopping…"
-        if force_quit_available:
-            text += " (interrupt again to force-quit)"
-        fn(text)
+        fn("force-quitting…" if forced else "stopping…")
 
     def note_interrupt_delivery_started(self) -> None:
         """Mark a live delivery start so a repeat gesture can forward force."""
@@ -835,7 +832,7 @@ class InterruptCoordinator:
             # A delivery can land after its own round's gate, i.e. after
             # end_gesture_round already ran; a new round must not inherit it.
             self._delivery_observed = False
-            self._note_gesture_ack(force_quit_available=False)
+            self._note_gesture_ack(forced=False)
             if self._first_gesture_at is None:
                 self._first_gesture_at = self._now()
         self._should_pause = True
@@ -942,7 +939,7 @@ class InterruptCoordinator:
             if not self._force_forwarded and self._register_gesture(kind="ctrl-c"):
                 if self._delivery_observed:
                     self._force_forwarded = True
-                    self._note_gesture_ack(force_quit_available=True)
+                    self._note_gesture_ack(forced=True)
                     send = self._sig_send
                     if send is not None:
                         with _suppress(Exception):  # WouldBlock / closed stream
@@ -950,7 +947,7 @@ class InterruptCoordinator:
                 else:
                     # Nothing delivered yet: ack plainly and leave the one-shot latch
                     # unspent, so a later press — once a delivery lands — still escalates.
-                    self._note_gesture_ack(force_quit_available=False)
+                    self._note_gesture_ack(forced=False)
             return  # suppressed, promised nothing, or force-forwarded
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT

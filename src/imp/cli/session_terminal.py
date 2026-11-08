@@ -252,7 +252,7 @@ async def run_terminal_client(
     # any time, including mid-grind with no prompt up. open_signal_receiver is a
     # sync context manager that installs the loop handler on enter (replacing
     # SIGQUIT's core-dump default) and restores it on exit.
-    # Only receive_events overwrites this: on ctrl-d / ctrl-\ / force-quit
+    # Only receive_events overwrites this: on ctrl-d / ctrl-\ / SIGTERM / SIGHUP
     # _watch_force_quit cancels the group and it never returns — a cancelled loop
     # observed no end frame, which is exactly CUT.
     ending = StreamEnding.CUT
@@ -409,7 +409,7 @@ async def run_terminal_client(
                     tg.cancel_scope.cancel()
 
                 async def _watch_sigquit() -> None:
-                    # Ctrl-\ deliberate detach: same teardown as force-quit — trigger
+                    # Ctrl-\ deliberate detach: same teardown as mid-run Ctrl-D — trigger
                     # the escalation event so _watch_force_quit owns the one cancel.
                     if sigquit_signals is None:
                         return
