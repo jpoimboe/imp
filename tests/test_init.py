@@ -901,7 +901,20 @@ def test_cmd_init_ctrl_c_prints_cancelled_and_exits_user_ended(
     rc = m._cmd_init(_init_args())
 
     assert rc == ExitCode.USER_ENDED
-    assert "imp: init cancelled" in capsys.readouterr().err.splitlines()
+    assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
+
+
+def test_init_input_ends_the_line_when_cancelled(monkeypatch, capsys):
+    import imp.cli.main as m
+
+    def interrupted(prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        m._init_input("x: ")
+
+    assert capsys.readouterr().err == "\n"
 
 
 def test_cmd_init_rejects_bad_workflow_on_the_interactive_path(

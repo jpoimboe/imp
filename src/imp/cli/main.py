@@ -665,6 +665,14 @@ def _apply_theme() -> None:
         pass
 
 
+def _init_input(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        raise
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     from imp.assets import selectable_workflow_names
     from imp.cli.config_write import ConfigWriteError
@@ -724,7 +732,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 providers_override=providers_override,
             )
         else:
-            run_init(project, input_fn=input, output_fn=print,
+            run_init(project, input_fn=_init_input, output_fn=print,
                      providers_override=providers_override,
                      settings_root=_claiming_settings_root())
     except (IntegrationBranchUnresolved, GitIdentityUnavailable,
@@ -735,7 +743,6 @@ def _cmd_init(args: argparse.Namespace) -> int:
         _emit_cli_error(f"{e}")
         return 2
     except KeyboardInterrupt:
-        print(file=sys.stderr)
         _emit_cli_error("init cancelled")
         return ExitCode.USER_ENDED
     if sys.stdout.isatty():
