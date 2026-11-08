@@ -11,6 +11,7 @@ import anyio
 import pytest
 
 from imp.cli import live_driver as ld
+from imp.cli.inert_resume import render_inert_question
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.session_terminal import run_terminal_client
@@ -25,6 +26,8 @@ from tests.test_narrative_interrupt_recap import (
     LIVE_GATE,
     NOW,
     SCRIPT_HINT,
+    SPEC_REVIEW,
+    THRESHOLD,
     Event,
     _ctrl_c,
     _cut_off_then_resume,
@@ -34,6 +37,7 @@ from tests.test_narrative_interrupt_recap import (
     _leave_and_resume,
     _opening_explorer,
     _opening_thinking,
+    _saying,
     _spec_review,
     _sub_work,
     _task_lead,
@@ -44,6 +48,9 @@ from tests.test_resume_startup_spinner import Screen, _trimmed
 
 BOUNDARY: Event = {"type": "replay_complete"}
 CODER_RECAP = "was: task 1/2 · writing code"
+PROSE = "Checking criterion 4."
+BLOCK = "• Checking criterion 4."
+SPEC_RECAP_AGED = "was: reviewing spec · paused 3m ago"
 
 
 class _Pipe(io.StringIO):
@@ -78,15 +85,16 @@ def test_recap_leaves_replay_suppressed_and_live_emission_normal() -> None:
     drv.print_interrupt_recap()
     drv.on_event(ev("r-d2", "tool_result", LEAD, id="blk-d2", content="done",
                     id_ns="block"))         # unblocks the replayed walk: stays hidden
-    assert out.getvalue() == CODER_RECAP + "\n"
+    recap = "• Replayed lead prose.\n\n" + CODER_RECAP + "\n"
+    assert out.getvalue() == recap
     drv.on_event(agent_text("lt", "Live prose after the recap.", agent_id=LEAD))
-    assert out.getvalue() == CODER_RECAP + "\n\n• Live prose after the recap.\n"
+    assert out.getvalue() == recap + "\n• Live prose after the recap.\n"
 
 
 def test_recap_before_the_replay_boundary_prints_nothing() -> None:
     out = _Pipe()
     drv = _resume_driver(out)
-    for e in _replayed(_cut_off_then_resume("coder", "writing code")):
+    for e in _replayed(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE)):
         drv.on_event(e)
     drv.print_interrupt_recap()
     assert out.getvalue() == ""
@@ -95,23 +103,25 @@ def test_recap_before_the_replay_boundary_prints_nothing() -> None:
 def test_recap_is_dropped_not_deferred_when_a_prompt_is_already_up() -> None:
     out = _Pipe()
     drv = _resume_driver(out)
-    for e in [*_replayed(_cut_off_then_resume("coder", "writing code")), BOUNDARY]:
+    events = _saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE)
+    for e in [*_replayed(events), BOUNDARY]:
         drv.on_event(e)
     drv.prepare_for_prompt()
     drv.print_interrupt_recap()
     drv.flush_deferred()
     drv.print_interrupt_recap()             # once per attach, even if the first was dropped
     assert "was:" not in out.getvalue()
+    assert PROSE not in out.getvalue()
 
 
 def _prompt_screen(replayed: list[Event], live: list[Event], *, splash: bool = True,
-                   recap: bool = True) -> list[str]:
+                   recap: bool = True, width: int = 80) -> list[str]:
     """Opening, replay, live events, recap, then the solicit's suspend + prepare + caret."""
     out = _TTY()
     out.write("banner\n\n" if splash else "feat · demo · resuming\n")
     status = LiveStatus(out)
     status._width_fn = lambda: 80
-    drv = LiveDriver(stream=out, color=False, width=80, status=status,
+    drv = LiveDriver(stream=out, color=False, width=width, status=status,
                      suppress_replay=True, preceded_by_blank=splash, startup_verb="resuming")
     drv.install_startup_status()
     for e in [*_replayed(replayed), BOUNDARY, *live]:
@@ -225,7 +235,8 @@ async def test_resumed_hold_gate_prints_the_recap(
 
 @pytest.mark.anyio
 async def test_nothing_cut_off_in_opening_conversation_prints_nothing(tmp_path: Path) -> None:
-    assert await _client_output(tmp_path, _resumed_at(_opening_thinking())) == ""
+    frames = _resumed_at(_saying(_opening_thinking(), THRESHOLD, PROSE))
+    assert await _client_output(tmp_path, frames) == ""
 
 
 @pytest.mark.anyio
@@ -260,31 +271,35 @@ async def test_quiet_attach_ctrl_c_recaps_once_at_the_step_agents_gate(
 
 @pytest.mark.anyio
 async def test_subagent_gate_alone_prints_nothing(tmp_path: Path) -> None:
-    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), _gate("sg", "sub:d1"))
+    frames = _resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE),
+                         _gate("sg", "sub:d1"))
     assert await _client_output(tmp_path, frames) == ""
 
 
 @pytest.mark.anyio
 async def test_no_recap_once_a_live_node_has_emitted(tmp_path: Path) -> None:
     live_text = agent_text("lt", "Looking at the failing test.", agent_id=LEAD)
-    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), live_text, LIVE_GATE)
+    frames = _resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE),
+                         live_text, LIVE_GATE)
     out = await _client_output(tmp_path, frames)
     assert "Looking at the failing test." in out
     assert "was:" not in out
+    assert PROSE not in out
 
 
 @pytest.mark.anyio
 async def test_second_interrupt_gate_prints_no_second_recap(tmp_path: Path) -> None:
-    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"),
+    frames = _resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE),
                          LIVE_GATE, _gate("live2", None))
-    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+    assert await _client_output(tmp_path, frames) == f"{BLOCK}\n\n{CODER_RECAP}\n"
 
 
 @pytest.mark.anyio
 async def test_question_gate_prints_no_recap(tmp_path: Path) -> None:
     question = ev("q", "awaiting_user_input", LEAD, steer_hint="",
                   last_agent_message="Which file?", interrupt=False)
-    frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), question)
+    frames = _resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE),
+                         question)
     assert await _client_output(tmp_path, frames) == ""
 
 
@@ -340,3 +355,90 @@ async def test_quiet_attach_other_clients_leave_after_a_resume_shows_no_age(
                _sub_work("d1")]
     frames = [*_replayed(running), BOUNDARY, *_ctrl_c("a", LEAD, "sub:d1", source="ctrl-d")]
     assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+# AC7(a)-(c)
+@pytest.mark.usefixtures("frozen_now")
+@pytest.mark.parametrize(("splash", "top"), [
+    pytest.param(True, ["banner", ""], id="splash"),
+    pytest.param(False, ["feat · demo · resuming", ""], id="header"),
+])
+@pytest.mark.parametrize(("texts", "block"), [
+    pytest.param((PROSE,), [BLOCK, ""], id="prose"),
+    pytest.param((), [], id="no-prose"),
+])
+def test_message_block_sits_one_blank_above_the_recap(
+    splash: bool, top: list[str], texts: tuple[str, ...], block: list[str],
+) -> None:
+    events = _timed(_saying(_spec_review(), SPEC_REVIEW, *texts))
+    assert (_prompt_screen(events, [LIVE_GATE], splash=splash)
+            == [*top, *block, SPEC_RECAP_AGED, "", "> PROMPT"])
+
+
+# AC7(d)
+def test_parked_steer_gate_attach_prints_the_message_above_the_recap() -> None:
+    lines = _prompt_screen(_saying(_parked_at_steer_gate(), LEAD, PROSE),
+                           [_gate(f"a-g-{LEAD}", LEAD)], splash=False)
+    assert lines == ["feat · demo · resuming", "", BLOCK, "", CODER_RECAP, "", "> PROMPT"]
+
+
+# AC7(e): no anchor (untimed), no label, nothing cut off.
+def test_message_alone_without_a_recap_line_prints_nothing() -> None:
+    events = _saying(_opening_thinking(), THRESHOLD, PROSE)
+    assert _prompt_screen(events, [LIVE_GATE]) == ["banner", "", "> PROMPT"]
+
+
+_RUNNING_CODER = [_task_lead(), _dispatch("d1", LEAD, "coder", "writing code"), _sub_work("d1")]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("frames", [
+    pytest.param(_resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, PROSE)),
+                 id="resumed-hold-gate"),
+    pytest.param([*_replayed(_saying(_parked_at_steer_gate(), LEAD, PROSE)), BOUNDARY,
+                  _gate(f"a-g-{LEAD}", LEAD)], id="parked-steer-gate-attach"),
+    pytest.param([*_replayed(_saying(_RUNNING_CODER, LEAD, PROSE)), BOUNDARY,
+                  *_ctrl_c("a", LEAD, "sub:d1")], id="quiet-attach-ctrl-c"),
+])
+async def test_every_recap_path_prints_the_message_block(
+    tmp_path: Path, frames: list[Event],
+) -> None:
+    assert await _client_output(tmp_path, frames) == f"{BLOCK}\n\n{CODER_RECAP}\n"
+
+
+# AC8
+@pytest.mark.anyio
+async def test_message_block_is_scrollback_styled_with_color_on(tmp_path: Path) -> None:
+    text = "Checking **criterion 4**.\x07"
+    frames = _resumed_at(_saying(_cut_off_then_resume("coder", "writing code"), LEAD, text))
+    out = await _client_output(tmp_path, frames, color=True)
+    block = render_inert_question(text, width=80, color=True)
+    assert out == f"{block}\n\n\x1b[2m{CODER_RECAP}\x1b[0m\n"
+    assert out.startswith("\x1b[1m• \x1b[0m")
+    assert "**" not in out
+    assert "^G" in out and "\x07" not in out
+
+
+def test_message_block_wraps_at_the_driver_width() -> None:
+    prose = "Checking criterion four against the recorded transcript before moving on to five."
+    lines = _prompt_screen(_saying(_parked_at_steer_gate(), LEAD, prose),
+                           [_gate(f"a-g-{LEAD}", LEAD)], splash=False, width=40)
+    assert lines == [
+        "feat · demo · resuming", "",
+        "• Checking criterion four against the",
+        "  recorded transcript before moving on",
+        "  to five.", "",
+        CODER_RECAP, "", "> PROMPT",
+    ]
+
+
+def test_multi_paragraph_message_keeps_its_inner_blank_row() -> None:
+    lines = _prompt_screen(
+        _saying(_parked_at_steer_gate(), LEAD, "First paragraph.\n\nSecond paragraph."),
+        [_gate(f"a-g-{LEAD}", LEAD)], splash=False)
+    assert lines == [
+        "feat · demo · resuming", "",
+        "• First paragraph.", "",
+        "  Second paragraph.", "",
+        CODER_RECAP, "", "> PROMPT",
+    ]
