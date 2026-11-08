@@ -4,72 +4,104 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import imp.cli.provider_command as provider_command
 from imp.cli.provider_command import (
+    ROSTER_FOOT,
     current_provider_for,
     picker_choices,
+    quest_provider_groups,
     render_picker,
     render_provider_roster,
-    selectable_available,
 )
+from imp.providers import ProviderGroups
 from imp.providers.config import ProviderModel
 from tests.test_provider_reconcile import _seed, _tiers
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+_GROUPS = ProviderGroups(configured=("claude",), also_installed=("codex",),
+                         needs_setup=("anthropic", "openai"))
 
 _PICKER = """\
 switch provider — the rest of this quest runs on your pick
 takes effect right away — this step is waiting to retry
 
+configured
   1  claude   current
+also installed
   2  codex
 
 press a number, or esc to cancel"""
 
 _ROSTER = """\
-Current: claude   (this quest)
+Current: claude (this quest)
 
-Available:
+Configured:
   claude
+Also installed:
   codex
 
-Switch with  /provider <name> — the rest of this quest runs on it."""
+Switch with /provider <name> — the rest of this quest runs on it."""
 
 
-# AC 8
 def test_the_picker_block_is_verbatim() -> None:
     # Line 2 of the head must stay true for every backoff category the gate
     # admits — auth, network, rate_limit and stalled — so it names none of them.
-    assert "\n".join(
-        render_picker("claude", ["claude", "codex"])) == _PICKER
+    assert "\n".join(render_picker("claude", _GROUPS)) == _PICKER
 
 
 def test_the_roster_block_is_verbatim() -> None:
-    assert "\n".join(
-        render_provider_roster("claude", ["claude", "codex"])) == _ROSTER
+    assert "\n".join(render_provider_roster("claude", _GROUPS)) == _ROSTER
 
 
 def test_only_the_current_vendor_is_tagged() -> None:
-    lines = render_picker("codex", ["claude", "codex"])
-    assert lines[3:5] == ["  1  claude", "  2  codex   current"]
+    lines = render_picker("codex", _GROUPS)
+    assert lines[3:7] == ["configured", "  1  claude",
+                          "also installed", "  2  codex   current"]
 
 
-def test_the_roster_drops_the_current_line_when_nothing_resolves_yet() -> None:
+def test_the_roster_keeps_config_order_and_prints_no_empty_header() -> None:
+    lines = render_provider_roster(
+        None, ProviderGroups(("codex", "claude"), (), ()))
+    assert lines == ["Configured:", "  codex", "  claude", "", ROSTER_FOOT]
+
+
+def test_the_roster_drops_the_current_line_and_an_empty_configured_group() -> None:
     # A configured order whose vendors are all unavailable resolves to nothing,
     # while the pin-reachable roster is still non-empty.
-    assert render_provider_roster(None, ["codex"])[0] == "Available:"
+    lines = render_provider_roster(
+        None, ProviderGroups((), ("codex",), ("anthropic", "openai", "claude")))
+    assert lines == ["Also installed:", "  codex", "", ROSTER_FOOT]
 
 
 def test_the_current_vendors_slot_carries_no_name() -> None:
-    assert picker_choices("claude", ["claude", "codex"]) == [
-        None, "codex"]
+    assert picker_choices("claude", _GROUPS) == [None, "codex"]
+    assert picker_choices("codex", _GROUPS) == ["claude", None]
 
 
-def test_the_roster_is_the_selectable_set_filtered_by_env_check(
-    floor_availability,
+def test_digits_follow_the_displayed_order_across_groups() -> None:
+    groups = ProviderGroups(("codex",), ("anthropic", "claude"), ())
+    rows = [line for line in render_picker(None, groups) if line.startswith("  ")]
+    assert rows == ["  1  codex", "  2  anthropic", "  3  claude"]
+    assert picker_choices(None, groups) == ["codex", "anthropic", "claude"]
+
+
+def test_the_quests_groups_come_from_its_effective_config(
+    tmp_path: Path, floor_availability,
 ) -> None:
-    floor_availability({"claude", "anthropic"})
-    # scripted has no tier table, so it is never selectable however available.
-    assert selectable_available() == ["anthropic", "claude"]
-    floor_availability({"codex"})
-    assert selectable_available() == ["codex"]
+    quest, _state, _wf = _seed(tmp_path)        # configures providers: [claude]
+    floor_availability({"claude", "codex"})
+    assert quest_provider_groups(quest) == _GROUPS
+
+
+def test_the_flat_roster_helper_is_gone() -> None:
+    assert not hasattr(provider_command, "selectable_available")
+
+
+def test_no_arming_surface_reads_availability_on_its_own() -> None:
+    for path in ("src/imp/cli/provider_command.py", "src/imp/cli/session_run.py",
+                 "src/imp/cli/slash.py"):
+        assert "provider_is_available" not in (_ROOT / path).read_text(), path
 
 
 def test_current_is_the_pin_when_pinned(tmp_path: Path, floor_availability) -> None:

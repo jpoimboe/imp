@@ -6,42 +6,58 @@ current or what may be picked."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from imp.providers import ProviderGroups
 
 PICKER_HEAD = (
     "switch provider — the rest of this quest runs on your pick",
     "takes effect right away — this step is waiting to retry",
 )
 PICKER_FOOT = "press a number, or esc to cancel"
-ROSTER_FOOT = "Switch with  /provider <name> — the rest of this quest runs on it."
+ROSTER_FOOT = "Switch with /provider <name> — the rest of this quest runs on it."
 
 
-def selectable_available() -> list[str]:
-    """The names every arming surface offers: floor entries carrying a full tier
-    table whose env_check passes, in floor order. Both env_check forms are local
-    reads, so this is computed in the client process."""
-    from imp.providers import selectable_providers
-    from imp.providers.resolve import provider_is_available
-    return [n for n in selectable_providers() if provider_is_available(n)]
+def quest_provider_groups(quest: Any) -> ProviderGroups:
+    from imp.providers import provider_groups
+    from imp.providers.effective import load_effective_config
+    return provider_groups(
+        load_effective_config(control_root=quest.control_root).config)
 
 
-def render_picker(current: str | None, names: list[str]) -> list[str]:
+def render_picker(current: str | None, groups: ProviderGroups) -> list[str]:
     lines = [*PICKER_HEAD, ""]
-    for i, name in enumerate(names, 1):
-        lines.append(f"  {i}  {name}   current" if name == current
-                     else f"  {i}  {name}")
+    slot = 0
+    for header, names in (("configured", groups.configured),
+                          ("also installed", groups.also_installed)):
+        if names:
+            lines.append(header)
+        for name in names:
+            slot += 1
+            lines.append(f"  {slot}  {name}   current" if name == current
+                         else f"  {slot}  {name}")
     return [*lines, "", PICKER_FOOT]
 
 
-def picker_choices(current: str | None, names: list[str]) -> list[str | None]:
-    """What each digit dispatches, the current vendor's slot None: a re-pick has
-    no name to send, so it cannot arm a switch no reconcile would clear."""
-    return [None if n == current else n for n in names]
+def picker_choices(current: str | None,
+                   groups: ProviderGroups) -> list[str | None]:
+    """What each digit dispatches, in render_picker's order, the current
+    vendor's slot None: a re-pick has no name to send, so it cannot arm a switch
+    no reconcile would clear."""
+    return [None if n == current else n
+            for n in (*groups.configured, *groups.also_installed)]
 
 
-def render_provider_roster(current: str | None, names: list[str]) -> list[str]:
-    head = [f"Current: {current}   (this quest)", ""] if current else []
-    return [*head, "Available:", *(f"  {n}" for n in names), "", ROSTER_FOOT]
+def render_provider_roster(current: str | None,
+                           groups: ProviderGroups) -> list[str]:
+    head = [f"Current: {current} (this quest)", ""] if current else []
+    body: list[str] = []
+    for header, names in (("Configured:", groups.configured),
+                          ("Also installed:", groups.also_installed)):
+        if names:
+            body += [header, *(f"  {n}" for n in names)]
+    return [*head, *body, "", ROSTER_FOOT]
 
 
 def current_provider_for(quest: Any) -> str | None:
@@ -61,5 +77,5 @@ def current_provider_for(quest: Any) -> str | None:
 def print_provider_roster(*, quest: Any,
                           output_fn: Callable[[str], None]) -> None:
     for line in render_provider_roster(current_provider_for(quest),
-                                       selectable_available()):
+                                       quest_provider_groups(quest)):
         output_fn(line)

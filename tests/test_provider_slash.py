@@ -73,8 +73,16 @@ def test_bare_provider_prints_the_roster_and_switches_nothing(
 
     assert handle_slash_line("/provider", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert "Current: claude   (this quest)" in out
-    assert "  codex" in out
+    assert out[-8:] == [
+        "Current: claude (this quest)",
+        "",
+        "Configured:",
+        "  claude",
+        "Also installed:",
+        "  codex",
+        "",
+        "Switch with /provider <name> — the rest of this quest runs on it.",
+    ]
     assert _pin_on_disk(quest) is None
 
 
@@ -89,7 +97,7 @@ def test_bare_provider_pre_session_needs_no_state(
 
     assert handle_slash_line("/provider", quest=quest, output_fn=out.append,
                              pre_session=True) is REPROMPT
-    assert "Current: claude   (this quest)" in out
+    assert "Current: claude (this quest)" in out
 
 
 def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
@@ -101,8 +109,8 @@ def test_an_unknown_name_prints_the_flag_error_without_its_prefix(
 
     assert handle_slash_line("/provider bogus", quest=quest,
                              output_fn=out.append) is REPROMPT
-    assert out[-1] == ("unknown provider 'bogus' (available here: claude, "
-                       "codex; needs setup: anthropic, openai)")
+    assert out[-1] == ("unknown provider 'bogus' (configured: claude; "
+                       "also installed: codex; needs setup: anthropic, openai)")
 
 
 def test_an_unavailable_name_is_refused_with_its_auth_hint(
@@ -214,3 +222,30 @@ async def test_pre_session_provider_resolves_the_quest_onto_that_vendor(
     assert {t: (pm.provider, pm.model) for t, pm in tiers.items()} == {
         t: ("codex", model)
         for t, model in BUILTIN_FLOOR["codex"].tier_defaults.items()}
+
+
+@pytest.fixture
+def malform_config(monkeypatch):
+    # _seed loads the config itself, so the breakage is armed after seeding.
+    from imp.engine.errors import LoadError
+
+    def _boom(*_a, **_k):
+        raise LoadError("bad config")
+
+    return lambda: monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config", _boom)
+
+
+@pytest.mark.parametrize("line", [
+    "/provider", "/provider codex", "/model", "/model codex:gpt-5"])
+def test_a_malformed_config_is_printed_not_raised(
+    tmp_path: Path, malform_config, line: str,
+) -> None:
+    quest, _state, _wf = _seed(tmp_path)
+    malform_config()
+    out: list[str] = []
+
+    assert handle_slash_line(line, quest=quest,
+                             output_fn=out.append) is REPROMPT
+    assert out.count("bad config") == 1
+    assert sum(1 for s in out if s.endswith(line)) == 1
