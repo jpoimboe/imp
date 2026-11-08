@@ -421,7 +421,7 @@ def test_apply_edit_depends_on_rejected_for_materialized(
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit40", title=None, backlog=False,
         active=False, depends_on=["B"], clear_deps=False, append_intent=None, base=None)
-    assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
+    assert (rc, msg) == (2, "imp: cannot change dependencies once a quest is built")
     # The rejected edit must not have mutated the dependency list.
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit40"))["depends_on"] == ["A"]
 
@@ -439,7 +439,7 @@ def test_apply_edit_clear_deps_rejected_for_materialized(
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit41", title=None, backlog=False,
         active=False, depends_on=None, clear_deps=True, append_intent=None, base=None)
-    assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
+    assert (rc, msg) == (2, "imp: cannot change dependencies once a quest is built")
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit41"))["depends_on"] == ["A"]
 
 
@@ -455,7 +455,7 @@ def test_edit_deps_rejected_for_materialized_via_cmd(
         json.dumps(meta, indent=2, sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit42", depends_on=["B"]))
     assert rc == 2
-    assert "cannot set dependencies on a materialized quest" in capsys.readouterr().err
+    assert "cannot change dependencies once a quest is built" in capsys.readouterr().err
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit42"))["depends_on"] == ["A"]
 
 
@@ -531,7 +531,7 @@ def test_edit_base_rejected_for_materialized(
         json.dumps(before, indent=2, sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit51", base="release-2.0"))
     assert rc == 2
-    assert "cannot change the base of a materialized quest" in capsys.readouterr().err
+    assert "cannot change the base once a quest is built" in capsys.readouterr().err
     after = _meta(Quest.load(tmp_path, "2026-06-24-edit51"))
     assert after["base_branch"] == before["base_branch"]
     assert after["orig_base_head"] == before["orig_base_head"]

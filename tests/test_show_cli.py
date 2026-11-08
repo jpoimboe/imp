@@ -229,7 +229,7 @@ def test_show_backlog_artifact_message_wording(
     err_verify = capsys.readouterr().err
     assert rc_verify == 2
     assert err_verify.rstrip("\n") == (
-        "imp: 2026-06-16-bkg111 is in the backlog (not started); no failing gate output yet"
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no failed test run yet"
     )
 
 
@@ -1141,7 +1141,7 @@ def test_show_verify_absent_reports_no_gate_output(
     rc = main(["show", _ID, "verify"])
     err = capsys.readouterr().err
     assert rc == 2, err
-    assert err.rstrip("\n") == f"imp: no failing gate output recorded for '{_ID}'"
+    assert err.rstrip("\n") == f"imp: no failed test run recorded for '{_ID}'"
 
 
 def test_show_absent_spec_message_is_unchanged(
