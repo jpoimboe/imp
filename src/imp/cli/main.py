@@ -4069,8 +4069,8 @@ def _excerpts(
         start = max(0, m.start() - context)
         end = min(len(content), m.end() + context)
         body = " ".join(content[start:end].split())
-        prefix = "… " if start > 0 else ""
-        suffix = " …" if end < len(content) else ""
+        prefix = "…" if start > 0 else ""
+        suffix = "…" if end < len(content) else ""
         spans.append(prefix + _highlight(body, query, color=color) + suffix)
     return spans, max(0, len(matches) - limit)
 
