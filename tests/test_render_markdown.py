@@ -36,6 +36,7 @@ from tests._event_fixtures import (
     INTERNAL_TOOLS,
     ev,
     interrupted_task_lead_events,
+    subagent_then_bash_events,
     task_lead_started,
     tool_burst_events,
 )
@@ -1523,3 +1524,8 @@ def test_full_omit_only_burst_emits_no_heading() -> None:
     out = _md(tool_burst_events(("update_step_label", {"label": "l"})), full=True)
     assert "**tools**" not in out
     assert "update_step_label" not in out
+
+
+def test_lean_burst_recap_times_only_the_tools() -> None:
+    lines = _md(subagent_then_bash_events()).splitlines()
+    assert "1 call · bash · 5s" in lines

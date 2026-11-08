@@ -157,3 +157,29 @@ def tool_burst_events(*calls: tuple[str, dict[str, Any]]) -> list[dict[str, Any]
         events.append(ev(f"r{i}", "tool_result", agent_id="step:p/s", id=f"b{i}",
                          content="ok", error=False))
     return events
+
+
+def subagent_then_bash_events() -> list[dict[str, Any]]:
+    """Prose, a 99s subagent, then a 5s bash burst closed by prose."""
+    a = "step:p/s"
+
+    def prose(eid: str, text: str, ts: str) -> dict[str, Any]:
+        return ev(eid, "agent_message", agent_id=a, provider="anthropic", model="m",
+                  stop_reason="tool_use", usage={},
+                  raw={"content": [{"type": "text", "text": text}]}, timestamp=ts)
+
+    return [
+        ev("s", "step_started", step="s", kind="agent", phase="p", model="m",
+           provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
+        prose("p1", "dispatching", "2026-06-03T00:00:00+00:00"),
+        ev("d", "tool_call", agent_id=a, id="x1", name="sub_agent",
+           input={"subagent_name": "explorer", "task_description": "go"},
+           timestamp="2026-06-03T00:00:01+00:00"),
+        ev("dr", "tool_result", agent_id=a, id="x1", content='{"status":"Success"}',
+           error=False, timestamp="2026-06-03T00:01:40+00:00"),
+        ev("c", "tool_call", agent_id=a, id="b1", name="bash", input={"command": "ls"},
+           timestamp="2026-06-03T00:01:45+00:00"),
+        ev("r", "tool_result", agent_id=a, id="b1", content="ok", error=False,
+           timestamp="2026-06-03T00:01:50+00:00"),
+        prose("p2", "done", "2026-06-03T00:01:51+00:00"),
+    ]

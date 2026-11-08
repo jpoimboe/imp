@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re as _re
 import unittest.mock
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from tests._event_fixtures import (
     ev,
     express_spec_marker_events,
     interrupted_task_lead_events,
+    subagent_then_bash_events,
     task_lead_started,
 )
 
@@ -2238,62 +2240,97 @@ def test_opening_intent_renders_user_turn_with_gutter() -> None:
     assert any(ln == "> add a flag" for ln in body)   # depth-0, caret-marked human turn
 
 
-def test_burst_summary_drops_sub_second_duration() -> None:
-    burst = nv.ToolBurstFold(
-        start_ts="2024-01-01T00:00:00", end_ts="2024-01-01T00:00:00.500000")
-    burst.calls.append(
-        nv.ToolCall(call_id="b1", name="read_file", input={"p": "1"}))
-    summary = rt._burst_summary(burst)
-    assert summary == "1 call · read_file"
+_BT0 = datetime(2026, 6, 3, tzinfo=UTC)
+_BA = "step:p/s"
 
 
-def test_burst_summary_duration_uses_prose_span_not_tool_span() -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
-        start_ts="2026-06-03T00:00:05+00:00",
-        end_ts="2026-06-03T00:00:06+00:00",          # tool span = 1s
-        span_start_ts="2026-06-03T00:00:00+00:00",
-        span_end_ts="2026-06-03T00:00:09+00:00",     # prose span = 9s
-    )
-    # The recap reports the 9s prose → prose span, not the 1s tool span.
-    assert rt._burst_summary(burst) == "1 call · bash · 9s"
+def _bat(s: float) -> str:
+    return (_BT0 + timedelta(seconds=s)).isoformat()
 
 
-def test_burst_summary_falls_back_to_tool_span_when_no_prose_span() -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
-        start_ts="2026-06-03T00:00:00+00:00",
-        end_ts="2026-06-03T00:00:04+00:00",          # tool span = 4s
-        span_start_ts=None,
-        span_end_ts=None,
-    )
-    # No span boundaries → fall back to the tool span (4s) rather than dropping it.
-    assert rt._burst_summary(burst) == "1 call · bash · 4s"
+def _bstep() -> dict:
+    return ev("s", "step_started", step="s", kind="agent", phase="p", model="m",
+              provider="anthropic", timestamp=_bat(0))
 
 
-def test_burst_summary_sub_second_prose_span_drops_duration() -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
-        start_ts="2026-06-03T00:00:00+00:00",
-        end_ts="2026-06-03T00:00:05+00:00",                  # tool span 5s (would show if used)
-        span_start_ts="2026-06-03T00:00:00+00:00",
-        span_end_ts="2026-06-03T00:00:00.500000+00:00",      # prose span 0.5s
-    )
-    # Sub-second prose span → the fmt_seconds_done < 1s rule drops the suffix.
-    assert rt._burst_summary(burst) == "1 call · bash"
+def _bprose(eid: str, s: float) -> dict:
+    return ev(eid, "agent_message", agent_id=_BA, provider="anthropic", model="m",
+              stop_reason="tool_use", usage={},
+              raw={"content": [{"type": "text", "text": f"prose {eid}"}]}, timestamp=_bat(s))
 
 
-def test_burst_summary_falls_back_to_tool_end_when_no_closing_prose() -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
-        start_ts="2026-06-03T00:00:02+00:00",
-        end_ts="2026-06-03T00:00:06+00:00",          # tool span end = 6s from step
-        span_start_ts="2026-06-03T00:00:00+00:00",   # step boundary
-        span_end_ts=None,                             # no closing prose
-    )
-    # span_start_ts set, span_end_ts=None → use span_start_ts and fall back to end_ts.
-    # Duration = 00:06 - 00:00 = 6s.
-    assert rt._burst_summary(burst) == "1 call · bash · 6s"
+def _bcall(cid: str, name: str, s: float) -> dict:
+    return ev(f"c-{cid}", "tool_call", agent_id=_BA, id=cid, name=name, input={},
+              timestamp=_bat(s))
+
+
+def _bresult(cid: str, s: float) -> dict:
+    return ev(f"r-{cid}", "tool_result", agent_id=_BA, id=cid, content="ok", error=False,
+              timestamp=_bat(s))
+
+
+def _recaps(events: list[dict]) -> list[str]:
+    return [ln.strip() for ln in _lines(events) if _re.match(r"\s*\d+ calls? · ", ln)]
+
+
+def test_burst_recap_excludes_subagent_time_before_the_burst() -> None:
+    # The burst opens after a 99s subagent; only the 5s bash call is timed.
+    assert _recaps(subagent_then_bash_events()) == ["1 call · bash · 5s"]
+
+
+def test_burst_recap_excludes_thinking_gap_between_calls() -> None:
+    events = [_bstep(), _bprose("p1", 0),
+              _bcall("a", "read_file", 1), _bresult("a", 3),
+              ev("th", "thinking", agent_id=_BA, content="hmm", timestamp=_bat(10)),
+              _bcall("b", "bash", 61), _bresult("b", 65),
+              _bprose("p2", 70)]
+    assert _recaps(events) == ["2 calls · read_file · bash · 6s"]
+
+
+def test_burst_recap_counts_overlapping_calls_once() -> None:
+    events = [_bstep(), _bprose("p1", 0),
+              _bcall("a", "read_file", 1), _bcall("b", "grep", 1),
+              _bresult("a", 4), _bresult("b", 6),
+              _bprose("p2", 7)]
+    assert _recaps(events) == ["2 calls · read_file · grep · 5s"]
+
+
+def test_burst_recap_sub_second_tool_time_drops_duration() -> None:
+    events = [_bstep(), _bprose("p1", 0),
+              _bcall("a", "read_file", 1.0), _bresult("a", 1.3),
+              _bcall("b", "grep", 1.4), _bresult("b", 1.6),
+              _bcall("c", "read_file", 1.7), _bresult("c", 1.9),
+              _bprose("p2", 30)]
+    assert _recaps(events) == ["3 calls · read_file · grep"]
+
+
+def test_burst_recap_skips_call_still_open_at_flush() -> None:
+    events = [_bstep(), _bprose("p1", 0),
+              _bcall("a", "bash", 1), _bresult("a", 4),
+              _bcall("b", "read_file", 5),
+              _bprose("p2", 20)]
+    assert _recaps(events) == ["2 calls · bash · read_file · 3s"]
+
+
+def test_burst_recap_with_no_completed_call_has_no_duration() -> None:
+    events = [_bstep(), _bprose("p1", 0), _bcall("a", "read_file", 1), _bprose("p2", 20)]
+    assert _recaps(events) == ["1 call · read_file"]
+
+
+def test_orphan_tool_result_gets_zero_length_interval() -> None:
+    tree = nv.build_tree([_bstep(), _bresult("zz", 5)])
+    step = tree.root.children[0].children[0]
+    (burst,) = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    (call,) = burst.calls
+    assert call.result_ts == call.call_ts == _bat(5)
+
+
+def test_burst_recap_counts_killed_call_interval() -> None:
+    events = [_bstep(), _bprose("p1", 0),
+              _bcall("a", "bash", 1), _bresult("a", 31),
+              ev("k", "tool_killed", agent_id=_BA, id="a", name="bash", timestamp=_bat(31)),
+              _bprose("p2", 40)]
+    assert _recaps(events) == ["1 call · bash · 30s"]
 
 
 def test_skill_load_renders_gerund() -> None:
@@ -2708,7 +2745,7 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
     (call,) = bursts[0].calls
     assert call.name == "complete_step"
     assert call.result is None            # genuinely dangling (no phantom result)
-    assert bursts[0].end_ts is None       # missing result never advanced the clock
+    assert call.result_ts is None         # no result, so no timed interval
 
     # Lean render: closed terminal with step elapsed; the internal tool gets no recap.
     lean = "\n".join(_lines(events, full=False))
@@ -4214,24 +4251,23 @@ def test_reopen_restart_reseeds_the_own_header() -> None:
 
 
 @pytest.mark.parametrize("name", INTERNAL_TOOLS)
-def test_burst_summary_drops_internal_tool_and_keeps_duration(name: str) -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="1", name="write_file", input={}),
-               nv.ToolCall(call_id="2", name=name, input={}),
-               nv.ToolCall(call_id="3", name="bash", input={})],
-        span_start_ts="2026-06-03T00:00:00+00:00",
-        span_end_ts="2026-06-03T00:00:25+00:00",
-    )
-    assert rt._burst_summary(burst) == "2 calls · write_file · bash · 25s"
+def test_burst_summary_times_only_visible_calls(name: str) -> None:
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id="1", name="write_file", input={},
+                    call_ts=_bat(0), result_ts=_bat(10)),
+        nv.ToolCall(call_id="2", name=name, input={},
+                    call_ts=_bat(10), result_ts=_bat(20)),
+        nv.ToolCall(call_id="3", name="bash", input={},
+                    call_ts=_bat(20), result_ts=_bat(25)),
+    ])
+    # The internal call's 10s interval is neither counted nor timed.
+    assert rt._burst_summary(burst) == "2 calls · write_file · bash · 15s"
 
 
 @pytest.mark.parametrize("name", INTERNAL_TOOLS)
 def test_burst_summary_internal_only_burst_is_none(name: str) -> None:
-    burst = nv.ToolBurstFold(
-        calls=[nv.ToolCall(call_id="1", name=name, input={})],
-        span_start_ts="2026-06-03T00:00:00+00:00",
-        span_end_ts="2026-06-03T00:00:10+00:00",
-    )
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id="1", name=name, input={}, call_ts=_bat(0), result_ts=_bat(10))])
     assert rt._burst_summary(burst) is None
 
 

@@ -1368,13 +1368,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
 
 
 def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
-    """One-line recap of a finished tool burst for the lean view: the distinct
-    tool names (first-seen order, capped), the call count, and the burst
-    duration. The duration mirrors the live status timer's prose → prose span
-    (the heads-down interval between agent outputs), falling back to the
-    first-call → last-result tool span when a burst has no surrounding prose, so
-    the recap equals what the live timer read the instant the burst closed.
-    Counts only `nv.visible_calls`. Returns None when nothing renderable remains."""
+    """Lean recap of a finished burst; its duration times only the tools (`nv.tool_seconds`)."""
     calls = nv.visible_calls(burst)
     if not calls:
         return None
@@ -1383,9 +1377,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
     count = f"{n} call{'s' if n != 1 else ''}"
-    elapsed = nv.elapsed_seconds(burst.span_start_ts or burst.start_ts,
-                                 burst.span_end_ts or burst.end_ts)
-    done = fmt_seconds_done(elapsed)
+    done = fmt_seconds_done(nv.tool_seconds(calls))
     secs = f" · {done}" if done else ""
     # Count-first (§3): the count leads, then the distinct names, then duration.
     # No leading marker — a tool burst is sub-detail of the agent's turn and is
