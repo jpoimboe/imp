@@ -1624,3 +1624,23 @@ def test_summary_markdown_heading_reads_untitled_without_title_or_intent() -> No
 
 def test_summary_markdown_status_line_uses_the_display_word() -> None:
     assert _md_head(title="t", status="merge_blocked")[1] == "**Status:** merge blocked"
+
+
+def test_markdown_drops_claude_interrupt_text_from_successful_complete_step() -> None:
+    aid = "step:review/rev"
+    events = [
+        ev("1", "step_started", step="rev", kind="agent", phase="review",
+           model="m", provider="claude"),
+        ev("2", "tool_call", agent_id=aid, id="X", name="complete_step",
+           input={"status": "Success", "outcome": "done"}),
+        ev("3", "tool_result", agent_id=aid, id="X", error=True,
+           content=("The user doesn't want to proceed with this tool use. STOP what "
+                    "you are doing and wait for the user to tell you how to proceed.")),
+        ev("4", "query_result", agent_id=aid, subtype="error_during_execution"),
+        ev("5", "agent_result", agent_id=aid, status="Success", outcome="done"),
+        ev("6", "step_completed", step="rev", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    out = _md(events, full=True)
+    assert "· complete_step" in out
+    assert "doesn't want to proceed" not in out
