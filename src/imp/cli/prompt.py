@@ -6,8 +6,9 @@ One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
 EOFError — the CLI's signal handler catches both and triggers save-and-exit.
 
 In vi mode a bare ESC enters normal mode, shown by a block cursor (bar in
-insert, underline in replace); in emacs mode prompt_toolkit discards a lone
-ESC after its key timeout.
+insert, underline in replace). A lone ESC (nothing else in the same read)
+takes effect at once via the mode's own ESC handler; Alt chords arrive in
+one write and still match.
 Alt+Enter (`escape c-m`) is bound by `_build_session` to insert a newline.
 
 History is in-memory and seeded at construction from the quest's durable
@@ -66,11 +67,14 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                    empty_hint: str = EMPTY_PROMPT_HINT,
                    output_fn: Callable[[str], None] = print) -> Any:
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.application import get_app
     from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
     from prompt_toolkit.enums import EditingMode
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.formatted_text import to_plain_text
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
 
     history = InMemoryHistory()
     kb = KeyBindings()
@@ -119,9 +123,17 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     def _(event: Any) -> None:
         event.app.current_buffer.insert_text("\n")
 
+    @kb.add("escape", eager=Condition(lambda: not get_app().key_processor.input_queue))
+    def _lone_escape(event: Any) -> None:
+        # Fire a lone ESC now; pick its binding like prompt_toolkit: eager first, then last.
+        matches = [
+            b for b in event.app.key_processor._bindings.get_bindings_for_keys((Keys.Escape,))
+            if b.handler is not _lone_escape and b.filter()]
+        *_, binding = [b for b in matches if b.eager()] or matches
+        binding.call(event)
+
     completer = (
         SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
-    from prompt_toolkit.application import get_app
     from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.output import ColorDepth
@@ -171,6 +183,8 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
         complete_while_typing=False, editing_mode=mode, erase_when_done=True,
         multiline=True, reserve_space_for_menu=0, color_depth=color_depth,
         cursor=ModalCursorShapeConfig() if mode == EditingMode.VI else None)
+    # Neovim's value: a lone ESC resolves in 50ms; Alt chords arrive in one read.
+    session.app.ttimeoutlen = 0.05
     if dot_state is not None:
         from imp.cli import vi_dot
 
