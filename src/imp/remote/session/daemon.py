@@ -132,10 +132,9 @@ def _record_landing(
         else:
             state.clear_step_resume()   # the executor arms no resume for a non-agent step
         return
-    payload = prompt["payload"]
-    if not payload.get("interrupt"):
+    if not prompt["payload"].get("interrupt"):
         state.arm_step_resume(should_continue=False)   # a question: re-solicit it
-    elif payload.get("steer_hint") in (_RESUME_PROMPT, _SCRIPT_HOLD_PROMPT):
+    elif step_kind == "script":
         state.arm_step_resume(should_continue=False, target="prompt-paused")
     else:
         state.arm_step_resume(should_continue=True, target="prompt-interrupted")
@@ -250,20 +249,17 @@ async def serve_quest_session(
                 and not (non_interactive or autonomous)):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
-            # a leave here re-records the landing by position.
+            # a leave here keeps the armed target.
             # Only an interactive resume can answer the prompt; a headless or
             # autonomous resume has no channel to type a redirect, so honoring it
             # would re-pause without progress. Fall through to run the agent — it
             # replays the interrupted step (§6.15 mid-step ctrl-c resume).
+            ran = False
             result: Any = RunResult.PAUSED
-            prompt: str | None
-            if _paused_is_script():
-                prompt = _SCRIPT_HOLD_PROMPT
-            elif resume_target == "prompt-interrupted":
-                prompt = _RESUME_INTERRUPTED_PROMPT
-            else:
-                prompt = _RESUME_PROMPT
+            prompt: str | None = (
+                _SCRIPT_HOLD_PROMPT if _paused_is_script() else _RESUME_PROMPT)
         else:
+            ran = True
             result = await run_fn(
                 quest,
                 on_event=on_event,
@@ -306,6 +302,7 @@ async def serve_quest_session(
                         continue
                     coordinator.enqueue_interject(reply)
             _append_workflow_resumed(quest.event_log(), in_process=True)
+            ran = True
             result = await run_fn(
                 quest,
                 on_event=on_event,
@@ -318,7 +315,8 @@ async def serve_quest_session(
             prompt = _hold_prompt(
                 result, coordinator, is_script_fn=_paused_is_script,
                 log=quest.event_log())
-        if result is RunResult.PAUSED and server.left_at is not None:
+        # Nothing ran this session: a leave keeps the armed target.
+        if ran and result is RunResult.PAUSED and server.left_at is not None:
             state = State.load(quest.state_dir)
             # The run moved on since the leave: the executor's own resume arming stands.
             if state.step == server.left_at.step:

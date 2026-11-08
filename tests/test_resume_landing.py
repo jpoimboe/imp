@@ -216,13 +216,13 @@ async def test_steer_gate_leave_resumes_at_the_interrupted_prompt(
         await _leave(client, "ctrl-d")
 
     await _leg(quest, fake, _resumed, resume=True)
-    assert _gates(seen)[0]["payload"]["steer_hint"] == daemon._RESUME_INTERRUPTED_PROMPT
+    assert _gates(seen)[0]["payload"]["steer_hint"] == daemon._RESUME_PROMPT
     assert calls == []
 
 
 _HOLD_CASES = [
     pytest.param("prompt-interrupted", True, "threshold",
-                 daemon._RESUME_INTERRUPTED_PROMPT, id="interrupted"),
+                 daemon._RESUME_PROMPT, id="interrupted"),
     pytest.param("prompt-paused", False, "threshold", daemon._RESUME_PROMPT, id="paused"),
     pytest.param("prompt-paused", False, "verify", daemon._SCRIPT_HOLD_PROMPT, id="script"),
 ]
@@ -250,6 +250,43 @@ async def test_leave_at_a_resumed_hold_prompt_lands_there_again(
     assert await _leg(quest, fake, _body, resume=True) is RunResult.PAUSED
     assert _landing(quest) == (step, target, cont)
     assert calls == []
+
+
+@pytest.mark.anyio
+async def test_second_resume_of_a_left_steer_hold_still_continues_the_agent(
+    tmp_path: Path,
+) -> None:
+    quest = _make_quest(tmp_path, QID)
+    st = State.load(quest.state_dir)
+    st.step = "threshold"
+    st.arm_step_resume(should_continue=True, target="prompt-interrupted")
+    st.save(quest.state_dir)
+    calls, fake = _fake_recorder()
+
+    async def _left(client: SessionClient, received: Events) -> None:
+        await wait_until(lambda: bool(_gates(received)))
+        assert _gates(received)[0]["payload"]["steer_hint"] == daemon._RESUME_PROMPT
+        await _leave(client, "ctrl-d")
+
+    await _leg(quest, fake, _left, resume=True)
+    assert _landing(quest) == ("threshold", "prompt-interrupted", True)
+    assert calls == []
+
+    seen: list[tuple[str | None, bool]] = []
+
+    async def _run(q: Quest, **_kw: Any) -> RunResult:
+        st = State.load(q.state_dir)
+        seen.append((st.resume_target, st.resume_should_continue))
+        return RunResult.PAUSED
+
+    async def _enter(client: SessionClient, received: Events) -> None:
+        await wait_until(lambda: bool(_gates(received)))
+        assert _gates(received)[0]["payload"]["steer_hint"] == daemon._RESUME_PROMPT
+        await client.send_input("")
+        await wait_until(lambda: bool(seen))
+
+    assert await _leg(quest, _run, _enter, resume=True) is RunResult.PAUSED
+    assert seen == [("prompt-interrupted", True)]
 
 
 @pytest.mark.anyio
@@ -305,8 +342,7 @@ async def test_steer_landing_does_not_outlive_a_later_midrun_leave(
 
     async def _resumed(client: SessionClient, received: Events) -> None:
         await wait_until(lambda: bool(_gates(received)))
-        assert _gates(received)[0]["payload"]["steer_hint"] == (
-            daemon._RESUME_INTERRUPTED_PROMPT)
+        assert _gates(received)[0]["payload"]["steer_hint"] == daemon._RESUME_PROMPT
         await client.send_input("")
         await wait_until(lambda: _lines(marker) == 2)
         await _leave(client, "ctrl-d")
@@ -418,3 +454,19 @@ async def test_question_leave_then_lane_eviction_leaves_resume_cleared(
 
     assert await _leg(quest, _asks_then_evicts, _body) is RunResult.PAUSED
     assert _landing(quest) == (None, None, False)
+
+
+@pytest.mark.parametrize(("step_kind", "landing"), [
+    ("agent", ("prompt-interrupted", True)),
+    ("script", ("prompt-paused", False)),
+])
+@pytest.mark.parametrize("hint", [
+    daemon._RESUME_PROMPT, daemon._RESUME_INTERRUPTED_PROMPT, daemon._SCRIPT_HOLD_PROMPT])
+def test_interrupt_prompt_landing_keys_on_step_kind_not_text(
+    step_kind: str, landing: tuple[str, bool], hint: str,
+) -> None:
+    state = State(id=QID, step="s", step_attempt=0, status="paused")
+    daemon._record_landing(
+        state, {"payload": {"steer_hint": hint, "interrupt": True}}, step_kind)
+    assert (state.resume_pending, state.resume_target, state.resume_should_continue) == (
+        "s", *landing)
