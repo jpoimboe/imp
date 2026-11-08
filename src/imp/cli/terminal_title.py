@@ -14,14 +14,14 @@ class TerminalTitle:
         self,
         stream: Any,
         quest_id: str,
-        quest_name: str,
+        quest_title: str,
         initial: str = "busy",
         *,
         project: str = "",
     ) -> None:
         self._stream = stream
         self._quest_id = quest_id
-        self._name = quest_name
+        self._title = quest_title
         self._project = project
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
@@ -48,12 +48,12 @@ class TerminalTitle:
         self._stream.flush()
         self._current = None
 
-    def update_name(self, name: str) -> None:
-        if name == self._name:
+    def update_title(self, title: str) -> None:
+        if title == self._title:
             return
-        self._name = name
+        self._title = title
         glyph = self._derive()
-        # A rename does not change the derived glyph, so _set would short-circuit
+        # A title change does not change the derived glyph, so _set would short-circuit
         # on the unchanged glyph; clear _current to force a re-emit.
         self._current = None
         self._set(glyph)
@@ -72,7 +72,7 @@ class TerminalTitle:
             return
         prefix = f"{glyph} " if glyph else ""
         label = " · ".join(
-            p for p in (self._project, self._quest_id, self._name) if p)
+            p for p in (self._project, self._quest_id, self._title) if p)
         self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()
         self._current = glyph

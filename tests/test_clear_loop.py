@@ -595,11 +595,11 @@ async def test_run_cleared_session_cancel_resets_title(
 
     class _FakeTitle:
         def __init__(
-            self, stream: object, cid: str, name: str, initial: str = "busy",
+            self, stream: object, cid: str, quest_title: str, initial: str = "busy",
             *, project: str = "",
         ) -> None:
             self._quest_id = cid
-            self._name = name
+            self._title = quest_title
 
         def busy(self) -> None: ...
         def idle(self) -> None: ...

@@ -26,7 +26,7 @@ def test_default_glyphs_match_spec() -> None:
 
 def test_init_sets_busy_title_on_tty() -> None:
     s = _TTY()
-    TerminalTitle(s, "nagi22", "My Quest")
+    TerminalTitle(s, "nagi22", quest_title="My Quest")
     assert s.getvalue() == "\x1b]2;✦ nagi22 · My Quest\x07"
 
 
@@ -83,48 +83,48 @@ def test_inert_on_non_tty_stream() -> None:
     assert s.getvalue() == ""
 
 
-def test_update_name_emits_new_name_under_busy_glyph() -> None:
+def test_update_title_emits_new_title_under_busy_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == "\x1b]2;✦ nagi22 · foo\x07"
 
 
-def test_update_name_same_name_is_noop() -> None:
+def test_update_title_same_title_is_noop() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "My Quest")
     s.truncate(0)
     s.seek(0)
-    title.update_name("My Quest")
+    title.update_title("My Quest")
     assert s.getvalue() == ""
 
 
-def test_update_name_preserves_idle_glyph() -> None:
+def test_update_title_preserves_idle_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
     title.idle()
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == f"\x1b]2;{GLYPH_IDLE} nagi22 · foo\x07"
 
 
-def test_update_name_inert_on_non_tty() -> None:
+def test_update_title_inert_on_non_tty() -> None:
     s = _Pipe()
     title = TerminalTitle(s, "nagi22", "Old Name")
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == ""
 
 
-def test_update_name_after_reset_uses_busy_glyph() -> None:
+def test_update_title_after_reset_uses_busy_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
     title.reset()
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == "\x1b]2;✦ nagi22 · foo\x07"
 
 
@@ -168,13 +168,13 @@ def test_busy_restores_hold_glyph_after_idle() -> None:
     assert s.getvalue() == "\x1b]2;⛙ nagi22 · My Quest\x07"
 
 
-def test_update_name_preserves_active_hold_glyph() -> None:
+def test_update_title_preserves_active_hold_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
     title.set_hold_glyph("⛙")
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == "\x1b]2;⛙ nagi22 · foo\x07"
 
 
@@ -189,14 +189,14 @@ def test_busy_restores_hold_glyph_set_while_idle() -> None:
     assert s.getvalue() == "\x1b]2;⛙ nagi22 · My Quest\x07"
 
 
-def test_update_name_after_reset_reemits_under_hold_glyph() -> None:
+def test_update_title_after_reset_reemits_under_hold_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
     title.set_hold_glyph("⛙")
     title.reset()
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == "\x1b]2;⛙ nagi22 · foo\x07"
 
 
@@ -218,5 +218,5 @@ def test_project_survives_rename_under_the_idle_glyph() -> None:
     title.idle()
     s.truncate(0)
     s.seek(0)
-    title.update_name("foo")
+    title.update_title("foo")
     assert s.getvalue() == f"\x1b]2;{GLYPH_IDLE} imp · vope45 · foo\x07"

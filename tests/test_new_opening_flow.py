@@ -327,11 +327,11 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
     class _FakeTitle:
         def __init__(
-            self, stream: object, cid: str, name: str, initial: str = "busy",
+            self, stream: object, cid: str, quest_title: str, initial: str = "busy",
             *, project: str = "",
         ) -> None:
             self._quest_id = cid
-            self._name = name
+            self._title = quest_title
 
         def busy(self) -> None: ...
         def idle(self) -> None: ...
