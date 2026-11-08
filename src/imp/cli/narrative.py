@@ -16,7 +16,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -48,9 +48,15 @@ _TURN_END_STOP_REASONS: frozenset[str] = frozenset(
 _OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "incomplete", "failed", "cancelled"})
 
-# Human interrupt/leave reasons: like the silent yield, they append no PauseNode.
-_HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
-    {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit", "pause"})
+# Manual-stop reason -> display label. Keys: like the silent yield, they append no PauseNode.
+MANUAL_STOP_LABELS: Mapping[str, str] = {
+    "pause": "/pause",
+    "ctrl-d": "Ctrl-D",
+    "ctrl-c": "Ctrl-C",
+    "sigterm": "SIGTERM",
+    "sighup": "SIGHUP",
+    "sigquit": "SIGQUIT",
+}
 
 # Pauses that get no resume marker: not an absence, or the key was not recorded.
 _NO_MARKER_REASONS: frozenset[str] = SIDE_EFFECT_REASONS | {"interrupt", "awaiting_turn"}
@@ -456,6 +462,14 @@ class PauseNode:
 class ResumeMarkerNode:
     """The run stopped and was picked back up `gap_s` whole seconds later."""
     gap_s: int
+    collapsible = False
+
+
+@dataclass(frozen=True)
+class LeaveMarkerNode:
+    """The history ends on this unresumed manual stop (batch-only: live owns the leave block)."""
+    reason: str
+    ts: str | None  # the stop's timestamp: identifies it across a window and the full log
     collapsible = False
 
 
@@ -1339,7 +1353,19 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     for e in events:
         b.add(e)
     b.finalize()
+    # Batch-only: the live view prints its own leave block in this slot.
+    stop = b._open_pause
+    if (b._root.status == "paused" and stop is not None and stop.reason is not None
+            and stop.reason in MANUAL_STOP_LABELS):
+        b._root.children.append(LeaveMarkerNode(reason=stop.reason, ts=stop.timestamp))
     return b.tree
+
+
+def overlay_leave_marker(sliced: NarrativeTree, full: NarrativeTree) -> None:
+    """Keep `sliced`'s trailing paused line only if `full` still ends on that stop."""
+    last = sliced.root.children[-1:]
+    if last and isinstance(last[0], LeaveMarkerNode) and last != full.root.children[-1:]:
+        sliced.root.children.pop()
 
 
 def _subagent_folds(children: list[Any]) -> Iterator[SubagentFold]:
@@ -1832,7 +1858,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         # PauseNode. (Shared render path — covers both imp log and the live view.)
         if reason == "awaiting_user":
             return
-        if reason in _HUMAN_INTERRUPT_REASONS:
+        if reason in MANUAL_STOP_LABELS:
             # No PauseNode; unlike awaiting_user, keep the flag so the digest flushes.
             self._pause_outcome_shown = True
             return
@@ -2686,6 +2712,10 @@ def resume_marker_text(node: ResumeMarkerNode) -> str:
     return f"paused · resumed {duration} later"
 
 
+def leave_marker_text(node: LeaveMarkerNode) -> str:
+    return f"paused · {MANUAL_STOP_LABELS[node.reason]}"
+
+
 _RETRY_VERB: dict[str, str] = {
     "rate_limit": "waiting for limit reset",
     "auth": "waiting for re-authentication",
@@ -2932,6 +2962,8 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "gap_s": node.gap_s}
     if isinstance(node, UserRenameNode):
         return {"t": t, "name": node.name}
+    if isinstance(node, LeaveMarkerNode):
+        return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):

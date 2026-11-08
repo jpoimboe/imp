@@ -449,11 +449,14 @@ def test_parity_holds_with_open_step_when_paused() -> None:
     # A live-then-paused log has an open StepNode; a batch replay of the same
     # log shows it open too. Both are correct (design §5.1 / §11).
     log = [*INTERLEAVED_LOG[:-1], _ev("wp", "workflow_paused", reason="ctrl-c")]
-    batch = nv.build_tree(log)
+    batch = nv.structural_repr(nv.build_tree(log).root)
     b = nv.NarrativeBuilder()
     for e in log:
         b.add(e)
-    assert nv.structural_repr(batch.root) == nv.structural_repr(b.tree.root)
+    # The trailing leave marker is batch-only by design.
+    assert batch["children"][-1] == {"t": "LeaveMarkerNode", "reason": "ctrl-c"}
+    del batch["children"][-1]
+    assert batch == nv.structural_repr(b.tree.root)
 
 
 def test_resume_reentry_reuses_phase_and_resets_step() -> None:
