@@ -4526,7 +4526,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "May also be supplied via --message.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
-                            "opening step names the quest if omitted.")
+                            "opening step sets one if omitted.")
     p_new.add_argument("--headless", action="store_true", dest="non_interactive",
                        help="Run headless: no live prompt; supply the opening "
                             "message via the positional argument or --message.")

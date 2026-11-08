@@ -499,5 +499,5 @@ def test_the_startup_band_stays_bare_when_the_replay_established_a_carrier() -> 
     rows = drv.compose_startup(0)
     assert rows is not None and len(rows) == 3     # spinner / blank / identity
     # _cc_events' quest_created carries `quest_id`, not `id`, so the band is the
-    # title alone. The boot window names the quest; it does not meter it.
+    # title alone. The boot window shows the quest's title; it does not meter it.
     assert rows[2] == "t"

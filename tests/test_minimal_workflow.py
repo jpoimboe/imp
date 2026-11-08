@@ -66,7 +66,7 @@ def test_front_door_allows_worktree_and_keeps_naming_parking_and_scouting() -> N
     tools = _wf().agents["front-door"].tools
     assert "create_and_enter_worktree" in tools   # forks the worktree on go-live
     assert "save_and_exit" in tools               # parking stays available
-    assert "rename_quest" in tools                # it names the quest
+    assert "rename_quest" in tools                # it titles the quest
     assert "sub_agent" in tools                   # explorer/researcher/spiker
 
 

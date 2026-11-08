@@ -454,7 +454,7 @@ def test_emit_completed_non_merge_tail_names_the_imp_branch_not_the_base(
     assert quest.materialized is False                          # the real render seam
     main._emit_completed(quest, merge=None)
     out = capsys.readouterr().out
-    # The tail names the quest branch imp/<id>, NOT the base branch, even though the
+    # The tail cites the quest branch imp/<id>, NOT the base branch, even though the
     # client quest object is still materialized=False.
     assert out.split("\n")[0] == (
         f'{pal.ansi("soro82", "wordmark")} · Closing commit list layout · '
