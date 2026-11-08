@@ -10,11 +10,18 @@ import pytest
 
 from imp.cli.accounting import RowUsage
 from imp.cli.main import main
-from imp.cli.quota_column import QuotaColumn, QuotaFallback
-from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
+from imp.cli.quota_column import QuotaColumn, QuotaFallback, quota_view
+from imp.cli.quota_share import (
+    GAUGE_BELOW,
+    GAUGE_UNREAD,
+    NO_CHARGE,
+    Charge,
+    GaugeCharge,
+)
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
+    rows_charge,
     total_cell,
 )
 from imp.engine.quest import LAYOUT_VERSION
@@ -23,17 +30,15 @@ from imp.paths import project_state_dir
 _HDR = SummaryHeader(title="feature", quest_id="abc", status="completed",
                      total_seconds=2342.0)
 
-_NO_READINGS = "quota unavailable; this run recorded no quota readings"
 
-
-def _row(step: str, secs: int, usage: RowUsage, units: Units) -> StepRow:
+def _row(step: str, secs: int, usage: RowUsage, charge: Charge) -> StepRow:
     return StepRow(phase="plan", step=step, start_ts="2026-01-01T00:00:00+00:00",
                    end_ts=f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00",
-                   usage=usage, units=units, subagents=[])
+                   usage=usage, charge=charge, subagents=[])
 
 
 def _notional(fresh: int = 1_000_000, out: int = 20_000) -> RowUsage:
-    """A subscription row: with no resolved gauge its cost cell reads $3.00*."""
+    """A subscription row: with no quota column its cost cell reads $3.00*."""
     return RowUsage(fresh_input=fresh, output=out, dollars=3.0, priced=1, notional=1)
 
 
@@ -42,33 +47,40 @@ def _metered(fresh: int = 200_000, out: int = 9_000) -> RowUsage:
     return RowUsage(fresh_input=fresh, output=out, dollars=0.73, priced=1)
 
 
-_RESOLVED = [_row("plan-writer", 90, _notional(), Units.of("claude", 3.0))]
-_MIXED = [_row("plan-writer", 90, _notional(), Units.of("claude", 3.0)),
-          _row("coder", 120, _metered(), Units.of("codex", 2.0))]
-_METERED = [_row("coder", 90, _metered(), Units.of("claude", 1.0))]
+def _view(rows: list[StepRow]) -> QuotaColumn | QuotaFallback:
+    return quota_view(rows_charge(rows))
+
+
+_RESOLVED = [_row("plan-writer", 90, _notional(),
+                  Charge.of("claude", GaugeCharge.resolved(0.9)))]
+_BELOW = [_row("plan-writer", 90, _notional(), Charge.of("claude", GAUGE_BELOW))]
+_MIXED = [_row("plan-writer", 90, _notional(),
+               Charge.of("claude", GaugeCharge.resolved(0.9))),
+          _row("coder", 120, _notional(200_000, 9_000),
+               Charge.of("codex", GaugeCharge.resolved(0.6)))]
+_METERED = [_row("coder", 90, _metered(), NO_CHARGE)]
+_UNREAD = [_row("plan-writer", 90, _notional(), Charge.of("claude", GAUGE_UNREAD))]
 
 
 @pytest.mark.parametrize("rows,quota,expected", [
-    # A resolved gauge: a share of the weekly window, so the charge says so.
-    (_RESOLVED, QuotaColumn((QuotaFigure("claude", 3.0, 3.0, 10.0),)),
-     "39m 2s · 1.0M in · 20.0k out · 0.90% weekly*"),
-    # Two providers in the total's units: no single window, no ` weekly*`.
-    (_MIXED, QuotaColumn((QuotaFigure("claude", 3.0, 9.0, 10.0),
-                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION))),
-     "39m 2s · 1.2M in · 29.0k out · —"),
-    # No quota view at all: the metered dollar cell, ~ marker and all.
+    # State 1: a share of the week's quota, so the charge says so.
+    (_RESOLVED, _view(_RESOLVED), "39m 2s · 1.0M in · 20.0k out · 0.90% weekly*"),
+    # State 2: the gauge has not ticked this week.
+    (_BELOW, _view(_BELOW), "39m 2s · 1.0M in · 20.0k out · <1% weekly*"),
+    # Two gauges in the total's charge: no single window, no ` weekly*`.
+    (_MIXED, _view(_MIXED), "39m 2s · 1.2M in · 29.0k out · —"),
+    # State 4: no quota view at all, the metered dollar cell.
     (_METERED, None, "39m 2s · 200.0k in · 9.0k out · ~$0.73"),
-    # A withheld gauge: the notional dollar cell, * marker and all.
-    (_RESOLVED, QuotaFallback((_NO_READINGS,)),
-     "39m 2s · 1.0M in · 20.0k out · $3.00*"),
-], ids=["resolved", "mixed", "metered", "withheld"])
-def test_the_run_charge_is_the_ledger_cell_plus_weekly_only_when_resolved(
+    # State 3: no usable reading, the notional dollar cell.
+    (_UNREAD, _view(_UNREAD), "39m 2s · 1.0M in · 20.0k out · $3.00*"),
+], ids=["resolved", "below", "mixed", "metered", "unread"])
+def test_the_run_charge_is_the_ledger_cell_plus_weekly_only_with_a_figure(
     rows: list[StepRow],
     quota: QuotaColumn | QuotaFallback | None,
     expected: str,
 ) -> None:
-    """Spec AC 4: four views, four charges — the ledger's own total cell verbatim,
-    with ` weekly*` appended only for a resolved gauge."""
+    """The ledger's own total cell verbatim, with ` weekly*` appended whenever
+    the weekly column shows a figure."""
     from imp.cli.main import _run_field
 
     got = _run_field(rows, _HDR, quota)
@@ -334,9 +346,8 @@ def test_a_quota_attribution_failure_prints_no_card(
     import imp.cli.store as s
 
     class _Broken(s.LocalStore):
-        def quota_neighbours(self, quest_id: str, start_iso: str,
-                             end_iso: str) -> list[s.NeighbourQuota]:
-            raise OSError("neighbour scan exploded")
+        def quota_weeks(self, quest_id: str) -> list[s.GaugeWeek]:
+            raise OSError("week scan exploded")
 
     slug = _setup(tmp_path, monkeypatch, _USAGE_EVENTS)
     monkeypatch.setattr(s, "make_store", lambda control: _Broken(control))
@@ -345,7 +356,7 @@ def test_a_quota_attribution_failure_prints_no_card(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert ("cannot reach the quest store for quota attribution "
-            "(quota_neighbours): neighbour scan exploded") in captured.err
+            "(quota_weeks): week scan exploded") in captured.err
 
 
 def _at(seconds: int) -> str:
@@ -552,9 +563,11 @@ def test_summary_export_of_a_resumed_conversation_stays_split(
     assert "| chatting | 1m 0s |" in out
 
 
-def _report_scenario() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def _report_scenario(used_pct: float = 6.0,
+                     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """D1: a quest paused at a wait after 19m 53s of work; then the sedu45 resume and a
-    leave with no model turn, 9s apart, and no quota readings anywhere."""
+    leave with no model turn, 9s apart. One codex weekly reading, taken before the
+    pause, anchors the week ending 2026-11-13T07:00Z; none follows."""
     aid = "step:spec/spec-writer"
     step: dict[str, object] = {"step": "spec-writer", "phase": "spec", "kind": "agent"}
     paused = [
@@ -569,6 +582,10 @@ def _report_scenario() -> tuple[list[dict[str, object]], list[dict[str, object]]
             "provider": "codex", "model": "gpt-5-codex", "auth_mode": "subscription",
             "usage": {"input_tokens": 120_000, "cache_read_input_tokens": 30_000,
                       "output_tokens": 4_000}}),
+        (0.0, "quota_reading", aid, {
+            "provider": "codex",
+            "windows": [{"label": "7d", "used_pct": used_pct,
+                         "resets_at": 1794553200}]}),
         (592.7, "agent_message", aid, {
             "provider": "codex", "model": "gpt-5-codex", "auth_mode": "subscription",
             "usage": {"input_tokens": 60_000, "output_tokens": 2_000}}),
@@ -605,6 +622,9 @@ def test_a_no_work_resume_leaves_the_ledger_byte_identical(
     totals row nor `imp show`'s `run:` line and `ledger:` section."""
     paused, resumed = _report_scenario()
     slug = _setup(tmp_path, monkeypatch, paused)
+    # A second quest in the project did the same work and read the gauge at 8
+    # points, so the week is 8 points over twice this quest's units: 4.00%.
+    _quest(tmp_path, "otherq", events=_report_scenario(8.0)[0])
     log_path = project_state_dir(tmp_path) / "quests" / slug / "events.jsonl"
 
     def _ledger() -> tuple[str, str, list[str]]:
@@ -620,4 +640,6 @@ def test_a_no_work_resume_leaves_the_ledger_byte_identical(
     after = _ledger()
     assert before[1].split(":", 1)[1].strip().startswith("19m 53s · ")
     assert "19m 53s" in before[0]
+    assert before[1].endswith("· 4.00% weekly*")
+    assert before[0].endswith("4.00%")
     assert after == before

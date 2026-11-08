@@ -4,30 +4,26 @@ from datetime import UTC, datetime
 from typing import Any
 
 from imp.cli.quota_share import (
+    NO_CHARGE,
     NO_UNITS,
+    Charge,
     Increment,
-    QuotaAttribution,
-    QuotaFigure,
-    QuotaWithheld,
     Units,
-    Withheld,
-    credits_by_index,
+    charges_by_index,
     increments,
     parse_ts,
-    quota_attribution,
     rollup_units,
     run_span,
     units_in_span,
-    weekly_movement,
     weighted_units,
 )
 from imp.cli.render_summary import (
     build_summary,
-    overlay_units,
-    rows_units,
-    units_by_row,
+    charges_by_row,
+    overlay_charges,
+    rows_charge,
 )
-from imp.cli.store import NeighbourQuota
+from imp.cli.store import GaugeWeek
 from imp.providers.catalog import BillingUsage
 
 
@@ -305,291 +301,91 @@ def _codex_log() -> list[dict[str, Any]]:
     ]
 
 
-def _span_of(log: list[dict[str, Any]]) -> tuple[datetime, datetime]:
-    span = run_span(log)
-    assert span is not None
-    return span
+_WEEK1 = 1767312000  # 2026-01-02T00:00Z: the week holding every event below
 
 
-def test_each_increment_is_credited_at_its_own_log_position() -> None:
+def _charges(log: list[dict[str, Any]], peak: float = 24.0,
+             provider: str = "claude") -> dict[int, Charge]:
+    """`log` priced in one week no other quest drew on."""
+    return charges_by_index(log, [GaugeWeek(provider, _WEEK1, peak, 0.0)])
+
+
+def _pts(charge: Charge, gauge: str = "claude") -> float:
+    points = dict(charge.per_gauge)[gauge].points
+    assert points is not None
+    return points
+
+
+def test_each_increment_is_charged_at_its_own_log_position() -> None:
     """The step's pair reports 200k then 500k cumulative sonnet output, so its two
     increments are 3.00 u at index 3 and 4.50 u at index 8 — the second of which
     the cumulative collapse keeps and the first of which it drops, both belonging
     to the same row."""
-    log = _quest_log()
-    credits = credits_by_index(log, _span_of(log))
-    assert {i: round(u.get("claude"), 4) for i, u in credits.items()} == {
+    charges = _charges(_quest_log())
+    assert {i: round(_pts(c), 4) for i, c in charges.items()} == {
         3: 3.0, 6: 1.5, 8: 4.5, 10: 15.0}
 
 
 def test_an_id_less_usage_patch_still_reaches_the_row_that_owns_it() -> None:
-    """A join keyed on the event id leaves a codex run's whole draw unattributed —
-    `quota unattributable` on a gauge that moved — while the dollar column, which
-    resolves the row from the log position, prices the same usage fine."""
+    """A join keyed on the event id would leave a codex run's whole draw
+    uncharged, while the dollar column, which resolves the row from the log
+    position, prices the same usage fine. The patch is the week's only codex
+    draw, so it carries all 5 points."""
     log = _codex_log()
-    rows = build_summary(log, _span_of(log))
-    assert rows[0].units.get("codex") == 0.06335
-    assert rows_units(rows).get("codex") == 0.06335
+    rows = build_summary(log, _charges(log, peak=5.0, provider="codex"))
+    assert _pts(rows[0].charge, "codex") == 5.0
+    assert _pts(rows_charge(rows), "codex") == 5.0
     assert rows[0].usage.dollars > 0
 
 
-def test_a_filtered_render_keeps_the_units_the_whole_log_computed() -> None:
-    """AC 18 / AC 19(b): `--range` can drop the one `query_result` a cumulative
-    pair's dollars ride on — which moves the dollar cell, as the first assertion
-    shows — so the rendered rows take the units the unfiltered log computed,
-    matched by row rather than by event."""
+def test_a_filtered_render_keeps_the_charge_the_whole_log_computed() -> None:
+    """`--range` can drop the one `query_result` a cumulative pair's dollars ride
+    on — which moves the dollar cell, as the first assertion shows — so the
+    rendered rows take the charge the unfiltered log computed, matched by row
+    rather than by event."""
     log = _quest_log()
-    whole = build_summary(log, _span_of(log))
+    whole = build_summary(log, _charges(log))
     narrowed = build_summary([e for e in log if e["id"] != "e8"])
     assert round(narrowed[0].usage.dollars, 4) < round(whole[0].usage.dollars, 4)
-    assert narrowed[0].units == NO_UNITS
-    overlay_units(narrowed, units_by_row(whole))
-    assert round(narrowed[0].units.get("claude"), 4) == 7.5
-    assert round(narrowed[0].subagents[0].units.get("claude"), 4) == 1.5
+    assert narrowed[0].charge == NO_CHARGE
+    overlay_charges(narrowed, charges_by_row(whole))
+    assert round(_pts(narrowed[0].charge), 4) == 7.5
+    assert round(_pts(narrowed[0].subagents[0].charge), 4) == 1.5
 
 
-def test_units_land_on_the_step_and_subagent_rows_that_own_the_agent() -> None:
+def test_charges_land_on_the_step_and_subagent_rows_that_own_the_agent() -> None:
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
+    rows = build_summary(log, _charges(log))
     assert len(rows) == 1
     step = rows[0]
-    assert round(step.units.get("claude"), 4) == 7.5
+    assert round(_pts(step.charge), 4) == 7.5
     assert [s.name for s in step.subagents] == ["explorer"]
-    assert round(step.subagents[0].units.get("claude"), 4) == 1.5
-    assert round(step.subtree_units.get("claude"), 4) == 9.0
+    assert round(_pts(step.subagents[0].charge), 4) == 1.5
+    assert round(_pts(step.subtree_charge), 4) == 9.0
 
 
-def test_an_unowned_agents_units_are_dropped_from_both_sides() -> None:
-    """Decision 18: `ghost` draws 15.00 u that no row owns, so the row-attributed
-    sum is 9.00 u — the same figure the per-step cells add up to."""
+def test_an_unowned_agents_units_dilute_the_week_but_render_on_no_row() -> None:
+    """`ghost` draws 15.00 of the week's 24.00 u and no row owns it, so the rows
+    carry 9/24 of the 24 points. Without it they carry all 24."""
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
-    assert round(rows_units(rows).get("claude"), 4) == 9.0
+    assert round(_pts(rows_charge(build_summary(log, _charges(log)))), 4) == 9.0
+    solo = [e for e in log if e["agent_id"] != "ghost"]
+    assert round(_pts(rows_charge(build_summary(solo, _charges(solo)))), 4) == 24.0
 
 
-def test_build_summary_without_a_span_leaves_every_row_at_no_units() -> None:
+def test_build_summary_without_charges_leaves_every_row_at_no_charge() -> None:
     rows = build_summary(_quest_log())
-    assert rows[0].units == NO_UNITS
-    assert rows[0].subagents[0].units == NO_UNITS
-    assert rows_units(rows) == NO_UNITS
+    assert rows[0].charge == NO_CHARGE
+    assert rows[0].subagents[0].charge == NO_CHARGE
+    assert rows_charge(rows) == NO_CHARGE
 
 
 def test_a_row_is_identified_by_its_occurrence_not_by_its_agent_id() -> None:
     """Two runs of one step share the agent id `step:impl/build`, so the keys the
     overlay matches on must still tell the occurrences apart."""
     log = _quest_log()
-    rows = build_summary(log, _span_of(log))
+    rows = build_summary(log, _charges(log))
     assert rows[0].key == "step:impl/build@2026-01-01T00:00:00+00:00"
     assert rows[0].subagents[0].key == "sub:e4"
-    assert sorted(units_by_row(rows)) == [
+    assert sorted(charges_by_row(rows)) == [
         "step:impl/build@2026-01-01T00:00:00+00:00", "sub:e4"]
-
-
-_GAUGE_SPAN = (datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
-               datetime(2026, 1, 1, 1, 0, tzinfo=UTC))
-
-
-def _reading(minute: int, used_pct: float, *, resets_at: int | None = 1_000_000,
-             provider: str = "claude") -> dict[str, Any]:
-    return {"id": f"r{minute}{provider}", "type": "quota_reading",
-            "agent_id": None,
-            "timestamp": f"2026-01-01T00:{minute:02d}:00+00:00",
-            "payload": {"provider": provider, "plan": None, "windows": [
-                {"label": "5h", "used_pct": 50.0, "resets_at": 500},
-                {"label": "7d", "used_pct": used_pct, "resets_at": resets_at}]}}
-
-
-def test_a_run_with_no_reading_for_the_provider_has_no_gauge() -> None:
-    """AC 6(a)."""
-    assert weekly_movement([], "claude", *_GAUGE_SPAN) is Withheld.NO_READINGS
-    codex_only = [_reading(10, 40.0, provider="codex")]
-    assert (weekly_movement(codex_only, "claude", *_GAUGE_SPAN)
-            is Withheld.NO_READINGS)
-
-
-def test_a_gauge_that_did_not_move_is_below_resolution() -> None:
-    """AC 6(b)."""
-    readings = [_reading(10, 78.0), _reading(50, 78.0)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.BELOW_RESOLUTION)
-
-
-def test_a_changed_resets_at_is_a_window_reset() -> None:
-    """AC 6(c)."""
-    readings = [_reading(10, 78.0, resets_at=1_000_000),
-                _reading(50, 2.0, resets_at=2_000_000)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_a_missing_reset_stamp_is_not_evidence_of_a_reset() -> None:
-    """`resets_at` is None whenever the provider's `resetsAt` is not an int
-    (`src/imp/providers/claude.py:1345`), and one sample missing the stamp beside
-    one carrying it is no window change: 78 → 81 is still 3 points."""
-    readings = [_reading(10, 78.0, resets_at=None), _reading(50, 81.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_a_drop_larger_than_the_gauges_quantization_is_a_reset() -> None:
-    """AC 6(c): 78 down to 74 inside one window is not sampling jitter."""
-    readings = [_reading(10, 78.0), _reading(30, 74.0), _reading(50, 76.0)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_a_one_point_dip_between_samples_is_jitter_not_a_reset() -> None:
-    """Two quests sampling the same gauge seconds apart straddle the provider's
-    own rounding boundary, so 78 → 79 → 78 → 81 is a 3-point rise — as the real
-    `samo71` reading union is."""
-    readings = [_reading(10, 78.0), _reading(20, 79.0),
-                _reading(30, 78.0), _reading(50, 81.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_a_reset_outranks_a_zero_movement() -> None:
-    """AC 6(e): endpoints that happen to match still report the reset."""
-    readings = [_reading(10, 78.0, resets_at=1_000_000),
-                _reading(30, 5.0, resets_at=2_000_000),
-                _reading(50, 78.0, resets_at=2_000_000)]
-    assert (weekly_movement(readings, "claude", *_GAUGE_SPAN)
-            is Withheld.WINDOW_RESET)
-
-
-def test_exactly_one_point_of_movement_resolves() -> None:
-    """AC 7."""
-    readings = [_reading(10, 78.0), _reading(50, 79.0)]
-    assert weekly_movement(readings, "claude", *_GAUGE_SPAN) == 1.0
-
-
-def test_movement_spans_the_union_of_own_and_neighbour_readings() -> None:
-    """AC 5: a neighbour reading inside the span but later than this quest's own
-    last one extends the movement from 1 point to 3."""
-    own = [_reading(10, 78.0), _reading(30, 79.0)]
-    assert weekly_movement(own, "claude", *_GAUGE_SPAN) == 1.0
-    neighbour = [_reading(45, 81.0)]
-    assert weekly_movement([*own, *neighbour], "claude", *_GAUGE_SPAN) == 3.0
-
-
-def test_readings_outside_the_span_are_not_sampled() -> None:
-    readings = [_reading(10, 78.0), _reading(30, 79.0)]
-    late = {**_reading(10, 95.0), "id": "late",
-            "timestamp": "2026-01-01T02:00:00+00:00"}
-    assert weekly_movement([*readings, late], "claude", *_GAUGE_SPAN) == 1.0
-
-
-def _gauge_readings() -> list[dict[str, Any]]:
-    """Two claude readings inside `_quest_log()`'s span: 78% to 81%, one window."""
-    def at(second: int, used_pct: float) -> dict[str, Any]:
-        return {"id": f"g{second}", "type": "quota_reading", "agent_id": None,
-                "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-                "payload": {"provider": "claude", "windows": [
-                    {"label": "7d", "used_pct": used_pct, "resets_at": 1}]}}
-
-    return [at(2, 78.0), at(38, 81.0)]
-
-
-def _gauge_log() -> list[dict[str, Any]]:
-    """`_quest_log()` with the readings interleaved in timestamp order, as a real
-    log carries them — `run_span` reads the first and last entries, not min/max."""
-    return sorted([*_quest_log(), *_gauge_readings()],
-                  key=lambda e: str(e["timestamp"]))
-
-
-def _neighbour(second: int, tokens: int, *, provider: str = "claude",
-               readings: tuple[dict[str, Any], ...] = (),
-               anchors: tuple[dict[str, Any], ...] = ()) -> NeighbourQuota:
-    usage = {"id": f"n{second}", "type": "query_result", "agent_id": "n1",
-             "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-             "payload": {"session_id": "ns", "duration_ms": 1000,
-                         "model_usage": {
-                             "claude-sonnet-4-6": {"outputTokens": tokens}}}}
-    return NeighbourQuota(
-        project="other", quest_id="q2", readings=readings, usage=(usage,),
-        anchors=anchors, agents={"n1": (provider, "claude-sonnet-4-6",
-                                        "subscription")})
-
-
-def _attribution(neighbours: list[NeighbourQuota]) -> QuotaAttribution:
-    events = _gauge_log()
-    span = _span_of(events)
-    rows = build_summary(events, span)
-    return quota_attribution(events, span, rows_units(rows), neighbours)
-
-
-def test_the_subject_appears_in_the_denominator_exactly_once() -> None:
-    """AC 24: the quest's row-attributed 9.00 u plus the neighbour's 3.00 u is a
-    12.00 u denominator — not the 21.00 u double-counting the subject gives."""
-    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
-    assert round(figure.subject_units, 4) == 9.0
-    assert round(figure.total_units, 4) == 12.0
-
-
-def test_the_figure_is_the_movement_scaled_by_the_unit_share() -> None:
-    """3 points of movement x 9/12 is 2.25 points of the weekly window, and a
-    row holding 3.00 u of that draws 0.75."""
-    figure = _attribution([_neighbour(30, 200_000)]).figures[0]
-    assert figure.movement == 3.0
-    assert round(figure.percent, 4) == 2.25
-    assert round(figure.scale(Units.of("claude", 3.0)), 4) == 0.75
-    assert figure.scale(NO_UNITS) == 0.0
-
-
-def test_a_widened_span_pulls_in_a_neighbour_increment() -> None:
-    """AC 23(a), second half: the neighbour's 3.00 u query occupies
-    [00:00:00, 00:00:01] — inside the span that opens at the `quest_created`
-    event, outside one that opens a second later."""
-    events = _gauge_log()
-    wide = _span_of(events)
-    narrow = (datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC), wide[1])
-    early = [_neighbour(1, 200_000)]
-    subject = rows_units(build_summary(events, wide))
-    wide_total = quota_attribution(events, wide, subject,
-                                   early).figures[0].total_units
-    narrow_total = quota_attribution(events, narrow, subject,
-                                     early).figures[0].total_units
-    assert (round(wide_total, 4), round(narrow_total, 4)) == (12.0, 9.0)
-
-
-def test_a_gauge_that_moved_with_no_units_yields_no_figure() -> None:
-    """AC 6(d) / AC 14(d): a codex gauge moved 4 points with no codex units
-    anywhere in the span, so there is nothing to divide by — no rule and no
-    division, just a withhold."""
-    codex_gauge = tuple(
-        {"id": f"c{second}", "type": "quota_reading", "agent_id": None,
-         "timestamp": f"2026-01-01T00:00:{second:02d}+00:00",
-         "payload": {"provider": "codex", "windows": [
-             {"label": "7d", "used_pct": used_pct, "resets_at": 9}]}}
-        for second, used_pct in ((3, 10.0), (37, 14.0)))
-    attribution = _attribution([_neighbour(30, 200_000, readings=codex_gauge)])
-    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
-    assert isinstance(attribution.gauges[0], QuotaFigure)
-    assert attribution.gauges[1] == QuotaWithheld("codex",
-                                                  Withheld.NO_TRACKED_USAGE)
-    assert [f.provider for f in attribution.figures] == ["claude"]
-
-
-def test_each_provider_gauge_is_resolved_independently() -> None:
-    """AC 14(e): the neighbour's draw is codex's, which recorded no reading, so
-    that gauge is withheld while claude's resolvable figure still stands over a
-    denominator holding only claude's units."""
-    attribution = _attribution([_neighbour(30, 200_000, provider="codex")])
-    assert [g.provider for g in attribution.gauges] == ["claude", "codex"]
-    assert round(attribution.figures[0].total_units, 4) == 9.0
-    assert attribution.gauges[1] == QuotaWithheld("codex",
-                                                  Withheld.NO_READINGS)
-
-
-def test_a_neighbours_pre_span_anchor_keeps_its_pre_span_burn_out() -> None:
-    """A neighbour's `query_result` is cumulative, so its pre-span anchor is what
-    stops the denominator swallowing a burn from before the span: 300k output
-    differenced against a 200k anchor is 1.50 u, where dropping the anchor
-    contributes the whole 4.50 u."""
-    anchor = {"id": "n-anchor", "type": "query_result", "agent_id": "n1",
-              "timestamp": "2025-12-31T23:59:00+00:00",
-              "payload": {"session_id": "ns", "duration_ms": 1000,
-                          "model_usage": {
-                              "claude-sonnet-4-6": {"outputTokens": 200_000}}}}
-    anchored = _attribution([_neighbour(30, 300_000, anchors=(anchor,))])
-    bare = _attribution([_neighbour(30, 300_000)])
-    assert round(anchored.figures[0].total_units, 4) == 10.5
-    assert round(bare.figures[0].total_units, 4) == 13.5

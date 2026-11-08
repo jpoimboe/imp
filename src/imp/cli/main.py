@@ -2867,35 +2867,29 @@ def _attribute_quota(
     rows: list[StepRow],
 ) -> QuotaColumn | QuotaFallback | int | None:
     """This run's quota column, overlaid onto `rows` — which a windowing flag may
-    have narrowed, so attribution is computed over the unfiltered log and a
+    have narrowed, so the charge is computed over the unfiltered log and a
     step's cell reads the same either way. None is a metered run, which renders
-    today's output untouched; 2 is an unreachable store, since an under-counted
-    denominator must never pass as a figure."""
+    today's output untouched and never reaches the store; 2 is an unreachable
+    store, since an under-counted denominator must never pass as a figure."""
     from imp.cli.quota_column import quota_view
-    from imp.cli.quota_share import quota_attribution, run_span
+    from imp.cli.quota_share import charges_by_index
     from imp.cli.render_summary import (
         build_summary,
-        overlay_units,
-        rows_units,
-        units_by_row,
+        charges_by_row,
+        overlay_charges,
+        rows_charge,
     )
-    span = run_span(events)
-    if span is None:
-        return None
-    full = build_summary(events, span)
-    if not any(r.totals.notional for r in full):
+    if not any(r.totals.notional for r in build_summary(events)):
         return None   # metered by construction: today's output, untouched
-    overlay_units(rows, units_by_row(full))
-    subject = rows_units(full)
     try:
-        neighbours = store.quota_neighbours(
-            quest_id, *(when.isoformat() for when in span))
+        weeks = store.quota_weeks(quest_id)
     except (OSError, RuntimeError, ValueError) as exc:
         _emit_cli_error("cannot reach the quest store for quota attribution "
-                        f"(quota_neighbours): {exc}")
+                        f"(quota_weeks): {exc}")
         return 2
-    return quota_view(quota_attribution(events, span, subject, neighbours),
-                      providers=subject.providers)
+    full = build_summary(events, charges_by_index(events, weeks))
+    overlay_charges(rows, charges_by_row(full))
+    return quota_view(rows_charge(full))
 
 
 def _write_log_export(args: argparse.Namespace, store: Store,

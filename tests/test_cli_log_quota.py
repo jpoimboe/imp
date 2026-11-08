@@ -9,30 +9,39 @@ import anyio
 import pytest
 
 import imp.cli.main as m
-from imp.cli.quota_column import QuotaColumn, share_cell
-from imp.cli.quota_share import QuotaFigure
+from imp.cli.quota_column import FOOTNOTE, LEGEND_BELOW, LEGEND_UNREAD, QuotaColumn
+from imp.cli.quota_scan import scan_weeks
+from imp.cli.quota_share import extract, gauge_weeks
 from imp.cli.render_summary import (
     SummaryHeader,
     build_summary,
     exclusion_spans,
     render_summary,
+    rows_charge,
     summary_total,
 )
-from imp.cli.store import LocalStore, NeighbourQuota
+from imp.cli.store import GaugeWeek, LocalStore
 from imp.cli.store_proxy import ProxyStore, run_query
+from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 from imp.remote.session.socket_server import SessionSocket
 from tests._quota_fixture import NEIGHBOUR_ID, SUBJECT_ID, quota_events
 
+_RESET = 1789758000
+_STAR = "  * theoretical API list price; actual subscription usage is much lower"
+_STAR_MD = "\\* theoretical API list price; actual subscription usage is much lower"
+
 
 class _QuotaStore:
-    """The subject's events from the fixture; neighbours from `inner`."""
+    """The subject's events from the fixture. Its weeks come from its own log
+    alone, or from a real scan of every project under `root`."""
 
-    def __init__(self, events: list[dict[str, Any]], inner: Any = None,
+    def __init__(self, events: list[dict[str, Any]], root: Path | None = None,
                  status: str = "completed") -> None:
         self._events = events
-        self._inner = inner
+        self._root = root
         self._status = status
-        self.asked: list[tuple[str, str, str]] = []
+        self.asked: list[str] = []
 
     def get_events(self, quest_id: str) -> list[dict[str, Any]]:
         return self._events
@@ -44,14 +53,25 @@ class _QuotaStore:
     def scan_homes(self) -> list[Any]:
         return []
 
-    def quota_neighbours(self, quest_id: str, start_iso: str,
-                         end_iso: str) -> list[NeighbourQuota]:
-        self.asked.append((quest_id, start_iso, end_iso))
-        if self._inner is None:
-            return []
-        found: list[NeighbourQuota] = self._inner.quota_neighbours(
-            quest_id, start_iso, end_iso)
-        return found
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        self.asked.append(quest_id)
+        if self._root is None:
+            return gauge_weeks(extract(self._events), [])
+        return scan_weeks(self._root, quest_id, self._events)
+
+
+class _NoWeeks(_QuotaStore):
+    """State 3: no reading anchors a week covering the run."""
+
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        return []
+
+
+class _Below(_QuotaStore):
+    """State 2: the run's week has not ticked off zero."""
+
+    def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+        return [GaugeWeek("claude", _RESET, 0.0, 0.0)]
 
 
 def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any,
@@ -62,18 +82,40 @@ def _cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any,
     monkeypatch.setenv("NO_COLOR", "1")
 
 
-class _ResetGauge(_QuotaStore):
-    """A neighbour whose claude 7d sample stamps a resets_at the samo71 fixture never does."""
+def _neighbour_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """fego87's replay as a live quest home in another project."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / NEIGHBOUR_ID
+    qdir.mkdir(parents=True)
+    (qdir / "quest.json").write_text(json.dumps(
+        {"id": NEIGHBOUR_ID, "title": NEIGHBOUR_ID, "base_branch": "main",
+         "created_at": "2026-09-18T03:00:00+00:00"}))
+    (qdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in quota_events(NEIGHBOUR_ID)))
 
-    def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
-        return [NeighbourQuota(
-            project="other", quest_id="zzzz11",
-            readings=({"type": "quota_reading",
-                       "timestamp": "2026-09-18T05:00:00+00:00",
-                       "payload": {"provider": "claude", "plan": None,
-                                   "windows": [{"label": "7d", "used_pct": 3.0,
-                                                "resets_at": 1789844400}]}},),
-            usage=(), anchors=(), agents={})]
+
+def _subject_home(tmp_path: Path) -> None:
+    """samo71 as a live quest of the project at `tmp_path`, so a LocalStore there
+    reads its log. Call after `_neighbour_home`, which pins IMP_HOME."""
+    from imp.engine.state import State
+
+    qdir = project_state_dir(tmp_path) / "quests" / SUBJECT_ID
+    (qdir / "state").mkdir(parents=True)
+    (qdir / "quest.json").write_text(json.dumps(
+        {"id": SUBJECT_ID, "title": SUBJECT_ID, "base_branch": "main",
+         "created_at": "2026-09-18T03:00:00+00:00",
+         "layout_version": LAYOUT_VERSION}))
+    (qdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in quota_events(SUBJECT_ID)))
+    State(id=SUBJECT_ID, status="paused", step="threshold",
+          step_attempt=0).save(qdir / "state")
+
+
+def _total(store: Any, events: list[dict[str, Any]]) -> str:
+    rows = build_summary(events)
+    view = m._attribute_quota(store, SUBJECT_ID, events, rows)
+    assert isinstance(view, QuotaColumn)
+    return view.total(rows_charge(rows))
 
 
 _METERED = [
@@ -96,9 +138,10 @@ _METERED = [
 ]
 
 
-def test_a_metered_run_renders_todays_output_and_asks_no_neighbours(
+def test_a_metered_run_renders_todays_output_and_scans_no_weeks(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
+    """State 4."""
     store = _QuotaStore(_METERED)
     _cli(tmp_path, monkeypatch, store)
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
@@ -122,61 +165,61 @@ def test_an_unreachable_store_fails_loudly_rather_than_undercounting(
         capsys: pytest.CaptureFixture[str]) -> None:
     """The three shapes the seam produces: a dead socket, a daemon reporting
     failure, and a truncated reply, which `parse_result` raises as a
-    `JSONDecodeError` (`src/imp/remote/session/protocol.py:225`)."""
+    `JSONDecodeError`."""
     class _Broken(_QuotaStore):
-        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
+        def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
             raise exc
 
     _cli(tmp_path, monkeypatch, _Broken(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 2
     captured = capsys.readouterr()
     assert captured.err == ("imp: cannot reach the quest store for quota "
-                            f"attribution (quota_neighbours): {text}\n")
+                            f"attribution (quota_weeks): {text}\n")
     assert "%" not in captured.out
 
 
-def test_a_withheld_gauge_keeps_the_cost_column(
+def test_no_readings_for_the_week_keeps_the_cost_column(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """No gauge resolved, so `imp log -s` keeps the dollar column and gains the
-    one line naming why."""
-    _cli(tmp_path, monkeypatch, _ResetGauge(quota_events(SUBJECT_ID)))
+    """State 3: `imp log -s` keeps the dollar column and gains the line naming why."""
+    _cli(tmp_path, monkeypatch, _NoWeeks(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[-3] == "  total                 2h 6m   28.0M  531.1k  $42.20*"
-    assert lines[-2] == ("  * theoretical API list price; actual subscription"
-                         " usage is much lower")
-    assert lines[-1] == ("  quota unmeasurable; the weekly window reset during"
-                         " this run")
+    assert lines[-2] == _STAR
+    assert lines[-1] == f"  {LEGEND_UNREAD}"
 
 
-def _codex_reading(ts: str, used_pct: float) -> dict[str, Any]:
-    return {"type": "quota_reading", "timestamp": ts,
-            "payload": {"provider": "codex", "plan": None,
-                        "windows": [{"label": "7d", "used_pct": used_pct,
-                                     "resets_at": 1789758000}]}}
-
-
-def test_a_neighbour_on_another_provider_does_not_make_this_run_mixed(
+def test_an_unmoved_week_reads_under_one_point(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """The weekly gauge is account-global, so an overlapping codex quest's
-    readings reach the attribution. samo71 ran no codex step, so its column is
-    still one claude figure -- no dashed total, no breakdown, no codex legend."""
+    """State 2: every row reads `—`, the total `<1%`."""
+    _cli(tmp_path, monkeypatch, _Below(quota_events(SUBJECT_ID)))
+    assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[4].split()[-1] == "—"
+    assert lines[-3].split() == ["total", "2h", "6m", "28.0M", "531.1k", "<1%"]
+    assert lines[-2] == f"  {FOOTNOTE}"
+    assert lines[-1] == f"  {LEGEND_BELOW}"
+    assert not any("$" in ln for ln in lines)
+
+
+def test_a_week_on_a_gauge_this_run_never_drew_on_does_not_make_it_mixed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """The weekly gauge is account-global, so a codex week reaches the store's
+    answer. samo71 ran no codex step, so its column is still one claude figure:
+    no dashed total, no breakdown, no codex legend."""
     class _WithCodex(_QuotaStore):
-        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
-            return [NeighbourQuota(
-                project="other", quest_id="zzzz11",
-                readings=(_codex_reading("2026-09-18T03:40:00+00:00", 10.0),
-                          _codex_reading("2026-09-18T05:00:00+00:00", 15.0)),
-                usage=(), anchors=(), agents={})]
+        def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
+            return [*super().quota_weeks(quest_id),
+                    GaugeWeek("codex", _RESET, 15.0, 0.0)]
 
     _cli(tmp_path, monkeypatch, _WithCodex(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[-2] == "  total                 2h 6m   28.0M  531.1k   3.00%"
-    assert lines[-1] == ("  * estimated to ±1 point of the weekly gauge; usage"
-                         " outside imp during the run skews it high")
+    assert lines[-2] == "  total                 2h 6m   28.0M  531.1k  81.00%"
+    assert lines[-1] == f"  {FOOTNOTE}"
     assert not any("codex" in ln for ln in lines)
 
 
@@ -214,7 +257,6 @@ _MIXED_AUTH = [
                      "cacheCreationInputTokens": 0}}}},
     {"type": "step_completed", "timestamp": "2026-09-18T02:03:30+00:00",
      "payload": {"step": "coder", "action": {"verb": "continue"}}},
-    # Two quota readings spanning the run so the gauge resolves
     {"type": "quota_reading", "timestamp": "2026-09-18T02:00:30+00:00",
      "payload": {"provider": "claude", "plan": None,
                  "windows": [{"label": "7d", "used_pct": 40.0,
@@ -226,22 +268,20 @@ _MIXED_AUTH = [
 ]
 
 
-def test_a_run_mixing_apikey_and_subscription_steps_still_gets_the_column(
+def test_a_metered_step_in_a_subscription_run_reads_dash_and_adds_nothing(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """The metered gate asks whether ANY row is notional."""
-    store = _QuotaStore(_MIXED_AUTH)
-    _cli(tmp_path, monkeypatch, store)
+    """AC 5(h) / AC 6: the metered gate asks whether ANY row is notional. The
+    coder's 0.30 u are the week's only subscription units, so 43 points over
+    them is 43.00%; the apikey spec step reads `—` and is in no denominator."""
+    _cli(tmp_path, monkeypatch, _QuotaStore(_MIXED_AUTH))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    # Two-row header: "tokens" above, "weekly*" in the second row
     assert any("weekly" in ln for ln in lines[:4])
-    # Total row ends with a % cell
-    total_line = next(ln for ln in lines if ln.strip().startswith("total"))
-    assert total_line.rstrip().endswith("%")
-    # No dollar amounts anywhere
-    assert not any("$" in ln for ln in lines)
-    assert not any("~" in ln for ln in lines)
+    cell = {ln.split()[0]: ln.split()[-1] for ln in lines
+            if ln.split()[:1] in (["spec"], ["coder"], ["total"])}
+    assert cell == {"spec": "—", "coder": "43.00%", "total": "43.00%"}
+    assert not any("$" in ln or "~" in ln for ln in lines)
 
 
 @pytest.fixture
@@ -249,82 +289,56 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _neighbour_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """fego87's replay as a live quest home in another project."""
-    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    qdir = tmp_path / "imphome" / "projects" / "other" / "quests" / NEIGHBOUR_ID
-    qdir.mkdir(parents=True)
-    (qdir / "quest.json").write_text(json.dumps(
-        {"id": NEIGHBOUR_ID, "title": NEIGHBOUR_ID, "base_branch": "main",
-         "created_at": "2026-09-18T03:00:00+00:00"}))
-    (qdir / "events.jsonl").write_text(
-        "".join(json.dumps(e) + "\n" for e in quota_events(NEIGHBOUR_ID)))
-
-
 def test_samo71_renders_its_share_of_the_week(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
+    store = _QuotaStore(quota_events(SUBJECT_ID), tmp_path)
     _cli(tmp_path, monkeypatch, store)
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[1] == "                                   tokens       quota"
     assert lines[2] == "                         time      in     out  weekly*"
-    assert lines[4] == "  threshold             5m 5s    1.4M   27.8k   0.19%"
-    assert lines[-2] == "  total                 2h 6m   28.0M  531.1k   2.83%"
-    assert lines[-1] == ("  * estimated to ±1 point of the weekly gauge; usage"
-                         " outside imp during the run skews it high")
+    assert lines[4] == "  threshold             5m 5s    1.4M   27.8k   4.45%"
+    assert lines[-2] == "  total                 2h 6m   28.0M  531.1k  67.68%"
+    assert lines[-1] == f"  {FOOTNOTE}"
     assert not any("$" in ln for ln in lines)
-    # The span asked for is the quest's first event to its last.
-    assert store.asked == [(SUBJECT_ID, "2026-09-18T03:29:57.904744+00:00",
-                            "2026-09-18T05:38:03.485364+00:00")]
-
-
-def _figure(store: Any, events: list[dict[str, Any]]) -> QuotaFigure:
-    rows = build_summary(events)
-    view = m._attribute_quota(store, SUBJECT_ID, events, rows)
-    assert isinstance(view, QuotaColumn)
-    figure = view.gauges[0]
-    assert isinstance(figure, QuotaFigure)
-    return figure
+    assert store.asked == [SUBJECT_ID]
 
 
 def test_the_per_step_cells_sum_to_the_quest_total(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC 5(d): every row is priced at the one week's rate, and the total is the
+    rows' sum, so the cells add up to it exactly."""
     _neighbour_home(tmp_path, monkeypatch)
     events = quota_events(SUBJECT_ID)
     rows = build_summary(events)
-    view = m._attribute_quota(LocalStore(tmp_path), SUBJECT_ID, events, rows)
+    view = m._attribute_quota(_QuotaStore(events, tmp_path), SUBJECT_ID, events, rows)
     assert isinstance(view, QuotaColumn)
-    figure = view.gauges[0]
-    assert isinstance(figure, QuotaFigure)
-    assert share_cell(figure.percent) == "2.83%"
-    # Numerator and denominator are the same row-attributed quantity, so the
-    # rendered cells sum to the total rather than approximately to it.
-    assert sum(figure.scale(r.subtree_units) for r in rows) == pytest.approx(
-        figure.percent, abs=1e-9)
+    ((gauge, run),) = view.run.per_gauge
+    assert gauge == "claude" and run.points is not None
+    assert round(run.points, 2) == 67.68
+    row_points = [c.points or 0.0 for r in rows for _g, c in r.subtree_charge.per_gauge]
+    assert sum(row_points) == pytest.approx(run.points, abs=1e-9)
 
 
 def test_discovery_routes_through_the_store_not_the_filesystem(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reaching fego87 moves the figure off the 81.00% the subject alone gives.
+    A direct filesystem read in-sandbox returns a partial set of quests, so the
+    guard is that the denominator provably comes from the store."""
     _neighbour_home(tmp_path, monkeypatch)
+    _subject_home(tmp_path)
     events = quota_events(SUBJECT_ID)
-    # fego87 drew 1.8338 of the 31.7793 in-span units, so reaching it moves the
-    # figure off the 3.00% a store-less walk would report. A direct filesystem
-    # read in-sandbox returns a partial neighbour set, so the guard is that the
-    # denominator provably comes from the store.
-    assert share_cell(_figure(LocalStore(tmp_path), events).percent) == "2.83%"
-    assert share_cell(_figure(_QuotaStore(events, None),
-                              events).percent) == "3.00%"
+    assert _total(LocalStore(tmp_path), events) == "67.68%"
+    assert _total(_QuotaStore(events), events) == "81.00%"
 
 
 def test_a_filtered_render_keeps_the_steps_own_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
-    _cli(tmp_path, monkeypatch, store)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--no-pager"]) == 0
     full = capsys.readouterr().out
     assert m.main(["log", SUBJECT_ID, "-s", "--step", "threshold",
@@ -333,19 +347,21 @@ def test_a_filtered_render_keeps_the_steps_own_cell(
     cells = [next(ln for ln in text.splitlines()
                   if ln.startswith("  threshold ")).split()[-1]
              for text in (full, filtered)]
-    assert cells == ["0.19%", "0.19%"]
+    assert cells == ["4.45%", "4.45%"]
     # Every column of the totals row is the subtotal of the rows above it, the
-    # share included: 2.83% of the week unfiltered, this step's 0.19% under it.
+    # share included.
     totals = [next(ln for ln in text.splitlines() if ln.startswith("  total"))
               for text in (full, filtered)]
-    assert totals == ["  total                 2h 6m   28.0M  531.1k   2.83%",
-                      "  total          5m 5s    1.4M  27.8k   0.19%"]
+    assert totals == ["  total                 2h 6m   28.0M  531.1k  67.68%",
+                      "  total          5m 5s    1.4M  27.8k   4.45%"]
 
 
 @pytest.mark.anyio
-async def test_local_and_proxied_neighbours_render_the_same_bytes(
+async def test_local_and_proxied_weeks_render_the_same_bytes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC 8."""
     _neighbour_home(tmp_path, monkeypatch)
+    _subject_home(tmp_path)
     events = quota_events(SUBJECT_ID)
 
     def _render(store: Any) -> list[str]:
@@ -372,73 +388,69 @@ async def test_local_and_proxied_neighbours_render_the_same_bytes(
         direct = _render(local)
         proxied = await anyio.to_thread.run_sync(_render, ProxyStore(sock))
         assert proxied == direct
-        assert direct[-2].endswith("  2.83%")
+        assert direct[-2].endswith("  67.68%")
         await session.close()
         tg.cancel_scope.cancel()
 
 
 _MD_QUOTA_HEADER = ("| Step | Duration | Fresh | Cache read | Cache write | Out"
                     " | Weekly* |")
+_MD_COST_HEADER = ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
+                   " Cost |")
+_THRESHOLD_MD = "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 4.45% |"
 
 
 def test_the_markdown_export_carries_samo71s_share(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 19(a) end to end: the same 2.83% the terminal renders."""
+    """The same 67.68% the terminal renders."""
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
-    _cli(tmp_path, monkeypatch, store)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
     out = capsys.readouterr().out
     assert _MD_QUOTA_HEADER in out
-    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
-    assert ("| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | 2.83% |"
-            in out)
-    assert ("\\* estimated to ±1 point of the weekly gauge; usage outside imp"
-            " during the run skews it high") in out
+    assert _THRESHOLD_MD in out
+    assert "| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | 67.68% |" in out
+    assert f"\\{FOOTNOTE}" in out
     assert "$" not in out
 
 
 def test_a_filtered_export_keeps_the_steps_own_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 19(b): the export gets the filtered rows, so it needs the unfiltered
-    log to attribute over — or this step's share would be computed against a
-    span and a denominator that the filter moved."""
+    """The export gets the filtered rows, so it needs the unfiltered log to price
+    over."""
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
-    _cli(tmp_path, monkeypatch, store)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--step", "threshold",
                    "--md=-"]) == 0
     out = capsys.readouterr().out
-    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
-    assert ("| total | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out)
-    assert "2.83%" not in out          # the quest total belongs to the full run
+    assert _THRESHOLD_MD in out
+    assert "| total | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 4.45% |" in out
+    assert "67.68%" not in out          # the quest total belongs to the full run
 
 
 def test_the_html_export_carries_the_share_as_a_table_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
-    _cli(tmp_path, monkeypatch, store)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--html=-"]) == 0
     out = capsys.readouterr().out
     assert "<th>Weekly*</th>" in out
-    assert "<td>2.83%</td>" in out
-    assert "<td>0.19%</td>" in out
+    assert "<td>67.68%</td>" in out
+    assert "<td>4.45%</td>" in out
 
 
-def test_a_metered_export_is_unchanged_and_asks_no_neighbours(
+def test_a_metered_export_is_unchanged_and_scans_no_weeks(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 12 on the export surface: today's bytes, no added legend line."""
+    """State 4 on the export surface: today's bytes, no added legend line."""
     store = _QuotaStore(_METERED)
     _cli(tmp_path, monkeypatch, store)
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
     out = capsys.readouterr().out
-    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
-            " Cost |") in out
+    assert _MD_COST_HEADER in out
     assert "| coder | 1m 30s | 200.0k | — | — | 9.0k | ~$0.73 |" in out
     assert "| total | 1m 30s | 200.0k | — | — | 9.0k | ~$0.73 |" in out
     assert out.rstrip("\n").endswith("~ estimated at API list price")
@@ -446,55 +458,63 @@ def test_a_metered_export_is_unchanged_and_asks_no_neighbours(
     assert store.asked == []
 
 
-def test_a_withheld_gauge_exports_the_cost_column_and_its_legend(
+def test_no_readings_export_the_cost_column_and_its_legend(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 19(a) carries AC 6's fallbacks onto the export too: no gauge resolved,
-    so the document keeps the dollar column and gains the line naming why."""
-    _cli(tmp_path, monkeypatch, _ResetGauge(quota_events(SUBJECT_ID)))
+    """State 3 on the export."""
+    _cli(tmp_path, monkeypatch, _NoWeeks(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
     out = capsys.readouterr().out
-    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out |"
-            " Cost |") in out
+    assert _MD_COST_HEADER in out
     assert "| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | $42.20* |" in out
-    star = ("\\* theoretical API list price; actual subscription usage is much"
-            " lower")
-    reset = "quota unmeasurable; the weekly window reset during this run"
-    assert star in out and reset in out
-    assert out.index(star) < out.index(reset)
+    assert out.index(_STAR_MD) < out.index(LEGEND_UNREAD)
     assert "Weekly" not in out and "%" not in out
+
+
+def test_an_unmoved_week_exports_under_one_point(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """State 2 on both exports."""
+    _cli(tmp_path, monkeypatch, _Below(quota_events(SUBJECT_ID)))
+    assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 0
+    out = capsys.readouterr().out
+    assert _MD_QUOTA_HEADER in out
+    assert "| total | 2h 6m | 174.1k | 25.8M | 2.0M | 531.1k | <1% |" in out
+    assert out.index(f"\\{FOOTNOTE}") < out.index(LEGEND_BELOW)
+    assert m.main(["log", SUBJECT_ID, "-s", "--html=-"]) == 0
+    html = capsys.readouterr().out
+    assert "<td>&lt;1%</td>" in html
+    assert f"<p>{LEGEND_BELOW}</p>" in html
 
 
 def test_an_ordinal_range_export_keeps_the_steps_own_cell(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 19(b)'s other selector. Events 1-107 are the threshold step — its
+    """The other selector. Events 1-107 are the threshold step — its
     `step_completed` is the 107th event of the fixture."""
     _neighbour_home(tmp_path, monkeypatch)
-    store = _QuotaStore(quota_events(SUBJECT_ID), LocalStore(tmp_path))
-    _cli(tmp_path, monkeypatch, store)
+    _cli(tmp_path, monkeypatch, _QuotaStore(quota_events(SUBJECT_ID), tmp_path))
     assert m.main(["log", SUBJECT_ID, "-s", "--range=1-107", "--md=-"]) == 0
     out = capsys.readouterr().out
-    assert "| threshold | 5m 5s | 13.4k | 1.2M | 199.2k | 27.8k | 0.19% |" in out
+    assert _THRESHOLD_MD in out
     # The range keeps the two events before the step started, so the total's
     # duration spans marginally wider than the step row's; the share does not.
     total = next(ln for ln in out.splitlines() if ln.startswith("| total |"))
-    assert total.split("|")[-2].strip() == "0.19%"
-    assert "2.83%" not in out
+    assert total.split("|")[-2].strip() == "4.45%"
+    assert "67.68%" not in out
 
 
 def test_an_unreachable_store_fails_the_export_too(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
-    """AC 10 on the export surface: no document is written over an
-    under-counted denominator."""
+    """No document is written over an under-counted denominator."""
     class _Broken(_QuotaStore):
-        def quota_neighbours(self, *a: str) -> list[NeighbourQuota]:
+        def quota_weeks(self, quest_id: str) -> list[GaugeWeek]:
             raise OSError("no such socket")
 
     _cli(tmp_path, monkeypatch, _Broken(quota_events(SUBJECT_ID)))
     assert m.main(["log", SUBJECT_ID, "-s", "--md=-"]) == 2
     captured = capsys.readouterr()
     assert captured.err == ("imp: cannot reach the quest store for quota "
-                            "attribution (quota_neighbours): no such socket\n")
+                            "attribution (quota_weeks): no such socket\n")
     assert captured.out == ""

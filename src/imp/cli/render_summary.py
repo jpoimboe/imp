@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from imp.cli import palette as pal
@@ -34,7 +33,7 @@ from imp.cli.quest_row import (
     resolve_display_name,
 )
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
-from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
+from imp.cli.quota_share import NO_CHARGE, Charge
 from imp.cli.render_text import display_subagent_title
 
 _FINISHED_STATUSES = frozenset({"completed", "abandoned"})
@@ -75,7 +74,7 @@ class SubagentRow:
     end_inferred: bool = False
     errored: bool = False
     usage: RowUsage = field(default_factory=RowUsage)
-    units: Units = NO_UNITS
+    charge: Charge = NO_CHARGE
     agent_id: str = ""
 
     @property
@@ -104,7 +103,7 @@ class StepRow:
     agent_id: str | None = None
     usage: RowUsage = field(default_factory=RowUsage)
     subagents: list[SubagentRow] = field(default_factory=list)
-    units: Units = NO_UNITS
+    charge: Charge = NO_CHARGE
     label: str | None = None
     phase_label: str | None = None
 
@@ -131,11 +130,11 @@ class StepRow:
         return total
 
     @property
-    def subtree_units(self) -> Units:
+    def subtree_charge(self) -> Charge:
         """Whole subtree, on the same inclusive basis as `totals`."""
-        total = self.units
+        total = self.charge
         for sub in self.subagents:
-            total = total + sub.units
+            total = total + sub.charge
         return total
 
     @property
@@ -171,13 +170,14 @@ def _is_nonterminal_error(p: dict[str, Any]) -> bool:
 
 
 def build_summary(events: Iterable[dict[str, Any]],
-                  units_span: tuple[datetime, datetime] | None = None,
+                  charges: dict[int, Charge] | None = None,
                   ) -> list[StepRow]:
-    """The summary's step rows. `units_span` turns on quota attribution, always
-    over the events passed here: pass the unfiltered log and `overlay_units` the
-    result onto a filtered build, so no filter can move a step's quota cell."""
+    """The summary's step rows. `charges` — `charges_by_index` over the events
+    passed here — turns on the quota column: pass the unfiltered log and
+    `overlay_charges` the result onto a filtered build, so no filter can move a
+    step's quota cell."""
     log = list(events)
-    credits = credits_by_index(log, units_span) if units_span is not None else {}
+    credits = charges or {}
     kept = kept_query_results(log)
     exclusions = exclusion_spans(log)
     rows: list[StepRow] = []
@@ -215,13 +215,13 @@ def build_summary(events: Iterable[dict[str, Any]],
         if row is not None:
             row.usage = row.usage + usage
 
-    def _credit_units(index: int) -> None:
+    def _credit_charge(index: int) -> None:
         credited = credits.get(index)
         if credited is None:
             return
         row = _target()
         if row is not None:
-            row.units = row.units + credited
+            row.charge = row.charge + credited
 
     for i, e in enumerate(log):
         etype = e.get("type")
@@ -238,7 +238,7 @@ def build_summary(events: Iterable[dict[str, Any]],
                 and not agent_id.startswith("sub:")):
             open_row.agent_id = agent_id
 
-        _credit_units(i)
+        _credit_charge(i)
         if etype == "query_result" and i not in kept:
             continue  # cumulative predecessor: its dollars ride the surviving row
 
@@ -392,32 +392,32 @@ def _sub_body(sub: SubagentRow) -> str:
     return text
 
 
-def rows_units(summary: list[StepRow]) -> Units:
-    """Every row's units — the subject's contribution to both sides of the quota
-    ratio, so the rendered cells sum to the quest total by construction."""
-    total = NO_UNITS
+def rows_charge(summary: list[StepRow]) -> Charge:
+    """Every row's charge, so the rendered cells sum to the quest total by
+    construction."""
+    total = NO_CHARGE
     for row in summary:
-        total = total + row.subtree_units
+        total = total + row.subtree_charge
     return total
 
 
-def units_by_row(summary: list[StepRow]) -> dict[str, Units]:
-    """Each row's units by row identity, for a build of the same log that a filter
-    narrowed."""
-    out: dict[str, Units] = {}
+def charges_by_row(summary: list[StepRow]) -> dict[str, Charge]:
+    """Each row's charge by row identity, for a build of the same log that a
+    filter narrowed."""
+    out: dict[str, Charge] = {}
     for row in summary:
-        out[row.key] = row.units
+        out[row.key] = row.charge
         for sub in row.subagents:
-            out[sub.key] = sub.units
+            out[sub.key] = sub.charge
     return out
 
 
-def overlay_units(summary: list[StepRow], by_row: dict[str, Units]) -> None:
-    """Give each row the units the unfiltered log credited it."""
+def overlay_charges(summary: list[StepRow], by_row: dict[str, Charge]) -> None:
+    """Give each row the charge the unfiltered log credited it."""
     for row in summary:
-        row.units = by_row.get(row.key, NO_UNITS)
+        row.charge = by_row.get(row.key, NO_CHARGE)
         for sub in row.subagents:
-            sub.units = by_row.get(sub.key, NO_UNITS)
+            sub.charge = by_row.get(sub.key, NO_CHARGE)
 
 
 def overlay_spans(summary: list[StepRow], full: list[StepRow]) -> None:
@@ -457,7 +457,7 @@ def total_cell(summary: list[StepRow],
     window once a gauge resolves. The share is taken over the rows rendered, so it
     agrees with the column above it under a windowing flag."""
     if isinstance(quota, QuotaColumn):
-        return quota.cell(rows_units(summary))
+        return quota.total(rows_charge(summary))
     _, total = summary_totals(summary, None)
     return cost_cell(total)
 
@@ -506,11 +506,11 @@ _WEEKLY_TITLE = "weekly"
 _TOTAL_LABEL = "total"
 
 
-def _last_cell(usage: RowUsage, units: Units,
+def _last_cell(usage: RowUsage, charge: Charge,
                column: QuotaColumn | None) -> str:
-    """The right-most column: dollars, or the row's share of the weekly window
-    once a gauge resolves — on a subscription no money was spent."""
-    return cost_cell(usage) if column is None else column.cell(units)
+    """The right-most column: dollars, or the row's share of its week's quota
+    once a gauge reads — on a subscription no money was spent."""
+    return cost_cell(usage) if column is None else column.cell(charge)
 
 
 def _column_widths(summary: list[StepRow], open_label: str,
@@ -532,12 +532,12 @@ def _column_widths(summary: list[StepRow], open_label: str,
         durs.append(len(r.dur_cell(open_label)))
         ins.append(len(_fmt_tokens(r.totals.input_total)))
         outs.append(len(_fmt_tokens(r.totals.output)))
-        lasts.append(len(_last_cell(r.totals, r.subtree_units, column)))
+        lasts.append(len(_last_cell(r.totals, r.subtree_charge, column)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
             ins.append(len(_fmt_tokens(s.usage.input_total)))
             outs.append(len(_fmt_tokens(s.usage.output)))
-            lasts.append(len(_last_cell(s.usage, s.units, column)))
+            lasts.append(len(_last_cell(s.usage, s.charge, column)))
     return (max(names), max(durs), max(ins), max(outs), max(lasts))
 
 
@@ -634,7 +634,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.phase != cur_phase:
             cur_phase = row.phase
             phase_header = row.phase_text
-        last = _last_cell(row.totals, row.subtree_units, column)
+        last = _last_cell(row.totals, row.subtree_charge, column)
         cells.append(last)
         if hide_idle and row.idle:
             continue
@@ -646,7 +646,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                                 out_w=out_w, last_w=last_w, color=color,
                                 open_label=open_label))
         for sub in row.subagents:
-            sub_last = _last_cell(sub.usage, sub.units, column)
+            sub_last = _last_cell(sub.usage, sub.charge, column)
             cells.append(sub_last)
             lines.append(_sub_line(sub, last=sub_last, name_w=name_w,
                                    dur_w=dur_w, in_w=in_w, out_w=out_w,

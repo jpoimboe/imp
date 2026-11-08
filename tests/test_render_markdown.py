@@ -11,8 +11,8 @@ from markdown_it import MarkdownIt
 from imp.cli import narrative as nv
 from imp.cli import render_markdown as rm
 from imp.cli.accounting import RowUsage
-from imp.cli.quota_column import QuotaColumn, QuotaFallback
-from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
+from imp.cli.quota_column import LEGEND_BELOW, LEGEND_UNREAD, quota_view
+from imp.cli.quota_share import GAUGE_BELOW, GAUGE_UNREAD, Charge, GaugeCharge
 from imp.cli.render_html import _fold_markers, _FoldOpen, render_html
 from imp.cli.render_markdown import (
     _accept,
@@ -29,6 +29,7 @@ from imp.cli.render_summary import (
     SubagentRow,
     SummaryHeader,
     build_summary,
+    rows_charge,
     summary_total,
 )
 from imp.cli.render_text import LOG_CATEGORIES
@@ -1023,8 +1024,15 @@ def test_agent_prose_all_codes_span_exports_as_its_literal_text() -> None:
     assert "``" not in out      # no collapsed / empty backtick pair anywhere
 
 
-_FOOTNOTE_MD = ("\\* estimated to ±1 point of the weekly gauge; usage outside"
-                " imp during the run skews it high")
+_FOOTNOTE_MD = ("\\* this quest's part of all imp work this week, applied to the"
+                " week's gauge; final once the week resets; usage outside imp"
+                " skews it high")
+_MD_HDR = SummaryHeader(title="imp", quest_id="abc", status="completed",
+                        total_seconds=2342.0)
+
+
+def _pts(gauge: str, points: float) -> Charge:
+    return Charge.of(gauge, GaugeCharge.resolved(points))
 
 
 def _quota_rows() -> list[StepRow]:
@@ -1033,14 +1041,14 @@ def _quota_rows() -> list[StepRow]:
                       end_ts="2026-01-01T00:00:40+00:00",
                       usage=RowUsage(fresh_input=200_000, output=3_000,
                                      dollars=1.0, priced=1, notional=1),
-                      units=Units.of("claude", 1.0))
+                      charge=_pts("claude", 0.9))
     return [
         StepRow(phase="plan", step="plan-writer",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:01:30+00:00",
                 usage=RowUsage(fresh_input=1_000_000, output=20_000,
                                dollars=3.0, priced=1, notional=1),
-                units=Units.of("claude", 2.0), subagents=[sub]),
+                charge=_pts("claude", 1.8), subagents=[sub]),
         StepRow(phase="plan", step="plan-finalized",
                 start_ts="2026-01-01T00:01:30+00:00",
                 end_ts="2026-01-01T00:01:30+00:00"),
@@ -1048,39 +1056,49 @@ def _quota_rows() -> list[StepRow]:
 
 
 def test_summary_markdown_swaps_the_cost_column_for_the_weekly_share() -> None:
-    # AC 19(a): 9 points of movement over a 10-unit window, so a row's share is
-    # 0.9x its own units — the step's subtree drew 3 of them, its subagent 1.
-    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
-                           total_seconds=2342.0)
-    column = QuotaColumn((QuotaFigure("claude", 9.0, 3.0, 10.0),))
-    out = render_summary_markdown(_quota_rows(), header=header, quota=column)
+    # The step's subtree is its own 1.80 plus its subagent's 0.90.
+    rows = _quota_rows()
+    out = render_summary_markdown(rows, header=_MD_HDR,
+                                  quota=quota_view(rows_charge(rows)))
     assert ("| Step | Duration | Fresh | Cache read | Cache write | Out"
             " | Weekly* |") in out
     assert "| plan-writer | 1m 30s | 1.2M | — | — | 23.0k | 2.70% |" in out
     assert "| ↳ coder | 30s | 200.0k | — | — | 3.0k | 0.90% |" in out
     assert "| plan-finalized | 0s | — | — | — | — | — |" in out
     assert "| total | 39m 2s | 1.2M | — | — | 23.0k | 2.70% |" in out
-    assert out.rstrip("\n").endswith(_FOOTNOTE_MD)   # AC 3, escaped sigil
-    assert "Cost" not in out                          # AC 13: one money column
+    assert out.rstrip("\n").endswith(_FOOTNOTE_MD)   # escaped sigil
+    assert "Cost" not in out                          # one money column
     assert "$" not in out
 
 
-def test_summary_markdown_falls_back_to_cost_with_the_withheld_legend() -> None:
-    # AC 19(a) over AC 6(b): no gauge resolved, so today's Cost column stays and
-    # one extra line names why — under, not instead of, the dollar legend.
-    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
-                           total_seconds=2342.0)
-    still = ("quota below measurement resolution; the weekly gauge did not move"
-             " during this run")
-    out = render_summary_markdown(_quota_rows(), header=header,
-                                  quota=QuotaFallback((still,)))
+def test_summary_markdown_shows_an_unmoved_week_as_under_one_point() -> None:
+    rows = [StepRow(phase="plan", step="plan-writer",
+                    start_ts="2026-01-01T00:00:00+00:00",
+                    end_ts="2026-01-01T00:01:30+00:00",
+                    usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                                   dollars=3.0, priced=1, notional=1),
+                    charge=Charge.of("claude", GAUGE_BELOW))]
+    out = render_summary_markdown(rows, header=_MD_HDR,
+                                  quota=quota_view(rows_charge(rows)))
+    assert "| plan-writer | 1m 30s | 1.0M | — | — | 20.0k | — |" in out
+    assert "| total | 39m 2s | 1.0M | — | — | 20.0k | <1% |" in out
+    assert out.index(_FOOTNOTE_MD) < out.index(LEGEND_BELOW)
+    assert out.rstrip("\n").endswith(LEGEND_BELOW)
+
+
+def test_summary_markdown_falls_back_to_cost_with_the_unread_legend() -> None:
+    # No usable reading: today's Cost column stays and one extra line names
+    # why — under, not instead of, the dollar legend.
+    out = render_summary_markdown(
+        _quota_rows(), header=_MD_HDR,
+        quota=quota_view(Charge.of("claude", GAUGE_UNREAD)))
     assert ("| Step | Duration | Fresh | Cache read | Cache write | Out"
             " | Cost |") in out
     assert "| total | 39m 2s | 1.2M | — | — | 23.0k | $4.00* |" in out
     star = ("\\* theoretical API list price; actual subscription usage is much"
             " lower")
     assert star in out
-    assert out.index(star) < out.index(still)
+    assert out.index(star) < out.index(LEGEND_UNREAD)
     assert "Weekly" not in out
     assert "%" not in out
 
@@ -1113,28 +1131,24 @@ def test_summary_markdown_without_a_quota_argument_is_unchanged() -> None:
 
 
 def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
-    # AC 14(a)/(e) on the export: claude's gauge moved 4 points over a 4-unit
-    # window (its own 2 units => 2.00%); codex's did not move at all, so it has
-    # no figure and says so in its own legend line.
+    # AC 5(f) on the export: claude's week resolved to 2.00 points for this
+    # row; codex's week has no readings, so it has no figure and says so.
     rows = [
         StepRow(phase="plan", step="plan-writer",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:01:30+00:00",
                 usage=RowUsage(fresh_input=1_000_000, output=20_000,
                                dollars=3.0, priced=1, notional=1),
-                units=Units.of("claude", 2.0)),
+                charge=_pts("claude", 2.0)),
         StepRow(phase="plan", step="coder",
                 start_ts="2026-01-01T00:01:30+00:00",
                 end_ts="2026-01-01T00:02:30+00:00",
                 usage=RowUsage(fresh_input=200_000, output=3_000, dollars=1.0,
                                priced=1, notional=1),
-                units=Units.of("codex", 1.0)),
+                charge=Charge.of("codex", GAUGE_UNREAD)),
     ]
-    header = SummaryHeader(title="imp", quest_id="abc", status="completed",
-                           total_seconds=2342.0)
-    column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
-                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
-    out = render_summary_markdown(rows, header=header, quota=column)
+    out = render_summary_markdown(rows, header=_MD_HDR,
+                                  quota=quota_view(rows_charge(rows)))
     assert "| plan-writer | 1m 30s | 1.0M | — | — | 20.0k | 2.00% |" in out
     assert "| coder | 1m 0s | 200.0k | — | — | 3.0k | — |" in out
     assert "| total | 39m 2s | 1.2M | — | — | 23.0k | — |" in out
@@ -1149,8 +1163,7 @@ def test_summary_markdown_breaks_a_mixed_run_down_by_provider() -> None:
                                                              "↳ codex"]
     assert [ln.split("|")[-2].strip() for ln in breakdown] == ["2.00%", "—"]
     assert out.index("| total |") < out.index("| ↳ claude |")
-    assert ("codex: quota below measurement resolution; the weekly gauge did"
-            " not move during this run") in out
+    assert f"codex: {LEGEND_UNREAD}" in out
 
 
 def test_accept_when_c_differs_only_inside_code() -> None:

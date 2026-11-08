@@ -4,8 +4,8 @@ import importlib.resources as ir
 
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
-from imp.cli.quota_column import QuotaColumn
-from imp.cli.quota_share import QuotaFigure, QuotaWithheld, Units, Withheld
+from imp.cli.quota_column import LEGEND_BELOW, LEGEND_UNREAD, quota_view
+from imp.cli.quota_share import GAUGE_BELOW, GAUGE_UNREAD, Charge, GaugeCharge
 from imp.cli.render_html import (
     _fold_markers,
     _FoldClose,
@@ -14,7 +14,7 @@ from imp.cli.render_html import (
     render_html,
 )
 from imp.cli.render_markdown import render_markdown, render_summary_markdown
-from imp.cli.render_summary import StepRow, SummaryHeader
+from imp.cli.render_summary import StepRow, SummaryHeader, rows_charge
 from tests._event_fixtures import tool_burst_events
 
 
@@ -459,56 +459,52 @@ def test_summary_html_export_keeps_the_notional_sigil_out_of_a_list() -> None:
     assert "<li>theoretical API list price" not in out  # never a bullet
 
 
-def test_summary_html_export_carries_the_weekly_column_and_its_footnote() -> None:
-    # AC 19(a): render_html is a pure Markdown pass, so the column arrives with
-    # no work of its own — but the footnote's `*` must stay a paragraph.
-    rows = [
-        StepRow(phase="p", step="plan-writer",
-                start_ts="2026-01-01T00:00:00+00:00",
-                end_ts="2026-01-01T00:01:30+00:00",
-                usage=RowUsage(fresh_input=1_000_000, output=20_000,
-                               dollars=3.00, priced=1, notional=1),
-                units=Units.of("claude", 2.0)),
-    ]
+def _html_row(step: str, charge: Charge) -> StepRow:
+    return StepRow(phase="plan", step=step,
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:30+00:00",
+                   usage=RowUsage(fresh_input=1_000_000, output=20_000,
+                                  dollars=3.0, priced=1, notional=1),
+                   charge=charge)
+
+
+def _html(rows: list[StepRow]) -> str:
     hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
-    column = QuotaColumn((QuotaFigure("claude", 9.0, 2.0, 10.0),))
-    out = render_html(render_summary_markdown(rows, header=hdr, quota=column))
+    return render_html(render_summary_markdown(
+        rows, header=hdr, quota=quota_view(rows_charge(rows))))
+
+
+def test_summary_html_export_carries_the_weekly_column_and_its_footnote() -> None:
+    # render_html is a pure Markdown pass, so the column arrives with no work of
+    # its own — but the footnote's `*` must stay a paragraph.
+    out = _html([_html_row("plan-writer", Charge.of("claude", GaugeCharge.resolved(1.8)))])
     assert "<th>Weekly*</th>" in out
-    assert "<td>1.80%</td>" in out               # 9 points x 2/10 units
-    assert ("<p>* estimated to ±1 point of the weekly gauge; usage outside imp"
-            " during the run skews it high</p>") in out
-    assert "<li>estimated to ±1 point" not in out   # never a bullet
-    assert "$" not in out                           # AC 13: no dollar figure
+    assert "<td>1.80%</td>" in out
+    assert ("<p>* this quest's part of all imp work this week, applied to the"
+            " week's gauge; final once the week resets; usage outside imp skews"
+            " it high</p>") in out
+    assert "<li>this quest's part" not in out    # never a bullet
+    assert "$" not in out                         # no dollar figure
+
+
+def test_summary_html_shows_an_unmoved_week_as_under_one_point() -> None:
+    out = _html([_html_row("plan-writer", Charge.of("claude", GAUGE_BELOW))])
+    assert "<td>&lt;1%</td>" in out
+    assert f"<p>{LEGEND_BELOW}</p>" in out
 
 
 def test_summary_html_puts_a_providers_share_in_the_quota_column() -> None:
-    # AC 14(a)/(e) on the export: a breakdown row one cell short of the header
-    # pads at the end, which lands the share in the `Out` column and leaves
-    # `Weekly*` empty — only the rendered table shows which cell it reached.
-    rows = [
-        StepRow(phase="plan", step="plan-writer",
-                start_ts="2026-01-01T00:00:00+00:00",
-                end_ts="2026-01-01T00:01:30+00:00",
-                usage=RowUsage(fresh_input=1_000_000, output=20_000,
-                               dollars=3.0, priced=1, notional=1),
-                units=Units.of("claude", 2.0)),
-        StepRow(phase="plan", step="coder",
-                start_ts="2026-01-01T00:01:30+00:00",
-                end_ts="2026-01-01T00:02:30+00:00",
-                usage=RowUsage(fresh_input=200_000, output=3_000, dollars=1.0,
-                               priced=1, notional=1),
-                units=Units.of("codex", 1.0)),
-    ]
-    hdr = SummaryHeader(title="f", quest_id="c", status="completed",
-                        total_seconds=60.0)
-    column = QuotaColumn((QuotaFigure("claude", 4.0, 2.0, 4.0),
-                          QuotaWithheld("codex", Withheld.BELOW_RESOLUTION)))
-    out = render_html(render_summary_markdown(rows, header=hdr, quota=column))
+    # A breakdown row one cell short of the header pads at the end, which lands
+    # the share in the `Out` column and leaves `Weekly*` empty — only the
+    # rendered table shows which cell it reached.
+    out = _html([_html_row("plan-writer", Charge.of("claude", GaugeCharge.resolved(2.0))),
+                 _html_row("coder", Charge.of("codex", GAUGE_UNREAD))])
     assert ("<tr>\n<td>↳ claude</td>\n<td></td>\n<td></td>\n<td></td>\n"
             "<td></td>\n<td></td>\n<td>2.00%</td>\n</tr>") in out
     assert ("<tr>\n<td>↳ codex</td>\n<td></td>\n<td></td>\n<td></td>\n"
             "<td></td>\n<td></td>\n<td>—</td>\n</tr>") in out
+    assert f"<p>codex: {LEGEND_UNREAD}</p>" in out
 
 
 def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
