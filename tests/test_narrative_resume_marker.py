@@ -23,6 +23,7 @@ CTRL_C = {"reason": "interrupt", "interrupt_reason": "ctrl-c"}
 CTRL_D = {"reason": "interrupt", "interrupt_reason": "ctrl-d"}
 MARKER = "paused · resumed"
 MARKER_2M = "paused · resumed 2m later"
+MARKER_2M45 = "paused · resumed 2m 45s later"
 AID = "step:review/review"
 AGENT = {"step": "review", "kind": "agent", "phase": "review", "label": "reviewing",
          "model": "m"}
@@ -138,13 +139,13 @@ def test_leave_renders_a_spaced_marker_ahead_of_the_resume_header() -> None:
 # AC1(b): held and show_output shapes, where no neighbour supplies the blank below.
 def test_marker_stands_clear_of_a_collapsed_step() -> None:
     assert _log(_script_run()) == [
-        "", "── implement phase ───", "", MARKER_2M, "", COLLAPSED]
+        "", "── implement phase ───", "", MARKER_2M45, "", COLLAPSED]
 
 
 def test_marker_stands_clear_of_surfaced_script_output() -> None:
     lines = _log(_script_run(show_output=True, before=("out before",), after=("out after",)))
-    i = lines.index(MARKER_2M)
-    assert lines[i - 2:i + 3] == ["• out before", "", MARKER_2M, "", "• out after"]
+    i = lines.index(MARKER_2M45)
+    assert lines[i - 2:i + 3] == ["• out before", "", MARKER_2M45, "", "• out after"]
 
 
 # AC1(b): --full prints a fallback line, which asks for no blank below itself.
@@ -152,7 +153,7 @@ def test_marker_stands_clear_of_a_line_that_wants_no_space() -> None:
     events = _script_run(show_output=True)
     events.insert(2, ev("f", "unrecognized_event", timestamp=_at(5)))
     lines = list(render_tree(nv.build_tree(events), full=True, color=False, width=80))
-    assert lines[lines.index(MARKER_2M) - 2:lines.index(MARKER_2M)] == [
+    assert lines[lines.index(MARKER_2M45) - 2:lines.index(MARKER_2M45)] == [
         "unrecognized_event", ""]
 
 
@@ -229,16 +230,16 @@ def test_a_resume_consumes_the_pause() -> None:
 
 # AC5(a)
 @pytest.mark.parametrize(("gap", "text"), [
-    (45, "45s"), (60, "1m"), (160, "2m"), (3600, "1h"), (7980, "2h 13m"),
-    (48 * 3600, "2d"), (76 * 3600, "3d 4h"),
+    (45, "45s"), (60, "1m"), (160, "2m 40s"), (235, "3m 55s"), (3600, "1h"),
+    (7980, "2h 13m"), (172799, "47h 59m"), (48 * 3600, "2d"), (76 * 3600, "3d 4h"),
 ])
 def test_duration_table(gap: int, text: str) -> None:
     assert _markers(_agent_run(gap=gap)) == [f"paused · resumed {text} later"]
 
 
-# The duration floors to whole seconds, as _fmt_hm floors to whole minutes.
+# The duration floors to whole seconds.
 @pytest.mark.parametrize(("gap", "text"), [
-    (1.0, "1s"), (59.7, "59s"), (60.9, "1m"), (119.9, "1m"),
+    (1.0, "1s"), (59.7, "59s"), (60.9, "1m"), (119.9, "1m 59s"),
 ])
 def test_duration_floors(gap: float, text: str) -> None:
     assert _markers(_agent_run(gap=gap)) == [f"paused · resumed {text} later"]
@@ -261,6 +262,8 @@ def test_an_unparseable_timestamp_gets_no_marker() -> None:
 def test_retry_wait_formatting_keeps_its_zero_units() -> None:
     assert nv._fmt_hm(3600) == "1h 0m"
     assert nv._fmt_hm(48 * 3600) == "2d 0h"
+    assert nv.fmt_seconds(60) == "1m 0s"
+    assert nv.fmt_seconds(3600) == "1h 0m"
 
 
 # AC6(a)
@@ -366,25 +369,25 @@ def test_structural_repr_and_incremental_parity() -> None:
 # AC18(a)
 def test_visible_script_step_keeps_its_collapse() -> None:
     assert [ln for ln in _log(_script_run()) if ln and "phase" not in ln] == [
-        MARKER_2M, COLLAPSED]
+        MARKER_2M45, COLLAPSED]
 
 
 # AC18(b)
 def test_hidden_script_step_shows_only_the_marker() -> None:
     assert [ln for ln in _log(_script_run(show_label=False)) if ln and "phase" not in ln] == [
-        MARKER_2M]
+        MARKER_2M45]
 
 
 # AC18(c)
 def test_show_output_script_step_holds_the_marker_between_its_output() -> None:
     lines = _log(_script_run(show_output=True, before=("out before",), after=("out after",)))
-    assert lines.index("• out before") < lines.index(MARKER_2M) < lines.index("• out after")
+    assert lines.index("• out before") < lines.index(MARKER_2M45) < lines.index("• out after")
 
 
 # AC18(d)
 def test_visible_script_step_with_two_cycles_keeps_markers_then_collapse() -> None:
     assert [ln for ln in _log(_two_cycle_script()) if ln and "phase" not in ln] == [
-        MARKER_2M, "paused · resumed 1m later", COLLAPSED]
+        MARKER_2M45, "paused · resumed 1m later", COLLAPSED]
 
 
 # AC19
@@ -396,7 +399,7 @@ def test_visible_script_step_with_two_cycles_keeps_markers_then_collapse() -> No
     _nested_script(),
 ], ids=["visible", "hidden", "show-output", "two-cycles", "nested"])
 def test_live_equals_batch_for_held_steps(events: Events) -> None:
-    assert MARKER_2M in _live(events)
+    assert MARKER_2M45 in _live(events)
     assert _live(events) == _log(events)
 
 
@@ -409,7 +412,7 @@ def test_held_step_marker_goes_ahead_of_it_in_its_parent_step() -> None:
     assert [type(c) for c in outer.children] == [nv.ResumeMarkerNode, nv.StepNode]
     assert outer.children[1].name == "B"
     lines = _log(events)
-    assert lines.index("step A") < lines.index(MARKER_2M) < lines.index("step B")
+    assert lines.index("step A") < lines.index(MARKER_2M45) < lines.index("step B")
 
 
 def _replayed(events: Events) -> str:
@@ -487,5 +490,5 @@ def test_markdown_and_html_carry_the_marker() -> None:
 def test_markdown_keeps_a_held_script_steps_marker(start: dict[str, Any]) -> None:
     events = _script_run(**start)
     md = rm.render_markdown(nv.build_tree(events), full=False)
-    assert f"**{MARKER_2M}**" in md.splitlines()
-    assert MARKER_2M in _log(events)
+    assert f"**{MARKER_2M45}**" in md.splitlines()
+    assert MARKER_2M45 in _log(events)

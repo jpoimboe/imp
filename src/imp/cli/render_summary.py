@@ -17,7 +17,7 @@ from imp.cli.accounting import (
     kept_query_results,
     vendor_contribution,
 )
-from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds
+from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds, fmt_seconds
 from imp.cli.quest_row import (
     NAME_CAP,
     STATUS_COLORS,
@@ -29,7 +29,6 @@ from imp.cli.quest_row import (
 )
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
-from imp.cli.render_text import fmt_seconds
 
 _FINISHED_STATUSES = frozenset({"completed", "abandoned"})
 

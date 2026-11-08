@@ -2191,7 +2191,7 @@ def test_fmt_seconds_done_suppresses_sub_second_keeps_whole() -> None:
     assert rt.fmt_seconds_done(4536) == "1h 15m"
     assert rt.fmt_seconds_done(7205) == "2h 0m"
     # fmt_seconds itself is unchanged: the live clock still shows 0s.
-    assert rt.fmt_seconds(0.4) == "0s"
+    assert nv.fmt_seconds(0.4) == "0s"
 
 
 def test_recap_sites_drop_sub_second_duration_and_separator() -> None:

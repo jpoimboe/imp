@@ -10,6 +10,7 @@ from imp.cli.accounting import (
     computed_contribution,
     model_rows,
 )
+from imp.cli.narrative import fmt_seconds
 from imp.cli.quota_neighbours import neighbour_slice
 from imp.cli.quota_share import (
     QuotaFigure,
@@ -28,7 +29,6 @@ from imp.cli.render_summary import (
     summary_total,
     summary_totals,
 )
-from imp.cli.render_text import fmt_seconds
 from imp.cli.store import NeighbourQuota
 from imp.paths import imp_home
 from tests._quota_fixture import NEIGHBOUR_ID, SUBJECT_ID, quota_events
