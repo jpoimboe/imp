@@ -590,6 +590,7 @@ _CONFIRM_HINT = "↑↓ move · space change · enter accept · esc cancel"
 _NO_VALUE = "(none)"
 _NONE_NEEDED = "(none needed)"
 _YOU_SET_THIS = "you set this"
+_YOU_LEFT_IT_EMPTY = "you left it empty"
 _NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
 _NO_SETUP_DETECTED = "nothing detected — no command runs in new worktrees"
 _NO_SUCH_ROOTS = "no such directory in this repo — nothing recorded"
@@ -725,13 +726,28 @@ def _confirm_rows(
     return out
 
 
-# The workflow row is absent by construction: `space` cycles it in place.
+# The workflow row is absent from both tables by construction: `space` cycles it in place.
 _EDIT_PROMPTS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "Integration branch: ",
     ScreenRow.TESTS: "Fast test command: ",
     ScreenRow.WORKTREE_SETUP: "Worktree setup command: ",
     ScreenRow.IMPORT_ROOT: "Python import paths (comma-separated): ",
 }
+
+_EDIT_HINTS: dict[ScreenRow, str] = {
+    ScreenRow.BRANCH: "The branch each quest forks from and merges back into.",
+    ScreenRow.TESTS: (
+        "Lint, typecheck and fast tests, run after each change. Leave empty for none."),
+    ScreenRow.WORKTREE_SETUP: (
+        "Installs dependencies in each new worktree, e.g. uv sync. Leave empty for none."),
+    ScreenRow.IMPORT_ROOT: (
+        "Put on PYTHONPATH so tests import the worktree's code. Leave empty for none."),
+}
+
+
+def _row_prompt_message(row: ScreenRow) -> list[tuple[str, str]]:
+    return [("", "\n"), ("ansibrightblack", _EDIT_HINTS[row]),
+            ("", "\n"), ("", _EDIT_PROMPTS[row])]
 
 
 def _edit_default(state: InitScreenState, row: ScreenRow) -> str:
@@ -751,17 +767,15 @@ def _apply_row_edit(
     if row is ScreenRow.BRANCH:
         return replace(
             state, branch=answer.strip(), branch_provenance=_YOU_SET_THIS)
+    command = answer.strip()
+    note = _YOU_SET_THIS if command else _YOU_LEFT_IT_EMPTY
     if row is ScreenRow.TESTS:
-        return replace(
-            state, test_cmd_fast=answer.strip() or False,
-            tests_provenance=_YOU_SET_THIS)
+        return replace(state, test_cmd_fast=command or False, tests_provenance=note)
     if row is ScreenRow.WORKTREE_SETUP:
-        return replace(
-            state, worktree_setup=answer.strip() or False,
-            setup_provenance=_YOU_SET_THIS)
+        return replace(state, worktree_setup=command or False, setup_provenance=note)
     entered = [part.strip() for part in answer.split(",") if part.strip()]
     if not entered:
-        return replace(state, pythonpath=False, roots_provenance=_YOU_SET_THIS)
+        return replace(state, pythonpath=False, roots_provenance=_YOU_LEFT_IT_EMPTY)
     validated = validate_detected_roots(project_root, entered)
     if not validated:
         return replace(state, pythonpath=None, roots_provenance=_NO_SUCH_ROOTS)
@@ -778,10 +792,11 @@ class _ScreenAction(Enum):
     EDIT = "edit"
 
 
-def _default_row_prompt(message: str, default: str) -> str:
+def _default_row_prompt(row: ScreenRow, default: str) -> str:
     from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.formatted_text import FormattedText
     try:
-        return str(pt_prompt(message, default=default))
+        return str(pt_prompt(FormattedText(_row_prompt_message(row)), default=default))
     except EOFError:  # ctrl-d cancels setup, the same exit esc offers on the screen
         raise KeyboardInterrupt from None
 
@@ -857,7 +872,7 @@ def _interactive_confirm_screen(
     state: InitScreenState,
     *,
     workflows: list[str],
-    prompt_fn: Callable[[str, str], str] = _default_row_prompt,
+    prompt_fn: Callable[[ScreenRow, str], str] = _default_row_prompt,
 ) -> ScreenAccepted:
     """The detected-and-confirmed setup screen. Editing a row leaves the screen,
     asks for the value with the current one pre-filled, and re-renders."""
@@ -868,7 +883,7 @@ def _interactive_confirm_screen(
             return ScreenAccepted(state)
         state = _apply_row_edit(
             project_root, state, cursor,
-            prompt_fn(_EDIT_PROMPTS[cursor], _edit_default(state, cursor)))
+            prompt_fn(cursor, _edit_default(state, cursor)))
 
 
 def write_init_files(project_root: Path, settings: InitSettings) -> tuple[str, ...]:
