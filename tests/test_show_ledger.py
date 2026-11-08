@@ -550,3 +550,74 @@ def test_summary_export_of_a_resumed_conversation_stays_split(
                   "--md=-", capsys)
     assert "## threshold phase\n" in out
     assert "| chatting | 1m 0s |" in out
+
+
+def _report_scenario() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """D1: a quest paused at a wait after 19m 53s of work; then the sedu45 resume and a
+    leave with no model turn, 9s apart, and no quota readings anywhere."""
+    aid = "step:spec/spec-writer"
+    step: dict[str, object] = {"step": "spec-writer", "phase": "spec", "kind": "agent"}
+    paused = [
+        (0.0, "quest_created", None, {"title": "x"}),
+        (1.3, "tiers_resolved", None, {}),
+        (0.0, "user_message", None, {"role": "user", "subtype": "intent",
+                                     "content": [{"type": "text", "text": "build it"}]}),
+        (0.0, "step_started", None, {**step, "resumed": False, "restarted": False}),
+        (0.3, "token_refresh", aid, {"outcome": "skipped_fresh"}),
+        (0.0, "cli_attached", None, {}),
+        (600.0, "agent_message", aid, {
+            "provider": "codex", "model": "gpt-5-codex", "auth_mode": "subscription",
+            "usage": {"input_tokens": 120_000, "cache_read_input_tokens": 30_000,
+                      "output_tokens": 4_000}}),
+        (592.7, "agent_message", aid, {
+            "provider": "codex", "model": "gpt-5-codex", "auth_mode": "subscription",
+            "usage": {"input_tokens": 60_000, "output_tokens": 2_000}}),
+        (0.0, "query_result", aid, {"subtype": "success"}),
+        (0.0, "awaiting_user_input", aid, {"interrupt": False}),
+        (5901.7, "workflow_paused", None, {"reason": "awaiting_user"}),
+    ]
+    resumed = [
+        (6395.7, "workflow_resumed", None, {}),
+        (0.1, "step_started", None, {**step, "resumed": True, "restarted": False}),
+        (0.3, "token_refresh", aid, {"outcome": "skipped_fresh"}),
+        (0.0, "awaiting_user_input", aid, {"interrupt": False}),
+        (0.0, "cli_attached", None, {}),
+        (8.6, "workflow_paused", None, {"reason": "awaiting_user"}),
+    ]
+    t0 = datetime(2026, 11, 6, 8, 0, tzinfo=UTC)
+    t = 0.0
+    out: list[list[dict[str, object]]] = []
+    for part in (paused, resumed):
+        events: list[dict[str, object]] = []
+        for delta, etype, agent_id, payload in part:
+            t = round(t + delta, 1)
+            events.append({"type": etype, "agent_id": agent_id, "payload": payload,
+                           "timestamp": (t0 + timedelta(seconds=t)).isoformat()})
+        out.append(events)
+    return out[0], out[1]
+
+
+def test_a_no_work_resume_leaves_the_ledger_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 2: attach + leave with no model turn moves neither the `imp log -s`
+    totals row nor `imp show`'s `run:` line and `ledger:` section."""
+    paused, resumed = _report_scenario()
+    slug = _setup(tmp_path, monkeypatch, paused)
+    log_path = project_state_dir(tmp_path) / "quests" / slug / "events.jsonl"
+
+    def _ledger() -> tuple[str, str, list[str]]:
+        assert main(["log", "-s", slug, "--no-pager"]) == 0
+        total = next(ln for ln in _out(capsys) if ln.startswith("  total"))
+        assert main(["show", slug, "--no-pager"]) == 0
+        card = _out(capsys)
+        run = next(ln for ln in card if ln.startswith("run:"))
+        return total, run, card[card.index("ledger:"):]
+
+    before = _ledger()
+    log_path.write_text("".join(json.dumps(e) + "\n" for e in paused + resumed))
+    after = _ledger()
+    assert before[1].split(":", 1)[1].strip().startswith("19m 53s · ")
+    assert "19m 53s" in before[0]
+    assert after == before

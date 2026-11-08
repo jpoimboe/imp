@@ -17,7 +17,13 @@ from imp.cli.accounting import (
     kept_query_results,
     vendor_contribution,
 )
-from imp.cli.narrative import Exclusions, ExclusionTracker, elapsed_seconds, fmt_seconds
+from imp.cli.narrative import (
+    INERT_EVENTS,
+    Exclusions,
+    ExclusionTracker,
+    elapsed_seconds,
+    fmt_seconds,
+)
 from imp.cli.quest_row import (
     STATUS_COLORS,
     TITLE_CAP,
@@ -51,11 +57,12 @@ NO_EXCLUSIONS = Exclusions()
 
 
 def exclusion_spans(events: Iterable[dict[str, Any]]) -> Exclusions:
-    """Closed exclusion spans over a whole log; the rule lives in narrative.ExclusionTracker."""
+    """Dead time over a whole log, open waits and pauses included; the rule lives in
+    narrative.ExclusionTracker."""
     tracker = ExclusionTracker()
     for e in events:
         tracker.feed(e)
-    return tracker.exclusions
+    return tracker.through_end
 
 
 @dataclass
@@ -473,9 +480,14 @@ class SummaryHeader:
 
 
 def summary_total(events: list[dict[str, Any]]) -> float | None:
+    """First to last live event: inert lifecycle events never move the clock."""
     if not events:
         return None
-    return elapsed_seconds(events[0].get("timestamp"), events[-1].get("timestamp"))
+    stamps = [e["timestamp"] for e in events
+              if e.get("type") not in INERT_EVENTS and isinstance(e.get("timestamp"), str)]
+    if not stamps:
+        return 0.0
+    return elapsed_seconds(stamps[0], stamps[-1])
 
 
 def _header_line(h: SummaryHeader, *, color: bool) -> str:

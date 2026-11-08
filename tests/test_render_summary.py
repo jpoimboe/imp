@@ -309,6 +309,18 @@ def test_summary_total_is_first_to_last_timestamp():
     assert summary_total([]) is None
 
 
+def test_summary_total_spans_the_live_events_only():
+    events = [
+        {"type": "quest_created", "timestamp": "2026-01-01T00:00:00+00:00", "payload": {}},
+        _started("verify", "implement", "2026-01-01T00:10:00+00:00"),
+        _completed("verify", "2026-01-01T00:11:00+00:00"),
+        {"type": "conversation_archived", "timestamp": "2026-01-02T00:00:00+00:00",
+         "payload": {}},
+    ]
+    assert summary_total(events) == 60.0
+    assert summary_total(events[:1]) == 0.0
+
+
 def test_exclusion_spans_pair_every_human_turn_with_its_own_reply():
     # Two gates in one step: the old single marker kept only the last one and
     # ran it to step_completed, charging the post-reply work as wait.
@@ -378,12 +390,15 @@ def test_a_pause_inside_a_human_wait_is_excluded_once():
     assert excl.total == 300.0
 
 
-def test_an_interval_the_log_never_closes_excludes_nothing():
+def test_an_open_wait_is_excluded_through_the_last_live_event():
     excl = exclusion_spans([
         _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
-        _await("2026-01-01T00:01:00+00:00")])
-    assert excl.spans == ()
-    assert excl.total == 0.0
+        _await("2026-01-01T00:01:00+00:00"),
+        {"type": "interrupt_delivered", "timestamp": "2026-01-01T00:01:30+00:00",
+         "payload": {}},
+        {"type": "conversation_saved", "timestamp": "2026-01-01T00:09:00+00:00",
+         "payload": {}}])
+    assert excl.total == 30.0
 
 
 def test_overlap_clips_to_the_queried_span():
