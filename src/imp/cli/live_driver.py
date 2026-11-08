@@ -500,7 +500,7 @@ class LiveDriver:
                 or self._emitted_any):
             return
         self._recap_pending = False
-        text = self._builder.interrupt_recap()
+        text = self._builder.interrupt_recap(datetime.now(UTC).isoformat())
         if text is None or self._prompt_active:
             return
         self._prev_prose = True

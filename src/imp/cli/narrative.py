@@ -623,6 +623,9 @@ _RESUMES_WAIT = frozenset({
     "agent_result", "step_started", "step_completed", "backoff_ended",
 })
 
+# Resume-boundary bookkeeping: the only events that keep the recap's pause age armed.
+_KEEPS_RESUME_ANCHOR = frozenset({"awaiting_user_input", "cli_attached", "interrupt_requested"})
+
 
 def _record_cut_off(fold: SubagentFold, was_running: bool) -> None:
     owner = fold.nested._owner_builder
@@ -715,6 +718,8 @@ class NarrativeBuilder:
         self._pending_pause: Literal["solicit", "halt"] | None = None
         # The pause a resume marker measures from; a step boundary closes it.
         self._open_pause: OpenPause | None = None
+        # The pause the current `imp resume` resumed from; cleared once the run executes.
+        self._resumed_pause_ts: str | None = None
         # Armed by an engine_message completion nudge; the next prose agent_message
         # consumes it and drops a bare WAITING protocol reply (pure plumbing).
         # Survives non-prose events.
@@ -790,8 +795,8 @@ class NarrativeBuilder:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]
 
-    def interrupt_recap(self) -> str | None:
-        """`was: <step label> · <cut-off helper>` for the resume recap; None if both absent."""
+    def interrupt_recap(self, now_iso: str) -> str | None:
+        """Resume recap `was: <label> · <helper> · paused <age> ago`; None if all absent."""
         top = self._step_stack[-1] if self._step_stack else None
         folds = list(self._cut_off.values())
         helper: str | None = None
@@ -800,7 +805,9 @@ class NarrativeBuilder:
         elif folds:
             helper = folds[0].label or f"subagent({folds[0].subagent_name})"
         body = _join(top.label if top is not None else None, helper)
-        return f"was: {body}" if body else None
+        gap = elapsed_seconds(self._resumed_pause_ts, now_iso)
+        age = f"paused {_pause_gap_text(int(gap))} ago" if gap is not None and gap >= 1 else None
+        return _join(f"was: {body}" if body else None, age)
 
     def backoff_wait_seconds(self, ref_iso: str | None) -> float:
         """Total backoff-wait seconds for this builder's agent: completed spans
@@ -1073,6 +1080,12 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
+
+        if etype == "workflow_resumed" and not payload.get("in_process"):
+            if self._open_pause is not None:
+                self._resumed_pause_ts = self._open_pause.timestamp
+        elif etype not in _KEEPS_RESUME_ANCHOR:
+            self._resumed_pause_ts = None
 
         # 0. context-bar update: latest_context_tokens tracks THIS builder's own agent.
         if etype == "agent_message":

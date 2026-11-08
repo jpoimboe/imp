@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import io
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
 
+from imp.cli import live_driver as ld
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.session_terminal import run_terminal_client
@@ -21,6 +23,7 @@ from tests.async_wait import HANG_BACKSTOP
 from tests.test_narrative_interrupt_recap import (
     LEAD,
     LIVE_GATE,
+    NOW,
     SCRIPT_HINT,
     Event,
     _ctrl_c,
@@ -34,6 +37,7 @@ from tests.test_narrative_interrupt_recap import (
     _spec_review,
     _sub_work,
     _task_lead,
+    _timed,
     _two_cut_off,
 )
 from tests.test_resume_startup_spinner import Screen, _trimmed
@@ -282,3 +286,57 @@ async def test_question_gate_prints_no_recap(tmp_path: Path) -> None:
                   last_agent_message="Which file?", interrupt=False)
     frames = _resumed_at(_cut_off_then_resume("coder", "writing code"), question)
     assert await _client_output(tmp_path, frames) == ""
+
+
+@pytest.fixture
+def frozen_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the driver's wall clock to NOW (T0 + 180 s)."""
+
+    class _Clock:
+        @staticmethod
+        def now(tz: Any = None) -> datetime:
+            return datetime.fromisoformat(NOW)
+
+    monkeypatch.setattr(ld, "datetime", _Clock)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("frozen_now")
+async def test_resumed_hold_gate_recap_shows_the_pause_age(tmp_path: Path) -> None:
+    frames = _resumed_at(_timed(_cut_off_then_resume("coder", "writing code")))
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + " · paused 3m ago\n"
+
+
+_PRIOR_RESUME = _timed(_leave_and_resume("p"))
+
+
+# AC5(e)
+@pytest.mark.anyio
+@pytest.mark.usefixtures("frozen_now")
+async def test_parked_steer_gate_attach_after_a_resume_shows_no_age(tmp_path: Path) -> None:
+    resent = _gate(f"a-g-{LEAD}", LEAD)
+    frames = [*_replayed([*_PRIOR_RESUME, *_parked_at_steer_gate()]), BOUNDARY, resent]
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+# AC5(e)
+@pytest.mark.anyio
+@pytest.mark.usefixtures("frozen_now")
+async def test_quiet_attach_ctrl_c_after_a_resume_shows_no_age(tmp_path: Path) -> None:
+    running = [*_PRIOR_RESUME, _task_lead(), _dispatch("d1", LEAD, "coder", "writing code"),
+               _sub_work("d1")]
+    frames = [*_replayed(running), BOUNDARY, *_ctrl_c("a", LEAD, "sub:d1")]
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"
+
+
+# AC5(f)
+@pytest.mark.anyio
+@pytest.mark.usefixtures("frozen_now")
+async def test_quiet_attach_other_clients_leave_after_a_resume_shows_no_age(
+    tmp_path: Path,
+) -> None:
+    running = [*_PRIOR_RESUME, ev("ip", "workflow_resumed", in_process=True),
+               _task_lead(resumed=True), _dispatch("d1", LEAD, "coder", "writing code"),
+               _sub_work("d1")]
+    frames = [*_replayed(running), BOUNDARY, *_ctrl_c("a", LEAD, "sub:d1", source="ctrl-d")]
+    assert await _client_output(tmp_path, frames) == CODER_RECAP + "\n"

@@ -1,12 +1,15 @@
 """Interrupt recap: the outermost builder's cut-off set and its `was:` accessor."""
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
-from imp.cli.narrative import NarrativeBuilder
+from imp.cli.narrative import NarrativeBuilder, build_tree
+from imp.cli.render_text import render_tree
 from tests._event_fixtures import ev
+from tests.test_narrative_resume_marker import SHARED_DURATIONS
 
 Event = dict[str, Any]
 
@@ -16,12 +19,21 @@ SPEC_REVIEW = "step:spec/spec-review"
 HINT = "interrupted · enter to continue · type to redirect · Ctrl-D to leave"
 SCRIPT_HINT = "paused · enter to re-run the gate · Ctrl-D to leave"
 
+T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
-def _recap(events: list[Event]) -> str | None:
+
+def _at(secs: float) -> str:
+    return (T0 + timedelta(seconds=secs)).isoformat()
+
+
+NOW = _at(180)
+
+
+def _recap(events: list[Event], now: str = NOW) -> str | None:
     b = NarrativeBuilder()
     for e in events:
         b.add(e)
-    return b.interrupt_recap()
+    return b.interrupt_recap(now)
 
 
 def _raw(eid: str, etype: str, payload: dict[str, Any]) -> Event:
@@ -55,9 +67,9 @@ def _gate(eid: str, agent: str | None, hint: str = HINT) -> Event:
               last_agent_message="", interrupt=True)
 
 
-def _ctrl_c(tag: str, agent: str, *subs: str) -> list[Event]:
+def _ctrl_c(tag: str, agent: str, *subs: str, source: str = "ctrl-c") -> list[Event]:
     """One Ctrl-C (fuvi18 lines 193-201): each subagent's gate lands before the step agent's."""
-    out = [ev(f"{tag}-ir", "interrupt_requested", source="ctrl-c", via="frame")]
+    out = [ev(f"{tag}-ir", "interrupt_requested", source=source, via="frame")]
     for target in (*subs, agent):
         out += [
             _raw(f"{tag}-ds-{target}", "interrupt_delivery_started",
@@ -250,3 +262,185 @@ def test_ctrl_d_at_resumed_prompt_keeps_helper() -> None:
               ev("cd", "interrupt_requested", source="ctrl-d", via="frame"),
               ev("wr2", "workflow_resumed"), ev("ca2", "cli_attached"), LIVE_GATE]
     assert _recap(events) == "was: task 1/2 · writing code"
+
+
+def _timed(events: list[Event]) -> list[Event]:
+    """Stamp every pause at T0 and every resume 1 s later, top-level as in events.jsonl."""
+    stamps = {"workflow_paused": _at(0), "workflow_resumed": _at(1)}
+    return [{**e, "timestamp": stamps[e["type"]]} if e["type"] in stamps else e
+            for e in events]
+
+
+def _upto_last_gate(events: list[Event]) -> list[Event]:
+    """The stream as the client has it when the recap prints: through the last gate."""
+    last = max(i for i, e in enumerate(events) if e["type"] == "awaiting_user_input")
+    return events[:last + 1]
+
+
+# AC1
+@pytest.mark.parametrize(("events", "expected"), [
+    pytest.param(_spec_review(), "was: reviewing spec · paused 3m ago", id="spec-review"),
+    pytest.param(_cut_off_then_resume("coder", "writing code"),
+                 "was: task 1/2 · writing code · paused 3m ago", id="task-coder"),
+    pytest.param(_opening_explorer(), "was: exploring codebase · paused 3m ago",
+                 id="opening-explorer"),
+    pytest.param(_opening_thinking(), "paused 3m ago", id="opening-nothing-cut-off"),
+])
+def test_recap_appends_the_pause_age(events: list[Event], expected: str) -> None:
+    assert _recap([*_timed(events), LIVE_GATE]) == expected
+
+
+# AC3(a)
+@pytest.mark.parametrize(("gap", "text"), SHARED_DURATIONS)
+def test_pause_age_durations_match_the_resume_marker(gap: int, text: str) -> None:
+    assert (_recap([*_timed(_spec_review()), LIVE_GATE], now=_at(gap))
+            == f"was: reviewing spec · paused {text} ago")
+
+
+# AC3(c)
+@pytest.mark.parametrize("now", [
+    pytest.param(_at(0.5), id="half-second"),
+    pytest.param(_at(-5), id="clock-skew"),
+    pytest.param("not-a-time", id="unparseable"),
+])
+def test_an_unusable_age_is_omitted(now: str) -> None:
+    assert _recap([*_timed(_spec_review()), LIVE_GATE], now=now) == "was: reviewing spec"
+
+
+def _paused_lead() -> list[Event]:
+    """A task-lead mid-thinking, paused at T0, then `imp resume` at T0 + 1 s."""
+    return [_task_lead(), ev("t1", "thinking", LEAD, content="hmm"),
+            ev("p-wp", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c",
+               timestamp=_at(0)),
+            ev("p-wr", "workflow_resumed", timestamp=_at(1))]
+
+
+LEAD_AGED = "was: task 1/2 · paused 3m ago"
+
+
+# AC4(a)-(c)
+@pytest.mark.parametrize("tail", [
+    pytest.param([], id="resume-then-gate"),
+    pytest.param([ev("ca", "cli_attached"),
+                  ev("cd", "interrupt_requested", source="ctrl-d", via="frame"),
+                  ev("wr2", "workflow_resumed", timestamp=_at(100)),
+                  ev("ca2", "cli_attached")],
+                 id="ctrl-d-at-resumed-prompt-then-resume"),
+    pytest.param([ev("ca", "cli_attached"),
+                  ev("cd", "interrupt_requested", source="ctrl-d", via="frame")],
+                 id="later-attacher-after-another-client-left"),
+])
+def test_idle_resume_paths_keep_the_pause_age(tail: list[Event]) -> None:
+    assert _recap([*_paused_lead(), *tail, LIVE_GATE]) == LEAD_AGED
+
+
+# AC4(d)
+def test_age_measures_from_the_latest_pause() -> None:
+    events = [*_paused_lead(), _task_lead("s2", resumed=True, restarted=False),
+              ev("t2", "thinking", LEAD, content="checking"),
+              ev("p2-wp", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c",
+                 timestamp=_at(100)),
+              ev("p2-wr", "workflow_resumed", timestamp=_at(101)), LIVE_GATE]
+    assert _recap(events, now=_at(280)) == LEAD_AGED
+
+
+@pytest.mark.parametrize("between", [
+    pytest.param(ev("x", "cli_attached"), id="cli_attached"),
+    pytest.param(ev("x", "interrupt_requested", source="ctrl-c", via="frame"), id="ctrl-c"),
+    pytest.param(ev("x", "interrupt_requested", source="ctrl-d", via="frame"), id="ctrl-d"),
+    pytest.param(ev("x", "interrupt_requested", source="detached", via="frame"),
+                 id="detached"),
+    pytest.param(_gate("x", LEAD), id="awaiting_user_input"),
+])
+def test_resume_boundary_bookkeeping_keeps_the_age(between: Event) -> None:
+    assert _recap([*_paused_lead(), between, LIVE_GATE]) == LEAD_AGED
+
+
+@pytest.mark.parametrize("between", [
+    pytest.param(_task_lead("x", resumed=True, restarted=False), id="step_started"),
+    pytest.param(ev("x", "sandbox_inactive"), id="sandbox_inactive"),
+    pytest.param(ev("x", "thinking", LEAD, content="go"), id="thinking"),
+    pytest.param(_raw("x", "interrupt_delivery_started",
+                      {"agent_id": LEAD, "tier": "cooperative"}),
+                 id="interrupt_delivery_started"),
+    pytest.param(ev("x", "workflow_resumed", in_process=True, timestamp=_at(2)),
+                 id="in-process-resume"),
+    pytest.param(ev("x", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c",
+                    timestamp=_at(2)), id="workflow_paused"),
+    pytest.param(ev("x", "runner_warning", message="viewer dropped"), id="runner_warning"),
+    pytest.param(ev("x", "quest_renamed", old_title="a", new_title="b"), id="quest_renamed"),
+])
+def test_any_other_event_disarms_the_age(between: Event) -> None:
+    assert _recap([*_paused_lead(), between, LIVE_GATE]) == "was: task 1/2"
+
+
+def test_an_in_process_resume_does_not_arm_the_age() -> None:
+    events = [_task_lead(), ev("t1", "thinking", LEAD, content="hmm"),
+              ev("wp", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c",
+                 timestamp=_at(0)),
+              ev("wr", "workflow_resumed", in_process=True, timestamp=_at(1)), LIVE_GATE]
+    assert _recap(events) == "was: task 1/2"
+
+
+def _resumed_then_ran() -> list[Event]:
+    """Pause at T0, `imp resume`, then the task-lead runs again before any gate."""
+    return [*_paused_lead(), ev("ca", "cli_attached"),
+            _task_lead("s2", resumed=True, restarted=False),
+            ev("t2", "thinking", LEAD, content="checking")]
+
+
+def _ran_then_run_stopped() -> list[Event]:
+    return [*_resumed_then_ran(),
+            ev("b-ir", "interrupt_requested", source="ctrl-c", via="frame"),
+            ev("b-wp", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c",
+               timestamp=_at(120)),
+            LIVE_GATE]
+
+
+def _ran_then_in_session_pause() -> list[Event]:
+    return _upto_last_gate([
+        *_resumed_then_ran(),
+        ev("b-wp", "workflow_paused", reason="interrupt", interrupt_reason="pause",
+           timestamp=_at(120)),
+        ev("b-wr", "workflow_resumed", in_process=True, timestamp=_at(130)),
+        _task_lead("s3", resumed=True, restarted=False),
+        ev("t3", "thinking", LEAD, content="again"), *_ctrl_c("c", LEAD)])
+
+
+# AC5(a)-(d)
+@pytest.mark.parametrize("events", [
+    pytest.param(_upto_last_gate([*_resumed_then_ran(), *_ctrl_c("b", LEAD)]),
+                 id="live-ctrl-c"),
+    pytest.param(_upto_last_gate([*_resumed_then_ran(),
+                                  *_ctrl_c("b", LEAD, source="ctrl-d")]),
+                 id="other-client-left"),
+    pytest.param(_ran_then_run_stopped(), id="run-stopping-interrupt"),
+    pytest.param(_ran_then_in_session_pause(), id="in-session-pause"),
+])
+def test_executed_after_resume_paths_show_no_age(events: list[Event]) -> None:
+    assert _recap(events, now=_at(600)) == "was: task 1/2"
+
+
+_LOG_PREFIX = [
+    "", "── implementation phase · plan 1/2 ───", "",
+    "implementation phase · plan 1/2 · task 1/2", "", "▾ thinking", "  hmm", "",
+    "paused · resumed 1s later", "", "implementation phase · plan 1/2 · task 1/2 (resume)", "",
+    "▾ thinking", "  checking", ""]
+
+
+# AC5(g): golden from before the anchor existed; full mode shows unregistered interrupt_* rows.
+@pytest.mark.parametrize(("events", "expected"), [
+    pytest.param(_ran_then_run_stopped(),
+                 [*_LOG_PREFIX, "interrupt_requested  source=ctrl-c via=frame", "",
+                  "paused · Ctrl-C"],
+                 id="run-stopping-interrupt"),
+    pytest.param(_ran_then_in_session_pause(),
+                 [*_LOG_PREFIX, "implementation phase · plan 1/2 · task 1/2 (resume)", "",
+                  "▾ thinking", "  again", "",
+                  "interrupt_requested  source=ctrl-c via=frame",
+                  "interrupt_delivery_started  agent_id=step:implement/task-lead"
+                  " tier=cooperative"],
+                 id="in-session-pause"),
+])
+def test_imp_log_rendering_ignores_the_anchor(events: list[Event], expected: list[str]) -> None:
+    assert list(render_tree(build_tree(events), full=True, color=False, width=80)) == expected
