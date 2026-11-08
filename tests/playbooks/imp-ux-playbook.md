@@ -170,9 +170,14 @@ to score).
   - `imp resume -h` — the flag surface; the resume itself is driven in the walk spine (step 4)
     and the picker under Inline pickers.
   - `imp list` — the overview: zones (in-flight / backlog / completed; `history` under `-a`)
-    legible? ids vs titles? Then `imp show <id>` (detail card) and the artifact views
-    `imp show <id> spec` and `imp show <id> verify` (the last failing test-gate run). `spec`
-    and `verify` are the only artifacts — a bare name like `status` errors. Also `imp list -a`.
+    legible? ids vs titles? Then `imp show <id>` (detail card, whose `files:` block lists the
+    quest's saved files) and its saved-file views: `imp show <id> spec`, `imp show <id> verify`
+    (the last failing test-gate run) and `summary` each print their folder's one file, `plans`
+    lists the plans, and a listed path prints that file. A name matching nothing (e.g.
+    `status`) errors and points back at `imp show <id>`. A plan's task list (`✓ plan N/M · K
+    tasks · imp show <id> plans/…`) prints only once the plan is finalized (after plan review
+    passes, or on the trivial-quest fast path) — a run stopped during plan review never shows
+    it; not a defect. Also `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`):

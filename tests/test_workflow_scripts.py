@@ -518,7 +518,8 @@ def test_run_verify_failure_writes_the_complete_output(
     quest_dir = tmp_path / "quest"
     proc = _run("run-verify.sh", tier, env_extra={
         "IMP_PROJECT_ROOT": str(project), cmd_var: _BIG_FAILING_CMD,
-        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir),
+        "TZ": "IMP+3"})
     assert proc.returncode == 3, proc.stderr
 
     body = _verify_log(quest_dir).read_text()
@@ -527,7 +528,7 @@ def test_run_verify_failure_writes_the_complete_output(
     assert lines[1] == ""
     assert lines[2] == f"- command: {_BIG_FAILING_CMD}"
     assert lines[3] == "- exit: 3"
-    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", lines[4]), lines[4]
+    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} IMP", lines[4]), lines[4]
     assert lines[5] == ""
     assert "head-padding-line-1" in body
     assert "tail-padding-line-200" in body
@@ -544,14 +545,15 @@ def test_run_verify_timeout_writes_the_complete_output(tmp_path: Path) -> None:
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": _BIG_TIMEOUT_CMD,
         "IMP_TEST_CMD_FAST_TIMEOUT": "3",
-        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir),
+        "TZ": "IMP+3"})
     assert proc.returncode == 124, proc.stderr
 
     lines = _verify_log(quest_dir).read_text().splitlines()
     assert lines[0] == "# Gate failure — fast"
     assert lines[2].startswith("- command: ")
     assert lines[3] == "- exit: 124"
-    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", lines[4]), lines[4]
+    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} IMP", lines[4]), lines[4]
     assert "head-padding-line-1" in lines
     assert "tail-padding-line-200" in lines
     _assert_the_middle_of_the_run_survived(lines)
@@ -569,7 +571,7 @@ def test_run_verify_green_run_writes_no_log(tmp_path: Path) -> None:
 
 
 def test_run_verify_log_is_named_for_the_quest_id_and_overwritten(tmp_path: Path) -> None:
-    """One file per quest at the <kind>/<id>.md shape LocalStore.get_artifact
+    """One file per quest at verify/<id>.md, the one-file folder `imp show <id> verify`
     resolves; the second failing run replaces the first, tier header included."""
     project = tmp_path / "proj"
     project.mkdir()

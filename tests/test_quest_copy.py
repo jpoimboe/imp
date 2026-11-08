@@ -41,7 +41,7 @@ def test_command_summaries_name_quests() -> None:
     assert "scope a quest)." in descs
     assert "Start a new quest: run the workflow from an opening intent." in descs
     assert "List your quests: in-flight, backlog, and completed." in descs
-    assert "Show one quest's detail or a named artifact (imp show <id>)." in descs
+    assert "Show one quest's detail or one of its saved files (imp show <id>)." in descs
     assert "change" not in descs
 
 

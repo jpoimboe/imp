@@ -398,9 +398,9 @@ def test_list_all_shows_archived_history(project) -> None:
     assert ARCH in out, f"archived quest missing from history rows: {out!r}"
 
 
-def test_show_spec_via_get_artifact(project) -> None:
-    """AC 2(e): `imp show <cur> spec` returns the spec artifact through the proxied
-    `get_artifact` op."""
+def test_show_spec_via_saved_file_ops(project) -> None:
+    """AC 2(e): `imp show <cur> spec` returns the spec through the proxied
+    `saved_files` + `read_saved_file` ops."""
     control = project
     rc, out, err = _imp(control, "show", CUR, "spec")
     assert rc == 0, f"imp show spec failed: rc={rc} err={err!r}"

@@ -75,46 +75,46 @@ def _run(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
     return buf.getvalue()
 
 
+def _no_match(quest_id: str, name: str) -> str:
+    return (f"imp: {quest_id} has no saved file '{name}'\n"
+            f"  list its saved files with: imp show {quest_id}\n")
+
+
+def _show_fails(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+                control: Path, *argv: str) -> str:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_control_root", lambda: control)
+    capsys.readouterr()
+    rc = main(["show", *argv])
+    out, err = capsys.readouterr()
+    assert rc == 2, (out, err)
+    return err
+
+
+_ONE_FILE_FOLDERS = {"spec": "# SPEC BODY\n", "verify": _VERIFY_LOG,
+                     "summary": "SUMMARY BODY\n"}
+
+
+def _block(lines: list[str], header: str) -> list[str]:
+    """`header` and the lines under it, up to the next blank line."""
+    i = lines.index(header)
+    assert lines[i - 1] == ""
+    end = lines.index("", i) if "" in lines[i:] else len(lines)
+    return lines[i:end]
+
+
 def test_show_spec_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     _seed_with_artifacts(tmp_path, _ID, "Feat")
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
 
 
-def test_show_rejects_review_artifact(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit):
-        main(["show", _ID, "review"])
-    assert "invalid choice: 'review'" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("facet", ["plan", "status", "summary"])
-def test_show_rejects_trimmed_facets(
-    facet: str,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit):
-        main(["show", _ID, facet])
-    assert f"invalid choice: '{facet}'" in capsys.readouterr().err
-
-
-def test_show_invalid_artifact_error_names_artifact(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["show", _ID, "status"])
-    assert exc.value.code != 0
-    err = capsys.readouterr().err
-    assert "argument artifact: invalid choice: 'status'" in err
-    assert "resource" not in err
-
-
 def _archive_and_prune(control: Path, ch: Quest, quest_id: str) -> None:
     """Prunes the home's artifacts too: `_show_artifact` prefers the live file, so
     leaving it would resolve without ever reading the archive."""
     files = {
-        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        str(p.relative_to(ch.quest_dir / "artifacts")): p.read_bytes()
         for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
@@ -145,6 +145,161 @@ def _archive_and_prune(control: Path, ch: Quest, quest_id: str) -> None:
     worktree.remove_worktree(control, quest_id)
     assert not (project_state_dir(control) / "worktrees" / quest_id).exists()
     shutil.rmtree(ch.quest_dir / "artifacts")
+
+
+@pytest.mark.parametrize("archived", [False, True], ids=["live", "ref-only"])
+@pytest.mark.parametrize("name", list(_ONE_FILE_FOLDERS))
+def test_show_a_one_file_folder_prints_its_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, archived: bool,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_verify_log(ch, _ID)
+    summary = ch.quest_dir / "artifacts" / "summary"
+    summary.mkdir(parents=True)
+    (summary / f"{_ID}.md").write_text("SUMMARY BODY\n")
+    if archived:
+        _archive_and_prune(tmp_path, ch, _ID)
+    assert _run(monkeypatch, tmp_path, "show", _ID, name) == _ONE_FILE_FOLDERS[name]
+
+
+@pytest.mark.parametrize("archived", [False, True], ids=["live", "ref-only"])
+def test_show_a_folder_of_several_lists_them_and_a_path_prints_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archived: bool,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    if archived:
+        _archive_and_prune(tmp_path, ch, _ID)
+    listing = f"plans/{_ID}-plan-1.md\nplans/{_ID}-plan-2.md\n"
+    assert _run(monkeypatch, tmp_path, "show", _ID, "plans") == listing
+    assert _run(monkeypatch, tmp_path, "show", _ID, "plans/") == listing
+    assert _run(monkeypatch, tmp_path, "show", _ID,
+                f"plans/{_ID}-plan-2.md") == "# PLAN TWO\n"
+
+
+@pytest.mark.parametrize("name", ["nope", "../state", "/etc/passwd", "verify",
+                                  "plan", "review", "status", "events"])
+def test_show_an_unmatched_name_errors_with_the_listing_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], name: str,
+) -> None:
+    _seed_control(tmp_path)
+    _seed_with_artifacts(tmp_path, _ID, "Feat")  # no test run has failed: no verify/
+    assert _show_fails(monkeypatch, capsys, tmp_path, _ID, name) == _no_match(_ID, name)
+
+
+def test_show_never_lists_or_reads_links_out_of_the_saved_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "secret.md").write_text("SECRET\n")
+    (outside / "dir").mkdir()
+    (outside / "dir" / "inner.md").write_text("INNER\n")
+    art = ch.quest_dir / "artifacts"
+    for folder in (art, art / "plans"):
+        (folder / "leak.md").symlink_to(outside / "secret.md")
+        (folder / "linkdir").symlink_to(outside / "dir")
+    assert _run(monkeypatch, tmp_path, "show", _ID, "plans") == (
+        f"plans/{_ID}-plan-1.md\nplans/{_ID}-plan-2.md\n")
+    for name in ("leak.md", "linkdir", "linkdir/inner.md", "plans/leak.md",
+                 "plans/linkdir/inner.md"):
+        assert _show_fails(monkeypatch, capsys, tmp_path, _ID, name) == \
+            _no_match(_ID, name)
+    saved = [f"plans/{_ID}-plan-1.md", f"plans/{_ID}-plan-2.md", f"spec/{_ID}.md"]
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", *saved]
+    assert json.loads(_run(monkeypatch, tmp_path, "show", _ID, "--json"))[
+        "files"] == saved
+
+
+def test_show_reads_the_ref_when_the_saved_folder_is_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Feat", quest_id=_ID, base_branch="main")
+    worktree.artifact_commit(tmp_path, _ID, {f"spec/{_ID}.md": b"# REF SPEC\n"},
+                             message="artifact: seed")
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "spec").mkdir()
+    (outside / "spec" / f"{_ID}.md").write_text("SECRET SPEC\n")
+    (outside / "secret.md").write_text("SECRET\n")
+    (ch.quest_dir / "artifacts").symlink_to(outside)
+    assert _run(monkeypatch, tmp_path, "show", _ID, "spec") == "# REF SPEC\n"
+    assert _show_fails(monkeypatch, capsys, tmp_path, _ID, "secret.md") == \
+        _no_match(_ID, "secret.md")
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", f"spec/{_ID}.md"]
+
+
+@pytest.mark.parametrize("archived", [False, True], ids=["live", "ref-only"])
+def test_show_card_and_json_list_every_saved_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archived: bool,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_verify_log(ch, _ID)
+    if archived:
+        _archive_and_prune(tmp_path, ch, _ID)
+    saved = [f"plans/{_ID}-plan-1.md", f"plans/{_ID}-plan-2.md",
+             f"spec/{_ID}.md", f"verify/{_ID}.md"]
+    lines = _run(monkeypatch, tmp_path, "show", _ID).splitlines()
+    assert _block(lines, "files:") == ["files:", *saved]
+    assert json.loads(_run(monkeypatch, tmp_path, "show", _ID, "--json"))[
+        "files"] == saved
+
+
+def test_show_renders_an_undecodable_saved_file_name_on_a_strict_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Feat", quest_id=_ID, base_branch="main")
+    folder = ch.quest_dir / "artifacts" / "odd"
+    folder.mkdir(parents=True)
+    for leaf in (b"bad\xff.md", b"ok.md"):
+        with open(os.path.join(os.fsencode(folder), leaf), "wb") as fh:
+            fh.write(b"x\n")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    def show(*argv: str) -> bytes:
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="utf-8", errors="strict")
+        with redirect_stdout(out):
+            assert main(["show", _ID, *argv]) == 0
+        out.flush()
+        return raw.getvalue()
+
+    card = show().decode("utf-8").splitlines()
+    assert _block(card, "files:") == ["files:", "odd/bad\ufffd.md", "odd/ok.md"]
+    assert show("odd").decode("utf-8") == "odd/bad\ufffd.md\nodd/ok.md\n"
+
+
+def test_show_card_omits_files_when_nothing_is_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Bare", quest_id="bare01", base_branch="main")
+    assert "files:" not in _run(monkeypatch, tmp_path, "show", "bare01").splitlines()
+    assert json.loads(_run(monkeypatch, tmp_path, "show", "bare01", "--json"))[
+        "files"] == []
+
+
+def test_show_backlog_card_and_json_gain_no_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="bkfile", base_branch="main",
+        origin="backlog", seed_opening="Queued\n\nDo the thing.", defer_seed=True)
+    assert "files:" not in _run(monkeypatch, tmp_path, "show", "bkfile").splitlines()
+    assert "files" not in json.loads(
+        _run(monkeypatch, tmp_path, "show", "bkfile", "--json"))
 
 
 def test_show_spec_falls_back_after_archive(
@@ -201,7 +356,7 @@ def test_show_backlog_default_renders_card(
     assert "wire up OAuth login" in out
 
 
-def test_show_backlog_artifact_message_wording(
+def test_show_backlog_name_message_wording(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -222,14 +377,14 @@ def test_show_backlog_artifact_message_wording(
     err_spec = capsys.readouterr().err
     assert rc_spec == 2
     assert err_spec.rstrip("\n") == (
-        "imp: 2026-06-16-bkg111 is in the backlog (not started); no spec yet"
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no saved files yet"
     )
 
     rc_verify = main(["show", "2026-06-16-bkg111", "verify"])
     err_verify = capsys.readouterr().err
     assert rc_verify == 2
     assert err_verify.rstrip("\n") == (
-        "imp: 2026-06-16-bkg111 is in the backlog (not started); no failed test run yet"
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no saved files yet"
     )
 
 
@@ -438,7 +593,8 @@ def test_show_spec_from_wip_ref_when_home_absent(
     worktree.artifact_commit(
         tmp_path,
         "ghost01",
-        {"spec/ghost01.md": spec, "plans/ghost01-plan-1.md": p1, "plans/ghost01-plan-2.md": p2},
+        {"spec/ghost01.md": spec.read_bytes(), "plans/ghost01-plan-1.md": p1.read_bytes(),
+         "plans/ghost01-plan-2.md": p2.read_bytes()},
         message="artifact: ghost",
     )
     # Seed the archive runtime (events/change/state) so `_resolve_id` finds the
@@ -518,7 +674,7 @@ def test_show_default_card_renders_summary_after_archive(
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        str(p.relative_to(ch.quest_dir / "artifacts")): p.read_bytes()
         for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
@@ -554,14 +710,6 @@ def _seed_events(ch: Quest, events: list[dict]) -> None:
     with ch.events_path.open("a", encoding="utf-8") as fh:
         for e in events:
             fh.write(json.dumps(e) + "\n")
-
-
-def test_show_rejects_events_artifact(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit):
-        main(["show", _ID, "events"])
-    assert "invalid choice: 'events'" in capsys.readouterr().err
 
 
 def test_show_json_emits_structured_overview(
@@ -1084,6 +1232,21 @@ def test_show_card_places_var_blocks_between_summary_and_ledger(
     ]
 
 
+def test_show_card_puts_files_after_var_blocks_and_before_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = _card_lines(
+        tmp_path, monkeypatch, with_ledger=True, summary=b"Shipped.\n",
+        seeded_vars={"notes": "a\nb"}, files=["plans/lng01-plan-1.md", "spec/lng01.md"])
+
+    assert lines[lines.index("summary:"):] == [
+        "summary:", "Shipped.",
+        "", "vars.notes:", "a", "b",
+        "", "files:", "plans/lng01-plan-1.md", "spec/lng01.md",
+        "", "ledger:", "LEDGER ROW",
+    ]
+
+
 def test_show_card_keeps_short_and_empty_values_on_the_vars_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1208,10 +1371,10 @@ def test_show_verify_absent_reports_no_gate_output(
     rc = main(["show", _ID, "verify"])
     err = capsys.readouterr().err
     assert rc == 2, err
-    assert err.rstrip("\n") == f"imp: no failed test run recorded for '{_ID}'"
+    assert err == _no_match(_ID, "verify")
 
 
-def test_show_absent_spec_message_is_unchanged(
+def test_show_absent_spec_reports_no_saved_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1224,7 +1387,7 @@ def test_show_absent_spec_message_is_unchanged(
     rc = main(["show", _ID, "spec"])
     err = capsys.readouterr().err
     assert rc == 2, err
-    assert err.rstrip("\n") == f"imp: no spec for '{_ID}'"
+    assert err == _no_match(_ID, "spec")
 
 
 @pytest.fixture
@@ -1252,36 +1415,16 @@ _LOG_WITH_INNER_WHEN = (
 )
 
 
-def test_show_verify_renders_header_when_in_local_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
+@pytest.mark.parametrize("name", ["spec", "verify"])
+def test_show_prints_saved_file_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None, name: str,
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    verify = ch.quest_dir / "artifacts" / "verify"
-    verify.mkdir(parents=True)
-    (verify / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
+    folder = ch.quest_dir / "artifacts" / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
 
-    out = _run(monkeypatch, tmp_path, "show", _ID, "verify")
-
-    assert out.splitlines() == [
-        "# Gate failure — fast",
-        "",
-        "- command: make check",
-        "- exit: 2",
-        "- when: 2026-09-04 13:22:31",
-        "",
-        _FAILURE_LINE,
-        "- when: 2026-01-01T00:00:00Z",   # gate output is never rewritten
-    ]
-
-
-def test_show_spec_does_not_rewrite_timestamps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chicago_tz: None,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    (ch.quest_dir / "artifacts" / "spec" / f"{_ID}.md").write_text(_LOG_WITH_INNER_WHEN)
-
-    out = _run(monkeypatch, tmp_path, "show", _ID, "spec")
+    out = _run(monkeypatch, tmp_path, "show", _ID, name)
 
     assert out == _LOG_WITH_INNER_WHEN

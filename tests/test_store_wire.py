@@ -63,6 +63,7 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
         merge_commit=None, parent={"id": "par1", "title": "Parent"},
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
         intent="why", seed_opening="summarize foo.py", summary=b"done\n",
+        files=["plans/q1-plan-1.md", "spec/q1.md"],
         vars={"retries": 5, "strict": True, "plan_index": 1},
         seeded_vars={"retries": 5, "strict": True})
     got = _card_from_wire(_json_round_trip(_card_to_wire(card)))
@@ -77,7 +78,7 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
         workflow="default", base_branch="main",
         merge_commit=None, parent=None,
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
-        intent="why", seed_opening=None, summary=b"done\n", vars={},
+        intent="why", seed_opening=None, summary=b"done\n", files=[], vars={},
         seeded_vars={})
     assert _card_from_wire(_json_round_trip(_card_to_wire(card2))) == card2
 

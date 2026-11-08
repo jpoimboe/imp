@@ -1192,14 +1192,12 @@ def _harvest_artifacts(
     quest: Quest, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
     """Journal quest_dir/artifacts/** to the quest's artifact ref (no-op if none)."""
-    from imp.engine import worktree
-    art_root = quest.quest_dir / "artifacts"
-    if not art_root.is_dir():
+    from imp.engine import artifact_files, worktree
+    names = artifact_files.list_files(quest.quest_dir)
+    if names is None:
         return
-    files = {
-        str(p.relative_to(art_root)): p
-        for p in sorted(art_root.rglob("*")) if p.is_file()
-    }
+    files = {rel: data for rel in names
+             if (data := artifact_files.read_file(quest.quest_dir, rel)) is not None}
     worktree.artifact_commit(
         quest.control_root, quest.id, files,
         message=f"artifact: {step.name}", warn=warn)
@@ -1403,15 +1401,15 @@ async def _route_script(
     return action, feedback, muts
 
 
-def _summary_body(summary_path: Path) -> str | None:
+def _summary_body(content: bytes | None) -> str | None:
     """The summary's leading paragraph, used as the merge commit body. Blank and
     heading lines are skipped in any order until the first content line, so a
     summary written under an older prompt — one that still leads with a title —
     yields its paragraph rather than the heading."""
-    if not summary_path.is_file():
+    if content is None:
         return None
     out: list[str] = []
-    for line in summary_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in content.decode("utf-8", errors="replace").splitlines():
         if not line.strip():
             if out:
                 break
@@ -1592,7 +1590,7 @@ def _merge_blocked_pause(
 async def _route_merge_and_exit_worktree(
     step: Step, quest: Quest, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    from imp.engine import worktree
+    from imp.engine import artifact_files, worktree
     _emit_started(log, step, state, quest)
 
     if state.merge_commit:
@@ -1601,8 +1599,8 @@ async def _route_merge_and_exit_worktree(
         state.vars.update(match.var_mutations)
         return _finish(log, step, quest, match, state)
 
-    summary_path = quest.quest_dir / "artifacts" / "summary" / f"{quest.id}.md"
-    body = _summary_body(summary_path)
+    body = _summary_body(
+        artifact_files.read_file(quest.quest_dir, f"summary/{quest.id}.md"))
     result = await anyio.to_thread.run_sync(
         functools.partial(
             worktree.merge_to_base,

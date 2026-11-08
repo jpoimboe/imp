@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -163,6 +164,16 @@ def read_quest_json(control_root: Path, quest_id: str) -> bytes | None:
 
 def _git_bytes(control_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(["git", *args], cwd=control_root, capture_output=True)
+
+
+def list_artifacts(control_root: Path, quest_id: str) -> list[str]:
+    # -z: raw names, never core.quotePath-quoted, so each one reads back via cat-file.
+    tree = _git_bytes(
+        control_root, "ls-tree", "-r", "-z", "--full-tree", "--name-only",
+        f"refs/imp/artifacts/{quest_id}")
+    if tree.returncode != 0:
+        return []
+    return sorted(os.fsdecode(name) for name in tree.stdout.split(b"\0") if name)
 
 
 def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:

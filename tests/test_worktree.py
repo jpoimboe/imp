@@ -426,7 +426,7 @@ def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
 
     # First snapshot: ref does not exist yet -> root commit; returns True.
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec") is True
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()}, message="artifact: spec") is True
     assert _git(tmp_path, "show",
                 "refs/imp/artifacts/feat:spec/feat.md").stdout == "# the spec\n"
     first = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
@@ -435,7 +435,7 @@ def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     # and the new commit is parented on the first (lineage grows, not replaced).
     assert wt.artifact_commit(
         tmp_path, "feat",
-        {"spec/feat.md": spec, "plans/feat-plan-1.md": plan},
+        {"spec/feat.md": spec.read_bytes(), "plans/feat-plan-1.md": plan.read_bytes()},
         message="artifact: plan") is True
     assert _git(tmp_path, "show",
                 "refs/imp/artifacts/feat:plans/feat-plan-1.md").stdout == "# plan 1\n"
@@ -449,7 +449,7 @@ def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     # Re-snapshotting the identical set is a no-op: returns False, ref unmoved.
     assert wt.artifact_commit(
         tmp_path, "feat",
-        {"spec/feat.md": spec, "plans/feat-plan-1.md": plan},
+        {"spec/feat.md": spec.read_bytes(), "plans/feat-plan-1.md": plan.read_bytes()},
         message="artifact: plan") is False
     assert _git(tmp_path, "rev-parse",
                 "refs/imp/artifacts/feat").stdout.strip() == second
@@ -457,7 +457,7 @@ def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     # Dropping the plan from the set deletes it at the tip (full snapshot), while
     # the spec remains — this is what distinguishes snapshot from accumulate.
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec") is True
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()}, message="artifact: spec") is True
     assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
                 "refs/imp/artifacts/feat:plans/feat-plan-1.md").returncode != 0
     assert _git(tmp_path, "show",
@@ -622,7 +622,7 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
     spec.write_text("# v1\n")
     warnings1: list[str] = []
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec},
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()},
         message="artifact: v1", warn=warnings1.append) is True
     assert warnings1 == []
     first = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
@@ -631,7 +631,7 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
     spec.write_text("# v2\n")
     warnings2: list[str] = []
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec},
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()},
         message="artifact: v2", warn=warnings2.append) is True
     assert warnings2 == []
     second = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
@@ -650,7 +650,7 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
     spec.write_text("# v3\n")
     warnings3: list[str] = []
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec},
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()},
         message="artifact: v3", warn=warnings3.append) is True
     assert warnings3 == [
         "artifact ref refs/imp/artifacts/feat unreadable; "
@@ -685,14 +685,14 @@ def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
     spec = stage / "spec.md"
     spec.write_text("# a\n")
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: a") is True
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()}, message="artifact: a") is True
     tip = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
     obj = tmp_path / ".git" / "objects" / tip[:2] / tip[2:]
     obj.chmod(0o644)
     obj.write_bytes(b"")
     spec.write_text("# b\n")
     assert wt.artifact_commit(
-        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: b") is True
+        tmp_path, "feat", {"spec/feat.md": spec.read_bytes()}, message="artifact: b") is True
     assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
                 "refs/imp/artifacts/feat~1").returncode != 0
 

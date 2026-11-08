@@ -8,6 +8,7 @@ import contextlib
 import functools
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
@@ -63,6 +64,7 @@ class QuestCard:
     intent: str | None
     seed_opening: str | None
     summary: bytes | None
+    files: list[str]
     vars: dict[str, object]
     seeded_vars: dict[str, object]   # quest.json's --var values; `vars` is the effective state.vars
 
@@ -109,7 +111,8 @@ class GaugeWeek:
 
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
+    def saved_files(self, quest_id: str) -> list[str]: ...
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None: ...
     def completed_rows(self) -> list[CompletedRow]: ...
     def backlog_readiness(self, depends_on: list[str]) -> Readiness: ...
     def scan_homes(self) -> list[HomeDigest]: ...
@@ -126,8 +129,19 @@ class LocalStore:
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None:
         return _load_events_for_id(self.control_root, quest_id)
 
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
-        return _show_artifact(self.control_root, quest_id, f"{kind}/{quest_id}.md")
+    def saved_files(self, quest_id: str) -> list[str]:
+        from imp.engine import artifact_files
+        from imp.engine.archive import read as archive_read
+        if not _is_quest_id(quest_id):
+            return []
+        live = artifact_files.list_files(_quest_home(self.control_root, quest_id))
+        return live if live is not None else archive_read.list_artifacts(
+            self.control_root, quest_id)
+
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None:
+        if rel not in self.saved_files(quest_id):
+            return None
+        return _show_artifact(self.control_root, quest_id, rel)
 
     def completed_rows(self) -> list[CompletedRow]:
         from imp.engine.archive import read as archive_read
@@ -180,6 +194,8 @@ class LocalStore:
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.engine import quest_refs
         from imp.providers.effective import resolve_default_workflow
+        if not _is_quest_id(quest_id):
+            return None
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
@@ -201,6 +217,7 @@ class LocalStore:
             intent=_resolve_intent(events),
             seed_opening=meta.get("seed_opening"),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
+            files=self.saved_files(quest_id),
             vars=dict(state.get("vars") or {}),
             seeded_vars=dict(meta.get("vars") or {}),
         )
@@ -286,6 +303,14 @@ def _list_quest_homes(control: Path) -> list[str]:
     return live_quest_ids(control)
 
 
+# Admits every archived id shape (CVCV99, legacy alnum, dated) and no path or git rev syntax.
+_QUEST_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def _is_quest_id(quest_id: str) -> bool:
+    return _QUEST_ID.fullmatch(quest_id) is not None
+
+
 def _quest_home(control: Path, quest_id: str) -> Path:
     return project_state_dir(control) / "quests" / quest_id
 
@@ -306,10 +331,11 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
 
 
 def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
+    from imp.engine import artifact_files
     from imp.engine.archive import read as archive_read
-    live = _quest_home(control, quest_id) / "artifacts" / rel
-    if live.is_file():
-        return live.read_bytes()
+    live = artifact_files.read_file(_quest_home(control, quest_id), rel)
+    if live is not None:
+        return live
     return archive_read.read_artifact(control, quest_id, rel)
 
 

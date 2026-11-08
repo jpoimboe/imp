@@ -782,10 +782,13 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
     assert (
         "The columns list the **principal** writers and readers, not an exhaustive census" in flat
     )
+    assert ("`imp show <id> <name>` prints any file under `artifacts/`, from the live"
+            " quest home or from that ref") in flat
     for row in (
-        "| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |",
+        "| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | "
+        "all phases, `imp show` |",
         "| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, "
-        "gap-check, batch-code-reviewer, deferred-sweep, summarizer |",
+        "gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |",
         "| `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` "
         "step (merge commit body), `imp show` |",
         "| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / "

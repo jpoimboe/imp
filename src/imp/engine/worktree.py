@@ -434,12 +434,12 @@ def _force_update_ref(control_root: Path, ref: str, commit: str) -> None:
 
 
 def artifact_commit(
-    control_root: Path, quest_id: str, files: Mapping[str, Path], *, message: str,
+    control_root: Path, quest_id: str, files: Mapping[str, bytes], *, message: str,
     warn: Callable[[str], None] | None = None,
 ) -> bool:
     """Snapshot a quest's artifacts to refs/imp/artifacts/<id> as a FULL tree.
 
-    The committed tree is exactly `files`, flat at the tree root (e.g.
+    The committed tree is exactly `files` (path -> content), flat at the tree root (e.g.
     spec/<id>.md, plans/<id>-plan-N.md) — a file dropped from `files` is gone at
     the tip. Each commit is parented on the prior tip, preserving lineage. When
     the ref's tip object is unreadable (corrupt/truncated) the parent probe's
@@ -455,10 +455,10 @@ def artifact_commit(
     if not files:
         return False
     with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:
-        for name, src in files.items():
+        for name, content in files.items():
             blob = subprocess.run(
                 ["git", "hash-object", "-w", "--stdin"], cwd=control_root,
-                env=env, input=src.read_bytes(), capture_output=True, check=True,
+                env=env, input=content, capture_output=True, check=True,
             ).stdout.decode().strip()
             subprocess.run(
                 ["git", "update-index", "--add", "--cacheinfo",

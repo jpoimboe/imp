@@ -79,7 +79,7 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
             "parent": c.parent,
             "depends_on": list(c.depends_on), "intent": c.intent,
             "seed_opening": c.seed_opening,
-            "summary": _b64e(c.summary), "vars": dict(c.vars),
+            "summary": _b64e(c.summary), "files": list(c.files), "vars": dict(c.vars),
             "seeded_vars": dict(c.seeded_vars)}
 
 
@@ -96,7 +96,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         parent=d["parent"],
         depends_on=list(d["depends_on"]), intent=d["intent"],
         seed_opening=d["seed_opening"],
-        summary=_b64d(d["summary"]), vars=dict(d["vars"]),
+        summary=_b64d(d["summary"]), files=list(d["files"]), vars=dict(d["vars"]),
         seeded_vars=dict(d["seeded_vars"]))
 
 
@@ -131,8 +131,10 @@ def _week_from_wire(d: dict[str, Any]) -> GaugeWeek:
 def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     if op == "get_events":
         return store.get_events(args["quest_id"])
-    if op == "get_artifact":
-        return _b64e(store.get_artifact(args["quest_id"], args["kind"]))
+    if op == "saved_files":
+        return store.saved_files(args["quest_id"])
+    if op == "read_saved_file":
+        return _b64e(store.read_saved_file(args["quest_id"], args["rel"]))
     if op == "completed_rows":
         return [_row_to_wire(r) for r in store.completed_rows()]
     if op == "backlog_readiness":
@@ -185,8 +187,11 @@ class ProxyStore:
             "list[dict[str, Any]] | None",
             self._call("get_events", {"quest_id": quest_id}))
 
-    def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
-        return _b64d(self._call("get_artifact", {"quest_id": quest_id, "kind": kind}))
+    def saved_files(self, quest_id: str) -> list[str]:
+        return cast("list[str]", self._call("saved_files", {"quest_id": quest_id}))
+
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None:
+        return _b64d(self._call("read_saved_file", {"quest_id": quest_id, "rel": rel}))
 
     def completed_rows(self) -> list[CompletedRow]:
         return [_row_from_wire(d) for d in self._call("completed_rows", {})]

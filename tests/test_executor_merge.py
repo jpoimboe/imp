@@ -294,33 +294,28 @@ def _message(root: Path, commit: str) -> str:
     return _git(root, "log", "-1", "--format=%B", commit).stdout.strip()
 
 
-def test_summary_body_takes_the_leading_paragraph(tmp_path: Path) -> None:
+def test_summary_body_takes_the_leading_paragraph() -> None:
     from imp.engine import executor
-    summary = tmp_path / "summary.md"
-    summary.write_text(f"{PARA}\n\n## Tasks\n\n- reshaped the settings\n")
-    assert executor._summary_body(summary) == PARA
+    content = f"{PARA}\n\n## Tasks\n\n- reshaped the settings\n".encode()
+    assert executor._summary_body(content) == PARA
 
 
-def test_summary_body_skips_a_leading_heading(tmp_path: Path) -> None:
+def test_summary_body_skips_a_leading_heading() -> None:
     # An in-flight quest holds the older summarizer prompt, which allows a title.
     from imp.engine import executor
-    summary = tmp_path / "summary.md"
-    summary.write_text(f"# Uniform shape\n\n{PARA}\n\n## Tasks\n\n- one\n")
-    assert executor._summary_body(summary) == PARA
+    content = f"# Uniform shape\n\n{PARA}\n\n## Tasks\n\n- one\n".encode()
+    assert executor._summary_body(content) == PARA
 
 
-def test_summary_body_file_not_found_returns_none(tmp_path: Path) -> None:
+def test_summary_body_absent_returns_none() -> None:
     from imp.engine import executor
-    assert executor._summary_body(tmp_path / "nonexistent.md") is None
+    assert executor._summary_body(None) is None
 
 
-def test_summary_body_contentless_file_returns_none(tmp_path: Path) -> None:
+def test_summary_body_contentless_returns_none() -> None:
     from imp.engine import executor
-    summary = tmp_path / "summary.md"
-    summary.write_text("")
-    assert executor._summary_body(summary) is None
-    summary.write_text("\n   \n\n")
-    assert executor._summary_body(summary) is None
+    assert executor._summary_body(b"") is None
+    assert executor._summary_body(b"\n   \n\n") is None
 
 
 def test_merge_body_is_the_summary_leading_paragraph(tmp_path: Path) -> None:
@@ -356,6 +351,28 @@ def test_merge_body_without_a_summary_stays_minimal(tmp_path: Path) -> None:
     action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert not isinstance(action, Pause)
     assert _message(tmp_path, state.merge_commit) == "Uniform shape\n\nQuest: feat"
+
+
+def test_merge_body_never_reads_a_symlinked_summary(
+    tmp_path: Path, tmp_path_factory,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Uniform shape", quest_id="feat", base_branch="main")
+    (ch.project_root / "feature.txt").write_text("hi")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "feat")
+    outside = tmp_path_factory.mktemp("outside") / "secret.md"
+    outside.write_text("LEAKED OUTSIDE TEXT\n")
+    summary = ch.quest_dir / "artifacts" / "summary" / "feat.md"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.symlink_to(outside)
+    state, log = _ctx(ch)
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert not isinstance(action, Pause)
+    message = _message(tmp_path, state.merge_commit)
+    assert "LEAKED OUTSIDE TEXT" not in message
+    assert message == "Uniform shape\n\nQuest: feat"
 
 
 def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> None:

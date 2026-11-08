@@ -119,7 +119,7 @@ def test_help_lists_list_then_show_with_copy(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("COLUMNS", "80")
     summaries = _command_summaries()
     assert summaries["list"] == "List your quests: in-flight, backlog, and completed."
-    assert summaries["show"] == "Show one quest's detail or a named artifact (imp show <id>)."
+    assert summaries["show"] == "Show one quest's detail or one of its saved files (imp show <id>)."
     text = _top_level_help(_build_parser())
     assert text.index("\n    list ") < text.index("\n    show ")
 

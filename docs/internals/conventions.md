@@ -46,7 +46,7 @@ title verbatim — no `Merge ` prefix, since merge-ness is structural (`git log
 --grep='^Quest:'`) — followed by the leading paragraph of the summarizer's
 `artifacts/summary/<id>.md` (extracted by `_summary_body()` in
 `src/imp/engine/executor.py`) and that trailer. A quest whose summary artifact
-is missing merges with the subject and trailer alone.
+is missing, or is not a regular file, merges with the subject and trailer alone.
 
 ## Seeing imp's own UI
 

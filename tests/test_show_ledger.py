@@ -322,7 +322,7 @@ def test_a_backlog_quest_card_gains_nothing(
     assert any(ln.startswith("status:") and ln.endswith("backlog") for ln in card)
     assert not any(ln.startswith(("run:", "workflow:", "ledger:")) for ln in card)
     assert main(["show", "bklg01", "spec"]) == 2
-    assert ("bklg01 is in the backlog (not started); no spec yet"
+    assert ("bklg01 is in the backlog (not started); no saved files yet"
             in capsys.readouterr().err)
 
 

@@ -498,6 +498,24 @@ def test_knowledge_and_introspection_name_the_verify_artifact_view() -> None:
     assert "Add `spec` for the raw spec, `verify` for the last failing gate run" in intro
 
 
+def test_knowledge_and_introspection_describe_saved_files() -> None:
+    knowledge = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert "the saved files (`files:`)" in knowledge
+    assert ("`show <id> <name>` prints one saved file: a `files:` path, or a folder"
+            " — a one-file folder prints its file") in knowledge
+    assert "a several-file folder lists them (`show <id> plans`)" in knowledge
+    intro = " ".join(_introspection_doc().split())
+    assert ("A quest with saved files lists them in a `files:` section just before"
+            " `ledger:`") in intro
+    assert "`--json` carries them as `files` (`[]` when none)" in intro
+    assert ("a folder holding several lists their paths (`imp show <id> plans`)"
+            ) in intro
+    assert ("reads the live quest files while a quest is in flight and the copy"
+            " saved in git once it is finished") in intro
+    assert ("any other saved file or folder named in `files:` (`plans` lists the"
+            " plans)") in intro
+
+
 def test_show_card_vars_are_documented_as_var_seeded_only() -> None:
     intro = " ".join(_introspection_doc().split())
     assert ("A quest card shows a `vars:` line of the variables you set with "

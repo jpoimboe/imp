@@ -44,7 +44,7 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
             last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
             created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
             workflow="default", base_branch=None, merge_commit=None, parent=None,
-            depends_on=[], intent=None, seed_opening=None, summary=None, vars={},
+            depends_on=[], intent=None, seed_opening=None, summary=None, files=[], vars={},
             seeded_vars={})
 
     class FakeStore:
@@ -100,7 +100,7 @@ def test_exit_ambiguous_sizes_columns_to_content(
                 last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
                 created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
                 workflow="default", base_branch=None, merge_commit=None, parent=None,
-                depends_on=[], intent=None, seed_opening=None, summary=None, vars={},
+                depends_on=[], intent=None, seed_opening=None, summary=None, files=[], vars={},
                 seeded_vars={})
 
     monkeypatch.setattr("imp.cli.store.make_store", lambda control: FakeStore())
@@ -129,7 +129,7 @@ def test_exit_ambiguous_sizes_around_missing_and_titleless_cards(
             last="2026-06-11T11:45:00+00:00", title=title,
             created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
             workflow="default", base_branch=None, merge_commit=None, parent=None,
-            depends_on=[], intent=None, seed_opening=seed_opening, summary=None,
+            depends_on=[], intent=None, seed_opening=seed_opening, summary=None, files=[],
             vars={}, seeded_vars={})
 
     class FakeStore:
