@@ -4467,7 +4467,7 @@ def test_handoff_note_absent_from_live_scrollback() -> None:
     drv.finish()
     body = _body(out)
     assert not any("HANDOFF-SENTINEL" in ln for ln in body)
-    assert any("reincarnating — context threshold crossed" in ln for ln in body)
+    assert any("fresh session — context threshold crossed" in ln for ln in body)
     assert any("ordinary prose" in ln for ln in body)     # the turn before it survives
     assert any("reborn prose" in ln for ln in body)       # and the reborn turn after it
     assert not any(body[i].strip() == "" and body[i + 1].strip() == ""
