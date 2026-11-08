@@ -36,3 +36,9 @@ def test_task_lead_dispatches_code_reviewer_both_paths() -> None:
     # code-reviewer is the single per-task reviewer now; spec-task-reviewer is gone.
     assert 'subagent_name="code-reviewer", tier="medium"' in body
     assert "spec-task-reviewer" not in body
+
+
+def test_task_lead_coder_dispatch_examples_carry_title() -> None:
+    body = _task_lead().prompt_template_source
+    assert 'sub_agent(subagent_name="coder", tier="medium", title=…, task_description=…)' in body
+    assert 'sub_agent(subagent_name="coder", tier="high", title=…, task_description=…)' in body

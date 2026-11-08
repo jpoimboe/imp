@@ -84,9 +84,9 @@ unimplemented task, or the re-opened task from injected feedback):
    work cold — it cannot give the hard task the top tier from the start. Name tiers,
    never specific model names — the configured provider may not be Anthropic.
    - **Unmarked (default):**
-     `sub_agent(subagent_name="coder", tier="medium", task_description=…)`
+     `sub_agent(subagent_name="coder", tier="medium", title=…, task_description=…)`
    - **Marked `**Tier:** high`:**
-     `sub_agent(subagent_name="coder", tier="high", task_description=…)`
+     `sub_agent(subagent_name="coder", tier="high", title=…, task_description=…)`
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files>` then `git commit -F` with a message in the house style. No
      `Task:` trailer, no `Quest:` trailer — the workflow stamps `Quest:` later."

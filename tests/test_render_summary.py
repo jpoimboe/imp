@@ -21,6 +21,7 @@ from imp.cli.render_summary import (
     summary_total,
     summary_totals,
 )
+from tests._event_fixtures import titled_subagent_events
 
 
 def _started(step: str, phase: str, ts: str) -> dict:
@@ -2062,3 +2063,50 @@ def test_header_status_keeps_display_word_and_bold():
     bold = pal.ansi("merge blocked", "bold", enabled=True)
     assert (_header(title="t", status="merge_blocked", color=True)
             == f"{_GOLD_ID}  ·  t  ·  {bold}")
+
+
+def _titled_rows(title: str | None, label: str | None = None) -> list[StepRow]:
+    return build_summary(titled_subagent_events(title, label=label))
+
+
+def _titled_ledger_line(title: str | None, label: str | None = None) -> str:
+    out = render_summary(_titled_rows(title, label), header=_HDR, color=False, width=80)
+    return next(ln for ln in out if "explorer" in ln)
+
+
+def test_build_summary_reads_the_dispatch_title():
+    assert _titled_rows("map ledger time totals")[0].subagents[0].title \
+        == "map ledger time totals"
+    assert _titled_rows(None)[0].subagents[0].title is None
+
+
+def test_sub_body_prefers_the_title_over_the_label():
+    assert _sub_body(SubagentRow(name="explorer", label="exploring codebase",
+                                 title="map ledger time totals")) \
+        == "↳ explorer (map ledger time totals)"
+    assert _sub_body(SubagentRow(name="explorer", label="exploring codebase",
+                                 title=" \n ")) == "↳ explorer (exploring codebase)"
+
+
+def test_ledger_row_shows_the_title_else_the_label():
+    assert "↳ explorer (map ledger time totals)" in _titled_ledger_line(
+        "map ledger time totals", label="exploring codebase")
+    assert "↳ explorer (exploring codebase)" in _titled_ledger_line(
+        None, label="exploring codebase")
+    assert "↳ explorer (map the ledger)" in _titled_ledger_line("  map   the\nledger ")
+
+
+def test_ledger_row_caret_escapes_the_title():
+    line = _titled_ledger_line("map\x1b[31mred")
+    assert "↳ explorer (map^[[31mred)" in line
+    assert "\x1b" not in line
+
+
+def test_ledger_row_clips_a_long_title_and_keeps_columns_aligned():
+    out = render_summary(_titled_rows("x" * 60), header=_HDR, color=False, width=80)
+    sub = next(ln for ln in out if "explorer" in ln)
+    assert "↳ explorer (" + "x" * 40 + "…)" in sub
+    assert "x" * 41 not in sub
+    step = next(ln for ln in out if ln.strip().startswith("spec"))
+    total = next(ln for ln in out if ln.strip().startswith("total"))
+    assert step.index("—") == sub.index("—") == total.index("—")

@@ -937,6 +937,17 @@ def subagent_provider(sub: nv.SubagentFold) -> str | None:
     return _subagent_field(sub, "provider")
 
 
+def display_subagent_title(title: str | None) -> str | None:
+    """A dispatch's title as every surface shows it; None when absent or blank."""
+    text = " ".join(title.split()) if title else ""
+    if not text:
+        return None
+    if len(text) > _SUBAGENT_TITLE_CLIP:
+        text = text[:_SUBAGENT_TITLE_CLIP] + "…"
+    # Clip before escaping so a `^[` pair is never split.
+    return _caret_escape(text)
+
+
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
     """The single lean/live row for a subagent: `{name}` — and NOTHING else (no
@@ -944,7 +955,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     eliminates the SDK cancellation-sentinel leak from the default views. No
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
-    identity. Uniform dot-separated layout `name · model · elapsed · tag`: the
+    identity. Uniform dot-separated layout `name · title · model · elapsed · tag`:
+    the title (when dispatched with one) keeps the default fg, the
     model is gray, a finished subagent's frozen run duration is gray, and the
     terminal-state tag comes LAST. A clean success carries no tag; `running` is
     subagent magenta; the abnormal states (stalled, interrupted, context
@@ -952,6 +964,9 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     not cleanly finish stands out."""
     sub_c = pal.NODE_COLORS["subagent"]
     parts = [pal.ansi(f"  {sub.subagent_name}", *sub_c, enabled=color)]
+    title = display_subagent_title(sub.title)
+    if title:
+        parts.append(f" · {title}")
     model = subagent_model(sub)
     if model:
         # Gray, like the step header's model.
@@ -1339,6 +1354,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
 
 _ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
 _OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
+_SUBAGENT_TITLE_CLIP = 40    # per-surface clip on a dispatch's sub_agent title
 _SUBAGENT_TASK_CLIP = 60     # §3: per-header clip on the --full subagent task description
 _OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
 _SCRIPT_DETAIL_TAIL_LINES = 15   # lean view: last N lines of a blocked-script detail
@@ -1458,12 +1474,17 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool = False,
     # narrative (nested thinking/tools expanded), then the structured return value.
     # --full stays a superset of the lean view.
     header = f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}"
-    task = " ".join(sub.task_description.split()) if sub.task_description else ""
-    if task:
-        if len(task) > _SUBAGENT_TASK_CLIP:
-            task = task[:_SUBAGENT_TASK_CLIP] + "…"
-        header += f" · {_caret_escape(task)}"
-    yield _line(header, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
+    sub_c = pal.NODE_COLORS["subagent"]
+    title = display_subagent_title(sub.title)
+    if title:
+        yield _line(header, depth, color, *sub_c, gutters=gutters) + f" · {title}"
+    else:
+        task = " ".join(sub.task_description.split()) if sub.task_description else ""
+        if task:
+            if len(task) > _SUBAGENT_TASK_CLIP:
+                task = task[:_SUBAGENT_TASK_CLIP] + "…"
+            header += f" · {_caret_escape(task)}"
+        yield _line(header, depth, color, *sub_c, gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, cats=cats,
                                 color=color, width=width, display_width=display_width,
                                 gutters=(*gutters, depth))

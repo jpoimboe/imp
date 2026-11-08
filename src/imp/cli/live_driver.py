@@ -317,27 +317,19 @@ def compose_prelaunch_position_row(
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           width: int, now_iso: str) -> list[str]:
-    """One row per running subagent (B4/AC5); colliding roles numbered.
+    """One row per running subagent (B4/AC5), its dispatch title beside the name.
     Each row carries the parent position row's band background, padded to width-2
     so the band spans the full footer width and aligns with the row above it."""
     folds = builder.running_subagents()
     if not folds:
         return []
-    counts: dict[str, int] = {}
-    for f in folds:
-        counts[f.subagent_name] = counts.get(f.subagent_name, 0) + 1
-    seen: dict[str, int] = {}
     rows: list[str] = []
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     for f in folds:
-        name = f.subagent_name
-        if counts[name] > 1:
-            seen[name] = seen.get(name, 0) + 1
-            role = f"{name} {seen[name]}"
-        else:
-            role = name
-        role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
+        role_seg = _paint(f.subagent_name, *pal.NODE_COLORS["subagent"],
+                          color=color, over_bg=over)
+        title_seg = rt.display_subagent_title(f.title)
         model = rt.subagent_model(f)
         provider = rt.subagent_provider(f)
         model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
@@ -351,7 +343,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         inner = arrow + " " + rt.compose_label(
-            [role_seg, el_seg, model_seg, bar])
+            [role_seg, title_seg, el_seg, model_seg, bar])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:

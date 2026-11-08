@@ -864,6 +864,7 @@ def _wrap_one(
                 if ctx.event_log is not None:
                     task_input: dict[str, Any] = {
                         "subagent_name": args["subagent_name"],
+                        "title": args["title"],
                         "task_description": args["task_description"],
                     }
                     if args.get("tier"):

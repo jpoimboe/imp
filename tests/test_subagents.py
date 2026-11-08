@@ -198,10 +198,20 @@ def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
         tool.invoke(ctx, {"subagent_name": "x", "task_description": "y"})
 
 
+_TITLE_DESC = (
+    "3\u20136 word label for this task, shown on its progress row "
+    "(e.g. \"map ledger time totals\")."
+)
+
+
 def test_task_tool_schema_has_required_args() -> None:
     assert "subagent_name" in TASK_TOOL_SCHEMA["properties"]
     assert "task_description" in TASK_TOOL_SCHEMA["properties"]
-    assert set(TASK_TOOL_SCHEMA["required"]) == {"subagent_name", "task_description"}
+    assert TASK_TOOL_SCHEMA["properties"]["title"] == {
+        "type": "string", "description": _TITLE_DESC}
+    assert list(TASK_TOOL_SCHEMA["properties"]) == [
+        "subagent_name", "title", "task_description"]
+    assert set(TASK_TOOL_SCHEMA["required"]) == {"subagent_name", "title", "task_description"}
 
 
 @pytest.mark.anyio
@@ -445,7 +455,8 @@ def test_make_task_tool_with_tiers_adds_optional_enum() -> None:
     # optional: NOT added to required
     assert "tier" not in tool.input_schema["required"]
     # original required args preserved
-    assert set(tool.input_schema["required"]) == {"subagent_name", "task_description"}
+    assert set(tool.input_schema["required"]) == {"subagent_name", "title", "task_description"}
+    assert props["title"] == {"type": "string", "description": _TITLE_DESC}
     # shared constant not mutated
     assert "tier" not in TASK_TOOL_SCHEMA["properties"]
 
@@ -459,7 +470,7 @@ def test_make_task_tool_openai_strict_round_trip() -> None:
     tier = strict["properties"]["tier"]
     assert tier["type"] == ["string", "null"]
     assert None in tier["enum"]
-    assert set(strict["required"]) == {"subagent_name", "task_description", "tier"}
+    assert set(strict["required"]) == {"subagent_name", "title", "task_description", "tier"}
 
 
 @pytest.mark.timeout(240)  # wall-clock SIGALRM can false-fire under -n auto saturation

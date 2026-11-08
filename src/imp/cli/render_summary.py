@@ -29,6 +29,7 @@ from imp.cli.quest_row import (
 )
 from imp.cli.quota_column import FOOTNOTE, QuotaColumn, QuotaFallback
 from imp.cli.quota_share import NO_UNITS, Units, credits_by_index
+from imp.cli.render_text import display_subagent_title
 
 _FINISHED_STATUSES = frozenset({"completed", "abandoned"})
 
@@ -61,6 +62,7 @@ def exclusion_spans(events: Iterable[dict[str, Any]]) -> Exclusions:
 class SubagentRow:
     name: str
     label: str | None = None
+    title: str | None = None
     start_ts: str | None = None
     end_ts: str | None = None
     end_inferred: bool = False
@@ -300,6 +302,7 @@ def build_summary(events: Iterable[dict[str, Any]],
                 new_sub = SubagentRow(
                     name=str(inp.get("subagent_name", "?")),
                     label=p.get("label"),
+                    title=str(inp["title"]) if inp.get("title") else None,
                     start_ts=ts,
                     agent_id=f"sub:{event_id}")
                 open_row.subagents.append(new_sub)
@@ -374,10 +377,11 @@ def summary_notes(cells: list[str],
 
 
 def _sub_body(sub: SubagentRow) -> str:
-    """The subagent's left-column label: '↳ name' plus ' (label)' when present."""
+    """The subagent's left-column label: '↳ name' plus ' (title)', else ' (label)'."""
     text = f"↳ {sub.name}"
-    if sub.label:
-        text += f" ({sub.label})"
+    paren = display_subagent_title(sub.title) or sub.label
+    if paren:
+        text += f" ({paren})"
     return text
 
 

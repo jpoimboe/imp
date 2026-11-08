@@ -161,8 +161,13 @@ def _tool_call_text(c: nv.ToolCall) -> str:
     return "\n".join(lines)
 
 
+def _subagent_heading(sub: nv.SubagentFold) -> str:
+    title = rt.display_subagent_title(sub.title)
+    return f"{sub.subagent_name} · {title}" if title else sub.subagent_name
+
+
 def _subagent_status_label(sub: nv.SubagentFold) -> str:
-    label = sub.subagent_name
+    label = _subagent_heading(sub)
     model = rt.subagent_model(sub)
     if model:
         label += f" · {model}"
@@ -307,7 +312,7 @@ def _walk(node: Any, *, full: bool, cats: frozenset[str], level: int,
         if not inner_text and not full:
             yield "· " + esc(label)
             return
-        summary = node.subagent_name if full else "· " + label
+        summary = _subagent_heading(node) if full else "· " + label
         yield _details(summary, inner_text, full=full, esc=esc)
         return
     if isinstance(node, nv.OutcomeLine):

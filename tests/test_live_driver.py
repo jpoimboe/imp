@@ -26,6 +26,7 @@ from tests._event_fixtures import (
     express_spec_marker_events,
     interrupted_task_lead_events,
     task_lead_started,
+    titled_subagent_events,
 )
 
 
@@ -2985,13 +2986,58 @@ def test_compose_subagent_rows_one_per_running_subagent() -> None:
     assert "exploring" not in joined
 
 
-def test_compose_subagent_rows_number_colliding_roles() -> None:
+def _titled_footer_builder(*titles):
+    """Running explorers (model sonnet, 80k context) dispatched with the given titles."""
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    for i, title in enumerate(titles, 1):
+        eid = f"t{i}"
+        b.add(ev(eid, "tool_call", agent_id="step:p/s", id=f"blk-{eid}", name="sub_agent",
+                 input={"subagent_name": "explorer", "title": title,
+                        "task_description": "go"},
+                 timestamp="2026-01-01T00:00:00+00:00"))
+        b.add(ev(f"c-{eid}", "step_context", agent_id=f"sub:{eid}", provider="anthropic",
+                 model="sonnet", tools_schema=[], params={}, max_tool_calls=None))
+        b.add(ev(f"r-{eid}", "agent_message", agent_id=f"sub:{eid}", provider="anthropic",
+                 model="sonnet", stop_reason="end_turn",
+                 usage={"input_tokens": 60000, "output_tokens": 5,
+                        "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0},
+                 context_window=200_000))
+    return b
+
+
+def test_compose_subagent_rows_show_titles_without_numbering() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _titled_footer_builder("map ledger time totals", "map ledger cost column")
+    rows = compose_subagent_rows(b, color=False, width=200,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    assert rows == [
+        "↳ explorer · map ledger time totals · 5s · sonnet · █████░░░░░ 80k/160k",
+        "↳ explorer · map ledger cost column · 5s · sonnet · █████░░░░░ 80k/160k",
+    ]
+    colored = compose_subagent_rows(b, color=True, width=200,   # ansi theme: no band
+                                    now_iso="2026-01-01T00:00:05+00:00")
+    assert (pal.ansi("explorer", *pal.NODE_COLORS["subagent"])
+            + " · map ledger time totals · ") in colored[0]
+
+
+def test_compose_subagent_rows_untitled_collision_shows_bare_names() -> None:
     from imp.cli.live_driver import compose_subagent_rows
     b = _sub_builder(("t1", "explorer"), ("t2", "explorer"))
     rows = compose_subagent_rows(b, color=False, width=120,
                                  now_iso="2026-01-01T00:00:00+00:00")
-    joined = "\n".join(rows)
-    assert "explorer 1" in joined and "explorer 2" in joined
+    assert rows == ["↳ explorer", "↳ explorer"]
+
+
+def test_compose_subagent_rows_escape_title() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    row = compose_subagent_rows(_titled_footer_builder("map\x1b[31mred"), color=False,
+                                width=200, now_iso="2026-01-01T00:00:05+00:00")[0]
+    assert row.startswith("↳ explorer · map^[[31mred · 5s · sonnet")
+    assert "\x1b" not in row
 
 
 def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
@@ -3031,6 +3077,24 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     assert rows[0].startswith("\x1b[48;2;43;47;58m")   # the position row's cool blue-gray band open
     assert rows[0].endswith("\x1b[0m")
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
+
+
+def test_compose_subagent_rows_titled_row_keeps_the_band_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _titled_footer_builder("map ledger time totals")
+    try:
+        pal.set_theme("dark")
+        rows = compose_subagent_rows(b, color=True, width=200,
+                                     now_iso="2026-01-01T00:00:05+00:00")
+    finally:
+        pal.set_theme("ansi")
+    row = rows[0]
+    assert row.startswith("\x1b[48;2;43;47;58m")
+    assert pal.display_width(row) == 198
+    # Title is unpainted, and no full reset ends the band before it.
+    assert " · map ledger time totals · " in row
+    assert "\x1b[0m" not in row[:row.index(" · map ledger time totals")]
 
 
 def test_compose_subagent_rows_pad_to_the_band_width_with_a_gauge() -> None:
@@ -4440,3 +4504,23 @@ def test_internal_only_last_burst_prints_nothing_and_keeps_one_blank(name: str) 
     i = next(n for n, ln in enumerate(live) if "final prose" in ln)
     assert live[i + 1] == ""
     assert live[i + 2] != ""
+
+
+def test_titled_subagent_row_live_equals_log() -> None:
+    events = titled_subagent_events("map ledger time totals")
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    live = [ln for ln in _body(out) if "explorer" in ln]
+    log = [ln for ln in _render_body(events) if "explorer" in ln]
+    assert live == log == ["  explorer · map ledger time totals · claude-sonnet-5-5 · 55s"]
+
+
+def test_titled_subagent_row_puts_abnormal_tag_last() -> None:
+    drv, out = _driver()
+    for e in titled_subagent_events("map ledger time totals", finished=False):
+        drv.on_event(e)
+    drv.finish(interrupted=True)
+    assert [ln for ln in _body(out) if "explorer" in ln] == [
+        "  explorer · map ledger time totals · claude-sonnet-5-5 · interrupted"]

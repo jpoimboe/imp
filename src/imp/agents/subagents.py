@@ -43,9 +43,16 @@ TASK_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "subagent_name": {"type": "string", "description": "Name of a declared subagent."},
+        "title": {
+            "type": "string",
+            "description": (
+                "3\u20136 word label for this task, shown on its progress row "
+                "(e.g. \"map ledger time totals\")."
+            ),
+        },
         "task_description": {"type": "string", "description": "What the subagent should do."},
     },
-    "required": ["subagent_name", "task_description"],
+    "required": ["subagent_name", "title", "task_description"],
 }
 
 
