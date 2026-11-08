@@ -79,8 +79,8 @@ async def test_pick_abandon_matches_non_tty_token_specific(
     err = capsys.readouterr().err
     assert rc == 2
     assert "'lodo'" in err
-    assert "more specific token" in err
-    assert "abandon needs a change token" not in err   # distinct from no-token copy
+    assert "matches multiple quests; pass more of the id" in err
+    assert "abandon needs a quest id" not in err   # distinct from no-id copy
 
 
 def test_cmd_abandon_single_match_abandons_directly(
@@ -194,3 +194,9 @@ def test_cmd_abandon_zero_matches_unknown_exits_2(
     rc = m._cmd_abandon(argparse.Namespace(token="zzzz", yes=False))
     assert rc == 2
     assert "no quest matches" in capsys.readouterr().err
+
+
+def test_abandon_picker_non_tty_asks_for_an_id(capsys) -> None:
+    assert m._abandon_picker_non_tty([]) == 2
+    assert ("abandon needs a quest id on a non-interactive terminal"
+            in capsys.readouterr().err)

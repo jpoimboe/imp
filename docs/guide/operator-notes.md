@@ -139,10 +139,10 @@ imp: archive data is at v17, newer than this imp (knows v16). A running imp keep
 
 `archive index is at v...` is the same refusal for the index's schema floor.
 
-Tokened `imp resume` is the one refusal that runs to more than one line. A token
+`imp resume <id>` is the one refusal that runs to more than one line. An id
 matching any quest on the active board (`running`, `waiting`, `error`, `new`,
 `paused`, `merge_blocked` or backlog) ignores archived matches, so version skew
-cannot change the outcome. Any other token can match archived conversations, so
+cannot change the outcome. Any other id can match archived conversations, so
 one matching an **archived** record this install cannot read refuses and names
 that record. The floor line follows indented:
 
@@ -153,7 +153,7 @@ imp: 'lodo' matches an archived quest this imp cannot read: lodo77
 
 A quest with a home on disk always resolves by its full id, whatever the archive's
 version. A finished quest's leftover home is not on the active board, so a partial
-token matching it can still refuse over an unreadable archived record.
+id matching it can still refuse over an unreadable archived record.
 
 The usual cause is a stale process, not a stale checkout. A running imp keeps the
 code it started with: a session daemon warms its module graph at startup, so

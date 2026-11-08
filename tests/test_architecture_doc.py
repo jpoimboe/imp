@@ -291,16 +291,16 @@ def test_operator_notes_document_archive_version_skew() -> None:
 def test_operator_notes_skew_says_an_active_board_match_ignores_the_archive() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     section = " ".join(text.split("## Archive version skew", 1)[1].split())
-    assert ("A token matching any quest on the active board (`running`, `waiting`, "
+    assert ("An id matching any quest on the active board (`running`, `waiting`, "
             "`error`, `new`, `paused`, `merge_blocked` or backlog) ignores archived "
             "matches, so version skew cannot change the outcome.") in section
-    assert ("Any other token can match archived conversations, so one matching an "
+    assert ("Any other id can match archived conversations, so one matching an "
             "**archived** record this install cannot read refuses and names that "
             "record.") in section
     assert ("A quest with a home on disk always resolves by its full id, whatever "
             "the archive's version.") in section
     assert ("A finished quest's leftover home is not on the active board, so a "
-            "partial token matching it can still refuse over an unreadable archived "
+            "partial id matching it can still refuse over an unreadable archived "
             "record.") in section
     assert "a partial token resolves it too, unless" not in section
     assert "any readable match is offered as a hint" not in section

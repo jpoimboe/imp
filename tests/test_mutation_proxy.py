@@ -364,7 +364,7 @@ def test_cmd_abandon_missing_token_in_sandbox_errors(
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _boom)
     rc = main._cmd_abandon(argparse.Namespace(token=token, yes=False))
     assert rc == 2
-    assert "needs a quest token" in capsys.readouterr().err
+    assert "abandon needs a quest id in a sandboxed session" in capsys.readouterr().err
 
 
 def test_new_mutation_threads_var_flags_to_apply_new(
