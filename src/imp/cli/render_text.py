@@ -203,26 +203,10 @@ def _caret_escape_prose(text: str) -> str:
                      for i, ln in enumerate(lines))
 
 
-def fmt_seconds(seconds: float | int | None) -> str:
-    """Format an elapsed-second count. This is the single duration formatter for
-    every surface (tree recaps, live timer, summary tables, markdown). Under a
-    minute reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`); an
-    hour or more as `Hh Mm` (e.g. 4536 → `1h 15m` — seconds are noise at that
-    scale). None → empty string."""
-    if seconds is None:
-        return ""
-    total = int(seconds)
-    if total < 60:
-        return f"{total}s"
-    if total < 3600:
-        return f"{total // 60}m {total % 60}s"
-    return f"{total // 3600}h {total % 3600 // 60}m"
-
-
 def fmt_seconds_done(seconds: float | int | None) -> str:
     if seconds is None or seconds < 1:
         return ""
-    return fmt_seconds(seconds)
+    return nv.fmt_seconds(seconds)
 
 
 LOG_CATEGORIES: tuple[str, ...] = ("thinking", "tools", "subagents", "prompts", "tiers")

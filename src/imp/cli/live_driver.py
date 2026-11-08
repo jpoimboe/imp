@@ -168,9 +168,9 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
     if activity.countdown_total is not None:
         remaining = max(0.0, activity.countdown_total - elapsed)
         tail = (f"{nv._fmt_hm(remaining)} left" if remaining >= 60
-                else f"{rt.fmt_seconds(remaining)} left")
+                else f"{nv.fmt_seconds(remaining)} left")
     else:
-        tail = rt.fmt_seconds(elapsed)
+        tail = nv.fmt_seconds(elapsed)
     rest: list[str] = []
     if activity.dep_wait:
         rest.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
@@ -347,7 +347,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         if secs is not None:
             secs = max(0.0, secs - f.nested.backoff_wait_seconds(now_iso))
-        el = rt.fmt_seconds(secs) if secs is not None else None
+        el = nv.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         inner = arrow + " " + rt.compose_label(

@@ -3412,8 +3412,7 @@ def test_activity_line_matches_subagent_row_for_single_subagent() -> None:
                                  width=120)
     row = compose_subagent_rows(b, color=False, width=120, now_iso=now)[0]
     fold = b.running_subagents()[0]
-    from imp.cli import render_text as rt
-    expected = rt.fmt_seconds(nv.elapsed_seconds(fold.start_ts, now)
+    expected = nv.fmt_seconds(nv.elapsed_seconds(fold.start_ts, now)
                               - fold.nested.backoff_wait_seconds(now))
     assert f"· {expected}" in line and f"· {expected}" in row
 

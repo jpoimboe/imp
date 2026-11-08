@@ -2650,6 +2650,22 @@ def _h_sandbox_overlay_unavailable(
                            detail=_detail_text(p.get("detail"))))
 
 
+def fmt_seconds(seconds: float | int | None) -> str:
+    """Format an elapsed-second count. This is the single duration formatter for
+    every surface (tree recaps, live timer, summary tables, markdown). Under a
+    minute reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`); an
+    hour or more as `Hh Mm` (e.g. 4536 → `1h 15m` — seconds are noise at that
+    scale). None → empty string."""
+    if seconds is None:
+        return ""
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        return f"{total // 60}m {total % 60}s"
+    return f"{total // 3600}h {total % 3600 // 60}m"
+
+
 def _fmt_hm(seconds: float) -> str:
     """`2d 4h` / `2h 13m` / `45m` compact duration; the day form takes over at 48
     hours, where `52h 0m` stops reading as a duration. Every caller can wait days."""
@@ -2665,8 +2681,8 @@ def _fmt_hm(seconds: float) -> str:
 
 def resume_marker_text(node: ResumeMarkerNode) -> str:
     gap = node.gap_s
-    duration = (f"{gap}s" if gap < 60
-                else _fmt_hm(gap).removesuffix(" 0m").removesuffix(" 0h"))
+    duration = (_fmt_hm(gap).removesuffix(" 0h") if gap >= 48 * 3600
+                else fmt_seconds(gap).removesuffix(" 0s").removesuffix(" 0m"))
     return f"paused · resumed {duration} later"
 
 
