@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from imp.cli.narrative import NarrativeBuilder, build_tree
+from imp.cli.narrative import AgentTextNode, NarrativeBuilder, build_tree
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import agent_text, ev
 from tests.test_narrative_resume_marker import SHARED_DURATIONS
@@ -456,7 +456,13 @@ def _message(events: list[Event]) -> str | None:
     b = NarrativeBuilder()
     for e in events:
         b.add(e)
-    return b.latest_step_message()
+    found = b.latest_step_message_at()
+    if found is None:
+        return None
+    step, index = found
+    node = step.children[index]
+    assert isinstance(node, AgentTextNode)
+    return node.text
 
 
 def _coder_said() -> list[Event]:
