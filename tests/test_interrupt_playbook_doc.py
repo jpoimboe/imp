@@ -19,13 +19,14 @@ _WHERE_YOU_LEFT = (
     " | mid-run on a script step (verify gate running) | the gate, re-run — no intervening hold"
     " prompt |"
     " | an agent's question | that question, re-asked; the typed answer reaches the agent |"
-    " | the inline steer gate (after a Ctrl-C) | `interrupted · enter to continue · type to"
+    " | the inline steer gate (after a Ctrl-C) | `paused · enter to continue · type to"
     " redirect · Ctrl-D to leave` |"
     " | a hold prompt (workflow pause, verify gate, or a resumed hold prompt) | that same hold"
     " prompt |"
     " Leaving again from the landing re-applies the same rule; a stale landing never outlives"
     " the step it was recorded for. Headless and autonomous resumes always run the agent."
 )
+_RESUMED_HOLD = "`paused · enter to continue · type to redirect · Ctrl-D to leave`"
 
 
 def _flat(text: str) -> str:
@@ -83,10 +84,11 @@ def test_hold_prompt_landing_is_conditional_on_leaving_from_it() -> None:
     assert "(e.g. the inline steer gate after a Ctrl-C) → detaches" not in flat
 
 
-def test_resteer_hold_prompt_text_is_named_identical_to_the_steer_gate() -> None:
+def test_resteer_hold_prompt_text_is_named_paused() -> None:
     flat = _flat(DOC.read_text())
-    sites = [m.end() for m in re.finditer(r"daemon resteer hold prompt", flat)
-             if not flat.startswith(" `paused", m.end())]
-    assert len(sites) == 4
+    sites = [m.end() for m in re.finditer(r"daemon resteer hold prompt", flat)]
+    assert len(sites) == 5
     for end in sites:
-        assert "identical to the inline steer gate" in flat[end:end + 300], flat[end:end + 300]
+        assert _RESUMED_HOLD in flat[end:end + 300], flat[end:end + 300]
+    assert "identical to the inline steer gate" not in flat
+    assert "`interrupted · enter to continue · type to redirect · Ctrl-D to leave`" in flat

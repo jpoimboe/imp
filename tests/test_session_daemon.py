@@ -1607,7 +1607,7 @@ async def test_leave_frame_midrun_lands_on_agent_despite_hold_prompt(
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto
 @pytest.mark.parametrize("target,prompt_attr", [
     ("prompt-paused", "_RESUME_PROMPT"),
-    ("prompt-interrupted", "_RESUME_INTERRUPTED_PROMPT"),
+    ("prompt-interrupted", "_RESUME_PROMPT"),
 ])
 @pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
