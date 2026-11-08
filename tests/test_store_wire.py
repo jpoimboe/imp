@@ -63,19 +63,22 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
         merge_commit=None, parent={"id": "par1", "title": "Parent"},
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
         intent="why", seed_opening="summarize foo.py", summary=b"done\n",
-        vars={"retries": 5, "strict": True})
+        vars={"retries": 5, "strict": True, "plan_index": 1},
+        seeded_vars={"retries": 5, "strict": True})
     got = _card_from_wire(_json_round_trip(_card_to_wire(card)))
     assert got == card
     assert got is not None and got.pause_reason == "detached"
     assert got.workflow == "memory"
     assert got.seed_opening == "summarize foo.py"
+    assert got.seeded_vars == {"retries": 5, "strict": True}
     card2 = QuestCard(
         quest_id="q1", status="active", pause_reason=None, step="plan",
         last="", title="Q", created="", step_label=None, phase_label=None,
         workflow="default", base_branch="main",
         merge_commit=None, parent=None,
         depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
-        intent="why", seed_opening=None, summary=b"done\n", vars={})
+        intent="why", seed_opening=None, summary=b"done\n", vars={},
+        seeded_vars={})
     assert _card_from_wire(_json_round_trip(_card_to_wire(card2))) == card2
 
 

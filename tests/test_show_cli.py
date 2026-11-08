@@ -828,6 +828,34 @@ def _quest_with_vars(control: Path) -> str:
     return "varshow"
 
 
+def _quest_with_engine_vars(control: Path) -> str:
+    """Seeded with one --var; state.vars also holds workflow defaults and engine vars."""
+    _seed_control_with_vars(control)
+    quest = Quest.create_draft(
+        control, title="Engine", quest_id="engvars", base_branch="main",
+        vars={"strict": False})
+    st = State.load(quest.state_dir)
+    st.vars.update({"plan_index": 1, "integration_fork": "abc",
+                    "plan_review_notes": "line one\nline two"})
+    st.save(quest.state_dir)
+    return "engvars"
+
+
+def test_quest_card_carries_seeded_vars_beside_the_effective_set(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.store import make_store
+    quest_id = _quest_with_engine_vars(tmp_path)
+
+    qc = make_store(tmp_path).quest_card(quest_id)
+
+    assert qc is not None
+    assert qc.seeded_vars == {"strict": False}
+    assert qc.vars == {
+        "jurisdiction": "eu", "retries": 3, "strict": False, "plan_index": 1,
+        "integration_fork": "abc", "plan_review_notes": "line one\nline two"}
+
+
 def test_show_card_renders_effective_vars_sorted_by_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
