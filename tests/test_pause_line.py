@@ -193,12 +193,9 @@ def test_error_labels_cover_every_policy_category() -> None:
     from imp.cli.main import _ERROR_LABELS
     from imp.engine.error_policy import _POLICY
 
-    # auth_terminal is remapped to reauth_needed at the executor's fatal branch
-    # — the only site a policy Pause reaches — so the raw token never reaches a
-    # label. Its remap target must be labelled instead.
-    missing = set(_POLICY) - set(_ERROR_LABELS) - {"auth_terminal"}
+    missing = set(_POLICY) - set(_ERROR_LABELS)
     assert missing == set(), f"unmapped categories: {missing}"
-    assert "reauth_needed" in _ERROR_LABELS
+    assert "reauth_needed" in _ERROR_LABELS      # the executor's remap target for auth_terminal
 
 
 def test_error_labels_map_tokens_to_user_facing_prefixes() -> None:

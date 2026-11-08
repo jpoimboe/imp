@@ -270,6 +270,7 @@ _ERROR_LABELS: dict[str, str] = {
     "retry_ceiling": "retries exhausted",
     "reauth_needed": "auth failed",
     "auth": "auth failed",
+    "auth_terminal": "auth failed",
     "rate_limit": "rate limited",
     "network": "network error",
     "stalled": "stalled",
@@ -2000,15 +2001,29 @@ def _vars_blocks(values: dict[str, object], *, color: bool) -> list[str]:
 
 
 # Short card phrasing for the halt reasons a bare token does not explain; the long
-# `imp log` copy is render_text._PAUSE_REASON_COPY. An unmapped token prints bare.
+# `imp log` copy is render_text._PAUSE_REASON_COPY. Unlisted tokens fall through
+# _card_reason_phrase's chain.
 _CARD_PAUSE_PHRASE: dict[str, str] = {
     "detached": "the terminal went away",
     "sigterm": "interrupted",
+    "interrupt": "interrupted",
+    "ctrl-c": "Ctrl-C",
     "reauth_needed": "provider login expired",
     "sandbox_spawn_failed": "the sandbox could not start",
     "max_loops": "a step hit its loop limit",
     "quota": "quota exhausted",
+    "script_blocked": "a script step was blocked",
+    "clean_tree": "a step left uncommitted changes",
+    "unknown_step": "the current step is missing from the workflow",
+    "model-override": "model switch",
+    "compact": "/compact",
+    "awaiting_turn": "waiting for its turn to merge",
 }
+
+
+def _card_reason_phrase(token: str) -> str:
+    return (_CARD_PAUSE_PHRASE.get(token) or _PAUSE_QUALIFIER.get(token)
+            or _ERROR_LABELS.get(token, token))
 
 
 def _card_pause_token(status: str, pause_reason: str | None) -> str | None:
@@ -2099,7 +2114,7 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
     reason = _card_pause_token(card.status, card.pause_reason)
     if reason:
         lines.append(_card_field(
-            "reason:", _CARD_PAUSE_PHRASE.get(reason, reason), 15, color=color))
+            "reason:", _card_reason_phrase(reason), 15, color=color))
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
         position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
