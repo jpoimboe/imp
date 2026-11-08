@@ -4807,7 +4807,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, an overview of your quests — in-flight, the "
             "backlog, and every completed quest. -a/--all also includes "
-            "abandoned/archived quests (the block is then labelled `history`)."),
+            "abandoned/archived quests. The finished-quest block is labelled "
+            "`completed`, or `history` once abandoned or archived quests are "
+            "included."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",

@@ -331,19 +331,30 @@ def _flag_help(p: argparse.ArgumentParser, flag: str) -> str | None:
     return next(a.help for a in p._actions if flag in a.option_strings)
 
 
+_LIST_DESCRIPTION = (
+    "With no argument, an overview of your quests — in-flight, the backlog, and "
+    "every completed quest. -a/--all also includes abandoned/archived quests. The "
+    "finished-quest block is labelled `completed`, or `history` once abandoned or "
+    "archived quests are included.")
+
+
 def test_list_help_copy_is_verbatim() -> None:
     p = _subparser("list")
     assert _command_summaries()["list"] == (
         "List your quests: in-flight, backlog, and completed.")
-    assert p.description == (
-        "With no argument, an overview of your quests — in-flight, the backlog, "
-        "and every completed quest. -a/--all also includes abandoned/archived quests "
-        "(the block is then labelled `history`).")
+    assert p.description == _LIST_DESCRIPTION
     assert _flag_help(p, "--completed") == "Show only completed quests."
     assert _flag_help(p, "--all") == (
         "Also include abandoned and archived quests "
         "(the block is then labelled `history`).")
     assert _flag_help(p, "--archived") == "Show only archived conversations."
+
+
+def test_list_help_output_states_the_label_rule(capsys, monkeypatch) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["list", "-h"])
+    assert _LIST_DESCRIPTION in " ".join(capsys.readouterr().out.split())
 
 
 def test_search_help_copy_is_verbatim() -> None:
