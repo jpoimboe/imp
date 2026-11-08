@@ -661,6 +661,52 @@ def test_summary_markdown_and_html_ledger_show_the_title_else_the_label() -> Non
     assert "<td>↳ explorer (exploring codebase)</td>" in render_html(untitled, title="t")
 
 
+def _failed_task_lead_ledger(**result: Any) -> str:
+    """task-lead fails after its explorer (map repo) ends 13s in with an error result."""
+    events = [
+        _tev("1", "step_started", timestamp="2024-01-01T00:00:00Z",
+             step="task-lead", phase="implement"),
+        _tev("2", "tool_call", timestamp="2024-01-01T00:00:10Z", name="sub_agent",
+             id="blk", id_ns="block", label="map repo",
+             input={"subagent_name": "explorer"}),
+        _tev("3", "tool_result", timestamp="2024-01-01T00:00:23Z", id="blk",
+             id_ns="block", error=True, **result),
+        _tev("4", "error", timestamp="2024-01-01T00:00:30Z", message="boom",
+             category="runner"),
+        _tev("5", "step_completed", timestamp="2024-01-01T00:01:00Z",
+             step="task-lead", action={"verb": "continue"}),
+    ]
+    header = SummaryHeader(title="imp", quest_id="c", status="completed",
+                           total_seconds=60.0)
+    return render_summary_markdown(build_summary(events), header=header)
+
+
+@pytest.mark.parametrize(("result", "word"), [
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was interrupted before "
+                             "finishing — the run was paused. [interrupted]"},
+                 "interrupted", id="interrupted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config) [stalled]"},
+                 "stalled", id="stalled"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' reached its context limit "
+                             "and stopped before finishing. [context_exhausted]"},
+                 "context exhausted", id="context-exhausted"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' was suspended before "
+                             "finishing — its provider or retry budget ran out. [suspended]"},
+                 "suspended", id="suspended"),
+    pytest.param({"content": "whatever", "kind": "interrupted"},
+                 "interrupted", id="explicit-kind"),
+    pytest.param({"content": "RuntimeError: subagent 'explorer' failed (config)"},
+                 "failed", id="plain-failure"),
+])
+def test_summary_markdown_and_html_tag_failed_and_stopped_rows(result, word) -> None:
+    md = _failed_task_lead_ledger(**result)
+    assert "| task-lead · failed | 1m 0s | — | — | — | — | — |" in md
+    assert f"| ↳ explorer (map repo) · {word} | 13s | — | — | — | — | — |" in md
+    html = render_html(md, title="t")
+    assert "<td>task-lead · failed</td>" in html
+    assert f"<td>↳ explorer (map repo) · {word}</td>" in html
+
+
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
     hdr = SummaryHeader(title="feature", quest_id="abc",
                         status="paused", total_seconds=100.0)

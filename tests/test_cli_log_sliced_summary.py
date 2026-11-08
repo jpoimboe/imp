@@ -153,8 +153,11 @@ def test_range_summary_marks_cut_off_failed_subagent_errored(
 
 @_STATUSES
 @pytest.mark.parametrize(("name", "whole_row"), [
-    pytest.param("build", "| build | ~50s | — | — | — | — | — |", id="step-inferred-end"),
+    pytest.param("build", "| build · failed | ~50s | — | — | — | — | — |",
+                 id="step-inferred-end"),
     pytest.param("explorer", "| ↳ explorer | 1m 15s | — | — | — | — | — |", id="subagent"),
+    pytest.param("scout", "| ↳ scout · failed | 48s | — | — | — | — | — |",
+                 id="failed-subagent"),
 ])
 def test_range_summary_md_row_matches_whole_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str, name: str,

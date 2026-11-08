@@ -26,6 +26,7 @@ from imp.cli.render_summary import (
     _dur_text,
     _fmt_tokens,
     _last_cell,
+    _step_body,
     _sub_body,
     open_span_label,
     summary_notes,
@@ -483,7 +484,7 @@ def _summary_document(summary: list[StepRow], header: SummaryHeader,
         if row.phase != cur_phase:
             cur_phase = row.phase
             grouped.append((row.phase_text, []))
-        step = esc(row.step_text).replace("|", "\\|")
+        step = esc(_step_body(row)).replace("|", "\\|")
         last = _last_cell(row.totals, row.subtree_charge, column)
         cells.append(last)
         grouped[-1][1].append(
