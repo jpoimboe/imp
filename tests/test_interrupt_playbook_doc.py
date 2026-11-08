@@ -92,3 +92,31 @@ def test_resteer_hold_prompt_text_is_named_paused() -> None:
         assert _RESUMED_HOLD in flat[end:end + 300], flat[end:end + 300]
     assert "identical to the inline steer gate" not in flat
     assert "`interrupted · enter to continue · type to redirect · Ctrl-D to leave`" in flat
+
+
+def test_phase0_leave_outcomes_are_scoped_by_regime() -> None:
+    flat = _flat(DOC.read_text())
+    for stale in ("either regime", "Both regimes write a",
+                  "because `imp resume` carries no leave-mode disposition",
+                  "(materialized) or `conversation_saved` (phase-0)",
+                  "a fresh `imp new` run mid-execution"):
+        assert stale not in flat, stale
+    row_b = _between("| **B** |", "\n| **C** |")
+    assert "`conversation_saved`" in row_b
+    assert "no** `workflow_paused`" in row_b
+    step = _between("### **`INTERRUPT-AND-VERIFY", "### **`RESUME-AND-VERIFY")
+    for label in ("**Mid-run Ctrl-D, phase 0:**", "**Ctrl-D at the inline steer gate, phase 0:**"):
+        assert label in step, label
+    clause = (
+        "phase 0, live session: the save or archive spine; a direct leave (no Ctrl-C first) "
+        "writes only `conversation_saved` (save) or `conversation_archived` (archive), and a "
+        "leave after a Ctrl-C also keeps the Ctrl-C's `workflow_paused`; discarded if you "
+        "haven't sent a message yet. Phase-0 pre-session prompts (opening, `/clear`, inert "
+        "resume): §6 row A"
+    )
+    rows = [line for line in DOC.read_text().splitlines()
+            if line.startswith(("| **SIGTERM** |", "| **SIGHUP** |", "| **Ctrl-\\** (mid-run) |",
+                                "| **Ctrl-D** (mid-run) |"))]
+    assert len(rows) == 4
+    for row in rows:
+        assert clause in row, row
