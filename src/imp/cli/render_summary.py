@@ -503,13 +503,20 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
     return elapsed_seconds(stamps[0], stamps[-1])
 
 
-def _header_line(h: SummaryHeader, *, color: bool) -> str:
-    quest_id = pal.ansi(h.quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+_HEADER_SEP = "  ·  "
+_HEADER_NAME_FLOOR = 10
+
+
+def _header_line(h: SummaryHeader, *, color: bool, width: int) -> str:
+    status_word = display_word(h.status)
+    room = width - pal.display_width(_HEADER_SEP.join((h.quest_id, "", status_word)))
     name = h.name
     name_codes = () if name.kind is NameKind.TITLE else ("dim",)
-    name_text = pal.ansi(name.text, *name_codes, enabled=color)
-    status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
-    return f"{quest_id}  ·  {name_text}  ·  {status}"
+    name_text = _fit(name.text, max(_HEADER_NAME_FLOOR, room))
+    return _HEADER_SEP.join((
+        pal.ansi(h.quest_id, *pal.NODE_COLORS["quest_id"], enabled=color),
+        pal.ansi(name_text, *name_codes, enabled=color),
+        pal.ansi(status_word, *STATUS_COLORS.get(h.status, ()), enabled=color)))
 
 
 _TITLES = ("time", "in", "out", "cost")
@@ -657,7 +664,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     total_last = total_cell(summary, quota)
     name_w, dur_w, in_w, out_w, last_w = _column_widths(
         summary, open_label, work, total, total_last, column, width)
-    lines = [_header_line(header, color=color)] if header_line else []
+    lines = [_header_line(header, color=color, width=width)] if header_line else []
     if summary:
         lines += _title_lines(name_w=name_w, dur_w=dur_w, in_w=in_w,
                               out_w=out_w, last_w=last_w,

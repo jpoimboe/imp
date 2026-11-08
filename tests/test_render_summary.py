@@ -2155,10 +2155,10 @@ def test_hide_idle_drops_the_header_of_an_all_idle_phase() -> None:
 
 
 def _header(*, title: str = "", intent: str | None = None, status: str = "paused",
-            color: bool = False) -> str:
+            color: bool = False, width: int = 80) -> str:
     hdr = SummaryHeader(quest_id="kole14", title=title, status=status,
                         total_seconds=None, intent=intent)
-    return render_summary([], header=hdr, color=color, width=80)[0]
+    return render_summary([], header=hdr, color=color, width=width)[0]
 
 
 _GOLD_ID = pal.ansi("kole14", *pal.NODE_COLORS["quest_id"], enabled=True)
@@ -2169,9 +2169,9 @@ def test_header_leads_with_id_then_title_then_status():
     assert _header(title="imp doctor", color=True) == f"{_GOLD_ID}  ·  imp doctor  ·  paused"
 
 
-def test_header_never_truncates_a_title():
+def test_unbounded_header_never_truncates_a_title():
     long_title = "t" * 90
-    assert _header(title=long_title) == f"kole14  ·  {long_title}  ·  paused"
+    assert _header(title=long_title, width=10_000) == f"kole14  ·  {long_title}  ·  paused"
 
 
 def test_titleless_header_falls_back_to_the_opening_message_truncated_and_dim():
@@ -2179,9 +2179,10 @@ def test_titleless_header_falls_back_to_the_opening_message_truncated_and_dim():
     flat = " ".join(opening.split())
     shown = flat[:69] + "…"
     assert len(shown) == 70
-    assert _header(intent=opening) == f"kole14  ·  {shown}  ·  paused"
+    assert _header(intent=opening, width=10_000) == f"kole14  ·  {shown}  ·  paused"
     dim = pal.ansi(shown, "dim", enabled=True)
-    assert _header(intent=opening, color=True) == f"{_GOLD_ID}  ·  {dim}  ·  paused"
+    assert (_header(intent=opening, color=True, width=10_000)
+            == f"{_GOLD_ID}  ·  {dim}  ·  paused")
 
 
 def test_short_opening_message_is_not_truncated():
@@ -2454,3 +2455,28 @@ def test_a_note_never_breaks_inside_a_word_or_at_a_hyphen():
         "    models",
         "    listed",
     ]
+
+
+def test_a_long_title_clips_with_an_ellipsis_so_the_header_fits():
+    title = "Stop spec reviewers from silently reversing decisions the user approve"
+    assert len(title) == 70
+    line = _header(title=title, status="running")
+    assert line == ("kole14  ·  Stop spec reviewers from silently reversing decisions th…"
+                    "  ·  running")
+    assert pal.display_width(line) == 80
+
+
+def test_a_title_that_exactly_fills_the_header_is_not_clipped():
+    assert _header(title="t" * 58) == f"kole14  ·  {'t' * 58}  ·  paused"
+
+
+def test_a_clipped_opening_message_keeps_its_dim_around_the_clipped_text():
+    opening = "fix the summary " + "x" * 80
+    shown = pal.ansi(opening[:57] + "…", "dim", enabled=True)
+    assert _header(intent=opening, color=True) == f"{_GOLD_ID}  ·  {shown}  ·  paused"
+
+
+def test_below_the_floor_the_title_keeps_ten_columns_and_the_line_overflows():
+    line = _header(title="t" * 40, width=30)
+    assert line == f"kole14  ·  {'t' * 9}…  ·  paused"
+    assert pal.display_width(line) > 30
