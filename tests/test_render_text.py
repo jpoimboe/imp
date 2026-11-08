@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.transcript import ContinuationNote, deliver_continuation_reply
+from imp.agents.transcript import (
+    COMPLETE_STEP_BATCHED,
+    ContinuationNote,
+    deliver_continuation_reply,
+)
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
@@ -4502,3 +4506,170 @@ def test_full_subagent_header_shows_title_instead_of_brief() -> None:
     escaped = full("map\x1b[31mred")
     assert "▾ explorer · map^[[31mred" in escaped
     assert not any("\x1b" in ln for ln in escaped)
+
+
+_CS_AID = "step:review/rev"
+_CC_REJECT = (
+    "The user doesn't want to proceed with this tool use. The tool use was rejected "
+    "(eg. if it was a file edit, the new_string was NOT written to the file). STOP "
+    "what you are doing and wait for the user to tell you how to proceed.")
+_CS_INVALID = "status must be Success or Error"
+
+
+def _cs_step(*body):
+    return [
+        ev("1", "step_started", step="rev", kind="agent", phase="review",
+           model="m", provider="claude"),
+        *body,
+        ev("99", "step_completed", step="rev", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+
+
+def _cs_call(eid, cid, status="Success", outcome="done"):
+    return ev(eid, "tool_call", agent_id=_CS_AID, id=cid, name="complete_step",
+              input={"status": status, "outcome": outcome})
+
+
+def _cs_result(eid, cid, content, *, error, **extra):
+    return ev(eid, "tool_result", agent_id=_CS_AID, id=cid, content=content,
+              error=error, **extra)
+
+
+def _cs_query_result(eid):
+    return ev(eid, "query_result", agent_id=_CS_AID, subtype="error_during_execution")
+
+
+def _cs_agent_result(eid):
+    return ev(eid, "agent_result", agent_id=_CS_AID, status="Success", outcome="done")
+
+
+def _cs_calls(events):
+    step = nv.build_tree(events).root.children[0].children[0]
+    return {c.call_id: c for n in step.children if isinstance(n, nv.ToolBurstFold)
+            for c in n.calls}
+
+
+def test_claude_interrupted_complete_step_renders_as_success() -> None:
+    events = _cs_step(
+        _cs_call("2", "X"),
+        _cs_result("3", "X", _CC_REJECT, error=True,
+                   citations=[{"url": "https://example.com/a"}]),
+        _cs_query_result("4"),
+        _cs_agent_result("5"))
+    call = _cs_calls(events)["X"]
+    assert call.is_error is False
+    assert call.result is None
+    assert call.citations_footer == ""
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step  status=Success" in full
+    assert "complete_step [error]" not in full
+    assert "doesn't want to proceed" not in full
+    assert "example.com" not in full
+
+
+def test_batched_complete_step_without_agent_result_keeps_error() -> None:
+    events = _cs_step(
+        _cs_call("2", "B"),
+        _cs_result("3", "B", COMPLETE_STEP_BATCHED, error=True))
+    call = _cs_calls(events)["B"]
+    assert (call.is_error, call.result) == (True, COMPLETE_STEP_BATCHED)
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step [error]  status=Success" in full
+    assert "→ complete_step was not run" in full
+
+
+def test_invalid_complete_step_without_agent_result_keeps_error() -> None:
+    events = _cs_step(
+        _cs_call("2", "V", status="Bogus"),
+        _cs_result("3", "V", _CS_INVALID, error=True),
+        ev("4", "output_validation_nudge", agent_id=_CS_AID, message="bad status",
+           attempt=1))
+    call = _cs_calls(events)["V"]
+    assert (call.is_error, call.result) == (True, _CS_INVALID)
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step [error]  status=Bogus" in full
+    assert f"→ {_CS_INVALID}" in full
+
+
+def test_retried_complete_step_clears_only_the_accepted_call() -> None:
+    events = _cs_step(
+        _cs_call("2", "X1", status="Bogus"),
+        _cs_result("3", "X1", _CS_INVALID, error=True),
+        ev("4", "output_validation_nudge", agent_id=_CS_AID, message="bad status",
+           attempt=1),
+        _cs_call("5", "X2"),
+        _cs_result("6", "X2", _CC_REJECT, error=True),
+        _cs_query_result("7"),
+        _cs_agent_result("8"))
+    calls = _cs_calls(events)
+    assert (calls["X1"].is_error, calls["X1"].result) == (True, _CS_INVALID)
+    assert (calls["X2"].is_error, calls["X2"].result) == (False, None)
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step [error]  status=Bogus" in full
+    assert f"→ {_CS_INVALID}" in full
+    assert "· complete_step  status=Success" in full
+    assert "doesn't want to proceed" not in full
+
+
+# ("Y2", "Y1"): claude accepts the first of two same-message calls, batch-rejects the second.
+@pytest.mark.parametrize(("batched", "accepted"), [("Y1", "Y2"), ("Y2", "Y1")])
+def test_same_burst_complete_steps_clear_only_the_unbatched_call(
+        batched: str, accepted: str) -> None:
+    outcome = {"Y1": "first", "Y2": "second"}
+    events = _cs_step(
+        _cs_call("2", "Y1", outcome="first"),
+        _cs_call("3", "Y2", outcome="second"),
+        _cs_result("4", batched, COMPLETE_STEP_BATCHED, error=True),
+        _cs_result("5", accepted, _CC_REJECT, error=True),
+        _cs_query_result("6"),
+        _cs_agent_result("7"))
+    calls = _cs_calls(events)
+    assert (calls[batched].is_error, calls[batched].result) == (True, COMPLETE_STEP_BATCHED)
+    assert (calls[accepted].is_error, calls[accepted].result) == (False, None)
+    full = "\n".join(_lines(events, full=True))
+    assert f"· complete_step [error]  status=Success  outcome={outcome[batched]}" in full
+    assert f"· complete_step  status=Success  outcome={outcome[accepted]}" in full
+    assert "→ complete_step was not run" in full
+    assert "doesn't want to proceed" not in full
+
+
+def test_codex_step_complete_result_dropped_on_success() -> None:
+    events = _cs_step(
+        _cs_call("2", "C"),
+        _cs_result("3", "C", "step complete", error=False),
+        _cs_agent_result("4"))
+    assert _cs_calls(events)["C"].result is None
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step  status=Success" in full
+    assert "→ step complete" not in full
+
+
+def test_codex_step_complete_result_dropped_when_prose_flushed_the_burst() -> None:
+    events = _cs_step(
+        _cs_call("2", "C"),
+        _cs_result("3", "C", "step complete", error=False),
+        agent_text("4", "No findings.", agent_id=_CS_AID),
+        _cs_agent_result("5"))
+    step = nv.build_tree(events).root.children[0].children[0]
+    kinds = [type(n) for n in step.children
+             if isinstance(n, (nv.ToolBurstFold, nv.AgentTextNode))]
+    assert kinds == [nv.ToolBurstFold, nv.AgentTextNode]
+    assert _cs_calls(events)["C"].result is None
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step  status=Success" in full
+    assert "→ step complete" not in full
+    assert "No findings." in full
+
+
+def test_complete_step_ack_flushed_by_prose_keeps_live_log_parity() -> None:
+    from tests.test_full_stream_view import _live_body, _log_body
+    events = _cs_step(
+        _cs_call("2", "C"),
+        _cs_result("3", "C", "step complete", error=False),
+        agent_text("4", "No findings.", agent_id=_CS_AID),
+        _cs_agent_result("5"))
+    cats = frozenset(rt.LOG_CATEGORIES)
+    live = _live_body(events, cats)
+    assert "→ step complete" not in live
+    assert live == _log_body(events, cats)

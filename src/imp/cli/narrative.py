@@ -2384,6 +2384,17 @@ def _h_agent_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # prose block — the agent's narration is the single rendered copy (E1).
     if not self._step_stack:
         return
+    # Open burst only: a flushed one was already printed live, so editing it splits live/log.
+    from imp.agents.transcript import COMPLETE_STEP_BATCHED
+    burst = self._current_burst
+    accepted = next(
+        (c for c in reversed(burst.calls if burst is not None else [])
+         if c.name == "complete_step" and c.result != COMPLETE_STEP_BATCHED),
+        None)
+    if accepted is not None:
+        accepted.is_error = False
+        accepted.result = None
+        accepted.citations_footer = ""
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_result = p
@@ -2529,9 +2540,11 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     if burst is not None:
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                call.result = summary
+                # complete_step's non-error result is only the "step complete" ack.
+                ack = call.name == "complete_step" and not is_error
+                call.result = None if ack else summary
                 call.result_ts = ts
-                call.citations_footer = footer
+                call.citations_footer = "" if ack else footer
                 call.is_error = is_error
                 return
 
