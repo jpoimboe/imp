@@ -53,8 +53,9 @@ def _imp_theme(theme: str) -> dict:
     """imp's theme as render_screen kwargs (bg/fg/palette) + a faint-gray SGR.
     Built here — the imp-aware layer — from imp.cli.palette, so the generic impty
     renderer stays free of any imp dependency. Maps imp's color names to pyte's
-    (pyte calls ANSI-yellow 'brown', the dim chrome gray 'brightblack', the user's
-    bright_blue 'brightblue'); names imp never emits fall back to the surface."""
+    (pyte calls ANSI-yellow 'brown', the dim chrome gray 'brightblack', ansi's
+    bright-blue phase/step labels 'brightblue'); names imp never emits fall back
+    to the surface."""
     from imp.cli import palette as pal
 
     bg, fg = pal.surface(theme)

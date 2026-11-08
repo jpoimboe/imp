@@ -468,9 +468,6 @@ class SummaryHeader:
         return resolved
 
 
-_HUE_ROTATION: tuple[str, ...] = ("step", "magenta", "cyan", "green")
-
-
 def summary_total(events: list[dict[str, Any]]) -> float | None:
     if not events:
         return None
@@ -537,10 +534,10 @@ def _cells(u: RowUsage, last: str, *, in_w: int, out_w: int, last_w: int,
     return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color and dim)
 
 
-def _step_line(row: StepRow, *, last: str, hue: str, name_w: int, dur_w: int,
+def _step_line(row: StepRow, *, last: str, name_w: int, dur_w: int,
                in_w: int, out_w: int, last_w: int, color: bool,
                open_label: str) -> str:
-    codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
+    codes = pal.NODE_COLORS["error"] if row.errored else ("step",)
     name = pal.ansi(f"{row.step_text:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     cells = _cells(row.totals, last, in_w=in_w, out_w=out_w, last_w=last_w)
@@ -617,25 +614,18 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     cells = [total_last]
     cur_phase: str | None = None
     phase_header: str | None = None
-    hues: dict[str, str] = {}
-    next_hue = 0
     for row in summary:
         if row.phase != cur_phase:
             cur_phase = row.phase
-            hues, next_hue = {}, 0
             phase_header = row.phase_text
-        if row.step not in hues:
-            hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
-            next_hue += 1
         last = _last_cell(row.totals, row.subtree_units, column)
         cells.append(last)
-        # Skipped only here, so a hidden row still advances the hue rotation.
         if hide_idle and row.idle:
             continue
         if phase_header is not None:
             lines.append(pal.ansi(phase_header, *pal.NODE_COLORS["phase"], enabled=color))
             phase_header = None
-        lines.append(_step_line(row, last=last, hue=hues[row.step],
+        lines.append(_step_line(row, last=last,
                                 name_w=name_w, dur_w=dur_w, in_w=in_w,
                                 out_w=out_w, last_w=last_w, color=color,
                                 open_label=open_label))

@@ -2168,6 +2168,46 @@ def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     assert "thinking" not in block[2]
 
 
+_THEME_COLOR = [(t, c) for t in pal.THEMES for c in (True, False)]
+
+
+def _expected_separator(theme: str, color: bool, columns: int) -> str:
+    return ("\x1b[90m" + "─" * (columns - 2) + "\x1b[0m") if (theme == "ansi" and color) else ""
+
+
+@pytest.mark.parametrize(("theme", "color"), _THEME_COLOR)
+def test_compose_status_rules_off_the_position_row_only_under_ansi_with_color(
+        theme: str, color: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "60")       # compose_status reads term_width()
+    pal.set_theme(theme)
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=color, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    block = drv.compose_status(0)
+    assert block is not None and len(block) == 3     # row count is theme-independent
+    assert "thinking" in block[0]
+    assert block[1] == _expected_separator(theme, color, 60)
+    assert "implementation phase" in block[2] and "task 1/3" in block[2]
+
+
+@pytest.mark.parametrize(("theme", "color"), _THEME_COLOR)
+def test_compose_startup_rules_off_the_identity_row_only_under_ansi_with_color(
+        theme: str, color: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "60")
+    pal.set_theme(theme)
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=color, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", quest_id="lufu50", title="t")
+    rows = drv.compose_startup(0)
+    assert rows is not None and len(rows) == 3       # row count is theme-independent
+    assert "resuming" in rows[0]
+    assert rows[1] == _expected_separator(theme, color, 60)
+    assert "lufu50" in rows[2]
+
+
 def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "quest_created", id="z9gixx", title="t"))
@@ -2680,10 +2720,11 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     # Flat order: id · title · phase · plan · counter · (model bar).
     assert "\x1b[33m" in parts[0]                                  # id: wordmark gold
     assert "\x1b[" not in parts[1]                                 # title: unpainted default fg
-    assert "\x1b[34m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: step-blue
-    assert "\x1b[34m" in parts[3]                                  # plan: step-blue
-    assert "\x1b[34m" in parts[4]                                  # counter: step-blue
-    assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
+    assert "\x1b[1m\x1b[94m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: bold 94
+    assert "\x1b[1m\x1b[94m" in parts[3]                                  # plan: bold 94
+    assert "\x1b[1m\x1b[94m" in parts[4]                                  # counter: bold 94
+    assert "\x1b[90m" in parts[5] and "\x1b[94m" not in parts[5]          # model: gray
+    assert "\x1b[34m" not in row
 
 
 def test_compose_position_row_leads_with_the_project_segment() -> None:
@@ -2722,7 +2763,7 @@ def test_compose_position_row_project_is_gray_like_the_model_segment() -> None:
     assert parts[0] == "\x1b[90mimp\x1b[0m"        # project: gray, model's tone
     assert "\x1b[33m" in parts[1]                  # id: still wordmark gold
     assert "\x1b[" not in parts[2]                 # title: still unpainted
-    assert "\x1b[34m" in parts[3]                  # phase: still step-blue
+    assert "\x1b[1m\x1b[94m" in parts[3]           # phase: still bold bright blue
     assert "\x1b[90m" in parts[-1]                 # model: the same gray
 
 

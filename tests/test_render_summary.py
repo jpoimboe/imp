@@ -205,34 +205,64 @@ def test_plain_multi_step_shows_column_padding():
     ]
 
 
-def test_phase_hue_cycle_and_reset_at_phase_boundary():
+_OLD_ROTATION_HUES = ("magenta", "cyan", "green")
+
+
+@pytest.mark.parametrize("theme", pal.THEMES)
+def test_every_step_row_wears_the_step_hue_whatever_its_position(theme):
     rows = [
         _row("plan", "plan-writer", 10),
         _row("plan", "plan-review", 20),
-        _row("plan", "plan-review", 30),
-        _row("implement", "task-lead", 40),
-        _row("implement", "verify", 50),
+        _row("plan", "verify", 30),
+        _row("plan", "task-lead", 40),
+        _row("plan", "plan-review", 50),
+        _row("implement", "coder", 60),
+        _row("implement", "reviewer", 70),
     ]
-    out = render_summary(rows, header=_HDR, color=True, width=80)
-
-    def line(name: str) -> str:
-        return next(ln for ln in out if name in ln)
-
-    assert "\x1b[34m" in line("plan-writer")          # 1st hue: step-blue
-    assert "\x1b[35m" in line("plan-review")          # 2nd hue: magenta
-    assert "\x1b[34m" in line("task-lead")            # rotation RESET at new phase
-    assert "\x1b[35m" in line("verify")               # 2nd hue again post-reset
-
-
-def test_repeat_reuses_its_phase_scoped_hue():
-    rows = [_row("plan", "plan-review", 20), _row("plan", "plan-review", 30)]
-    out = render_summary(rows, header=_HDR, color=True, width=80)
-    review_lines = [ln for ln in out if "plan-review" in ln]
-    assert len(review_lines) == 2
-    assert all("\x1b[34m" in ln for ln in review_lines)  # both step-blue (1st hue when alone)
+    pal.set_theme(theme)
+    try:
+        step = pal._ANSI["step"]
+        others = [pal._ANSI[h] for h in _OLD_ROTATION_HUES]
+        out = render_summary(rows, header=_HDR, color=True, width=80)
+    finally:
+        pal.set_theme("ansi")
+    names = ("plan-writer", "plan-review", "verify", "task-lead", "coder",
+             "reviewer")
+    step_lines = [ln for ln in out if any(n in ln for n in names)]
+    assert len(step_lines) == len(rows)
+    for ln in step_lines:
+        assert ln.startswith(f"  {step}")          # name in the step hue
+        assert ln.count(step) == 2                 # ...and the duration
+        assert not any(h in ln for h in others)    # no positional magenta/cyan/green
 
 
-def test_errored_step_renders_bold_red_overriding_hue():
+@pytest.mark.parametrize("theme", pal.THEMES)
+def test_subagent_rows_stay_magenta_and_errored_steps_bold_red(theme):
+    rows = [
+        StepRow(phase="plan", step="plan-writer",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                subagents=[SubagentRow(name="explorer",
+                                       start_ts="2026-01-01T00:00:05+00:00",
+                                       end_ts="2026-01-01T00:00:50+00:00")]),
+        _row("plan", "task-lead", 10, errored=True),
+    ]
+    pal.set_theme(theme)
+    try:
+        mag, dim = pal._ANSI["magenta"], pal._ANSI["dim"]
+        bold, red = pal._ANSI["bold"], pal._ANSI["red"]
+        out = render_summary(rows, header=_HDR, color=True, width=80)
+    finally:
+        pal.set_theme("ansi")
+    sub = next(ln for ln in out if "↳ explorer" in ln)
+    assert sub.startswith(f"    {mag}↳ explorer")
+    assert f"{dim}   45s" in sub
+    err = next(ln for ln in out if "task-lead" in ln)
+    assert err.startswith(f"  {bold}{red}task-lead")
+    assert err.count(f"{bold}{red}") == 2
+
+
+def test_errored_step_renders_bold_red():
     rows = [_row("implement", "task-lead", 10, errored=True)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
     assert "\x1b[1m\x1b[31mtask-lead" in next(ln for ln in out if "task-lead" in ln)
@@ -1079,7 +1109,18 @@ def test_duration_renders_in_step_hue():
     rows = [_row("plan", "plan-writer", 90)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
-    assert "\x1b[34m1m 30s\x1b[0m" in line   # first hue: step-blue on the duration
+    assert "\x1b[94m1m 30s\x1b[0m" in line   # step hue (ansi bright blue) on the duration
+
+
+def test_ansi_summary_phase_and_step_rows_are_bright_blue():
+    rows = [_row("plan", "plan-writer", 90), _row("plan", "plan-review", 30)]
+    pal.set_theme("ansi")
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    assert "\x1b[1m\x1b[94mplan phase\x1b[0m" in out
+    review = next(ln for ln in out if "plan-review" in ln)
+    assert review.startswith("  \x1b[94mplan-review")
+    assert "\x1b[94m   30s\x1b[0m" in review
+    assert not any("\x1b[34m" in ln for ln in out)
 
 
 def test_token_and_cost_columns_carry_no_color():
@@ -1093,7 +1134,7 @@ def test_token_and_cost_columns_carry_no_color():
     # Duration is hued for contrast, but the token/cost columns stay default
     # foreground: the line ends with the plain "12.0k  345  ~$0.34" and no SGR reset.
     assert line.endswith("  12.0k  345  ~$0.34")
-    assert "\x1b[34m1m 30s\x1b[0m" in line
+    assert "\x1b[94m1m 30s\x1b[0m" in line
 
 
 def test_errored_step_duration_follows_error_color():
@@ -1918,20 +1959,6 @@ def test_rows_sharing_a_raw_phase_stay_one_group_under_the_first_heading():
     assert not any("plan 2/3" in ln for ln in lines)
 
 
-def test_two_visits_to_one_raw_step_share_a_hue_whatever_their_labels():
-    rows = [_row("spec", "spec-finalizer", 10, label="writing spec"),
-            _row("spec", "spec-reviewer", 20, label="reviewing spec"),
-            _row("spec", "spec-finalizer", 30, label="addressing feedback")]
-    out = render_summary(rows, header=_HDR, color=True, width=80)
-
-    def line(text: str) -> str:
-        return next(ln for ln in out if text in ln)
-
-    assert "\x1b[34m" in line("writing spec")          # 1st hue: step-blue
-    assert "\x1b[35m" in line("reviewing spec")        # 2nd hue: magenta
-    assert "\x1b[34m" in line("addressing feedback")   # the raw step's hue again
-
-
 _START = "2026-01-01T00:00:00+00:00"
 
 
@@ -1975,7 +2002,7 @@ def test_hide_idle_drops_only_idle_rows_and_keeps_the_full_tables_layout() -> No
     assert card == [ln for ln in full if "plan-finalized" not in ln]
 
 
-def test_hide_idle_keeps_hues_and_drops_the_header_of_an_all_idle_phase() -> None:
+def test_hide_idle_drops_the_header_of_an_all_idle_phase() -> None:
     rows = [
         _row("spec", "spec-writer", 30),
         _row("spec", "spec-commit", 0),
@@ -1989,8 +2016,6 @@ def test_hide_idle_keeps_hues_and_drops_the_header_of_an_all_idle_phase() -> Non
     hidden = ("spec-commit", "rebase", "pre-merge", "merge phase")
     assert all(any(h in ln for ln in full) for h in hidden)
     assert card == [ln for ln in full if not any(h in ln for h in hidden)]
-    # third step of its phase: cyan, even though the idle step before it is hidden
-    assert "\x1b[36m" in next(ln for ln in card if "spec-review" in ln)
 
 
 def _header(*, title: str = "", intent: str | None = None, status: str = "paused",

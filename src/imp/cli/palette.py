@@ -22,8 +22,8 @@ _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m",
 # the only theme that's correct without knowing the terminal's background.
 _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
-    "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[34m",
+    "blue": "\x1b[94m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
+    "gray": "\x1b[90m", "step": "\x1b[94m",
     "wordmark": "\x1b[33m",  # 16-color has no warm gold; plain yellow is closest
 }
 
@@ -186,9 +186,9 @@ def user_emphasis_open(*, enabled: bool) -> str:
 # Cool blue-gray "toolbar/footer" background, per truecolor theme — the band
 # behind the interactive prompt's bottom toolbar and the live-status footer.
 # Split from the warmer user-scrollback band (_USER_BG_RGB) so the two surfaces
-# color independently. The `ansi` 16-color theme gets no toolbar band and no
-# substitute emphasis (unlike user_emphasis_open's bold). dark: #2B2F3A;
-# light: #E4EAF2.
+# color independently. The `ansi` 16-color theme gets no toolbar band; a gray
+# rule above the status row sets it apart instead (see status_separator).
+# dark: #2B2F3A; light: #E4EAF2.
 _TOOLBAR_BG_RGB: dict[str, tuple[int, int, int]] = {
     "dark": (0x2B, 0x2F, 0x3A),
     "light": (0xE4, 0xEA, 0xF2),
@@ -197,7 +197,8 @@ _TOOLBAR_BG_RGB: dict[str, tuple[int, int, int]] = {
 
 def toolbar_bg_open(*, enabled: bool) -> str:
     """The opening SGR for the toolbar/footer background, or '' when color is off
-    or the active theme is `ansi` (no subtle band in 16 colors)."""
+    or the active theme is `ansi` (no subtle band in 16 colors; status_separator
+    rules the row off instead)."""
     if not enabled:
         return ""
     rgb = _TOOLBAR_BG_RGB.get(_active_theme)
@@ -207,8 +208,16 @@ def toolbar_bg_open(*, enabled: bool) -> str:
 
 
 def rule(width: int, *, enabled: bool) -> str:
-    """A horizontal rule the width of the terminal, gray so it recedes."""
+    """A gray horizontal rule `width` columns wide, so it recedes."""
     return ansi("─" * max(1, width), "gray", enabled=enabled)
+
+
+def status_separator(width: int, *, enabled: bool) -> str:
+    """The row directly above a status row: under `ansi` with color, a gray rule
+    the band's width (width-2); otherwise '' — the band sets the row apart."""
+    if not enabled or _active_theme != "ansi":
+        return ""
+    return rule(width - 2, enabled=True)
 
 
 _SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -302,7 +311,6 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "error": ("bold", "red"),          # semantic
     "warning": ("wordmark",),          # semantic — warm accent (orange)
     "lifecycle": ("wordmark",),        # navigational spine: rules, route labels, run-spine states
-    "user": ("bright_blue",),          # bright-blue caret/text marks the user's turn
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 

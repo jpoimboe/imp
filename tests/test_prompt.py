@@ -369,6 +369,37 @@ async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> No
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(("theme", "color"),
+                         [(t, c) for t in ("dark", "light", "ansi") for c in (True, False)])
+async def test_ask_async_rules_off_the_toolbar_only_under_ansi_with_color(
+        theme: str, color: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    from prompt_toolkit.formatted_text import to_formatted_text
+
+    from imp.cli import palette as pal
+
+    monkeypatch.setenv("COLUMNS", "40")     # the rule spans the status row's band width
+    pal.set_theme(theme)
+    prompt = Prompt(color=color, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(
+        bottom_toolbar="\x1b[33mz9gixx\x1b[0m · row" if color else "z9gixx · row")
+    frags = to_formatted_text(captured["bottom_toolbar"])
+    text = "".join(t for _s, t, *_ in frags)
+    if theme == "ansi" and color:
+        assert text == "─" * 38 + "\nz9gixx · row"
+        rule_styles = [s for s, t, *_ in frags if t == "─"]
+        assert rule_styles and all("ansibrightblack" in s for s in rule_styles)  # SGR 90
+    else:
+        assert text == "\nz9gixx · row"     # blank row above the bar, as before
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("toolbar", [None, "status"], ids=["no-toolbar", "toolbar"])
 async def test_ask_async_passes_the_prompt_style_on_every_call(toolbar: str | None) -> None:
     captured: dict[str, object] = {}

@@ -108,7 +108,6 @@ def test_fold_glyphs_default_unicode() -> None:
 def test_node_colors_calm_scheme() -> None:
     # The most frequent content is calmest; weight/color go to identity + structure.
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)     # bright-blue caret marks user turn
     assert pal.NODE_COLORS["phase"] == ("bold", "blue")    # structure stands out: bold blue
     assert pal.NODE_COLORS["step"] == ("bold", "step")     # bold darker-blue "mini-phase" label
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
@@ -118,16 +117,28 @@ def test_node_colors_calm_scheme() -> None:
     assert pal.NODE_COLORS["lifecycle"] == ("wordmark",)
 
 
+def test_ansi_phase_and_step_are_bright_blue_truecolor_untouched() -> None:
+    assert pal._ANSI["blue"] == "\x1b[94m"
+    assert pal._ANSI["step"] == "\x1b[94m"
+    assert pal.ansi("x", *pal.NODE_COLORS["phase"]) == "\x1b[1m\x1b[94mx\x1b[0m"
+    assert pal.ansi("x", *pal.NODE_COLORS["step"]) == "\x1b[1m\x1b[94mx\x1b[0m"
+    assert pal.theme_escapes("dark")["blue"] == "\x1b[38;2;120;152;190m"
+    assert pal.theme_escapes("dark")["step"] == "\x1b[38;2;112;144;176m"
+    assert pal.theme_escapes("light")["blue"] == "\x1b[38;2;30;68;126m"
+    assert pal.theme_escapes("light")["step"] == "\x1b[38;2;53;85;128m"
+
+
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     # agent = () means pal.ansi returns prose unwrapped even when color is on.
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
 
 
-def test_user_color_is_bright_blue_foreground() -> None:
-    # User-turn identity is now a bright-blue FOREGROUND caret (not a bg fill):
-    # the live prompt (slash/prompt) and the imp-log replay both reference this.
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)
-    assert pal._ANSI["bright_blue"] == "\x1b[94m"
+def test_no_user_role_and_bright_blue_only_in_truecolor_maps() -> None:
+    assert "user" not in pal.NODE_COLORS
+    assert "bright_blue" not in pal.theme_escapes("ansi")
+    # The snap-ui / showcase pyte palettes map `brightblue` through theme_rgb.
+    for theme in pal.THEMES:
+        assert "bright_blue" in pal.theme_rgb(theme)
 
 
 def test_caret_constant_and_helper_are_the_gold_arrow() -> None:
@@ -280,6 +291,15 @@ def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
     pal.set_theme("ansi")
     assert pal.toolbar_bg_open(enabled=True) == ""      # no subtle band in 16-color
     assert pal.toolbar_bg_open(enabled=False) == ""     # color off
+
+
+@pytest.mark.parametrize("theme", pal.THEMES)
+@pytest.mark.parametrize("enabled", [True, False])
+def test_status_separator_is_a_band_width_gray_rule_only_under_ansi_with_color(
+        theme: str, enabled: bool) -> None:
+    pal.set_theme(theme)
+    expected = ("\x1b[90m" + "─" * 8 + "\x1b[0m") if (theme == "ansi" and enabled) else ""
+    assert pal.status_separator(10, enabled=enabled) == expected
 
 
 def test_reverse_attr_wraps_with_sgr_7() -> None:

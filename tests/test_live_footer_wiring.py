@@ -324,10 +324,10 @@ def test_compose_status_passes_the_live_width_to_the_activity_line(
     assert pal.clip_display(rows[0], 79) == rows[0]
 
 
-def test_compose_startup_passes_the_live_width_to_the_activity_line(
+def test_compose_startup_reads_the_live_width_once(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two term_width() calls: the activity line takes the live width, as the identity
-    row already does — a hardcoded width would leave only one."""
+    """One term_width() sample per frame feeds the activity line, separator and
+    identity row, so a resize mid-compose can't size them differently."""
     from imp.cli import live_driver as ld
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=200, status=LiveStatus(out),
@@ -342,7 +342,7 @@ def test_compose_startup_passes_the_live_width_to_the_activity_line(
     rows = drv.compose_startup(0)
     assert rows is not None
     assert "resuming" in rows[0]
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 _WINDOWS = "session 62% (3h left) · week 7% (5d left)"

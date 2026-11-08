@@ -453,6 +453,17 @@ def test_open_chrome_step_shows_header_then_collapses_on_complete() -> None:
     assert done_hits == ["run-tests · complete"]       # collapsed to one line
 
 
+def test_ansi_step_header_is_bold_bright_blue() -> None:
+    pal.set_theme("ansi")
+    colored = list(render_tree(nv.build_tree([
+        _ev("1", "quest_created", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
+    ]), full=False, color=True, width=80))
+    header = next(ln for ln in colored if "run-tests" in ln)
+    assert "\x1b[1m\x1b[94m" in header
+    assert not any("\x1b[34m" in ln for ln in colored)
+
+
 def test_step_has_body_ignores_only_the_trailing_breadcrumb() -> None:
     node = nv.StepNode(name="s", kind="script")
     assert nv.step_has_body(node) is False
