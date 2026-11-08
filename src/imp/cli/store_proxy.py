@@ -133,6 +133,10 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
         return store.get_events(args["quest_id"])
     if op == "get_artifact":
         return _b64e(store.get_artifact(args["quest_id"], args["kind"]))
+    if op == "saved_files":
+        return store.saved_files(args["quest_id"])
+    if op == "read_saved_file":
+        return _b64e(store.read_saved_file(args["quest_id"], args["rel"]))
     if op == "completed_rows":
         return [_row_to_wire(r) for r in store.completed_rows()]
     if op == "backlog_readiness":
@@ -187,6 +191,12 @@ class ProxyStore:
 
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
         return _b64d(self._call("get_artifact", {"quest_id": quest_id, "kind": kind}))
+
+    def saved_files(self, quest_id: str) -> list[str]:
+        return cast("list[str]", self._call("saved_files", {"quest_id": quest_id}))
+
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None:
+        return _b64d(self._call("read_saved_file", {"quest_id": quest_id, "rel": rel}))
 
     def completed_rows(self) -> list[CompletedRow]:
         return [_row_from_wire(d) for d in self._call("completed_rows", {})]

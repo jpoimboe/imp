@@ -8,6 +8,7 @@ import contextlib
 import functools
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
@@ -110,6 +111,8 @@ class GaugeWeek:
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
+    def saved_files(self, quest_id: str) -> list[str]: ...
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None: ...
     def completed_rows(self) -> list[CompletedRow]: ...
     def backlog_readiness(self, depends_on: list[str]) -> Readiness: ...
     def scan_homes(self) -> list[HomeDigest]: ...
@@ -128,6 +131,20 @@ class LocalStore:
 
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
         return _show_artifact(self.control_root, quest_id, f"{kind}/{quest_id}.md")
+
+    def saved_files(self, quest_id: str) -> list[str]:
+        from imp.engine import artifact_files
+        from imp.engine.archive import read as archive_read
+        if not _is_quest_id(quest_id):
+            return []
+        live = artifact_files.list_files(_quest_home(self.control_root, quest_id))
+        return live if live is not None else archive_read.list_artifacts(
+            self.control_root, quest_id)
+
+    def read_saved_file(self, quest_id: str, rel: str) -> bytes | None:
+        if rel not in self.saved_files(quest_id):
+            return None
+        return _show_artifact(self.control_root, quest_id, rel)
 
     def completed_rows(self) -> list[CompletedRow]:
         from imp.engine.archive import read as archive_read
@@ -180,6 +197,8 @@ class LocalStore:
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.engine import quest_refs
         from imp.providers.effective import resolve_default_workflow
+        if not _is_quest_id(quest_id):
+            return None
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
@@ -284,6 +303,14 @@ def _list_quest_homes(control: Path) -> list[str]:
     """Ids of quests with a permanent home under <state dir>/quests/."""
     from imp.engine.quest import live_quest_ids
     return live_quest_ids(control)
+
+
+# Admits every archived id shape (CVCV99, legacy alnum, dated) and no path or git rev syntax.
+_QUEST_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def _is_quest_id(quest_id: str) -> bool:
+    return _QUEST_ID.fullmatch(quest_id) is not None
 
 
 def _quest_home(control: Path, quest_id: str) -> Path:
