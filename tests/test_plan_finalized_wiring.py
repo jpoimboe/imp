@@ -90,7 +90,7 @@ def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path, w
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
     # highest-numbered plan is plan-2 (2 tasks), NOT plan-1 (1 task).
-    assert "✓ plan 2/3 · 2 tasks" in r.stdout
+    assert r.stdout.splitlines()[0] == "✓ plan 2/3 · 2 tasks · imp show abc plans/abc-plan-2.md"
     assert "1. Beta" in r.stdout and "2. Gamma" in r.stdout
     assert json.loads(out_file.read_text()) == {"task_total": 2}
 
@@ -109,5 +109,45 @@ def test_plan_finalized_script_singular_for_one_task(tmp_path) -> None:
     r = subprocess.run(["bash", str(script), "1", "1"],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
-    assert "✓ plan 1/1 · 1 task\n" in r.stdout
+    assert r.stdout.splitlines()[0] == "✓ plan 1/1 · 1 task · imp show abc plans/abc-plan-1.md"
     assert json.loads(out_file.read_text()) == {"task_total": 1}
+
+
+def test_plan_finalized_header_names_the_plan_file(tmp_path) -> None:
+    script = Path("src/imp/assets/workflows/default/scripts/plan-finalized.sh").resolve()
+    plans = tmp_path / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "zuza70-plan-1.md").write_text(
+        "# P\n## Task 1: Alpha\nbody\n## Task 2: Beta\nmore\n")
+    out_file = tmp_path / "out.json"
+    env = {**os.environ,
+           "IMP_PROJECT_ROOT": str(tmp_path),
+           "IMP_QUEST_DIR": str(tmp_path),
+           "IMP_QUEST_ID": "zuza70",
+           "IMP_OUTPUT": str(out_file)}
+    r = subprocess.run(["bash", str(script), "1", "1"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == [
+        "✓ plan 1/1 · 2 tasks · imp show zuza70 plans/zuza70-plan-1.md",
+        "   1. Alpha",
+        "   2. Beta",
+    ]
+
+
+def test_plan_finalized_header_keeps_the_real_file_name(tmp_path) -> None:
+    script = Path("src/imp/assets/workflows/default/scripts/plan-finalized.sh").resolve()
+    plans = tmp_path / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "zuza70-plan-02.md").write_text("# P\n## Task 1: Alpha\nbody\n")
+    out_file = tmp_path / "out.json"
+    env = {**os.environ,
+           "IMP_PROJECT_ROOT": str(tmp_path),
+           "IMP_QUEST_DIR": str(tmp_path),
+           "IMP_QUEST_ID": "zuza70",
+           "IMP_OUTPUT": str(out_file)}
+    r = subprocess.run(["bash", str(script), "2", "2"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == (
+        "✓ plan 2/2 · 1 task · imp show zuza70 plans/zuza70-plan-02.md")
