@@ -2251,7 +2251,7 @@ class _ShowArtifact(NamedTuple):
     noun: str
 
 
-# The keys are `show`'s resource choices; a choice cannot exist without both the
+# The keys are `show`'s artifact choices; a choice cannot exist without both the
 # absent-artifact message and the noun the backlog path names it by.
 _SHOW_ARTIFACTS = {
     "spec": _ShowArtifact("no spec for", "spec"),
@@ -2281,10 +2281,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
         quest_id = _resolve_id(control, token)
     except SystemExit:
         return 2
-    resource = args.resource
+    artifact = args.artifact
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        if resource is None:
+        if artifact is None:
             if args.json:
                 _page_or_print(
                     json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
@@ -2296,9 +2296,9 @@ def _cmd_show(args: argparse.Namespace) -> int:
                 no_pager=args.no_pager, trailing_blank=True)
             return 0
         _emit_cli_error(
-            f"{quest_id} is in the backlog (not started); no {_SHOW_ARTIFACTS[resource].noun} yet")
+            f"{quest_id} is in the backlog (not started); no {_SHOW_ARTIFACTS[artifact].noun} yet")
         return 2
-    if resource is None:
+    if artifact is None:
         if args.json:
             card = _quest_json(control, quest_id)
             if card is None:
@@ -2313,12 +2313,12 @@ def _cmd_show(args: argparse.Namespace) -> int:
             return lines
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
-    data = make_store(control).get_artifact(quest_id, resource)
+    data = make_store(control).get_artifact(quest_id, artifact)
     if data is None:
-        _emit_cli_error(f"{_SHOW_ARTIFACTS[resource].absent} {quest_id!r}")
+        _emit_cli_error(f"{_SHOW_ARTIFACTS[artifact].absent} {quest_id!r}")
         return 2
     lines = data.decode("utf-8", errors="replace").splitlines()
-    if resource == "verify":
+    if artifact == "verify":
         lines = _localize_verify_when(lines)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
@@ -4745,7 +4745,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "token", nargs="?", default=None,
         help="Quest id or its short token.")
     p_show.add_argument(
-        "resource", nargs="?", default=None,
+        "artifact", nargs="?", default=None,
         choices=list(_SHOW_ARTIFACTS),
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(

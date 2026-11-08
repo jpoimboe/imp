@@ -81,7 +81,7 @@ def test_show_spec_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
 
 
-def test_show_rejects_review_resource(
+def test_show_rejects_review_artifact(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with pytest.raises(SystemExit):
@@ -97,6 +97,17 @@ def test_show_rejects_trimmed_facets(
     with pytest.raises(SystemExit):
         main(["show", _ID, facet])
     assert f"invalid choice: '{facet}'" in capsys.readouterr().err
+
+
+def test_show_invalid_artifact_error_names_artifact(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["show", _ID, "status"])
+    assert exc.value.code != 0
+    err = capsys.readouterr().err
+    assert "argument artifact: invalid choice: 'status'" in err
+    assert "resource" not in err
 
 
 def _archive_and_prune(control: Path, ch: Quest, quest_id: str) -> None:
@@ -190,7 +201,7 @@ def test_show_backlog_default_renders_card(
     assert "wire up OAuth login" in out
 
 
-def test_show_backlog_resource_message_wording(
+def test_show_backlog_artifact_message_wording(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -493,7 +504,7 @@ def test_show_default_card_renders_summary(
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text(
         "Gives every change a durable intent-level summary.\n")
-    out = _run(monkeypatch, tmp_path, "show", _ID)  # default card, no resource
+    out = _run(monkeypatch, tmp_path, "show", _ID)  # default card, no artifact
     assert "intent-level summary" in out
 
 
@@ -545,7 +556,7 @@ def _seed_events(ch: Quest, events: list[dict]) -> None:
             fh.write(json.dumps(e) + "\n")
 
 
-def test_show_rejects_events_resource(
+def test_show_rejects_events_artifact(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with pytest.raises(SystemExit):

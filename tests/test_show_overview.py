@@ -129,7 +129,7 @@ def test_show_status_word_errors_not_found(tmp_path: Path, monkeypatch, capsys) 
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    rc = main(["show", "status"])     # `status` parsed as a token, not a resource
+    rc = main(["show", "status"])     # `status` parsed as a token, not an artifact
     assert rc == 2
     assert "no quest matches" in capsys.readouterr().err
 
@@ -152,7 +152,7 @@ def test_detail_card_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     assert captured[0][0]                 # the detail card lines were paged
 
 
-def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
+def test_artifact_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)

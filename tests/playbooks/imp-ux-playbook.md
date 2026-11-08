@@ -169,7 +169,7 @@ to score).
   - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and the artifact views `imp show <id> spec`
     and `imp show <id> verify` (the last failing test-gate run). `spec` and `verify` are the
-    only artifact resources — a bare name like `status` errors. Also `imp list -a`.
+    only artifacts — a bare name like `status` errors. Also `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,

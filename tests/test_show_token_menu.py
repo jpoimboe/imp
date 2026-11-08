@@ -8,8 +8,8 @@ import imp.cli.store as s
 from imp.cli.main import main
 
 
-def _ns(token, resource=None):
-    return argparse.Namespace(token=token, resource=resource, no_pager=True, json=False)
+def _ns(token, artifact=None):
+    return argparse.Namespace(token=token, artifact=artifact, no_pager=True, json=False)
 
 
 _SHOW_NO_QUESTS = "imp: show needs a quest id\n  No quests yet — start one with imp new\n"
