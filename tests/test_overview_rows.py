@@ -110,7 +110,8 @@ def test_overview_rows_backfills_intent_for_a_titleless_archived_row(
                                  prompt="add a retry budget to the poller")
     rows = m._overview_rows(tmp_path, dispositions={"completed"}, cutoff=None)
     assert [r[0] for r in rows.history] == ["unn002"]
-    assert rows.intents["unn002"] == "add a retry budget to the poller"
+    assert rows.display_intents["unn002"] == "add a retry budget to the poller"
+    assert not hasattr(rows, "intents")
 
 
 def test_overview_rows_history_selects_both_boards(
