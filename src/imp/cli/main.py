@@ -3445,15 +3445,17 @@ def apply_edit(
                    "--depends-on/--clear-deps, --base, or --append-intent")
 
     if zone_change and quest.materialized:
-        return 2, (f"imp: {quest_id} is already built; --backlog/--active only "
-                   "apply before a quest is built")
+        return 2, (f"imp: {quest_id} has already started building, so it can't "
+                   "move between the active list and the backlog")
 
     if dep_change and quest.materialized:
-        return 2, "imp: cannot change dependencies once a quest is built"
+        return 2, (f"imp: {quest_id} has already started building, so its "
+                   "dependencies can't change")
 
     if base is not None:
         if quest.materialized:
-            return 2, "imp: cannot change the base once a quest is built"
+            return 2, (f"imp: {quest_id} has already started building, so its "
+                       "base branch can't change")
         if not worktree.branch_exists(control, base):
             return 2, f"imp: --base {base!r} does not name an existing branch"
 
