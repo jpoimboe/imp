@@ -2745,7 +2745,9 @@ def _log_tree(events: list[dict[str, Any]],
     from imp.cli import narrative
     tree = narrative.build_tree(events)
     if events is not unfiltered:
-        narrative.overlay_subagent_state(tree, narrative.build_tree(unfiltered))
+        full = narrative.build_tree(unfiltered)
+        narrative.overlay_subagent_state(tree, full)
+        narrative.overlay_leave_marker(tree, full)
     return tree
 
 

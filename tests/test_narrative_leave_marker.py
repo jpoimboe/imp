@@ -159,8 +159,31 @@ def test_the_live_view_never_prints_the_trailing_line() -> None:
 
 
 def test_structural_repr_carries_the_reason() -> None:
-    assert nv.structural_repr(nv.LeaveMarkerNode("pause")) == {
+    assert nv.structural_repr(nv.LeaveMarkerNode("pause", _at(10))) == {
         "t": "LeaveMarkerNode", "reason": "pause"}
+
+
+def _window_markers(window: Events, full: Events) -> list[Any]:
+    from imp.cli.main import _log_tree
+    return [c for c in _log_tree(window, full).root.children
+            if isinstance(c, nv.LeaveMarkerNode)]
+
+
+def test_a_window_ending_on_a_later_resumed_stop_gets_no_trailing_line() -> None:
+    window = _stopped(_manual("ctrl-c"))
+    assert _window_markers(window, [*window, *_resumed_run()]) == []
+
+
+def test_a_window_ending_on_an_earlier_same_reason_stop_gets_no_trailing_line() -> None:
+    window = _stopped(_manual("ctrl-c"))
+    full = [*window, *_resumed_run(),
+            ev("8", "workflow_paused", **_manual("ctrl-c"), timestamp=_at(150))]
+    assert _window_markers(window, full) == []
+
+
+def test_a_window_ending_on_the_final_stop_keeps_its_trailing_line() -> None:
+    full = _stopped(_manual("ctrl-c"))
+    assert _window_markers(full[1:], full) == [nv.LeaveMarkerNode("ctrl-c", _at(10))]
 
 
 def test_incremental_tree_omits_the_batch_only_node() -> None:

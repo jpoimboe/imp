@@ -469,6 +469,7 @@ class ResumeMarkerNode:
 class LeaveMarkerNode:
     """The history ends on this unresumed manual stop (batch-only: live owns the leave block)."""
     reason: str
+    ts: str | None  # the stop's timestamp: identifies it across a window and the full log
     collapsible = False
 
 
@@ -1356,8 +1357,15 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     stop = b._open_pause
     if (b._root.status == "paused" and stop is not None and stop.reason is not None
             and stop.reason in MANUAL_STOP_LABELS):
-        b._root.children.append(LeaveMarkerNode(reason=stop.reason))
+        b._root.children.append(LeaveMarkerNode(reason=stop.reason, ts=stop.timestamp))
     return b.tree
+
+
+def overlay_leave_marker(sliced: NarrativeTree, full: NarrativeTree) -> None:
+    """Keep `sliced`'s trailing paused line only if `full` still ends on that stop."""
+    last = sliced.root.children[-1:]
+    if last and isinstance(last[0], LeaveMarkerNode) and last != full.root.children[-1:]:
+        sliced.root.children.pop()
 
 
 def _subagent_folds(children: list[Any]) -> Iterator[SubagentFold]:
