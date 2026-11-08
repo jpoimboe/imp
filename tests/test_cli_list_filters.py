@@ -499,3 +499,41 @@ def test_list_backlog_filter_has_no_blank_after_header(tmp_path, monkeypatch) ->
     lines = _run_list(tmp_path, monkeypatch, ["list", "--backlog"]).splitlines()
     assert lines[1] == "backlog:"
     assert lines[2].split()[0] == "bklgid"
+
+
+def _seed_recent_abandoned_and_archived(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    recent = datetime.now(UTC).isoformat()
+    _archive_status(tmp_path, "abnd", "abandoned", last_ts=recent)
+    _archive_status(tmp_path, "shlv", "archived", last_ts=recent)
+
+
+def test_list_all_since_lists_abandoned_and_archived_under_history(
+        tmp_path, monkeypatch) -> None:
+    _seed_recent_abandoned_and_archived(tmp_path)
+    lines = _run_list(tmp_path, monkeypatch, ["list", "-a", "--since", "today"]).splitlines()
+    below = lines[lines.index("history:") + 1:]
+    assert {ln.split()[0] for ln in below if ln} >= {"abnd", "shlv"}
+
+
+def test_list_since_without_all_omits_abandoned_and_archived(
+        tmp_path, monkeypatch) -> None:
+    _seed_recent_abandoned_and_archived(tmp_path)
+    out = _run_list(tmp_path, monkeypatch, ["list", "--since", "today"])
+    assert "abnd" not in out and "shlv" not in out
+
+
+def test_list_all_since_explicit_disposition_flag_wins(
+        tmp_path, monkeypatch) -> None:
+    _seed_recent_abandoned_and_archived(tmp_path)
+    out = _run_list(
+        tmp_path, monkeypatch, ["list", "-a", "--abandoned", "--since", "today"])
+    assert "abnd" in out and "shlv" not in out
+
+
+def test_list_json_all_since_includes_abandoned_and_archived(
+        tmp_path, monkeypatch) -> None:
+    _seed_recent_abandoned_and_archived(tmp_path)
+    data = json.loads(_run_list(
+        tmp_path, monkeypatch, ["list", "--json", "-a", "--since", "today"]))
+    assert {e["id"] for e in data} >= {"abnd", "shlv"}

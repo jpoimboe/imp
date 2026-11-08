@@ -2282,7 +2282,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except ValueError:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
-    selected = dispositions or set(_DEFAULT_LIST_DISPOSITIONS)
+    selected = dispositions or _board_dispositions(show_all=args.all)
     if args.json:
         _page_or_print(
             json.dumps(_board_json(control, dispositions=selected, cutoff=cutoff),
