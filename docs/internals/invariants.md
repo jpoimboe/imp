@@ -32,6 +32,12 @@ Read this when editing imp's engine/renderer or workflow prompts.
   streamed message, never persisted. A resume armed to continue ends its
   streamed turn on imp's continuation unless a human message is pending;
   claude-p's interrupt marker is never a human message.
+- **Claude replay semantics.** claude-p treats `assistant`/`user` blocks on
+  stream-json stdin as context and never re-dispatches a replayed `tool_use`
+  (verified with a counting MCP tool: zero invocations, and the model recalled
+  the replayed result). Native resume likewise loads stored `tool_use` records
+  without re-running them; `test_resume_all_shapes_live.py` and
+  `test_native_session_resume_live.py` pin that live.
 - **Codex native session.** One run-scoped process owner linearizes cancellation
   with subprocess publication and identity-safe cleanup; a live hard stop captures
   the process tree before waking blocked driver I/O, and the wake also releases

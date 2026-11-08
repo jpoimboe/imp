@@ -9,10 +9,10 @@ runners:
     Each imp Tool gets a thin async wrapper that runs the underlying sync
     function in the same process; the MCP transport is stdio between
     `claude -p` and our Python process.
-  - History replay via stream-json input — `ClaudeSDKClient.query(...)`
-    accepts an AsyncIterable[dict] that the SDK writes to claude's stdin
-    one JSON line per dict. Verified end-to-end by Spike 7 (replayed
-    tool_use blocks are NOT re-dispatched).
+  - Resume is native `--resume` from imp's session store; only the trailing
+    user-text run is streamed, via stream-json input —
+    `ClaudeSDKClient.query(...)` accepts an AsyncIterable[dict] that the SDK
+    writes to claude's stdin one JSON line per dict.
   - `complete_step` is a synthesized MCP tool like any other. Its wrapper
     records the args in the shared `_RunState` and returns normally; the runner
     reads them from there. Wrappers catch imp's tool errors and return
@@ -23,13 +23,13 @@ History isolation, by config dir. claude-p (CC 2.x) writes an `ai-title` session
 stub to its `CLAUDE_CONFIG_DIR`/projects/ on every spawn; imp keeps that off the
 real `~/.claude` by controlling where that dir points. Every disposition runs
 against an imp-made ephemeral `CLAUDE_CONFIG_DIR` under the quest scratch root,
-removed in `run()`'s finally. Fresh and stream-json replay seed it up front
-(`materialize_fresh_config_dir`). Native resume creates it bare
-(`make_config_dir`), fills it with redacted auth and the store's session just
-before the spawn (`fill_resume_config_dir`), and passes `--resume` via
-extra_args — never `options.resume`, which makes the SDK materialize its own
-temp dir in host /tmp. No disposition writes to the real `~/.claude`. Imp
-persists its own transcripts.
+removed in `run()`'s finally. Fresh runs, and resumes whose whole transcript is
+the streamed user-text run, seed it up front (`materialize_fresh_config_dir`).
+Native resume creates it bare (`make_config_dir`), fills it with redacted auth
+and the store's session just before the spawn (`fill_resume_config_dir`), and
+passes `--resume` via extra_args — never `options.resume`, which makes the SDK
+materialize its own temp dir in host /tmp. No disposition writes to the real
+`~/.claude`. Imp persists its own transcripts.
 """
 
 from __future__ import annotations
@@ -707,8 +707,8 @@ def _make_sdk_tools(
 
 def _python_type_for_property(prop_schema: dict[str, Any]) -> Any:
     """Walk a JSON-schema property dict to a Python type for the SDK
-    decorator's schema arg. The SDK uses {param_name: python_type} as
-    documented in Spike 7 (`@tool("record_word", "...", {"word": str})`).
+    decorator's schema arg. The SDK uses {param_name: python_type}, e.g.
+    `@tool("record_word", "...", {"word": str})`.
 
     Lossy by design: enums collapse to `str`, nested objects to `dict`,
     arrays to `list`. The model may emit an out-of-enum string; imp's own
@@ -1054,11 +1054,10 @@ def _stream_history(messages: list[Message]) -> Any:
     """Build an async iterable of stream-json dicts from imp messages.
 
     Each yielded dict is exactly the shape claude-p expects on its stream-json
-    stdin (Spike 7 verified). The SDK forwards each dict as one JSONL line
-    without transformation.
+    stdin. The SDK forwards each dict as one JSONL line without transformation.
 
     Per spec §6.11, replayed `tool_use` blocks are NOT re-dispatched — claude
-    treats `assistant` / `system` messages in stream-json input as conversation
+    treats `assistant` / `user` messages in stream-json input as conversation
     *context*, not as instructions to act on.
 
     Streaming chunks from claude-p (thinking, then text, then tool_use) land
@@ -2305,7 +2304,8 @@ class ClaudeAgentRunner:
     """Drives `claude -p` via claude_agent_sdk.
 
     Persistence: per-step transcript.jsonl, identical to the other runners.
-    Resume: stream-json history replay via _stream_history (Spike 7 verified).
+    Resume: native `--resume` from imp's session store, plus the trailing
+            user-text run streamed via _stream_history.
     Tools: in-process MCP server (`create_sdk_mcp_server`) hosts the imp
            registry; the agent sees them as `mcp__imp__<name>`.
     """
