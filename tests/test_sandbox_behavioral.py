@@ -2189,8 +2189,8 @@ def test_bash_tool_teardown_lets_a_sigterm_trap_finish() -> None:
     sleeps 0.3s and only then writes a marker into the worktree, host-visible through
     the rw bind. The marker must exist once terminate_running_processes has returned.
     Nothing here asserts elapsed time — the marker is polled — and the teardown is
-    held until the command signals readiness, so bwrap startup latency cannot race
-    the SIGTERM."""
+    held until the command signals readiness AND bash has registered it, so this
+    always exercises the registry-drain path, never the spawn-overlap one."""
     root = _make_root()
     ready = root / "up"
     marker = root / "trap-finished"
@@ -2207,9 +2207,10 @@ def test_bash_tool_teardown_lets_a_sigterm_trap_finish() -> None:
 
     async def _killer() -> None:
         deadline = time.monotonic() + 20.0
-        while not ready.exists():
+        while not (ready.exists() and ctx.running_processes):
             if time.monotonic() > deadline:
-                raise AssertionError("the sandboxed command never signalled readiness")
+                raise AssertionError(
+                    "the sandboxed command never signalled readiness and registered")
             await anyio.sleep(0.02)
         # 8.0, not the 4.0 default: ~25x headroom for the trap's 0.3s under a
         # saturated -n auto run. Free on the passing path — teardown returns as soon
