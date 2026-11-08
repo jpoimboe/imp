@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+import imp.cli.main as m
 from imp.cli.main import _build_parser, main
+from imp.engine import worktree
 
 
 def _help_for(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
@@ -140,17 +144,31 @@ def test_log_help_says_the_content_filters_reach_the_exports(
             "terminal and in --md/--html exports alike.") in flat
 
 
-def test_bare_events_search_prints_full_help_on_stderr(
+def test_bare_events_search_is_one_error_line_outside_any_repo(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+) -> None:
+    # A raising _control_root makes this fail if the guard ever moves after it.
+    def no_repo() -> Path:
+        raise worktree.PreconditionError("not inside an imp project")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", no_repo)
+    rc = main(["events", "search"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err == "imp: events search needs a query — see imp events search -h\n"
+    assert captured.out == ""
+
+
+def test_events_search_short_help_still_prints_full_help(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # The no-query guard precedes _control_root(), so no repo is needed.
     monkeypatch.setenv("COLUMNS", "200")
-    rc = main(["events", "search"])
-    err = capsys.readouterr().err
-    assert rc == 2
-    assert "Case-insensitive substring search" in err
-    assert "--active" in err
-    assert "--agent" in err
+    with pytest.raises(SystemExit) as exc:
+        main(["events", "search", "-h"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "Case-insensitive substring search" in out
+    assert "--agent" in out
 
 
 def test_new_message_help_is_seed_alias(

@@ -4210,7 +4210,7 @@ def _cmd_events_search(
     args: argparse.Namespace, _control: Path | None = None,
 ) -> int:
     if args.query is None:
-        args.parser.print_help(sys.stderr)
+        _emit_cli_error("events search needs a query — see imp events search -h")
         return 2
     if error := _events_search_output_control_error(args):
         _emit_cli_error(error)
@@ -4468,7 +4468,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
         help="Structured output, bounded like the default view unless --all.")
     p.add_argument("--no-pager", action="store_true",
                    help="Disable the pager even when stdout is a TTY.")
-    p.set_defaults(func=_cmd_events_search, parser=p)
+    p.set_defaults(func=_cmd_events_search)
     return p
 
 
