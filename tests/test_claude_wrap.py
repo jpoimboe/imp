@@ -505,7 +505,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
         "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
     )
     # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+    out = await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do",
                          "__tool_use_id__": ""})
     assert out["content"][0]["text"] == "done successfully"
 
@@ -701,7 +701,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
     state = _RunState()
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+    out = await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do",
                          "__tool_use_id__": ""})
     assert out["content"][0]["text"] == "done successfully"
 
@@ -739,7 +739,7 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
     state = _RunState()
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+    out = await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do",
                          "__tool_use_id__": ""})
     assert out.get("is_error") is True
 
@@ -778,7 +778,7 @@ async def test_wrap_task_suspension_marks_result_interrupted(
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     with pytest.raises(SubagentSuspended):
-        await wrapped({"subagent_name": "sub", "task_description": "do",
+        await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do",
                        "__tool_use_id__": ""})
 
     results = [e for e in elog.read() if e["type"] == "tool_result"]
@@ -810,7 +810,7 @@ async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
     cc_mod.dispatch_task = _fake  # type: ignore[assignment]
     try:
         wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
-        out = await wrapped({"subagent_name": "reviewer", "task_description": "go"})
+        out = await wrapped({"subagent_name": "reviewer", "title": "t", "task_description": "go"})
     finally:
         cc_mod.dispatch_task = monkey  # type: ignore[assignment]
     assert "abort_dispatch" not in seen["kwargs"]        # refusal apparatus gone
@@ -1095,7 +1095,7 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
 
     wrapped = _wrap_one(
         "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do"})
+    out = await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do"})
     assert out["content"][0]["text"] == "done"
 
     assert flush["calls"] == 1, "state.flush_llm_group must be called exactly once"
@@ -1244,7 +1244,7 @@ async def test_wrap_task_over_cap_result_spills_and_records_the_wrapped_body(
     state = _RunState()
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+    out = await wrapped({"subagent_name": "sub", "title": "t", "task_description": "do",
                          "__tool_use_id__": ""})
 
     body = out["content"][0]["text"]

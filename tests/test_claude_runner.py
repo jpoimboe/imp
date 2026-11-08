@@ -1608,7 +1608,7 @@ async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> N
         return deco
 
     impl = cc._wrap_one("sub_agent", _StubTool(), ctx, state, _fake_sdk_tool)
-    await impl({"subagent_name": "explorer", "task_description": "go"})
+    await impl({"subagent_name": "explorer", "title": "t", "task_description": "go"})
 
     call = next(e for e in log.read() if e["type"] == "tool_call")
     assert call["payload"]["name"] == "sub_agent"
@@ -1647,9 +1647,9 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
 
     impl = cc._wrap_one("sub_agent", _StubTool(), ctx, state, _fake_sdk_tool)
     # Case 1: subagent name not in subagent_defs
-    await impl({"subagent_name": "ghost", "task_description": "haunt"})
+    await impl({"subagent_name": "ghost", "title": "t", "task_description": "haunt"})
     # Case 2: subagent exists but label=None
-    await impl({"subagent_name": "explorer", "task_description": "go"})
+    await impl({"subagent_name": "explorer", "title": "t", "task_description": "go"})
 
     calls = [e for e in log.read() if e["type"] == "tool_call"]
     assert len(calls) == 2

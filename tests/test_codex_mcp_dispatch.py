@@ -173,7 +173,7 @@ async def test_task_start_before_request_admits_reserved_ticket() -> None:
     assert starts.reserved_count == 1
 
 
-_TASK_ARGS = {"subagent_name": "impl", "task_description": "x"}
+_TASK_ARGS = {"subagent_name": "impl", "title": "t", "task_description": "x"}
 
 
 def _task_ctx(tmp_path: Path) -> tuple[ToolContext, InMemoryEventLog]:
