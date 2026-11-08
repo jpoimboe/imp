@@ -239,10 +239,6 @@ class ToolCall:
 @dataclass
 class ToolBurstFold:
     calls: list[ToolCall] = field(default_factory=list)
-    start_ts: str | None = None        # first tool_call.timestamp (burst timing)
-    end_ts: str | None = None          # last tool_result.timestamp
-    span_start_ts: str | None = None   # surrounding-prose span start (mirrors live timer)
-    span_end_ts: str | None = None     # surrounding-prose span end (mirrors live timer)
     collapsible = True
 
 
@@ -666,7 +662,6 @@ class NarrativeBuilder:
         # normal step — there is no nested gate container.
         self._step_stack: list[StepNode] = []
         self._current_burst: ToolBurstFold | None = None
-        self._span_start_ts: str | None = None
         self._reset_wait: ResetWait | None = None
         self._dep_wait: DepWait | None = None
         # Per-agent backoff-wait accounting (timer honesty). This builder stands
@@ -678,7 +673,7 @@ class NarrativeBuilder:
         self._exclusion_tracker = ExclusionTracker()
         # Parent-working stretch start + backoff accrued at that start. Set at the three
         # parent boundaries (step_started, user_message, subagent-return); never advanced by
-        # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
+        # within-stretch prose/thinking/tool bursts.
         self._stretch_start_ts: str | None = None
         self._stretch_backoff_base: float = 0.0
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
@@ -1596,7 +1591,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     pause, self._pending_pause = self._pending_pause, None
     # A your-turn reply is never a resume; a crash recovery journals no pause at all.
     genuine_signal = pause == "halt" or (self._resuming and pause is None)
-    self._span_start_ts = event.get("timestamp")
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
@@ -2150,11 +2144,8 @@ def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     else:
         self._flush_burst()
     if subtype == "agent_prompt":
-        # Replicate the old human=False user_message seed: reseed the burst/stretch
-        # span clock from the body ts for agent_prompt ONLY, so lean imp log stays
-        # byte-identical (system_prompt/continuation/completion never seeded span).
+        # Only agent_prompt reseeds the stretch clock from the body ts.
         _rotate_status_phrase(self)
-        self._span_start_ts = event.get("timestamp")
         self._stretch_start_ts = event.get("timestamp")
         self._stretch_backoff_base = self.backoff_wait_seconds(None)
     if subtype == "undelivered_message":
@@ -2167,7 +2158,6 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._cut_off.clear()
     self._flush_burst()
     _rotate_status_phrase(self)
-    self._span_start_ts = event.get("timestamp")
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
     subtype = p.get("subtype")
@@ -2226,10 +2216,7 @@ def _h_agent_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
         if node.text.strip().casefold() == "waiting":
             return
     _rotate_status_phrase(self)
-    if self._current_burst is not None:
-        self._current_burst.span_end_ts = event.get("timestamp")
     self._flush_burst()
-    self._span_start_ts = event.get("timestamp")
     # A new narration is taking its place, so every EARLIER narration in this
     # container is now settled (only the TRAILING one can still fold into the
     # step conclusion). Un-hold them ALL — not just the immediately-adjacent
@@ -2306,7 +2293,7 @@ NarrativeBuilder._HANDLERS["query_result"] = _h_query_result
 
 def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
     if self._current_burst is None:
-        self._current_burst = ToolBurstFold(span_start_ts=self._span_start_ts)
+        self._current_burst = ToolBurstFold()
         self._append(self._current_burst)
     return self._current_burst
 
@@ -2317,8 +2304,6 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
     burst = _ensure_burst(self)
-    if burst.start_ts is None:
-        burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
         input=p.get("input") or {}, call_ts=event.get("timestamp"))
@@ -2420,8 +2405,6 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     if burst is not None:
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                # This turn actually ran → advance the clock.
-                burst.end_ts = ts
                 call.result = summary
                 call.result_ts = ts
                 call.citations_footer = footer
@@ -2435,7 +2418,6 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # existed to salvage, so an unmatched result here is a genuine orphan.)
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
-    burst.end_ts = ts
     burst.calls.append(ToolCall(
         call_id=rid, name="tool", input={}, result=summary,
         citations_footer=footer, is_error=is_error, call_ts=ts, result_ts=ts))

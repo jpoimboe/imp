@@ -2745,7 +2745,7 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
     (call,) = bursts[0].calls
     assert call.name == "complete_step"
     assert call.result is None            # genuinely dangling (no phantom result)
-    assert bursts[0].end_ts is None       # missing result never advanced the clock
+    assert call.result_ts is None         # no result, so no timed interval
 
     # Lean render: closed terminal with step elapsed; the internal tool gets no recap.
     lean = "\n".join(_lines(events, full=False))

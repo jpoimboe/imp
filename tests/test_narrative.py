@@ -2624,56 +2624,7 @@ def test_step_node_command_populated_on_resume_reentry() -> None:
     assert step.command == "make check"
 
 
-def test_burst_span_start_defaults_to_step_started_when_no_preceding_prose() -> None:
-    tree = nv.build_tree([
-        ev("s", "step_started", step="s", kind="agent", phase="p",
-           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
-        ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={},
-           timestamp="2026-06-03T00:00:02+00:00"),
-        ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
-           timestamp="2026-06-03T00:00:03+00:00"),
-        ev("c", "step_completed", step="s", kind="agent",
-           action={"verb": "continue"}, var_mutations={},
-           timestamp="2026-06-03T00:00:05+00:00"),
-    ])
-    step = tree.root.children[0].children[0]
-    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
-    # No preceding prose: the span opens at the step_started boundary, distinct
-    # from the first tool_call timestamp the tool-span field records.
-    assert burst.span_start_ts == "2026-06-03T00:00:00+00:00"
-    assert burst.start_ts == "2026-06-03T00:00:02+00:00"
-    assert burst.span_end_ts is None
-
-
-def test_burst_span_brackets_surrounding_prose() -> None:
-    tree = nv.build_tree([
-        ev("s", "step_started", step="s", kind="agent", phase="p",
-           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
-        ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
-           stop_reason="tool_use", usage={},
-           raw={"content": [{"type": "text", "text": "let me look"}]},
-           timestamp="2026-06-03T00:00:04+00:00"),
-        ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={},
-           timestamp="2026-06-03T00:00:05+00:00"),
-        ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
-           timestamp="2026-06-03T00:00:06+00:00"),
-        ev("p2", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
-           stop_reason="end_turn", usage={},
-           raw={"content": [{"type": "text", "text": "done"}]},
-           timestamp="2026-06-03T00:00:10+00:00"),
-        ev("c", "step_completed", step="s", kind="agent",
-           action={"verb": "continue"}, var_mutations={},
-           timestamp="2026-06-03T00:00:11+00:00"),
-    ])
-    step = tree.root.children[0].children[0]
-    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
-    # Span = the two prose timestamps, NOT the first tool_call (00:05) / last
-    # tool_result (00:06) tool-span and NOT the step_started boundary (00:00).
-    assert burst.span_start_ts == "2026-06-03T00:00:04+00:00"
-    assert burst.span_end_ts == "2026-06-03T00:00:10+00:00"
-
-
-def test_tool_use_carrier_agent_message_does_not_split_span() -> None:
+def test_tool_use_carrier_agent_message_does_not_split_burst() -> None:
     tree = nv.build_tree([
         ev("s", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
@@ -2697,31 +2648,9 @@ def test_tool_use_carrier_agent_message_does_not_split_span() -> None:
     ])
     step = tree.root.children[0].children[0]
     bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
-    # The empty-text carrier neither split the burst nor stamped a span end.
+    # The empty-text carrier did not split the burst.
     assert len(bursts) == 1
     assert [c.name for c in bursts[0].calls] == ["bash", "grep"]
-    assert bursts[0].span_start_ts == "2026-06-03T00:00:01+00:00"
-    assert bursts[0].span_end_ts is None
-
-
-def test_burst_span_restarts_on_user_message() -> None:
-    tree = nv.build_tree([
-        ev("s", "step_started", step="s", kind="agent", phase="p",
-           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
-        ev("u", "user_message", text="go on", timestamp="2026-06-03T00:00:08+00:00"),
-        ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={},
-           timestamp="2026-06-03T00:00:09+00:00"),
-        ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
-           timestamp="2026-06-03T00:00:10+00:00"),
-        ev("c", "step_completed", step="s", kind="agent",
-           action={"verb": "continue"}, var_mutations={},
-           timestamp="2026-06-03T00:00:11+00:00"),
-    ])
-    step = tree.root.children[0].children[0]
-    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
-    # The reply restarts the span: the burst measures from 00:08, not the
-    # step_started boundary at 00:00.
-    assert burst.span_start_ts == "2026-06-03T00:00:08+00:00"
 
 
 def test_lane_events_render_no_fallback_breadcrumb() -> None:
@@ -3544,30 +3473,6 @@ def test_completion_engine_message_drops_bare_waiting_reply():
     ])
     step = tree.root.children[0].children[0]
     assert not any(isinstance(c, nv.AgentTextNode) for c in step.children)
-
-
-def test_agent_prompt_seeds_burst_span_from_body_ts():
-    t0 = "2026-06-03T00:00:00+00:00"
-    t2 = "2026-06-03T00:00:05+00:00"
-    tree = nv.build_tree([
-        {"id": "1", "agent_id": None, "type": "step_started", "timestamp": t0,
-         "payload": {"step": "plan", "kind": "agent", "phase": "build",
-                     "model": "m", "provider": "anthropic"}},
-        {"id": "e1", "agent_id": "step:build/plan", "type": "engine_message",
-         "timestamp": t2,
-         "payload": {"role": "user", "subtype": "agent_prompt",
-                     "content": [{"type": "text", "text": "body"}]}},
-        {"id": "a1", "agent_id": "step:build/plan", "type": "agent_message",
-         "payload": {"provider": "anthropic", "model": "m", "stop_reason": None,
-                     "usage": {}, "raw": {"content": [
-                         {"type": "tool_use", "id": "b1", "name": "bash",
-                          "input": {"command": "ls"}}]}}},
-        {"id": "t1", "agent_id": "step:build/plan", "type": "tool_call",
-         "payload": {"id": "b1", "name": "bash", "input": {"command": "ls"}}},
-    ])
-    step = tree.root.children[0].children[0]
-    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
-    assert burst.span_start_ts == t2
 
 
 def test_activity_provider_defaults_to_none() -> None:
