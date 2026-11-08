@@ -48,6 +48,10 @@ names rather than guessing them.
   alone shows only archived conversations.
 - `imp list --json` — the same board as a structured JSON array, one
   object per quest tagged with its zone; composes with every filter.
+  `name` is what the board shows — the title, else the opening intent or
+  draft brief flattened to one line (`null` if none); `step` holds the
+  board's display labels. For a quest's full intent, use
+  `imp show <id> --json`.
 - `imp search <query>` — a live-and-history scout: search **active** (in-flight +
   drafts), **backlog**, and **history** (completed, abandoned, archived) quests for
   `<query>` as a case-insensitive substring of a quest's id, title, or conversation

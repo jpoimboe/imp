@@ -3794,7 +3794,6 @@ class _OverviewRows(NamedTuple):
     inflight: list[_Row]
     backlog: list[_Row]
     history: list[_Row]
-    intents: dict[str, str | None]
     display_intents: dict[str, str | None]
 
 
@@ -3815,16 +3814,14 @@ def _overview_rows(control: Path, *, dispositions: set[str],
     inflight = [r for r in inflight if _row_since(r, cutoff)]
     backlog = [r for r in backlog if _row_since(r, cutoff)]
     history = [r for r in history if _row_since(r, cutoff)]
-    intents: dict[str, str | None] = {d.quest_id: d.intent_title for d in scanned}
     display_intents: dict[str, str | None] = {
         d.quest_id: quest_row.fallback_intent(d.intent_title, d.meta.get("seed_opening"))
         for d in scanned}
     for r in history:
-        if not r[4].strip() and r[0] not in intents:
-            intents[r[0]] = _resolve_row_intent(control, r)
+        if not r[4].strip() and r[0] not in display_intents:
             display_intents[r[0]] = quest_row.fallback_intent(
-                intents[r[0]], _meta_seed_opening(control, r[0]))
-    return _OverviewRows(inflight, backlog, history, intents, display_intents)
+                _resolve_row_intent(control, r), _meta_seed_opening(control, r[0]))
+    return _OverviewRows(inflight, backlog, history, display_intents)
 
 
 def _filtered_overview_lines(control: Path, *, dispositions: set[str],
@@ -3841,15 +3838,16 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
 
 
 def _board_entry_json(r: _Row, *, zone: Zone,
-                      status: str, intent: str | None) -> dict[str, Any]:
+                      status: str, display_intent: str | None) -> dict[str, Any]:
     """One board entry's always-present keys. `status` is a parameter because a
     backlog row's slot 1 holds its origin word, not a status."""
     title = r[4].strip()
+    name = quest_row.resolve_display_name(title, display_intent)
     return {
         "id": r[0],
         "zone": zone,
         "title": title or None,
-        "intent": None if title else intent,
+        "name": None if name.kind is quest_row.NameKind.UNTITLED else name.text,
         "status": status,
         "created": r[5] or None,
         "last_activity": r[3] or None,
@@ -3863,18 +3861,20 @@ def _board_json(control: Path, *, dispositions: set[str],
     entries: list[dict[str, Any]] = []
     for r in rows.inflight:
         entry = _board_entry_json(r, zone="active", status=r[1],
-                                  intent=rows.intents.get(r[0]))
+                                  display_intent=rows.display_intents.get(r[0]))
         if r[2] not in ("", "-"):
             entry["step"] = {"phase": r[7] or None, "name": r[6] or r[2]}
         entries.append(entry)
     for r in rows.backlog:
-        entry = _board_entry_json(r, zone="backlog", status="backlog", intent=None)
+        entry = _board_entry_json(r, zone="backlog", status="backlog",
+                                  display_intent=rows.display_intents.get(r[0]))
         entry["provenance"] = r[1]
         entry["readiness"] = "blocked" if r[2] == "blocked" else "ready"
         entries.append(entry)
     for r in rows.history:
-        entries.append(_board_entry_json(r, zone="history", status=r[1],
-                                         intent=rows.intents.get(r[0])))
+        entries.append(_board_entry_json(
+            r, zone="history", status=r[1],
+            display_intent=rows.display_intents.get(r[0])))
     return entries
 
 

@@ -96,13 +96,38 @@ def test_list_names_a_homeless_archived_quest_by_its_seed_opening(tmp_path: Path
     assert "(untitled)" not in row
 
 
-def test_list_json_keeps_events_only_intent_for_seeded_quests(tmp_path: Path) -> None:
-    # `imp list --json` must not pick up the human-only seed fallback.
+def test_list_json_names_seeded_quests_by_their_brief(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    q = create_draft_quest(tmp_path, "summarize foo.py")
+    q = create_draft_quest(tmp_path, "summarize\n  foo.py")
     Quest.create_draft(tmp_path, title="", quest_id="bk0001", base_branch="main",
                        origin="idea", seed_opening="a brief")
     entries = {e["id"]: e for e in m._board_json(
         tmp_path, dispositions=m._board_dispositions(show_all=True), cutoff=None)}
-    assert entries[q.id]["title"] is None and entries[q.id]["intent"] is None
-    assert entries["bk0001"]["title"] is None and entries["bk0001"]["intent"] is None
+    assert entries[q.id]["title"] is None
+    assert entries[q.id]["name"] == "summarize foo.py"
+    assert entries["bk0001"]["title"] is None
+    assert entries["bk0001"]["name"] == "a brief"
+
+
+def test_list_json_names_a_homeless_archived_quest_by_its_seed_opening(
+        tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    q = Quest.create(tmp_path, title="", quest_id="arc002", base_branch="main")
+    q.set_seed_opening("seeded\n only")
+    _complete_and_archive(tmp_path, "arc002")
+    shutil.rmtree(project_state_dir(tmp_path) / "quests" / "arc002")
+    entries = {e["id"]: e for e in m._board_json(
+        tmp_path, dispositions=m._board_dispositions(show_all=True), cutoff=None)}
+    assert entries["arc002"]["zone"] == "history"
+    assert entries["arc002"]["title"] is None
+    assert entries["arc002"]["name"] == "seeded only"
+
+
+def test_list_json_nameless_quest_reports_null_name(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _archive_untitled(tmp_path, "unn002", prompt=None)
+    entries = m._board_json(
+        tmp_path, dispositions=m._board_dispositions(show_all=True), cutoff=None)
+    entry = next(e for e in entries if e["id"] == "unn002")
+    assert entry["title"] is None and entry["name"] is None
+    assert "(untitled)" not in json.dumps(entries)

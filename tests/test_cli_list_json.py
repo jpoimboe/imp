@@ -96,31 +96,31 @@ def test_board_json_active_entry_carries_the_core_keys_and_step(
     _seed_inflight(tmp_path, "live01", created="2026-06-01T00:00:00+00:00",
                    started="2026-06-01T00:00:00+00:00")
     assert m._board_json(tmp_path, dispositions={"active"}, cutoff=None) == [{
-        "id": "live01", "zone": "active", "title": "LIVE01", "intent": None,
+        "id": "live01", "zone": "active", "title": "LIVE01", "name": "LIVE01",
         "status": "running", "created": "2026-06-01T00:00:00+00:00",
         "last_activity": "2026-06-01T00:00:00+00:00",
         "step": {"phase": "impl", "name": "coding"}}]
 
 
-def test_board_json_titled_row_reports_no_intent(tmp_path: Path) -> None:
+def test_board_json_titled_row_names_itself_by_its_title(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _seed_live(tmp_path, "namd07", title="Named",
+    _seed_live(tmp_path, "namd07", title="  Named ",
                prompt="a prompt nobody should see")
     assert m._board_json(tmp_path, dispositions={"active"}, cutoff=None) == [{
-        "id": "namd07", "zone": "active", "title": "Named", "intent": None,
+        "id": "namd07", "zone": "active", "title": "Named", "name": "Named",
         "status": "running", "created": "2026-06-02T00:00:00+00:00",
         "last_activity": "2026-06-05T00:00:00+00:00",
         "step": {"phase": "impl", "name": "coding"}}]
 
 
-def test_board_json_unnamed_stepless_entry_reports_intent_and_omits_step(
+def test_board_json_unnamed_stepless_entry_names_itself_by_its_intent_and_omits_step(
         tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _seed_live(tmp_path, "blkd02", title="  ", status="merge_blocked", step=None,
-               prompt="make the poller retry, please")
+               prompt="make the poller\n   retry, please")
     assert m._board_json(tmp_path, dispositions={"active"}, cutoff=None) == [{
         "id": "blkd02", "zone": "active", "title": None,
-        "intent": "make the poller retry, please", "status": "merge_blocked",
+        "name": "make the poller retry, please", "status": "merge_blocked",
         "created": "2026-06-02T00:00:00+00:00",
         "last_activity": "2026-06-05T00:00:00+00:00"}]
 
@@ -137,16 +137,18 @@ def test_board_json_backlog_entry_reports_provenance_and_readiness(
     by_id = {e["id"]: e
              for e in m._board_json(tmp_path, dispositions={"backlog"}, cutoff=None)}
     assert set(by_id["idea03"]) == {
-        "id", "zone", "title", "intent", "status", "created", "last_activity",
+        "id", "zone", "title", "name", "status", "created", "last_activity",
         "provenance", "readiness"}
     assert by_id["idea03"]["zone"] == "backlog"
     assert by_id["idea03"]["status"] == "backlog"
     assert by_id["idea03"]["provenance"] == "idea"
     assert by_id["idea03"]["readiness"] == "ready"
     assert by_id["idea03"]["title"] == "Add OAuth"
+    assert by_id["idea03"]["name"] == "Add OAuth"
     assert datetime.fromisoformat(by_id["idea03"]["created"]).tzinfo is not None
     assert by_id["blok04"] == {
-        "id": "blok04", "zone": "backlog", "title": None, "intent": None,
+        "id": "blok04", "zone": "backlog", "title": None,
+        "name": "depends on a ghost",
         "status": "backlog", "created": by_id["blok04"]["created"],
         "last_activity": by_id["blok04"]["last_activity"],
         "provenance": "followup", "readiness": "blocked"}
@@ -160,27 +162,37 @@ def test_board_json_archive_entry_omits_step_and_nulls_empty_timestamps(
     by_id = {e["id"]: e
              for e in m._board_json(tmp_path, dispositions={"completed"}, cutoff=None)}
     assert by_id["mrgd05"] == {
-        "id": "mrgd05", "zone": "history", "title": "Mrgd05", "intent": None,
+        "id": "mrgd05", "zone": "history", "title": "Mrgd05", "name": "Mrgd05",
         "status": "completed", "created": "2026-06-02T00:00:00+00:00",
         "last_activity": "2026-06-10T00:00:00+00:00"}
     assert by_id["nots01"]["created"] is None
     assert by_id["nots01"]["last_activity"] is None
 
 
-def test_board_json_unnamed_archived_entry_carries_its_intent_and_omits_step(
+def test_board_json_unnamed_archived_entry_names_itself_by_its_intent_and_omits_step(
         tmp_path: Path) -> None:
-    # `_archive_with_event` seeds an `abandoned` quest whose step is `"spec"`, so a
-    # whole-entry equality here pins both halves of the history zone: its intent
-    # comes from the gatherer's `_resolve_row_intent` backfill (a different path
-    # from the active zone's scanned-home map), and it emits no `step` key.
+    # History name comes from the `_resolve_row_intent` backfill, not the scanned-home map.
     _seed_control(tmp_path)
     _archive_with_event(tmp_path, "unna08", "", _ARCHIVED_INTENT_EVENT)
     assert m._board_json(tmp_path, dispositions={"abandoned"}, cutoff=None) == [{
         "id": "unna08", "zone": "history", "title": None,
-        "intent": "teach the poller a retry budget\n"
-                  "then wire it through the config so a restart keeps the tally",
+        "name": "teach the poller a retry budget "
+                "then wire it through the config so a restart keeps the tally",
         "status": "abandoned", "created": "2026-06-01T00:00:00+00:00",
         "last_activity": "2026-06-07T00:00:00+00:00"}]
+
+
+def test_board_json_entries_keep_the_documented_key_order(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _seed_board(tmp_path)
+    by_id = {e["id"]: e for e in m._board_json(
+        tmp_path, dispositions=m._board_dispositions(show_all=True), cutoff=None)}
+    core = ["id", "zone", "title", "name", "status", "created", "last_activity"]
+    assert list(by_id["live01"]) == [*core, "step"]
+    assert list(by_id["idea03"]) == [*core, "provenance", "readiness"]
+    for cid in ("mrgd05", "abnd06", "shlv07"):
+        assert list(by_id[cid]) == core
+    assert all("intent" not in e for e in by_id.values())
 
 
 def _seed_board(control: Path) -> None:
