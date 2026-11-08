@@ -109,13 +109,6 @@ def pause_and_exit(quest: Quest, *, reason: str) -> None:
         payload={"reason": reason, "interrupt_reason": reason})
 
 
-def install_process_group() -> None:
-    """Become process-group leader so child subprocesses can be killed en
-    masse on Ctrl+C. POSIX-only; no-op on Windows."""
-    with contextlib.suppress(AttributeError, OSError):
-        os.setpgrp()
-
-
 def _feed_prompt_ctrl_c() -> None:
     """Route an out-of-band SIGINT at a prompt through the SAME path as a typed
     Ctrl-C: feed a synthetic ControlC key into the running prompt_toolkit app so

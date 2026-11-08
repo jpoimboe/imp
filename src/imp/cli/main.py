@@ -1181,7 +1181,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         make_interactive_solicit,
         run_session_client,
     )
-    from imp.cli.signals import install_process_group, prompt_signal_guard
+    from imp.cli.signals import prompt_signal_guard
     from imp.cli.terminal_title import TerminalTitle
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1212,7 +1212,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "var_flags": getattr(args, "var", None),
             "background": getattr(args, "background", False),
             "provider": provider_arg}))
-    install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
@@ -1494,13 +1493,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         make_interactive_solicit,
         run_session_client,
     )
-    from imp.cli.signals import install_process_group
     from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.state import State, lock_is_live
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
             await proxy_mutation_async("resume", {"token": args.token}))
-    install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()

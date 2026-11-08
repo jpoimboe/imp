@@ -47,7 +47,6 @@ def _seed(tmp_path: Path) -> Quest:
 
 
 def _patch_common(monkeypatch, tmp_path: Path, ch: Quest) -> None:
-    monkeypatch.setattr("imp.cli.signals.install_process_group", lambda: None)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "c")
     monkeypatch.setattr(m, "_load_or_rehydrate", lambda control, cid: ch)

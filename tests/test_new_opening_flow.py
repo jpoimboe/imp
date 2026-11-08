@@ -35,7 +35,6 @@ def _new_args() -> Namespace:
 def stub_new(monkeypatch, tmp_path):
     """Stub every boundary collaborator of _async_cmd_new so the test drives
     only its opening-flow control logic. Returns the patched main module."""
-    monkeypatch.setattr("imp.cli.signals.install_process_group", lambda: None)
     monkeypatch.setattr(main, "_control_root", lambda: tmp_path)
     monkeypatch.setattr("imp.engine.worktree.check_preconditions", lambda *a, **k: None)
     monkeypatch.setattr("imp.engine.worktree.ensure_imp_ignored", lambda *a, **k: None)
