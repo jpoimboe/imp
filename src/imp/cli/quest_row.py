@@ -127,10 +127,14 @@ def compose_status_label(step: str, step_label: str | None,
 
 
 def _fit_label(status: str, label: str | None, width: int) -> str:
-    """`status (label)` if the whole suffix fits width, else the bare word."""
-    if label is None or len(label) > width - len(status) - 3:
+    """`status (label)` if it fits, else the label cut to ≥5 chars + `…`, else the bare word."""
+    if label is None:
         return status
-    return f"{status} ({label})"
+    room = width - len(status) - 3
+    if len(label) <= room:
+        return f"{status} ({label})"
+    cut = label[:max(room - 1, 0)].rstrip(" ·")
+    return f"{status} ({cut}…)" if len(cut) >= 5 else status
 
 
 def _status_segment(status: str, step: str, step_label: str | None,

@@ -172,13 +172,12 @@ def test_provenance_words_absent_from_palette():
     assert "followup" not in STATUS_COLORS
 
 
-def test_oversized_label_dropped_not_truncated():
+def test_oversized_label_truncated_with_ellipsis():
+    # status_width 35 -> room 35-13-3 = 19; the 24-char label truncates to 18 chars + "…".
     line = format_quest_line(
         **_row(status="merge_blocked", step="x"),
         step_label="resolving deferred items", color=False)
-    assert "merge blocked" in line               # status word intact
-    assert "…" not in line                       # no partial ellipsis
-    assert "(" not in line                       # whole parenthetical dropped
+    assert "merge blocked (resolving deferred…)" in line
     assert "resolving deferred items" not in line
 
 
@@ -241,15 +240,12 @@ def test_status_cell_omits_phase_when_none():
     assert "·" not in line
 
 
-def test_status_width_drops_oversized_label():
-    # status_width 20 -> budget 20-7-3 = 10; a 30-char label does not fit and is
-    # dropped whole, leaving the bare status word (never a partial `(…)`).
+def test_status_width_truncates_oversized_label():
+    # status_width 20 -> room 20-7-3 = 10; a 30-char label truncates to 9 chars + "…".
     line = format_quest_line(**_row(status="running", step="x", status_width=20),
                               step_label="a" * 30, color=False)
-    assert "running" in line
-    assert "…" not in line
-    assert "(" not in line
-    assert "a" * 30 not in line
+    assert "running (" + "a" * 9 + "…)" in line
+    assert "a" * 10 not in line
 
 
 def test_status_subfloor_drops_suffix_no_overflow():
@@ -270,12 +266,11 @@ def test_status_label_fits_at_budget_boundary():
     assert "running (" + "b" * 10 + ")" in line
 
 
-def test_status_label_drops_one_char_over_budget():
-    # status_width 20 -> budget 10; an 11-char label is one over and is dropped whole.
+def test_status_label_truncates_one_char_over_budget():
+    # status_width 20 -> room 10; an 11-char label is one over and truncates to 9 + "…".
     line = format_quest_line(**_row(status="running", step="x", status_width=20),
                               step_label="b" * 11, color=False)
-    assert "running" in line
-    assert "(" not in line
+    assert "running (" + "b" * 9 + "…)" in line
 
 
 def test_header_line_honors_status_width():
@@ -351,13 +346,12 @@ def _term(monkeypatch, cols):
                         lambda fallback=(80, 24): os.terminal_size((cols, 24)))
 
 
-def test_overview_widths_80col_drops_label_that_does_not_fit(monkeypatch):
+def test_overview_widths_80col_truncates_label_that_does_not_fit(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; NAME takes its 20, leaving 41 — too few for the 50-col labelled
-    # cell, so the label drops and STATUS shrinks to the bare word it prints.
+    # region = 61; NAME takes its 20, leaving 41 — the 50-col labelled cell truncates to 41.
     status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
-    assert (status_w, name_w) == (7, 20)
+    assert (status_w, name_w) == (41, 20)
 
 
 def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
@@ -371,11 +365,11 @@ def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
 def test_overview_widths_status_is_widest_rendered_cell(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 100)
-    # region = 81, NAME 20 -> 61 left: the 30-col cell fits, the 70-col one drops
-    # to its 7-col word, so STATUS is 30, not the 61 available or the 70 it could be.
+    # region = 81, NAME 20 -> 61 left: the 30-col cell fits, the 70-col one truncates
+    # to the 61-col budget, so STATUS is 61.
     status_w, name_w = overview_widths([("running", "a" * 20, "n" * 20),
                                         ("waiting", "b" * 60, "n" * 20)])
-    assert (status_w, name_w) == (30, 20)
+    assert (status_w, name_w) == (61, 20)
 
 
 def test_overview_widths_indent_shrinks_the_status_budget(monkeypatch):
@@ -383,7 +377,7 @@ def test_overview_widths_indent_shrinks_the_status_budget(monkeypatch):
     _term(monkeypatch, 80)
     rows = [("running", "x" * 30, "y" * 20)]   # labelled cell = 40 cols
     assert overview_widths(rows) == (40, 20)            # 61 - 20 = 41 left: fits
-    assert overview_widths(rows, indent=2) == (7, 20)   # 59 - 20 = 39 left: drops
+    assert overview_widths(rows, indent=2) == (39, 20)  # 59 - 20 = 39 left: truncates
 
 
 def test_overview_widths_name_cap_protects_status(monkeypatch):
@@ -541,12 +535,12 @@ def test_overview_row_has_no_padding_gap(monkeypatch):
     _term(monkeypatch, 80)
     status_w, name_w = overview_widths([("running", "l" * 60, "Fix the login button")])
     assert header_line(color=False, name_width=name_w, status_width=status_w) == (
-        "ID      NAME                  STATUS   UPDATED")
+        "ID      NAME                  STATUS" + " " * 37 + "UPDATED")
     line = format_quest_line(
         quest_id="abc123", title="Fix the login button", status="running", step="x",
         step_label="l" * 60, last_iso="2026-06-11T11:59:58+00:00", now=_NOW,
         color=False, name_width=name_w, status_width=status_w)
-    assert line == "abc123  Fix the login button  running  2s"
+    assert line == "abc123  Fix the login button  running (" + "l" * 30 + "…)  2s"
 
 
 def test_overview_clips_long_name_at_cap_on_wide_terminal(monkeypatch):
@@ -558,7 +552,7 @@ def test_overview_clips_long_name_at_cap_on_wide_terminal(monkeypatch):
     assert "  " + "y" * 69 + "…  running  15m" in line
 
 
-@pytest.mark.parametrize("cols", [200, 80, 30])
+@pytest.mark.parametrize("cols", [200, 120, 80, 30])
 def test_overview_header_status_aligns_with_row_status(monkeypatch, cols):
     from imp.cli.quest_row import ID_W, overview_widths
     _term(monkeypatch, cols)
@@ -573,4 +567,59 @@ def test_overview_header_status_aligns_with_row_status(monkeypatch, cols):
                                         name_width=name_w, status_width=status_w),
                                  step_label=label, color=False)
         assert line[col:].startswith(status)
-        assert "(…" not in line and "…)" not in line
+        assert "(…" not in line          # never an empty cut
+
+
+_SPEC_LABEL = "spec phase · reviewing spec"
+
+
+def test_fit_label_truncates_with_ellipsis():
+    from imp.cli.quest_row import _fit_label
+    cell = _fit_label("paused", _SPEC_LABEL, 31)
+    assert cell == "paused (spec phase · reviewin…)"
+    assert len(cell) == 31
+
+
+def test_fit_label_strips_trailing_separators_before_ellipsis():
+    from imp.cli.quest_row import _fit_label
+    # width 23 -> room 14, cut label[:13] == "spec phase · " -> stripped to "spec phase".
+    assert _fit_label("paused", _SPEC_LABEL, 23) == "paused (spec phase…)"
+    # width 17 -> cut label[:7] == "review " -> stripped to "review".
+    assert _fit_label("paused", "review spec phase", 17) == "paused (review…)"
+
+
+def test_fit_label_bare_word_when_fewer_than_five_label_chars_fit():
+    from imp.cli.quest_row import _fit_label
+    assert _fit_label("paused", _SPEC_LABEL, 14) == "paused"   # room - 1 == 4
+    # width 15 -> cut "spec " strips to "spec" (4 chars) -> bare word.
+    assert _fit_label("paused", _SPEC_LABEL, 15) == "paused"
+    assert _fit_label("running", "a very long label", 8) == "running"   # negative room
+
+
+def test_fit_label_whole_label_and_none_unchanged():
+    from imp.cli.quest_row import _fit_label
+    assert _fit_label("running", "threshold", 35) == "running (threshold)"
+    assert _fit_label("running", None, 35) == "running"
+
+
+def test_overview_120col_truncates_status_under_capped_name(monkeypatch):
+    from imp.cli.quest_row import ID_W, overview_widths
+    _term(monkeypatch, 120)
+    # region = 101; NAME capped at 70 leaves STATUS 31 — the 36-col cell truncates.
+    status_w, name_w = overview_widths([("paused", _SPEC_LABEL, "y" * 80)])
+    assert (status_w, name_w) == (31, 70)
+    col = ID_W + 2 + name_w + 2
+    assert header_line(color=False, name_width=name_w,
+                       status_width=status_w)[col:].startswith("STATUS")
+    line = format_quest_line(**_row(title="y" * 80, status="paused", step="review-spec",
+                                    name_width=name_w, status_width=status_w),
+                             step_label="reviewing spec", phase_label="spec phase",
+                             color=False)
+    assert line[col:].startswith("paused (spec phase · reviewin…)  15m")
+
+
+def test_truncated_suffix_renders_dim_and_status_word_keeps_style():
+    line = format_quest_line(**_row(status="waiting", step="review-spec", status_width=31),
+                             step_label="reviewing spec", phase_label="spec phase",
+                             color=True)
+    assert "\x1b[1mwaiting\x1b[0m\x1b[2m (spec phase · reviewi…)\x1b[0m" in line

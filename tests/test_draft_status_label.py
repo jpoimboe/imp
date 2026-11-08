@@ -150,7 +150,7 @@ def test_opening_conversation_position_row_is_id_and_title_only(
                                 context_tokens=None, color=False, width=80) == "dflt01 · t"
 
 
-def test_shipped_label_over_the_status_budget_drops_to_the_bare_word() -> None:
+def test_shipped_label_over_the_status_budget_truncates_with_ellipsis() -> None:
     from datetime import UTC, datetime
 
     step = next(s for s in load_workflow(bundled_workflow_dir("default")).flat_steps()
@@ -159,7 +159,5 @@ def test_shipped_label_over_the_status_budget_drops_to_the_bare_word() -> None:
         quest_id="dflt01", title="X", status="paused", step=step.name,
         step_label=step.label, phase_label=step.phase_label,
         last_iso=None, now=datetime.now(UTC), color=False, status_width=20)
-    assert "paused" in line
-    assert "(" not in line
-    assert "spec phase" not in line
+    assert "paused (spec phase…)" in line
     assert "checking" not in line
