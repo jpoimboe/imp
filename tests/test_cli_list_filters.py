@@ -449,3 +449,41 @@ def test_since_cutoff_suppresses_the_notice(tmp_path, monkeypatch) -> None:
     out = _run_list(tmp_path, monkeypatch, ["list", "--since", "today"])
     assert "bklgid" in out
     assert "no active quests" not in out
+
+
+_HIDDEN_HISTORY = "No active quests — see imp list -a for history"
+
+
+@pytest.mark.parametrize("status", ["abandoned", "archived"])
+def test_list_with_only_hidden_history_points_at_dash_a(
+        tmp_path, monkeypatch, status) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "gone", status)
+    assert _run_list(tmp_path, monkeypatch, ["list"]).strip() == _HIDDEN_HISTORY
+    assert m._overview_lines(
+        tmp_path, show_all=False, now=_NOW, color=False) == [_HIDDEN_HISTORY]
+
+
+def test_list_all_with_only_hidden_history_shows_it(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "abnd", "abandoned")
+    lines = _run_list(tmp_path, monkeypatch, ["list", "-a"]).splitlines()
+    assert lines[1:4] == ["no active quests", "", "history:"]
+    assert lines[4].split()[0] == "abnd"
+
+
+def test_list_archived_filter_has_no_blank_after_header(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _archive_status(tmp_path, "shlv", "archived")
+    lines = _run_list(tmp_path, monkeypatch, ["list", "--archived"]).splitlines()
+    assert lines[1] == "history:"
+    assert lines[2].split()[0] == "shlv"
+
+
+def test_list_backlog_filter_has_no_blank_after_header(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="Idea", quest_id="bklgid", base_branch="main",
+                       origin="idea", seed_opening="Idea")
+    lines = _run_list(tmp_path, monkeypatch, ["list", "--backlog"]).splitlines()
+    assert lines[1] == "backlog:"
+    assert lines[2].split()[0] == "bklgid"
