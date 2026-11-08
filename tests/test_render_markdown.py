@@ -655,10 +655,10 @@ def test_summary_markdown_and_html_ledger_show_the_title_else_the_label() -> Non
 
     titled = ledger("map ledger time totals")
     assert "| ↳ explorer (map ledger time totals) | 55s | — | — | — | — | — |" in titled
-    assert "<td>↳ explorer (map ledger time totals)</td>" in render_html(titled)
+    assert "<td>↳ explorer (map ledger time totals)</td>" in render_html(titled, title="t")
     untitled = ledger(None)
     assert "| ↳ explorer (exploring codebase) | 55s | — | — | — | — | — |" in untitled
-    assert "<td>↳ explorer (exploring codebase)</td>" in render_html(untitled)
+    assert "<td>↳ explorer (exploring codebase)</td>" in render_html(untitled, title="t")
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
@@ -1246,7 +1246,7 @@ def _raw_html(md: str) -> list[str]:
 
 def _assert_safe(md: str, *, folds: int = 0) -> None:
     assert all(_SAFE_FOLD_HTML.fullmatch(h) for h in _raw_html(md))
-    page = render_html(md)
+    page = render_html(md, title="t")
     assert "<script" not in page and "<img" not in page
     assert page.count("<details>") == folds
 
@@ -1307,7 +1307,7 @@ def test_md_escape_handles_tabs_lazy_continuation_and_quoted_list_fences() -> No
 def test_agent_code_span_is_escaped_exactly_once() -> None:
     md = _md(_agent_events("Use `_cmd_*(args) -> int`"))
     assert "Use `_cmd_*(args) -> int`" in md
-    page = render_html(md)
+    page = render_html(md, title="t")
     assert "<code>_cmd_*(args) -&gt; int</code>" in page
     assert "&amp;gt;" not in page and "&amp;lt;" not in page
 
@@ -1321,7 +1321,7 @@ def test_agent_code_span_is_escaped_exactly_once() -> None:
 def test_agent_code_block_is_escaped_exactly_once(text: str) -> None:
     md = _md(_agent_events(text))
     assert "if a < b:" in md
-    page = render_html(md)
+    page = render_html(md, title="t")
     assert "<pre><code>if a &lt; b:\n</code></pre>" in page
     assert "&amp;lt;" not in page
 
@@ -1385,7 +1385,7 @@ def _burst_named(name: str) -> list[dict]:
 
 def test_burst_recap_summary_is_escaped_exactly_once() -> None:
     md = _md(_burst_named("`<x>`"), show=frozenset({"tools"}))
-    for doc in (md, render_html(md)):
+    for doc in (md, render_html(md, title="t")):
         assert "<summary>1 call · `&lt;x&gt;`</summary>" in doc
         assert "&amp;" not in doc
 
@@ -1403,7 +1403,7 @@ def _subagent_named(name: str) -> list[dict]:
 def test_full_subagent_label_is_escaped_exactly_once() -> None:
     md = _md(_subagent_named("`<x>`"), full=True)
     assert "**`<x>`**" in md
-    page = render_html(md)
+    page = render_html(md, title="t")
     assert "<strong><code>&lt;x&gt;</code></strong>" in page
     assert "&amp;lt;" not in page
 

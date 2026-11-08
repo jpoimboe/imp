@@ -62,6 +62,18 @@ def _setup(tmp_path, monkeypatch, slug="exp-smoke"):
     return slug
 
 
+def _retitle(control: Path, slug: str, **fields) -> None:
+    path = project_state_dir(control) / "quests" / slug / "quest.json"
+    data = json.loads(path.read_text())
+    data.update(fields)
+    path.write_text(json.dumps(data))
+
+
+def _page_title(html: str) -> str:
+    assert html.count("<title>") == 1
+    return html.split("<title>", 1)[1].split("</title>", 1)[0]
+
+
 def test_md_writes_default_file_and_prints_path(tmp_path, monkeypatch, capsys):
     slug = _setup(tmp_path, monkeypatch)
     rc = main(["log", slug, "--md"])
@@ -258,3 +270,44 @@ def test_html_export_renders_the_commit_list_as_a_real_list(tmp_path, monkeypatc
     # paragraph on the way through markdown-it
     assert "<li><code>4091ab6d</code> cli: print the commit list</li>" in html
     assert "into main as <code>ffffffff</code>.</strong>" in html
+
+
+def test_html_title_names_a_titled_quest(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _retitle(tmp_path, slug, title="Add imp doctor setup check")
+    assert main(["log", slug, "--html", "-"]) == 0
+    assert _page_title(capsys.readouterr().out) == f"{slug} · Add imp doctor setup check"
+
+
+def test_html_summary_title_appends_summary(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _retitle(tmp_path, slug, title="Add imp doctor setup check")
+    assert main(["log", slug, "--html", "-", "--summary"]) == 0
+    assert (_page_title(capsys.readouterr().out)
+            == f"{slug} · Add imp doctor setup check · summary")
+
+
+def test_html_title_falls_back_to_truncated_intent(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _retitle(tmp_path, slug, title="", seed_opening="fix  the\n  " + "x" * 100)
+    assert main(["log", slug, "--html", "-"]) == 0
+    # whitespace flattened, cut to TITLE_CAP=70 chars including the ellipsis
+    assert _page_title(capsys.readouterr().out) == f"{slug} · fix the " + "x" * 61 + "…"
+
+
+def test_html_title_is_bare_id_without_title_or_intent(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _retitle(tmp_path, slug, title="")
+    assert main(["log", slug, "--html", "-"]) == 0
+    assert _page_title(capsys.readouterr().out) == slug
+
+
+def test_html_title_carries_no_ansi_even_when_color_is_on(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _retitle(tmp_path, slug, title="Add imp doctor setup check")
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setattr(m, "should_use_color", lambda *_a, **_k: True)
+    assert main(["log", slug, "--html", "-"]) == 0
+    title = _page_title(capsys.readouterr().out)
+    assert "\x1b" not in title
+    assert title == f"{slug} · Add imp doctor setup check"

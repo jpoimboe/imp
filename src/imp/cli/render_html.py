@@ -2,6 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import html
 import importlib.resources as ir
 from dataclasses import dataclass
 
@@ -104,7 +105,7 @@ def _md_to_fragment(markdown: str) -> str:
     return "".join(parts)
 
 
-def render_html(markdown: str) -> str:
+def render_html(markdown: str, *, title: str) -> str:
     """Wrap the converted Markdown fragment in a single self-contained HTML page:
     the vendored github-markdown-css inlined into <style>, the body carrying the
     `.markdown-body` class it targets, and no external href/src reference."""
@@ -116,6 +117,7 @@ def render_html(markdown: str) -> str:
         "<head>\n"
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{html.escape(title)}</title>\n"
         "<style>\n"
         f"{css}\n"
         ".markdown-body { box-sizing: border-box; min-width: 200px; "

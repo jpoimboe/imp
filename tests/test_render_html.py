@@ -124,7 +124,7 @@ def test_nested_subagent_thinking_fold_html_no_leaked_close_tag() -> None:
     md = render_markdown(tree, full=False, show=frozenset({"subagents", "thinking"}))
     # Confirm the markdown really nests folds (thinking inside subagent)
     assert md.count("<details>") == 2
-    out = render_html(md)
+    out = render_html(md, title="t")
     assert "&lt;/details&gt;" not in out   # no leaked closing tag as visible text
     # outcome must sit INSIDE the subagent fold, not spill out after it
     outer_fold_end = out.rindex("</details>")
@@ -187,7 +187,7 @@ def test_info_string_fence_in_thinking_does_not_swallow_later_fold() -> None:
     ]
     tree = nv.build_tree(events)
     md = render_markdown(tree, full=False, show=frozenset({"subagents", "thinking"}))
-    out = render_html(md)
+    out = render_html(md, title="t")
     assert "&lt;/details&gt;" not in out          # no leaked closing tags
     assert "&lt;details&gt;" not in out           # no leaked open tags
     assert "second done" in out                   # second fold's content rendered
@@ -351,7 +351,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 
 def test_render_html_is_self_contained_document() -> None:
-    out = render_html("# Title\n\nsome **bold** prose\n")
+    out = render_html("# Title\n\nsome **bold** prose\n", title="t")
     assert out.startswith("<!DOCTYPE html>")
     assert '<body class="markdown-body">' in out
     assert "<style>" in out
@@ -368,7 +368,7 @@ def test_render_html_indents_nested_folds() -> None:
     md = ("<details>\n<summary>outer</summary>\n\n"
           "<details>\n<summary>inner</summary>\n\nbody\n\n</details>\n\n"
           "</details>\n")
-    out = render_html(md)
+    out = render_html(md, title="t")
     assert out.count("<details>") == 2          # both folds are real elements
     assert ".markdown-body details details { margin-left: 1.5em; }" in out
 
@@ -383,7 +383,7 @@ def test_render_html_end_to_end_neutralizes_hostile_tool_result() -> None:
             content="<script>alert(1)</script>\x00", error=False),
     ]
     tree = nv.build_tree(events)
-    out = render_html(render_markdown(tree, full=True))
+    out = render_html(render_markdown(tree, full=True), title="t")
     assert "<script>alert(1)</script>" not in out   # never a live tag
     assert "&lt;script&gt;" in out                  # escaped / inert
     assert "\x00" not in out                        # control byte neutralized (-> ^@)
@@ -394,8 +394,8 @@ def test_quiet_first_retry_is_absent_from_the_lean_html_export() -> None:
     tree = nv.build_tree([
         {"id": "r1", "agent_id": None, "type": "agent_retry",
          "payload": {"category": "auth", "attempt": 1, "backoff_seconds": 1.0}}])
-    assert "retry 1" not in render_html(render_markdown(tree, full=False))
-    assert "retry 1" in render_html(render_markdown(tree, full=True))
+    assert "retry 1" not in render_html(render_markdown(tree, full=False), title="t")
+    assert "retry 1" in render_html(render_markdown(tree, full=True), title="t")
 
 
 def test_agent_prose_bare_sgr_fence_html_export_is_clean() -> None:
@@ -411,7 +411,7 @@ def test_agent_prose_bare_sgr_fence_html_export_is_clean() -> None:
                      "raw": {"content": [{"type": "text",
                                           "text": f"Look:\n\n```\n{bare}\n```\n"}]}}},
     ])
-    out = render_html(render_markdown(tree, full=False))
+    out = render_html(render_markdown(tree, full=False), title="t")
     assert "38;2;255;154;60" not in out
     assert "\x1b" not in out
     assert "^[[" not in out
@@ -430,7 +430,7 @@ def test_agent_prose_colored_inline_span_html_export_is_plain_code() -> None:
                          {"type": "text",
                           "text": "The gauge reads `[1;33m78%[0m` amber.\n"}]}}},
     ])
-    out = render_html(render_markdown(tree, full=False))
+    out = render_html(render_markdown(tree, full=False), title="t")
     assert "<code>78%</code>" in out     # a real <code> element, not literal codes
     assert "[1;33m" not in out
     assert "\x1b" not in out
@@ -452,7 +452,7 @@ def test_summary_html_export_keeps_the_notional_sigil_out_of_a_list() -> None:
     ]
     hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
-    out = render_html(render_summary_markdown(rows, header=hdr))
+    out = render_html(render_summary_markdown(rows, header=hdr), title="t")
     assert "<td>$6.00*</td>" in out                     # the total's starred cell
     assert ("<p>* theoretical API list price; actual subscription usage is"
             " much lower</p>") in out
@@ -472,7 +472,7 @@ def _html(rows: list[StepRow]) -> str:
     hdr = SummaryHeader(title="f", quest_id="c", status="completed",
                         total_seconds=60.0)
     return render_html(render_summary_markdown(
-        rows, header=hdr, quota=quota_view(rows_charge(rows))))
+        rows, header=hdr, quota=quota_view(rows_charge(rows))), title="t")
 
 
 def test_summary_html_export_carries_the_weekly_column_and_its_footnote() -> None:
@@ -521,7 +521,7 @@ def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
     ]
     md = render_markdown(nv.build_tree(events), full=False,
                          show=frozenset({"subagents"}))
-    out = render_html(md)
+    out = render_html(md, title="t")
     for doc in (md, out):
         assert "<summary>· `&lt;x&gt;` · m</summary>" in doc
         assert "&amp;" not in doc
@@ -530,7 +530,7 @@ def test_subagent_fold_summary_is_escaped_exactly_once() -> None:
 def _html_for_complete_step(*, full: bool = False, show: frozenset[str] | None = None) -> str:
     events = tool_burst_events(
         ("complete_step", {"status": "Success", "findings": "line one\nline two"}))
-    return render_html(render_markdown(nv.build_tree(events), full=full, show=show))
+    return render_html(render_markdown(nv.build_tree(events), full=full, show=show), title="t")
 
 
 def test_html_lean_internal_only_burst_emits_nothing() -> None:
@@ -554,6 +554,14 @@ def test_html_show_tools_internal_only_burst_folds_under_tools() -> None:
 
 def test_html_full_mixed_burst_heading_is_recap_over_every_call() -> None:
     events = tool_burst_events(("bash", {}), ("read_file", {}), ("complete_step", {}))
-    out = render_html(render_markdown(nv.build_tree(events), full=True))
+    out = render_html(render_markdown(nv.build_tree(events), full=True), title="t")
     assert "<strong>2 calls · bash · read_file</strong>" in out
     assert "· complete_step" in out
+
+
+def test_render_html_title_is_escaped_inside_head() -> None:
+    out = render_html("body\n", title="a <b> & c")
+    assert out.count("<title>") == 1
+    assert "<title>a &lt;b&gt; &amp; c</title>" in out
+    head = out.split("<head>", 1)[1].split("</head>", 1)[0]
+    assert "<title>a &lt;b&gt; &amp; c</title>" in head

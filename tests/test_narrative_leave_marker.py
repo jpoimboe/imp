@@ -138,7 +138,7 @@ def test_trailing_line_uses_the_lifecycle_color_and_no_glyph() -> None:
 def test_markdown_and_html_carry_the_trailing_line() -> None:
     md = rm.render_markdown(nv.build_tree(_stopped(_manual("pause"))), full=False)
     assert "**paused · /pause**" in md
-    assert "<strong>paused · /pause</strong>" in render_html(md)
+    assert "<strong>paused · /pause</strong>" in render_html(md, title="t")
 
 
 class _Pipe(io.StringIO):

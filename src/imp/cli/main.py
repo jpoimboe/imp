@@ -769,6 +769,13 @@ def _run_header_line(quest_id: str, title: str, marker: str | None = None,
     return head + ansi(tail, "dim", enabled=color) if tail else head
 
 
+def _card_header_line(quest_id: str, card: QuestCard | None, *, color: bool) -> str:
+    title = card.title if card is not None else ""
+    intent = (quest_row.fallback_intent(card.intent, card.seed_opening)
+              if card is not None else None)
+    return _run_header_line(quest_id, title, color=color, intent=intent)
+
+
 def _cleared_divider(quest_id: str, leave_mode: str, *, color: bool) -> str:
     kind = {"chat": "chat", "new": "quest"}[leave_mode]
     return (ansi(f"── new {kind} ", "dim", enabled=color)
@@ -2855,11 +2862,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = _log_tree(events, unfiltered)
-    card = store.quest_card(quest_id)
-    title = card.title if card is not None else ""
-    intent = (quest_row.fallback_intent(card.intent, card.seed_opening)
-              if card is not None else None)
-    run_header = _run_header_line(quest_id, title, color=color, intent=intent)
+    run_header = _card_header_line(quest_id, store.quest_card(quest_id), color=color)
     lines = [run_header, "", *render_tree(tree, show=show, color=color, width=width,
                                           display_width=_display_width())]
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -2900,9 +2903,9 @@ def _write_log_export(args: argparse.Namespace, store: Store,
                       quest_id: str, events: list[dict[str, Any]],
                       unfiltered: list[dict[str, Any]], *,
                       show: frozenset[str]) -> int:
+    card = store.quest_card(quest_id)
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
-        card = store.quest_card(quest_id)
         header = _summary_header(quest_id, card, events)
         rows = _log_summary(events, unfiltered)
         view = _attribute_quota(store, quest_id, unfiltered, rows)
@@ -2915,7 +2918,10 @@ def _write_log_export(args: argparse.Namespace, store: Store,
                                    show=show)
     if args.html is not None:
         from imp.cli.render_html import render_html
-        document = render_html(document)
+        page_title = _card_header_line(quest_id, card, color=False)
+        if args.summary:
+            page_title += " · summary"
+        document = render_html(document, title=page_title)
         ext = "html"
         target = args.html
     else:
