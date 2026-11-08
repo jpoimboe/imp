@@ -4272,13 +4272,18 @@ def _cmd_events_search(
 
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
+    from imp.providers.config import _REQUIRED_TIERS
     from imp.providers.effective import load_effective_config
+    explain = getattr(args, "explain", None)
+    if explain is not None and explain not in _REQUIRED_TIERS:
+        _emit_cli_error(f"unknown tier {explain!r} "
+                        f"(choose from: {', '.join(_REQUIRED_TIERS)})")
+        return 2
     root = _claiming_settings_root()
     eff = load_effective_config(control_root=root)
     color = should_use_color(sys.stdout)
-    explain = getattr(args, "explain", None)
     buf = io.StringIO()
-    if explain:
+    if explain is not None:
         render_explain(eff, explain, buf, color=color)
     else:
         render_config(eff, buf,
