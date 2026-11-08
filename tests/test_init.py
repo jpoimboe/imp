@@ -1039,6 +1039,7 @@ def test_main_init_cancelled_at_the_screen_writes_no_machine_config(
     assert rc == ExitCode.USER_ENDED
     assert capsys.readouterr().err.splitlines() == ["imp: init cancelled"]
     assert not (tmp_path / "imphome" / "config.yaml").exists()
+    assert not (tmp_path / "imphome" / "projects").exists()
     assert not (tmp_path / "imp").exists()
 
 

@@ -5129,9 +5129,9 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_cli_error(error)
                 return 2
         with contextlib.suppress(Exception):
-            install_stack_dumper(
-                project_state_dir(_control_root())
-                / f"cli.{os.getpid()}.stack-dump.txt")
+            if (claiming := _claiming_settings_root()) is not None:
+                install_stack_dumper(
+                    project_state_dir(claiming) / f"cli.{os.getpid()}.stack-dump.txt")
         result = _dispatch_meta(args, parser)
         if result is not None:
             # _dispatch_meta may have printed the overview/unknown-command
