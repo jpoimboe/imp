@@ -157,7 +157,7 @@ _CARD_REASONS = [
     ("terminated", "agent error"),
     ("internal_error", "internal error"),
     ("api", "API error"),
-    ("context_window", "context limit"),
+    ("context_window", "a step used up its context handoffs"),
     ("config", "config error"),
     ("content_filter", "content filtered"),
     ("loop", "loop detected"),
@@ -195,6 +195,7 @@ def test_show_card_phrases_every_halt_token_and_json_keeps_the_token(
 @pytest.mark.parametrize(("reason", "phrase"), [
     ("quota", "quota exhausted"),
     ("sandbox_spawn_failed", "the sandbox could not start"),
+    ("context_window", "a step used up its context handoffs"),
 ])
 def test_show_names_an_error_halt_reason_under_status_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str, phrase: str,
@@ -255,3 +256,8 @@ def test_show_prints_no_reason_line_when_none_is_current(
     assert not [ln for ln in lines if ln.startswith("reason:")]
     data = json.loads(_run(monkeypatch, tmp_path, "show", _QID, "--json"))
     assert data["pause_reason"] is None
+
+
+def test_context_window_pause_still_halts_as_error() -> None:
+    from imp.engine.state import classify_pause_halt
+    assert classify_pause_halt("context_window", None) == "error"

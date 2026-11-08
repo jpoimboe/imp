@@ -257,13 +257,13 @@ def _emit_completed(quest: Quest, *, merge: Merge | None,
     print()
 
 
-# Single source: error pause-reason base token -> user-facing label; covers all _POLICY.
+# Single source: error pause-reason base token -> user-facing label; covers all _POLICY
+# except context_window, a clean _PAUSE_QUALIFIER pause.
 _ERROR_LABELS: dict[str, str] = {
     "terminated": "agent error",
     "internal_error": "internal error",
     "api": "API error",
     "quota": "quota exceeded",
-    "context_window": "context limit",
     "config": "config error",
     "content_filter": "content filtered",
     "loop": "loop detected",
@@ -281,7 +281,11 @@ _ERROR_LABELS: dict[str, str] = {
 
 # Pause trigger -> its banner display form. Internal reason strings stay
 # lowercase; only the banner display is transformed.
-_PAUSE_QUALIFIER: dict[str, str] = {**MANUAL_STOP_LABELS, "max_loops": "loop limit"}
+_PAUSE_QUALIFIER: dict[str, str] = {
+    **MANUAL_STOP_LABELS,
+    "max_loops": "loop limit",
+    "context_window": "context handoff limit",
+}
 
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
@@ -2017,6 +2021,7 @@ _CARD_PAUSE_PHRASE: dict[str, str] = {
     "reauth_needed": "provider login expired",
     "sandbox_spawn_failed": "the sandbox could not start",
     "max_loops": "a step hit its loop limit",
+    "context_window": "a step used up its context handoffs",
     "quota": "quota exhausted",
     "script_blocked": "a script step was blocked",
     "clean_tree": "a step left uncommitted changes",

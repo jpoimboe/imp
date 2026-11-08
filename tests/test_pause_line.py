@@ -205,11 +205,14 @@ def test_daemon_stderr_has_crash_false_when_file_absent(tmp_path: Path) -> None:
 
 
 def test_error_labels_cover_every_policy_category() -> None:
-    from imp.cli.main import _ERROR_LABELS
+    from imp.cli.main import _ERROR_LABELS, _PAUSE_QUALIFIER
     from imp.engine.error_policy import _POLICY
 
-    missing = set(_POLICY) - set(_ERROR_LABELS)
+    # context_window is a clean `paused · context handoff limit` pause, not a red block.
+    missing = set(_POLICY) - set(_ERROR_LABELS) - {"context_window"}
     assert missing == set(), f"unmapped categories: {missing}"
+    assert "context_window" not in _ERROR_LABELS
+    assert "context_window" in _PAUSE_QUALIFIER
     assert "reauth_needed" in _ERROR_LABELS      # the executor's remap target for auth_terminal
 
 
@@ -250,7 +253,6 @@ def test_error_block_untitled_drops_title_and_body_when_empty() -> None:
     ("terminated", "agent error"),
     ("internal_error", "internal error"),
     ("quota", "quota exceeded"),
-    ("context_window", "context limit"),
     ("retry_ceiling", "retries exhausted"),
     ("reauth_needed", "auth failed"),
     ("unknown", "unknown error"),
@@ -351,7 +353,7 @@ def test_pause_lines_max_loops_head_is_gold_paused_dim_qualifier() -> None:
     assert lines[2] == "resume: imp resume dufa26"
 
 
-def test_pause_qualifier_holds_exactly_its_seven_entries() -> None:
+def test_pause_qualifier_holds_exactly_its_eight_entries() -> None:
     from imp.cli.main import _PAUSE_QUALIFIER, _PauseInfo
     assert _PAUSE_QUALIFIER == {
         "pause": "/pause",
@@ -361,6 +363,7 @@ def test_pause_qualifier_holds_exactly_its_seven_entries() -> None:
         "sighup": "SIGHUP",
         "sigquit": "SIGQUIT",
         "max_loops": "loop limit",
+        "context_window": "context handoff limit",
     }
     for trigger, display in _PAUSE_QUALIFIER.items():
         lines = _pause_lines("dufa26", "dufa26", title="T",
@@ -371,5 +374,22 @@ def test_pause_qualifier_holds_exactly_its_seven_entries() -> None:
 def test_pause_qualifier_derives_from_the_narrative_manual_stop_labels() -> None:
     from imp.cli import narrative as nv
     from imp.cli.main import _PAUSE_QUALIFIER
-    assert _PAUSE_QUALIFIER == {**nv.MANUAL_STOP_LABELS, "max_loops": "loop limit"}
+    assert _PAUSE_QUALIFIER == {**nv.MANUAL_STOP_LABELS, "max_loops": "loop limit",
+                                "context_window": "context handoff limit"}
     assert not hasattr(nv, "_HUMAN_INTERRUPT_REASONS")
+
+
+@pytest.mark.parametrize("cause", [None, "prompt is too long: 210000 tokens > 200000"],
+                         ids=["no-cause", "provider-cause"])
+def test_pause_lines_context_window_is_gold_handoff_limit_with_resume(
+    cause: str | None,
+) -> None:
+    from imp.cli import palette as pal
+    from imp.cli.main import _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo("context_window", cause), color=True)
+    assert lines == [
+        pal.ansi("paused", "wordmark") + pal.ansi(" · context handoff limit", "dim"),
+        f'{pal.ansi("dufa26", "wordmark")} · T',
+        "resume: imp resume dufa26",
+    ]
