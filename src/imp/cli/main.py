@@ -3022,7 +3022,7 @@ def _abandon_rows(control: Path) -> list[_Row]:
 
 @dataclass(frozen=True)
 class _UnreadableMatches:
-    """Archived ids matching a resume token that this install cannot render,
+    """Archived ids matching a resume query that this install cannot render,
     paired with the floor text that blocked them — so a caller cannot read the
     rows without confronting that the match set was cut."""
     ids: tuple[str, ...]
@@ -3147,7 +3147,7 @@ def _picker_cancelled(verb: str) -> ExitCode:
 def _resume_picker_non_tty(control: Path, rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
-    _emit_cli_error("multiple resumable quests — pass a token; candidates:")
+    _emit_cli_error("multiple resumable quests — pass an id; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     intents = {r[0]: _row_display_intent(control, r) for r in rows}
@@ -3352,7 +3352,7 @@ def _abandon_picker_empty() -> int:
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:
-    _emit_cli_error("abandon needs a quest token on a non-interactive terminal")
+    _emit_cli_error("abandon needs a quest id on a non-interactive terminal")
     return 2
 
 
@@ -3379,7 +3379,7 @@ async def _pick_abandon_matches(
     errors with a token-specific message (distinct from the no-token
     `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
     def _non_tty(_rows: list[_Row]) -> int:
-        _emit_cli_error(f"{token!r} matches multiple quests; pass a more specific token")
+        _emit_cli_error(f"{token!r} matches multiple quests; pass more of the id")
         return 2
 
     return await _pick_quest_target(
@@ -3450,7 +3450,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     token = args.token
     if os.environ.get("IMP_SESSION_SOCKET"):
         if token is None or not token.strip():
-            _emit_cli_error("abandon needs a quest token in a sandboxed session")
+            _emit_cli_error("abandon needs a quest id in a sandboxed session")
             return 2
         return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
     control = _control_root()
@@ -4601,14 +4601,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resume = sub.add_parser(
         "resume",
-        help="Resume a paused or interrupted quest by id or token.",
+        help="Resume a paused or interrupted quest.",
         description=(
             "Resume a paused or interrupted quest, continuing the workflow where "
-            "it stopped. With no token on a tty, pick from a list of resumable "
+            "it stopped. With no id on a tty, pick from a list of resumable "
             "quests."))
     p_resume.add_argument(
-        "token", nargs="?",
-        help="Quest id or resume token identifying which quest to resume.")
+        "token", nargs="?", metavar="ID",
+        help="id of the quest to resume, or any unique part of it.")
     p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
@@ -4639,8 +4639,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_log.add_argument(
-        "token", nargs="?",
-        help="Quest id or its short token.")
+        "token", nargs="?", metavar="ID",
+        help="Quest id, or any unique part of it.")
     p_log.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120, 59-, -80 (like imp events).")
@@ -4719,8 +4719,8 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=ImpRawHelpFormatter,
     )
     p_events.add_argument(
-        "token", nargs="?", default=None,
-        help="Quest id or short token.")
+        "token", nargs="?", default=None, metavar="ID",
+        help="Quest id, or any unique part of it.")
     p_events.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
@@ -4812,8 +4812,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "falls back to the archive once it is finished."),
     )
     p_show.add_argument(
-        "token", nargs="?", default=None,
-        help="Quest id or its short token.")
+        "token", nargs="?", default=None, metavar="ID",
+        help="Quest id, or any unique part of it.")
     p_show.add_argument(
         "artifact", nargs="?", default=None,
         choices=list(_SHOW_ARTIFACTS),
@@ -4909,13 +4909,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
             "Tear down a built quest — its worktree, branch, and state — "
-            "or discard a backlog idea. With no token, pick from a list. "
+            "or discard a backlog idea. With no id, pick from a list. "
             "On a terminal, confirm before tearing down a quest that has a "
             "worktree; pass --yes to skip."),
     )
     p_abandon.add_argument(
-        "token", nargs="?",
-        help="Quest id or short token identifying which quest to abandon "
+        "token", nargs="?", metavar="ID",
+        help="id of the quest to abandon, or any unique part of it "
              "(omit on a tty to pick from a list).")
     p_abandon.add_argument(
         "--yes", action="store_true",
@@ -4930,7 +4930,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Edit a quest's title, backlog membership, dependencies, or base branch, "
             "or append to its opening intent. --backlog/--active, "
             "--depends-on/--clear-deps, and --base work only before a quest is built."))
-    p_edit.add_argument("token", help="Quest id or its short token.")
+    p_edit.add_argument("token", metavar="ID", help="Quest id, or any unique part of it.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the quest title.")
     p_edit.add_argument(

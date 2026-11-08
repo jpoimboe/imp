@@ -13,9 +13,9 @@ def _subparser(name: str) -> argparse.ArgumentParser:
     raise AssertionError("no subparsers")
 
 
-def test_abandon_documents_token_positional() -> None:
+def test_abandon_documents_id_positional() -> None:
     help_text = _subparser("abandon").format_help()
-    assert "which quest to abandon" in help_text
+    assert "id of the quest to abandon" in help_text
 
 
 def test_list_documents_overview() -> None:

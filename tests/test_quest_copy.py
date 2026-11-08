@@ -25,7 +25,7 @@ def test_show_help_names_quests_not_changes(capsys) -> None:
     out = _help_for("show", capsys)
     assert "Print a quest's detail card" in out            # description=
     assert "while a quest is in flight" in out             # description=
-    assert "Quest id or its short token" in out            # token arg help
+    assert "Quest id, or any unique part of it." in out    # id arg help
     assert "change" not in out
 
 

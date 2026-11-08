@@ -108,11 +108,11 @@ async def test_two_matches_scoped_picker_cancel_exits_130_resume_cancelled(
 
 
 @pytest.mark.anyio
-async def test_two_matches_non_tty_errors_pass_token(
+async def test_two_matches_non_tty_errors_pass_id(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     # AC 14: non-interactive terminal with two-or-more matches errors (no menu),
-    # directing the user to pass a token.
+    # directing the user to pass an id.
     monkeypatch.setattr(m, "_resumable_matches",
                         lambda c, t: ([_row("lodo40"), _row("lodo77")], None))
     monkeypatch.setattr(m, "_interactive", lambda: False)
@@ -125,7 +125,7 @@ async def test_two_matches_non_tty_errors_pass_token(
     err = capsys.readouterr().err
     assert rc == 2
     assert "lodo40" in err and "lodo77" in err   # candidate listing
-    assert "pass a token" in err
+    assert "pass an id" in err
 
 
 @pytest.mark.anyio
@@ -294,7 +294,7 @@ def test_resume_picker_non_tty_header_normalized(capsys, tmp_path: Path) -> None
     rc = m._resume_picker_non_tty(tmp_path, [_row("lodo40"), _row("lodo77")])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "imp: multiple resumable quests — pass a token; candidates:" in err
+    assert "imp: multiple resumable quests — pass an id; candidates:" in err
     assert "Multiple resumable quests" not in err
     assert "lodo40" in err and "lodo77" in err
 

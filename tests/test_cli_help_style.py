@@ -283,7 +283,7 @@ positional arguments:
                     intent.
     chat            Open a conversation with imp (ask questions, scout work,
                     or scope a quest).
-    resume          Resume a paused or interrupted quest by id or token.
+    resume          Resume a paused or interrupted quest.
     log             Show the narrative for a quest.
     events          Slice and dice a quest's event log (imp events <id>).
     list            List your quests: in-flight, backlog, and completed.

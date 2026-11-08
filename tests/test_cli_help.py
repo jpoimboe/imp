@@ -33,18 +33,44 @@ def test_new_help_documents_the_message_positional(
     assert "threshold" not in out.lower()
 
 
-def test_resume_help_documents_the_token_positional(
+def test_resume_help_documents_the_id_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    out = _help_for(["resume", "-h"], capsys)
-    assert "Quest id or resume token" in out
+    out = " ".join(_help_for(["resume", "-h"], capsys).split())
+    assert "id of the quest to resume, or any unique part of it." in out
+    assert "With no id on a tty, pick from a list of resumable quests." in out
 
 
-def test_log_help_documents_the_token_positional(
+def test_log_help_documents_the_id_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["log", "-h"], capsys)
-    assert "Quest id or its short token" in out
+    assert "Quest id, or any unique part of it." in out
+
+
+@pytest.mark.parametrize(("cmd", "needle"), [
+    ("resume", "[ID]"),
+    ("log", "[ID] [RANGE]"),
+    ("events", "[ID] [RANGE]"),
+    ("show", "[ID]"),
+    ("abandon", "[ID]"),
+    ("edit", "[--base BRANCH] ID"),
+])
+def test_quest_positional_is_named_id_in_usage(
+    cmd: str, needle: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    usage = " ".join(_help_for([cmd, "-h"], capsys).split("\n\n")[0].split())
+    assert usage.startswith(f"usage: imp {cmd} ")
+    assert needle in usage
+    assert "token" not in usage
+
+
+def test_edit_without_an_id_names_the_missing_argument_id(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["edit"])
+    assert "the following arguments are required: ID" in capsys.readouterr().err
 
 
 def test_help_lists_model_command() -> None:
@@ -101,7 +127,7 @@ def test_log_help_no_longer_promises_a_most_recent_default(
     monkeypatch.setenv("COLUMNS", "200")
     out = _help_for(["log", "-h"], capsys)
     assert "most recent" not in out
-    assert "Quest id or its short token" in out
+    assert "Quest id, or any unique part of it." in out
 
 
 def test_log_help_says_the_content_filters_reach_the_exports(
