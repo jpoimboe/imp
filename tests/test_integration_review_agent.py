@@ -54,3 +54,34 @@ def test_integration_review_emits_tolerated_signal() -> None:
     assert "tolerated: false" in body
     # the prompt names the persistent var the accept edge copies the field into.
     assert "slow_verify_tolerated" in body
+
+
+_DESCRIPTION = (
+    "At-head semantic-integration review — reason about whether the integrated branch "
+    "breaks against the base-side incoming diff or through the quest's own changes, and "
+    "whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; "
+    "classifies findings and routes them back to the reconciler."
+)
+_PINS = (
+    _DESCRIPTION,
+    "You run at the HEAD of the merge queue, after the quest branch was rebased onto the "
+    "current base — or, when the base did not move, only to adjudicate a failing slow run "
+    "or review a reconciler fix.",
+    "Reason over the failure text against the quest's own diff (`git diff \"$B\" HEAD`) "
+    "and the base-side incoming diff (empty when the base did not move). This is the "
+    "quest's only slow run, so nothing upstream has tested its full diff:",
+    "**Worth fixing** — a break the quest's own changes cause, or a genuine silent break "
+    "against the base-side incoming diff → count it at Major or above and name the break "
+    "in `findings`.",
+)
+
+
+def test_integration_review_covers_the_unmoved_base_and_the_quests_own_diff() -> None:
+    from imp.engine.loader import parse_agent_file
+    path = WF / "agents" / "integration-review.md"
+    flat = " ".join(path.read_text().split())
+    for pin in _PINS:
+        assert " ".join(pin.split()) in flat, pin[:40]
+    assert parse_agent_file(path.resolve()).description == _DESCRIPTION
+    assert "the base moved since this quest forked" not in flat
+    assert "the base moved, so reason" not in flat
