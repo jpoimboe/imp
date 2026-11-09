@@ -122,3 +122,10 @@ def test_lifecycle_resume_replays_the_last_message() -> None:
     assert ("- `imp resume <id>` — pick a parked or left quest back up. It first replays"
             " the agent's last message and what followed, then continues; the full history"
             " stays in `imp log <id>`.") in flat
+
+
+def test_lifecycle_documents_resume_background() -> None:
+    flat = " ".join(DOC.read_text().split())
+    assert ("`--background` continues it detached with no live prompt instead (add "
+            "`--message` to answer its pending question first); it refuses a live "
+            "one.") in flat

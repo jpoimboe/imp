@@ -543,3 +543,9 @@ def test_card_ledger_is_documented_as_omitting_idle_steps() -> None:
     assert "holding the full per-step table" not in intro
     knowledge = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert "the per-step `ledger:` table minus idle steps" in knowledge
+
+
+def test_knowledge_names_resume_background() -> None:
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert ("`imp resume <id> --background` sends a paused quest back to running "
+            "detached; `--message` answers its question first.") in flat
