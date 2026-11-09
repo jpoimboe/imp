@@ -216,7 +216,7 @@ to score).
   once a conversation is running. `/pause`, `/archive`, and `/clear` also need a running
   conversation; `/archive` and `/clear` only while the quest is not yet built (`imp chat` or
   any pre-materialized conversation). On a built quest they print a redirect naming
-  `/pause`, and `/pause` pauses it like Ctrl-D (`paused · /pause`). The retired `save` and
+  `/pause`, and `/pause` pauses it like Ctrl-D (`· paused · /pause`). The retired `save` and
   `shelve` leave names are unknown commands now (`Unknown command: …`). At a pre-session
   prompt (opening intent, post-`/clear`, inert-resume reply) `/help` still lists
   `/compact`, `/pause`, `/archive`, and `/clear`, but each prints a redirect and re-prompts
@@ -232,14 +232,15 @@ to score).
   submitted to the model verbatim. Test both: a typo errors client-side, and a pasted path submits
   as ordinary input.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
-  (ask something about the repo), then `/pause`. The block should end `· paused` and the chat
-  should stay in `imp list`. In fresh chats, after an exchange, try `/archive` and `/clear`
-  (`/clear` also starts a fresh one): each should end `· archived`, and the chat leaves
+  (ask something about the repo), then `/pause`. The block should end `· paused · /pause` and the
+  chat should stay in `imp list`. In fresh chats, after an exchange, try `/archive` and `/clear`
+  (`/clear` also starts a fresh one): each should end a bare `· archived`, and the chat leaves
   `imp list` but shows under `imp list --archived`. Also compare Ctrl-D dispositions: after an
-  exchange in an untitled chat (`archived`) vs in a brand-new chat with no exchange (`discarded`).
-  Every leave here is rc 130. On a built quest, `/pause` at a prompt should print `paused ·
-  /pause` and leave it `paused`, and `imp resume` should land where Ctrl-D would. Does chat read
-  as a distinct, lighter thing than `imp new`?
+  exchange in an untitled chat (`archived · Ctrl-D`) vs in a brand-new chat with no exchange
+  (`discarded`).
+  Every leave here is rc 130. On a built quest, `/pause` at a prompt should print
+  `<id> · <name> · paused · /pause` and leave it `paused`, and `imp resume` should land where
+  Ctrl-D would. Does chat read as a distinct, lighter thing than `imp new`?
 - **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
   `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects. The picker **advertises `q` to
   cancel** (a bare `q` keystroke); ESC also cancels (escape-flush caveat, §2). A cancel erases
