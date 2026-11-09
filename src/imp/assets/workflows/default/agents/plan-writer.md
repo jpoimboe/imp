@@ -173,11 +173,21 @@ not bury it in prose. Append it to the **Deferred Followups** list in
 Reader form is **load-bearing**: on a trivial `fast_path` corrective the `deferred-sweep`
 step never runs, so an item not already in `— needs-decision:` form would be silently
 dropped before the merge gate. Reader form guarantees it reaches `finalize` whether or not
-`deferred-sweep` runs. This is for genuine human-decision items only — keep deciding the
-technical calls yourself and recording them in the `## Decisions` section (see "Ask vs.
-decide").
+`deferred-sweep` runs. `— needs-decision:` is only for calls that clear the bar above; a
+call you already made and implemented takes the `— decided:` record below. Keep deciding
+the technical calls yourself and recording them in the `## Decisions` section (see "Ask
+vs. decide").
 
-New user-facing copy — any string a human sees, or LLM prompt text — whose wording the spec left unpinned is this same decide-and-record case: implement a sensible default styled after neighbouring copy and ensure one `— needs-decision:` line carries the wording to the gate — never stop mid-plan for copy.
+### Recording a call you already made
+
+A call you made and implemented that the human should see but need not approve — a spec
+scope/AC deviation (see "Ask vs. decide") or unpinned copy — gets one born-ticked line in
+the same **Deferred Followups** list. It never gates the merge and is never re-raised; the
+quest summary lists it:
+
+`- [x] DEFERRED plan-writer: <what was decided> [scope: quest] — decided: <why>`
+
+New user-facing copy — docs/README prose, UI strings, messages, or LLM prompt text — whose wording the spec left unpinned is this case: implement a sensible default styled after neighbouring copy and record the wording as one `— decided:` line — never stop mid-plan for copy.
 
 ## Explore the Codebase First
 

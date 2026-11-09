@@ -34,17 +34,27 @@ def test_brainstorm_dialogue_drops_copy_from_enumerate_list_and_adds_copy_paragr
 def test_spec_finalizer_carries_unenumerated_copy_backstop() -> None:
     text = (AGENTS / "spec-finalizer.md").read_text()
     assert (
-        "> **Unenumerated copy is a non-blocking case of this.** If the design adds "
-        "new user-facing copy — any string a human sees, or LLM prompt text — whose "
-        "exact wording the threshold interview never enumerated, do not gate landing "
-        "on it. Pin a reasonable default as spec content, styled after neighbouring "
-        "copy, and record the wording as one `— needs-decision:` item so it rides to "
-        "the merge gate. Never write \"approval-gated before it lands\" or anything "
-        "that stalls the headless plan phase."
+        "> **Unenumerated copy is decided, not gated.** If the design adds new "
+        "user-facing copy — docs/README prose, UI strings, messages, or LLM prompt "
+        "text — whose exact wording the threshold interview never enumerated, do not "
+        "gate landing on it. Pin a reasonable default as spec content, styled after "
+        "neighbouring copy, and record the wording as one born-ticked line in the "
+        "same list — it never gates the merge; the quest summary lists it:"
         in text
     )
+    assert (
+        "> `- [x] DEFERRED spec-finalizer: <what was decided> [scope: quest] "
+        "— decided: <why>`"
+        in text
+    )
+    assert (
+        "> Never write \"approval-gated before it lands\" or anything that stalls "
+        "the headless plan phase."
+        in text
+    )
+    assert "**Unenumerated copy is a non-blocking case of this.**" not in text
     # Placement: closes the Surfacing-a-decision section, before Pinning complexity.
-    idx_para = text.index("**Unenumerated copy is a non-blocking case of this.**")
+    idx_para = text.index("**Unenumerated copy is decided, not gated.**")
     idx_section = text.index("## Surfacing a decision you cannot resolve")
     idx_next = text.index("## Pinning complexity")
     assert idx_section < idx_para < idx_next
@@ -53,15 +63,16 @@ def test_spec_finalizer_carries_unenumerated_copy_backstop() -> None:
 def test_plan_writer_carries_copy_decide_and_defer_guard() -> None:
     text = (AGENTS / "plan-writer.md").read_text()
     assert (
-        "New user-facing copy — any string a human sees, or LLM prompt text — whose "
-        "wording the spec left unpinned is this same decide-and-record case: "
-        "implement a sensible default styled after neighbouring copy and ensure one "
-        "`— needs-decision:` line carries the wording to the gate — never stop "
-        "mid-plan for copy."
+        "New user-facing copy — docs/README prose, UI strings, messages, or LLM "
+        "prompt text — whose wording the spec left unpinned is this case: implement "
+        "a sensible default styled after neighbouring copy and record the wording as "
+        "one `— decided:` line — never stop mid-plan for copy."
         in text
     )
-    # Placement: closes the Surfacing-a-decision section, before Explore the Codebase.
-    idx_para = text.index("New user-facing copy — any string a human sees")
+    assert "carries the wording to the gate" not in text
+    # Placement: under Recording-a-call, inside Surfacing, before Explore the Codebase.
+    idx_para = text.index("New user-facing copy — docs/README prose")
     idx_section = text.index("## Surfacing a decision you cannot resolve")
+    idx_record = text.index("### Recording a call you already made")
     idx_next = text.index("## Explore the Codebase First")
-    assert idx_section < idx_para < idx_next
+    assert idx_section < idx_record < idx_para < idx_next
