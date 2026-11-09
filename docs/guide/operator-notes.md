@@ -137,7 +137,7 @@ all work for it by its full id while the archive is unreadable. A refusal is one
 line on stderr, exit 2, no output:
 
 ```
-imp: archive data is at v17, newer than this imp (knows v16). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+imp: archive data is at v18, newer than this imp (knows v17). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
@@ -151,7 +151,7 @@ that record. The floor line follows indented:
 
 ```
 imp: 'lodo' matches an archived quest this imp cannot read: lodo77
-  archive data is at v17, newer than this imp (knows v16). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
+  archive data is at v18, newer than this imp (knows v17). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 A quest with a home on disk always resolves by its full id, whatever the archive's
@@ -176,7 +176,7 @@ touched, so a refusal there is post-terminal bookkeeping: imp keeps the
 
 ```
 warning: this quest finished but was not filed into the archive; imp files it on its next run
-  archive data is at v17; this imp knows v16
+  archive data is at v18; this imp knows v17
 ```
 
 The stranded-home sweep on the next `imp list` or `imp show` files the record, and

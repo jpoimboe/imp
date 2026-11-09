@@ -21,6 +21,7 @@ from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import live_quest_ids
+from imp.engine.state import lock_is_live
 from imp.paths import claimed_state_dir, project_state_dir
 
 
@@ -197,9 +198,8 @@ def _index_is_complete(control_root: Path) -> bool:
 
 
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
-_DATA_VERSION = 16
-_UPGRADABLE_FROM = 15   # the one stored version this install heals in place
-_RETIRED_FINISHED = ("merged", "done")
+_DATA_VERSION = 17
+_UPGRADABLE_FROM = 16   # the one stored version this install heals in place
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -222,42 +222,23 @@ def _write_data_version(control_root: Path, version: int) -> None:
         data_version_path(control_root), str(version).encode("ascii"))
 
 
-def heal_live_status(state_json: Path) -> bytes | None:
-    """Durably rewrite a retired `merged`/`done` status to `completed`; the new
-    bytes, or None when nothing changed. Retired with the 15 -> 16 hop at the next bump."""
-    try:
-        state = json.loads(state_json.read_bytes())
-    except (OSError, ValueError):
-        return None
-    if state.get("status") not in _RETIRED_FINISHED:
-        return None
-    state["status"] = "completed"
-    healed = json.dumps(state, indent=2, sort_keys=True).encode("utf-8")
-    durable.durable_replace_bytes(state_json, healed)
-    return healed
-
-
 def _upgrade_to_current(control_root: Path) -> None:
-    """One-shot 15 -> 16: collapse the stored statuses `merged` and `done` into
-    `completed` in every record and live home, rebuild the index so its status
-    column matches, then stamp the marker. Status lives only in the record, so no
-    blob is rewritten."""
+    """One-shot 16 -> 17: heal states parked on a step the default workflow retired
+    (see step_heal) in every resumable `archived` record and every live home whose
+    lock is not live, rebuild the index so its step column matches, then stamp the
+    marker. Rehydration restores state from the record, so no blob is rewritten."""
+    from imp.engine.archive.step_heal import heal_archived_records, heal_live_home
     root = archive_root(control_root)
     if root.exists() and not os.access(root, os.W_OK):
         return
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
         if _read_data_version(control_root) != _UPGRADABLE_FROM:
             return
-        records_dir = records_root(control_root)
-        for cid in record.list_record_ids(records_dir):
-            rec = record.read_record(records_dir, cid)
-            if rec is None or rec["final_state"].get("status") not in _RETIRED_FINISHED:
-                continue
-            rec["final_state"]["status"] = "completed"
-            record.write_record(records_dir, rec)
+        heal_archived_records(control_root)
         homes = project_state_dir(control_root) / "quests"
         for qid in live_quest_ids(control_root):
-            heal_live_status(homes / qid / "state" / "state.json")
+            if not lock_is_live(homes / qid / "lock"):   # a live runner would save over it
+                heal_live_home(control_root, homes / qid)
         rebuild_index(control_root)
         _write_data_version(control_root, _DATA_VERSION)
 
