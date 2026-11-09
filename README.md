@@ -20,7 +20,7 @@ It runs coding agents and LLM providers through a deterministic workflow,
 avoiding long human-managed Claude Code sessions by splitting the development
 process into a configurable series of short-lived, focused LLM sessions.
 
-imp builds itself: 875 imp quests merged since May 2026.
+imp builds itself: 1,000+ imp quests merged since May 2026.
 
 ## Why use imp?
 
@@ -43,7 +43,7 @@ imp builds itself: 875 imp quests merged since May 2026.
   fix, and an agent will faithfully implement a flawed spec, so imp loops
   on adversarial review over the spec and plan
 - **Built-in regression protection** — imp leans heavily on TDD and writes a
-  lot of regression tests (imp itself has over 11,000); keeping them green is
+  lot of regression tests (imp itself has over 15,000); keeping them green is
   the agents' job, not yours
 - **Run multiple quests in parallel** — A quest runs in its own git worktree,
   so several can run in parallel, and can be paused or resumed at any time
