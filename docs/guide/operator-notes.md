@@ -189,21 +189,30 @@ an engine bug and still pauses the run.
 An older imp may still archive a quest into a newer archive; its trailing stamp
 lowers both floors (the blob `data_version` marker and the index's `PRAGMA
 user_version`). One blob migration ships in the tree, and it heals exactly one
-step: a marker reading 15 is upgraded to 16 in place. `check_data_floor` runs
+step: a marker reading 16 is upgraded to 17 in place. `check_data_floor` runs
 the upgrade on first blob-backed touch, and the heal at the top of
 `ensure_current` runs it for the index-only readers (`imp list`, `imp search`),
-so whichever comes first migrates the archive. The upgrade renames the stored
-statuses `merged` and `done` to `completed` in each archived record and each
-live quest home, rebuilds the index and stamps both markers current — so a v15
-archive is repaired rather than refused. Status lives only in the record, so no
-blob is rewritten, and merge commits are left as they are. Two kinds of live
-home escape the upgrade: one in a project whose archive has no marker yet,
-where the upgrade never runs, and one a stale pre-16 imp finishes after it. A
-stranded home still holding `merged` or `done` is healed and archived by the
-stranded-home sweep on the next `imp list` or `imp show`, once its lock is
-released. The upgrade has to write, so a v15 archive on a read-only archive
-root is refused rather than healed, where before this migration it read fine;
-make the archive root writable and the next command heals it. Every other
+so whichever comes first migrates the archive. The upgrade moves every quest
+parked on `converge-verify`, the slow test step the default workflow retired, to
+`wait-for-head` — in each resumable `archived` record and each live quest home —
+clearing its armed resume and taking that step's labels, then rebuilds the index
+and stamps both markers current, so a v16 archive is repaired rather than
+refused. A quest moves only when its workflow, resolved the way its next run
+will resolve it, has a `wait-for-head` step and no `converge-verify` step: one on
+a committed fork of `default` that still ships the step, or whose workflow does
+not resolve, is left alone. Rehydration restores state from the record, so no
+blob is rewritten; completed and abandoned records keep the old step name as
+history. The upgrade skips a live home whose lock is live, since its runner
+would save over the rewrite. Three kinds of live home escape the upgrade: one it
+skipped as live-locked, one a still-running pre-17 imp leaves at
+`converge-verify` after it, and one in a project whose archive has no marker yet,
+where the upgrade never runs. Each is healed by the stranded-home sweep on the
+next `imp list`, `imp show` or `imp resume`, once its lock is released, and
+before that sweep files any finished home. A pre-17 imp refuses to archive into
+a v17 archive, so a home it finishes stays live until the sweep heals and files
+it. The upgrade has to write, so a v16 archive on a read-only archive root is
+refused rather than healed, where before this migration it read fine; make the
+archive root writable and the next command heals it. Every other
 below-floor version is a layout nothing in the tree can vouch for: a current imp
 refuses that archive rather than stamping it current. Record and blob reads
 raise, `ensure_current` leaves it exactly as it found it, nothing further is
@@ -212,7 +221,7 @@ deletes no quest home — which can strand a quest on bookkeeping after its merg
 has already landed, but leaves the homes that are its last locally readable copy
 standing. Index-only queries (`imp list`, `imp search`) keep answering from the
 stale index, and that index is never rebuilt: no code path raises a lowered
-marker back to `_DATA_VERSION`, so for records written below any version but 15
+marker back to `_DATA_VERSION`, so for records written below any version but 16
 the stranding is permanent. Recovery runs through the install that wrote a given
 record — its floors match what it stamped, so it can still read it: check out
 that commit to finish or extract the affected quest. Updating every imp that
@@ -226,10 +235,10 @@ writer's `index.ingest` never supplies it, and that row stands until a rebuild; 
 **Constraint on future migrations: a blob migration that changes an index-visible
 value must also bump the index schema version.** Each read checks only the floor it
 touches, so a blob rewrite that changed what an index query reports would otherwise
-slip past the index-only gate on an archive this imp cannot read. The 15 → 16
-migration is the worked example: the status it rewrites is the index's `status`
-column, which the board and `imp search` filter on, so `index._SCHEMA_VERSION`
-went 8 → 9 alongside `_DATA_VERSION`, and the migration's own rebuild re-stamps
+slip past the index-only gate on an archive this imp cannot read. The 16 → 17
+migration is the worked example: the step it rewrites is the index's `step`
+column, which the archived rows of `imp list` show, so `index._SCHEMA_VERSION`
+went 9 → 10 alongside `_DATA_VERSION`, and the migration's own rebuild re-stamps
 it in the same locked pass.
 
 **Constraint on a further `_DATA_VERSION` bump: ship the migration and hang it
@@ -243,7 +252,7 @@ without the heal they would answer from the un-migrated index until some
 blob-backed access happened: the heal runs the upgrade on a marker reading
 exactly `_UPGRADABLE_FROM` before `ensure_current`'s data-version check, which
 otherwise returns early on any mismatch. The bare-floor readers (`archived_ids`,
-`is_archived`) call neither hook and read the index as it stands. The 15 → 16
+`is_archived`) call neither hook and read the index as it stands. The 16 → 17
 upgrade is the shape to copy: version-exact (any other stored version keeps
 raising), one-shot under the index filelock with a double-checked re-read, and a
 no-op on a read-only archive root, which keeps today's refusal. A bump that also

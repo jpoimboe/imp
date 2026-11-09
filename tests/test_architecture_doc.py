@@ -288,8 +288,8 @@ def test_operator_notes_document_archive_version_skew() -> None:
     assert ("a blob migration that changes an index-visible value must also bump "
             "the index schema version") in section
     # the index-visible rule carries its worked example
-    assert "the status it rewrites is the index's `status` column" in section
-    assert "`index._SCHEMA_VERSION` went 8 → 9" in section
+    assert "the step it rewrites is the index's `step` column" in section
+    assert "`index._SCHEMA_VERSION` went 9 → 10" in section
 
 
 def test_operator_notes_skew_says_an_active_board_match_ignores_the_archive() -> None:
@@ -330,31 +330,40 @@ def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
             "already made") in section
     assert "The fix is to update every imp that writes here" not in section
     assert "Writes are deliberately unguarded" not in section
-    # one migration now ships, and it heals exactly the 15 -> 16 step
+    # one migration now ships, and it heals exactly the 16 -> 17 step
     assert "No blob migration ships in the tree" not in section
     assert "One blob migration ships in the tree" in section
-    assert "a marker reading 15 is upgraded to 16 in place" in section
+    assert "a marker reading 16 is upgraded to 17 in place" in section
     assert "`check_data_floor` runs the upgrade" in section
     assert ("the heal at the top of `ensure_current` runs it for the index-only "
             "readers") in section
-    assert "renames the stored statuses `merged` and `done` to `completed`" in section
-    # live homes the hop cannot reach are healed by the sweep
-    assert "is healed and archived by the stranded-home sweep" in section
-    # the retired 14 -> 15 and 13 -> 14 hops leave no narrative behind
+    assert ("moves every quest parked on `converge-verify`, the slow test step the "
+            "default workflow retired, to `wait-for-head`") in section
+    # the heal predicate: a workflow still shipping the step is left alone
+    assert ("has a `wait-for-head` step and no `converge-verify` step") in section
+    assert "a committed fork of `default` that still ships the step" in section
+    # live-locked homes, a stale pre-17 runner and the no-marker case fall to the sweep
+    assert "skips a live home whose lock is live" in section
+    assert "a project whose archive has no marker yet, where the upgrade never runs" in section
+    assert "is healed by the stranded-home sweep" in section
+    assert "A pre-17 imp refuses to archive into a v17 archive" in section
+    # the retired hops leave no narrative behind
+    assert "15 → 16" not in section
+    assert "renames the stored statuses" not in section
     assert "14 → 15" not in section
     assert "shelved" not in section
     assert "13 → 14" not in section
     assert "`commits` list" not in section
     # permanence still holds for every other below-floor version
-    assert ("for records written below any version but 15 the stranding is "
+    assert ("for records written below any version but 16 the stranding is "
             "permanent") in section
     # the constraint a future _DATA_VERSION bump has to honour names both hooks
     assert ("ship the migration and hang it off both hooks — `check_data_floor` "
             "for blob-backed access, and the heal at the top of `ensure_current` "
             "for index-only readers") in section
     assert "Hooking `ensure_current` instead never runs at all" not in section
-    # the one v15 archive the migration cannot heal, and its remedy
-    assert ("a v15 archive on a read-only archive root is refused rather than "
+    # the one v16 archive the migration cannot heal, and its remedy
+    assert ("a v16 archive on a read-only archive root is refused rather than "
             "healed") in section
     assert "make the archive root writable" in section
     assert "an archive below the blob floor is never reindexed" in section
