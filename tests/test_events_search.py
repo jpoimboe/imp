@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import io
 import json as _json
+import os
+import re
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +124,7 @@ class _FakeStore:
 
 def _row(cid: str, title: str, last: str = "2026-06-11T00:00:00+00:00",
          ) -> tuple[str, str, str, str, str, str, str | None, str | None, str | None]:
-    return (cid, "planning", "spec", last, title,
+    return (cid, "paused", "spec", last, title,
             "2026-06-01T00:00:00+00:00", None, None, None)
 
 
@@ -155,7 +158,7 @@ def test_events_search_active_includes_only_quests_with_matching_events(
     monkeypatch.setattr("imp.cli.store.make_store", lambda control: store)
     hits = m._events_search_active(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["aaa111"]
-    assert hits[0].zone == "active"
+    assert (hits[0].status, hits[0].zone) == ("paused", "active")
     assert hits[0].match_count == 1
     assert [o for o, _ in hits[0].events] == [1]
     assert hits[0].intent is None   # titled
@@ -169,7 +172,7 @@ def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: P
         lambda control: _BacklogStore([_digest("ccc333", "add a GREPTARGET to checkout")]))
     hits = m._events_search_backlog(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["ccc333"]
-    assert hits[0].zone == "backlog"
+    assert (hits[0].status, hits[0].zone) == ("backlog", "backlog")
     assert hits[0].events == []
     assert hits[0].match_count == 1
     assert hits[0].intent is None   # titled: the seed is not a name source
@@ -240,7 +243,7 @@ def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
                                      statuses=frozenset({"completed"}))
     assert [h.quest_id for h in hits] == ["arch01"]
-    assert hits[0].zone == "history"
+    assert (hits[0].status, hits[0].zone) == ("completed", "history")
     assert [o for o, _ in hits[0].events] == [1]
 
 
@@ -262,7 +265,7 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
                                      statuses=frozenset({"completed"}))
     assert [h.quest_id for h in hits] == ["arch01"]
-    assert hits[0].zone == "history"
+    assert (hits[0].status, hits[0].zone) == ("completed", "history")
     assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
     assert hits[0].intent is None   # titled: no quest_card load (the fake has none)
 
@@ -289,9 +292,9 @@ def test_events_search_archived_keeps_only_selected_statuses(
     assert loaded == ["abn01", "arc01"]
 
 
-def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]]],
+def _hit(cid: str, title: str, status: str, events: list[tuple[int, dict[str, Any]]],
          match_count: int, last: str = "2026-06-11T00:00:00+00:00") -> m.EventSearchHit:
-    return m.EventSearchHit(cid, title, zone, last, events, {}, match_count, {}, None)
+    return m.EventSearchHit(cid, title, status, last, events, {}, match_count, {}, None)
 
 
 def _bounded_hits() -> list[m.EventSearchHit]:
@@ -304,13 +307,13 @@ def _bounded_hits() -> list[m.EventSearchHit]:
         ]
 
     return [
-        _hit("arc_old", "Archive Old", "history", events("arc_old"), 5,
+        _hit("arc_old", "Archive Old", "completed", events("arc_old"), 5,
              "2026-06-10T00:00:00+00:00"),
-        _hit("act_old", "Active Old", "active", events("act_old"), 5,
+        _hit("act_old", "Active Old", "paused", events("act_old"), 5,
              "2026-06-11T00:00:00+00:00"),
-        _hit("arc_new", "Archive New", "history", events("arc_new"), 5,
+        _hit("arc_new", "Archive New", "archived", events("arc_new"), 5,
              "2026-06-15T00:00:00+00:00"),
-        _hit("act_new", "Active New", "active", events("act_new"), 5,
+        _hit("act_new", "Active New", "running", events("act_new"), 5,
              "2026-06-16T00:00:00+00:00"),
         _hit("bkl001", "Backlog One", "backlog", [], 1,
              "2026-06-12T00:00:00+00:00"),
@@ -318,7 +321,7 @@ def _bounded_hits() -> list[m.EventSearchHit]:
 
 
 def test_cmd_events_search_rich_header_and_digest(monkeypatch, capsys, tmp_path: Path) -> None:
-    hit = _hit("aaa111", "Alpha", "active",
+    hit = _hit("aaa111", "Alpha", "running",
                [(1, _ev("e0", "tool_call", "step:impl/coder", name="bash",
                         input={"cmd": "GREPTARGET"}))], 1)
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
@@ -326,7 +329,7 @@ def test_cmd_events_search_rich_header_and_digest(monkeypatch, capsys, tmp_path:
     out = capsys.readouterr().out
     assert rc == 0
     assert '1 match in 1 quest for "GREPTARGET"' in out
-    assert "aaa111 · Alpha · active" in out
+    assert "aaa111 · Alpha · running" in out
     assert "#1" in out and "tool_call" in out and "GREPTARGET" in out
 
 
@@ -436,10 +439,10 @@ def test_cmd_events_search_default_rich_is_bounded(
     out = capsys.readouterr().out
     lines = out.splitlines()
     act_new_line = next(
-        line for line in lines if line.startswith("act_new · Active New · active · "))
+        line for line in lines if line.startswith("act_new · Active New · running · "))
     act_old_index = next(
         index for index, line in enumerate(lines)
-        if line.startswith("act_old · Active Old · active · "))
+        if line.startswith("act_old · Active Old · paused · "))
     act_new_index = lines.index(act_new_line)
     age = act_new_line.rsplit(" · ", 1)[1]
 
@@ -482,7 +485,7 @@ def test_cmd_events_search_human_presentation_and_spacing(
     assert act_new_heading.startswith(
         "\x1b[33mact_new\x1b[0m · "
         "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
-        "\x1b[2mactive · "
+        "\x1b[2mrunning · "
     )
     assert "\x1b[2m  … +2 more\x1b[0m" in rich
     assert "\x1b[2m… +2 more quests\x1b[0m" in rich
@@ -497,12 +500,12 @@ def test_cmd_events_search_human_presentation_and_spacing(
         (
             "\x1b[33mact_new\x1b[0m · "
             "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
-            "\x1b[2mactive\x1b[0m"
+            "\x1b[2mrunning\x1b[0m"
         ),
-        "\x1b[33mact_old\x1b[0m · Active Old · \x1b[2mactive\x1b[0m",
+        "\x1b[33mact_old\x1b[0m · Active Old · \x1b[2mpaused\x1b[0m",
         "\x1b[33mbkl001\x1b[0m · Backlog One · \x1b[2mbacklog\x1b[0m",
-        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2mhistory\x1b[0m",
-        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2mhistory\x1b[0m",
+        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2marchived\x1b[0m",
+        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2mcompleted\x1b[0m",
     ]
     assert listed.endswith("\n\n") and not listed.endswith("\n\n\n")
 
@@ -511,7 +514,7 @@ def test_cmd_events_search_per_quest_event_overflow(monkeypatch, capsys, tmp_pat
     events = [(i, _ev(f"e{i}", "tool_call", None, name="bash",
                       input={"cmd": "GREPTARGET"})) for i in range(1, 6)]
     monkeypatch.setattr(m, "_events_search",
-                        lambda *a, **k: [_hit("aaa111", "Alpha", "active", events, 5)])
+                        lambda *a, **k: [_hit("aaa111", "Alpha", "running", events, 5)])
     rc = m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -523,7 +526,7 @@ def test_cmd_events_search_default_json_is_bounded_and_byte_clean(
     source_ordinals = [7, 11, 19, 23, 29]
     hits = _bounded_hits()
     hits[3] = _hit(
-        "act_new", "Active New", "active",
+        "act_new", "Active New", "running",
         [(ordinal, _ev(f"act_new-{ordinal}", "tool_call", "step:impl/coder",
                        name="bash",
                        input={"cmd": f"GREPTARGET act_new event {ordinal}"}))
@@ -537,7 +540,8 @@ def test_cmd_events_search_default_json_is_bounded_and_byte_clean(
     payload = _json.loads(out)
     assert isinstance(payload, list)
     assert [hit["quest_id"] for hit in payload] == ["act_new", "act_old", "bkl001"]
-    assert set(payload[0]) == {"quest_id", "title", "zone", "last_activity", "events"}
+    assert set(payload[0]) == {
+        "quest_id", "title", "zone", "status", "last_activity", "events"}
     assert [event["ordinal"] for event in payload[0]["events"]] == [7, 11, 19]
     assert payload[0]["events"][0]["payload"]["input"]["cmd"] == (
         "GREPTARGET act_new event 7")
@@ -584,11 +588,11 @@ def test_cmd_events_search_list_is_exhaustive_but_limit_bounds_all_modes(
 def test_cmd_events_search_rich_header_plural_nouns(
         monkeypatch, capsys, tmp_path: Path) -> None:
     hits = [
-        _hit("q1", "T1", "active",
+        _hit("q1", "T1", "running",
              [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})),
               (2, _ev("e1", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
              match_count=2),
-        _hit("q2", "T2", "active",
+        _hit("q2", "T2", "running",
              [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})),
               (2, _ev("e1", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
              match_count=2),
@@ -708,7 +712,7 @@ def test_events_search_help_exits_zero_with_bounded_contract(
     out = capsys.readouterr().out
     assert "Show at most LIMIT matched quests (default: 3, except with --list)." in out
     assert "Show every matched quest and matching event; conflicts with --limit." in out
-    assert ("One terse line per matched quest (id, title, zone); combine with --limit to cap."
+    assert ("One terse line per matched quest (id, title, status); combine with --limit to cap."
             in out)
     assert "Structured output, bounded like the default view unless --all." in out
 
@@ -727,7 +731,7 @@ def test_search_hit_digest_applies_codex_usage_patch_overlay(
     matched, handle_map, overlays = m._matched_events(
         events, "greptarget", types=None, agents=None)
     assert overlays, "patch must produce an overlay for the preceding agent_message"
-    hit = m.EventSearchHit("q1", "T1", "active", "2026-06-11T00:00:00+00:00",
+    hit = m.EventSearchHit("q1", "T1", "running", "2026-06-11T00:00:00+00:00",
                            matched, handle_map, len(matched), overlays, None)
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
 
@@ -801,23 +805,23 @@ def test_events_search_archived_titleless_hit_falls_back_to_card_seed_opening(
 
 
 def test_events_search_list_line_names_a_titleless_hit_dim() -> None:
-    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, _OPENING)
+    hit = m.EventSearchHit("bedo08", "", "archived", None, [], {}, 1, {}, _OPENING)
     assert m._events_search_list_line(hit, query="zzz", color=False) == (
-        f"bedo08 · {_OPENING} · history")
+        f"bedo08 · {_OPENING} · archived")
     assert m._events_search_list_line(hit, query="zzz", color=True) == (
-        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2mhistory\x1b[0m")
+        f"\x1b[33mbedo08\x1b[0m · \x1b[2m{_OPENING}\x1b[0m · \x1b[2marchived\x1b[0m")
 
 
 def test_events_search_list_line_clips_a_long_fallback_at_name_cap() -> None:
     opening = "summarize " + "y" * 100
-    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, opening)
+    hit = m.EventSearchHit("bedo08", "", "archived", None, [], {}, 1, {}, opening)
     assert m._events_search_list_line(hit, query="zzz", color=False) == (
-        "bedo08 · summarize " + "y" * 59 + "… · history")
+        "bedo08 · summarize " + "y" * 59 + "… · archived")
 
 
 def test_events_search_list_line_omits_the_name_with_neither_title_nor_intent() -> None:
-    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, None)
-    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · history"
+    hit = m.EventSearchHit("bedo08", "", "archived", None, [], {}, 1, {}, None)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == "bedo08 · archived"
 
 
 def _headings(out: str) -> dict[str, str]:
@@ -832,18 +836,18 @@ def test_cmd_events_search_names_titleless_quests_in_every_zone(
     for listed in (True, False):
         assert m._cmd_events_search(_search_ns("foo.py", list=listed), tmp_path) == 0
         heads = _headings(capsys.readouterr().out)
-        assert heads["act001"].startswith(f"act001 · {_OPENING} · active")
+        assert heads["act001"].startswith(f"act001 · {_OPENING} · new")
         assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog")
-        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · history")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archived")
 
 
 def test_events_search_list_line_highlights_the_query_over_the_dim_fallback() -> None:
-    hit = m.EventSearchHit("bedo08", "", "history", None, [], {}, 1, {}, _OPENING)
+    hit = m.EventSearchHit("bedo08", "", "archived", None, [], {}, 1, {}, _OPENING)
     assert m._events_search_list_line(hit, query="foo.py", color=True) == (
         "\x1b[33mbedo08\x1b[0m · "
         "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
         "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
-        " · \x1b[2mhistory\x1b[0m")
+        " · \x1b[2marchived\x1b[0m")
 
 
 def test_events_search_help_copy_names_the_status_flags() -> None:
@@ -865,3 +869,108 @@ def test_events_search_rejects_the_retired_history_flag(capsys) -> None:
         main(["events", "search", "q", "--history"])
     assert exc.value.code == 2
     assert "--history" in capsys.readouterr().err
+
+
+_GREP_LINE = _json.dumps({
+    "id": "e0", "type": "tool_call", "timestamp": "2026-06-10T00:00:00+00:00",
+    "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+
+
+def _inflight_with_event(tmp_path: Path, quest_id: str, title: str, status: str = "new", *,
+                         waiting: bool = False, lock_live: bool = False) -> None:
+    from imp.engine.quest import Quest
+    from imp.engine.state import State
+    q = Quest.create(tmp_path, title=title, quest_id=quest_id, base_branch="main")
+    q.event_log().append(agent_id="step:impl/coder", type="tool_call",
+                         payload={"name": "bash", "input": {"cmd": "GREPTARGET"}})
+    st = State.load(q.state_dir)
+    st.status = status
+    if waiting:
+        st.halt_condition = "waiting"
+    st.save(q.state_dir)
+    if lock_live:
+        (q.quest_dir / "lock").write_text(str(os.getpid()))
+
+
+@pytest.mark.parametrize(("stored", "kw", "shown"), [
+    ("paused", {}, "paused"),
+    ("merge_blocked", {}, "merge_blocked"),
+    ("error", {}, "error"),
+    ("new", {"lock_live": True}, "running"),
+    ("paused", {"waiting": True, "lock_live": True}, "waiting"),
+])
+def test_events_search_active_hit_carries_resolved_status(
+        tmp_path: Path, stored: str, kw: dict, shown: str) -> None:
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    _inflight_with_event(tmp_path, "act001", "Active one", stored, **kw)
+    hits = m._events_search_active(tmp_path, "greptarget", types=None, agents=None)
+    assert [(h.quest_id, h.status, h.zone) for h in hits] == [("act001", shown, "active")]
+
+
+@pytest.mark.parametrize("status", ["completed", "abandoned", "archived"])
+def test_events_search_archived_hit_carries_stored_status(tmp_path: Path, status: str) -> None:
+    _archive_events(tmp_path, "arc001", "Archived one", _GREP_LINE, status=status)
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None,
+                                     statuses=frozenset({status}))
+    assert [(h.status, h.zone) for h in hits] == [(status, "history")]
+
+
+@pytest.mark.parametrize(("status", "zone"), [
+    ("paused", "active"), ("merge_blocked", "active"), ("running", "active"),
+    ("backlog", "backlog"),
+    ("completed", "history"), ("abandoned", "history"), ("archived", "history"),
+])
+def test_events_search_hit_zone_is_derived_from_status(status: str, zone: str) -> None:
+    assert m.EventSearchHit("q", "T", status, None, [], {}, 1, {}, None).zone == zone
+
+
+def test_events_search_hit_stores_no_zone_field() -> None:
+    assert "zone" not in m.EventSearchHit._fields
+    assert "status" in m.EventSearchHit._fields
+
+
+def test_events_search_headings_render_merge_blocked_as_two_words() -> None:
+    hit = m.EventSearchHit("abc", "Title", "merge_blocked", None, [], {}, 1, {}, None)
+    assert m._events_search_list_line(hit, query="zzz", color=False) == (
+        "abc · Title · merge blocked")
+    spine = m._render_events_search_hit(
+        hit, "zzz", now=datetime(2026, 6, 14, tzinfo=UTC), color=False, width=120)[0]
+    assert spine == "abc · Title · merge blocked · -"
+
+
+def test_cmd_events_search_paused_quest_heading_reads_paused(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _seed_control(tmp_path)
+    _inflight_with_event(tmp_path, "pzd001", "Dark paused work", "paused")
+    assert m._cmd_events_search(_search_ns("greptarget", active=True), tmp_path) == 0
+    rich = capsys.readouterr().out
+    assert re.search(r"^pzd001 · Dark paused work · paused · \S+$", rich, re.M), rich
+    assert m._cmd_events_search(
+        _search_ns("greptarget", active=True, list=True), tmp_path) == 0
+    listed = capsys.readouterr().out
+    assert re.search(r"^pzd001 · Dark paused work · paused$", listed, re.M), listed
+    assert "· active" not in rich + listed
+
+
+def test_cmd_events_search_json_carries_raw_status_and_derived_zone(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    hits = [
+        _hit("cmp001", "Done", "completed", [], 1, "2026-06-15T00:00:00+00:00"),
+        _hit("pzd001", "Paused", "paused", [], 1, "2026-06-11T00:00:00+00:00"),
+        _hit("mbk001", "Blocked", "merge_blocked", [], 1, "2026-06-12T00:00:00+00:00"),
+        _hit("bkl001", "Parked", "backlog", [], 1, "2026-06-13T00:00:00+00:00"),
+    ]
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: hits)
+    assert m._cmd_events_search(_search_ns("GREPTARGET", json=True, all=True), tmp_path) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert all(set(p) == {"quest_id", "title", "zone", "status", "last_activity", "events"}
+               for p in payload)
+    assert [(p["quest_id"], p["status"], p["zone"]) for p in payload] == [
+        ("mbk001", "merge_blocked", "active"),
+        ("pzd001", "paused", "active"),
+        ("bkl001", "backlog", "backlog"),
+        ("cmp001", "completed", "history"),
+    ]

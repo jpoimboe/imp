@@ -61,7 +61,7 @@ names rather than guessing them.
   are searched. Add `--merged-after <commit>` to keep only completed quests whose
   merge landed after `<commit>` (implies `--completed`). Default output is grep-style matched
   excerpts per quest; `-l` / `--list` prints one terse line per quest
-  (`id  title  [zone]`). A miss prints a hint suggesting a next step.
+  (`id  title  status`). A miss prints a hint suggesting a next step.
 - `imp events search <query>` — the structured-event sibling of `imp search`: the
   same case-insensitive substring search, but over quests' **event content** (tool
   calls, tool results, agent reasoning, skill loads) rather than only their

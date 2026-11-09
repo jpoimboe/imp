@@ -99,7 +99,7 @@ def test_readiness_survives_round_trip_including_blocked_on_tuple() -> None:
 
 def test_search_hit_survives_round_trip() -> None:
     hit = SearchHit(
-        quest_id="q1", title="", zone="active", content="darkmode",
+        quest_id="q1", title="", status="paused", content="darkmode",
         last_activity=None, intent="summarize foo.py")
     assert _hit_from_wire(_json_round_trip(_hit_to_wire(hit))) == hit
 
@@ -156,7 +156,8 @@ def test_run_query_search_decodes_zones(tmp_path: Path) -> None:
     zones = {"active": True, "backlog": False, "statuses": [], "merged_after": None}
     wire = run_query(LocalStore(tmp_path), "search", {"query": "darkmode", "zones": zones})
     assert [h["quest_id"] for h in wire] == ["liveone"]
-    assert wire[0]["zone"] == "active"
+    assert wire[0]["status"] == "new"
+    assert "zone" not in wire[0]
 
 
 def test_run_query_search_event_candidates_round_trips_none_last(tmp_path: Path) -> None:

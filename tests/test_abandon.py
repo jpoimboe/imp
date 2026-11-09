@@ -331,7 +331,7 @@ def test_search_finds_abandoned_draft(
     out = capsys.readouterr().out
     assert rc == 0
     assert "idea1" in out            # abandoned draft is found
-    assert "· history ·" in out      # surfaced from the history zone
+    assert "· abandoned ·" in out    # surfaced with its real status
 
 
 def test_abandon_returns_rc_and_message_without_printing(

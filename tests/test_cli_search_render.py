@@ -49,9 +49,9 @@ def test_spine_segment_reopens_base_color_after_highlight() -> None:
 
 
 def test_search_list_line_spine_plain() -> None:
-    hit = _SearchHit("abc", "Dark title", "active", "body", "2026-07-10T00:00:00+00:00", None)
+    hit = _SearchHit("abc", "Dark title", "running", "body", "2026-07-10T00:00:00+00:00", None)
     line = _search_list_line(hit, query="dark", now=_NOW, color=False)
-    assert line == "abc · Dark title · active · 3d"
+    assert line == "abc · Dark title · running · 3d"
 
 
 def test_search_list_line_untitled_drops_title_segment() -> None:
@@ -62,32 +62,32 @@ def test_search_list_line_untitled_drops_title_segment() -> None:
 
 
 def test_search_list_line_colorized_heading() -> None:
-    hit = _SearchHit("darkid", "Dark mode", "active", "body",
+    hit = _SearchHit("darkid", "Dark mode", "paused", "body",
                      "2026-07-10T00:00:00+00:00", None)
     line = _search_list_line(hit, query="dark", now=_NOW, color=True)
     assert "\x1b[" in line
-    assert _plain(line) == "darkid · Dark mode · active · 3d"
+    assert _plain(line) == "darkid · Dark mode · paused · 3d"
     assert "\x1b[1m\x1b[33m" in line          # bold+yellow query highlight
 
 
 def test_render_hit_heading_then_two_space_excerpts() -> None:
-    hit = _SearchHit("abc", "Title", "active", "please wire a 50% budget cap",
+    hit = _SearchHit("abc", "Title", "running", "please wire a 50% budget cap",
                      "2026-07-10T00:00:00+00:00", None)
     lines = _render_search_hit(hit, "50%", now=_NOW, color=False)
-    assert lines[0] == "abc · Title · active · 3d"
+    assert lines[0] == "abc · Title · running · 3d"
     assert any(line.startswith("  ") and "50%" in line for line in lines[1:])
     assert not any(line.startswith("    ") for line in lines[1:])
 
 
 def test_render_hit_no_match_lines_when_only_heading_matches() -> None:
-    hit = _SearchHit("arcid", "Dark mode", "history", "", None, None)
+    hit = _SearchHit("arcid", "Dark mode", "completed", "", None, None)
     lines = _render_search_hit(hit, "dark", now=_NOW, color=False)
-    assert lines == ["arcid · Dark mode · history · -"]
+    assert lines == ["arcid · Dark mode · completed · -"]
     assert not any("matched on" in line for line in lines)
 
 
 def test_render_hit_adds_more_line_beyond_three_occurrences() -> None:
-    hit = _SearchHit("abc", "Title", "active", "query " * 5, None, None)
+    hit = _SearchHit("abc", "Title", "running", "query " * 5, None, None)
     lines = _render_search_hit(hit, "query", now=_NOW, color=False)
     assert len(lines) == 1 + 3 + 1
     assert lines[-1] == "  … +2 more"
@@ -135,39 +135,45 @@ _OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
 
 
 def test_search_list_line_names_a_titleless_hit_by_its_opening() -> None:
-    hit = _SearchHit("bedo08", "", "active", "", "2026-07-10T00:00:00+00:00", _OPENING)
+    hit = _SearchHit("bedo08", "", "running", "", "2026-07-10T00:00:00+00:00", _OPENING)
     line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
-    assert line == f"bedo08 · {_OPENING} · active · 3d"
+    assert line == f"bedo08 · {_OPENING} · running · 3d"
 
 
 def test_search_list_line_dims_the_fallback_under_the_query_highlight() -> None:
-    hit = _SearchHit("bedo08", "", "active", "", "2026-07-10T00:00:00+00:00", _OPENING)
+    hit = _SearchHit("bedo08", "", "running", "", "2026-07-10T00:00:00+00:00", _OPENING)
     line = _search_list_line(hit, query="foo.py", now=_NOW, color=True)
     assert line == (
         "\x1b[33mbedo08\x1b[0m · "
         "\x1b[2m/home/jpoimboe/\x1b[0m\x1b[1m\x1b[33mfoo.py\x1b[0m"
         "\x1b[2m -- in one sentence, what does this file do?\x1b[0m"
-        " · \x1b[2mactive · 3d\x1b[0m")
+        " · \x1b[2mrunning · 3d\x1b[0m")
 
 
 def test_search_list_line_flattens_and_clips_a_long_fallback_at_name_cap() -> None:
     opening = "summarize\n  " + "y" * 100
-    hit = _SearchHit("abc", "", "history", "", None, opening)
+    hit = _SearchHit("abc", "", "archived", "", None, opening)
     line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
     # TITLE_CAP is 70: 69 text columns + "…"
-    assert line == "abc · summarize " + "y" * 59 + "… · history · -"
+    assert line == "abc · summarize " + "y" * 59 + "… · archived · -"
 
 
 def test_search_list_line_real_title_stays_plain_and_unclipped() -> None:
     title = "a real title " + "t" * 100
-    hit = _SearchHit("abc", title, "active", "", None, None)
+    hit = _SearchHit("abc", title, "waiting", "", None, None)
     line = _search_list_line(hit, query="zzz", now=_NOW, color=True)
-    assert line == f"\x1b[33mabc\x1b[0m · {title} · \x1b[2mactive · -\x1b[0m"
+    assert line == f"\x1b[33mabc\x1b[0m · {title} · \x1b[2mwaiting · -\x1b[0m"
 
 
 def test_search_list_line_clips_the_fallback_before_highlighting() -> None:
-    hit = _SearchHit("abc", "", "history", "", None, "summarize " + "y" * 100 + " foo.py")
+    hit = _SearchHit("abc", "", "abandoned", "", None, "summarize " + "y" * 100 + " foo.py")
     line = _search_list_line(hit, query="foo.py", now=_NOW, color=True)
     assert line == (
         "\x1b[33mabc\x1b[0m · \x1b[2msummarize " + "y" * 59 + "…\x1b[0m"
-        " · \x1b[2mhistory · -\x1b[0m")
+        " · \x1b[2mabandoned · -\x1b[0m")
+
+
+def test_search_list_line_renders_merge_blocked_as_two_words() -> None:
+    hit = _SearchHit("abc", "Title", "merge_blocked", "", None, None)
+    line = _search_list_line(hit, query="zzz", now=_NOW, color=False)
+    assert line == "abc · Title · merge blocked · -"

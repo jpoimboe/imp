@@ -83,10 +83,14 @@ Zone = Literal["active", "backlog", "history"]
 class SearchHit:
     quest_id: str
     title: str
-    zone: Zone
+    status: str
     content: str
     last_activity: str | None
     intent: str | None   # titleless name source (opening, else seed_opening); None when titled
+
+    @property
+    def zone(self) -> Zone:
+        return zone_of(self.status)
 
 
 @dataclass(frozen=True)
@@ -549,6 +553,12 @@ def _journal_last_iso(control: Path, quest_id: str) -> str | None:
 _INFLIGHT = ("running", "waiting", "error", "new", "paused", "merge_blocked")
 
 
+def zone_of(status: str) -> Zone:
+    if status in _INFLIGHT:
+        return "active"
+    return "backlog" if status == "backlog" else "history"
+
+
 def resolve_display_status(
     status: str, *, lock_live: bool, halt_condition: str | None = None
 ) -> str:
@@ -698,7 +708,7 @@ def _search_active(control: Path, query: str) -> list[SearchHit]:
         prose = prose_by_id.get(r[0], "")
         if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
             intent = None if r[4].strip() else intent_by_id.get(r[0])
-            hits.append(SearchHit(r[0], r[4], "active", prose, r[3], intent))
+            hits.append(SearchHit(r[0], r[4], r[1], prose, r[3], intent))
     return hits
 
 
@@ -737,7 +747,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
         if (status == "completed" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
-        hits.append(SearchHit(cid, title, "history", content, last,
+        hits.append(SearchHit(cid, title, status, content, last,
                               None if title.strip() else _display_intent_for_id(control, cid)))
     return hits
 
