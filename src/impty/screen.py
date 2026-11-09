@@ -8,8 +8,9 @@ content bleeds into scrollback and the pre-alt screen is never restored. This
 subclass intercepts set_mode/reset_mode to do a real two-buffer swap, suppresses
 history while in alt (so "alt has no scrollback" holds at the buffer level), and
 hand-rolls resize-during-alt on the detached saved buffer. It also absorbs the
-old _ReplyScreen CPR/DA shim so prompt_toolkit/curses apps still unblock, and
-emulates SU/SD (`CSI S` / `CSI T`, which pyte drops), tmux's bulk scroll.
+old _ReplyScreen CPR/DA shim so prompt_toolkit/curses apps still unblock,
+emulates SU/SD (`CSI S` / `CSI T`, which pyte drops), tmux's bulk scroll, and
+fixes pyte's delete_lines, which keeps a stale row when its source row is absent.
 """
 
 from __future__ import annotations
@@ -149,7 +150,7 @@ class TerminalScreen(pyte.HistoryScreen):
         else:
             super().reverse_index()
 
-    # --- SU / SD (pyte has no CSI S / T handlers) -------------------------
+    # --- SU / SD (pyte has no CSI S / T handlers) and the DL fix ----------
     def scroll_up(self, *params: int, private: bool = False) -> None:
         if private:  # XTSMGRAPHICS, a graphics query
             return
@@ -171,6 +172,18 @@ class TerminalScreen(pyte.HistoryScreen):
         for _ in range(count):
             step()
         self.cursor.y = y
+
+    def delete_lines(self, count: int | None = None) -> None:
+        # pyte keeps row y when the source row y+count is absent from the buffer.
+        count = count or 1
+        top, bottom = self.margins or Margins(0, self.lines - 1)
+        if top <= self.cursor.y <= bottom:
+            for y in range(self.cursor.y, bottom + 1):
+                if y + count <= bottom and y + count in self.buffer:
+                    self.buffer[y] = self.buffer.pop(y + count)
+                else:
+                    self.buffer.pop(y, None)
+            self.carriage_return()
 
     # --- resize (incl. the detached saved buffer while in alt) ------------
     def resize(self, lines: int | None = None, columns: int | None = None) -> None:

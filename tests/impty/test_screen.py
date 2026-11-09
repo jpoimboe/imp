@@ -264,3 +264,11 @@ def test_scroll_up_on_the_alt_screen_adds_no_history() -> None:
     stream.feed(b"\x1b[?1049h" + _SIX_ROWS + b"\x1b[2S")
     assert _rows(screen) == ["r3", "r4", "r5", "r6", "", ""]
     assert len(screen.history.top) == 0
+
+
+def test_delete_lines_clears_rows_whose_source_row_is_absent() -> None:
+    # One chunk, never reading display in between: the trailing CRLF scrolls
+    # and index() pops row 5, so DL's source row is absent from the buffer.
+    screen, stream = _filtered(cols=10, rows=5)
+    stream.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n\x1b[3;1H\x1b[2M")
+    assert _rows(screen) == ["b", "c", "", "", ""]
