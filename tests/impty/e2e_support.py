@@ -27,6 +27,8 @@ E2E_RENDER_POLL_TIMEOUT = E2E_POLL_TIMEOUT * 2
 # multiple so it never false-fires before the 240s outer catches a genuine hang.
 # Distinct from E2E_RENDER_POLL_TIMEOUT (same value; pty repaint vs. process exit).
 E2E_EXIT_POLL_TIMEOUT = E2E_POLL_TIMEOUT * 2
+# argv prefix moving only stdin off the PTY: imp picks headless, output still renders there.
+STDIN_OFF_PTY = ["sh", "-c", 'exec "$@" </dev/null', "sh"]
 
 
 def _poll(predicate, timeout: float) -> bool:

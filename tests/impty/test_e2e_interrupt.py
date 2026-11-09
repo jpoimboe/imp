@@ -23,6 +23,7 @@ from tests.impty.e2e_support import (
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
     E2E_RENDER_POLL_TIMEOUT,
+    STDIN_OFF_PTY,
     _flock_free,
     _git,
     _poll,
@@ -45,7 +46,7 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
     env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "demo", "--headless"],
+        [*STDIN_OFF_PTY, sys.executable, "-m", "imp", "new", "demo"],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as s:
         # Poll until the scripted bash's "echo running" is visible, which
@@ -123,7 +124,7 @@ def test_sigint_during_subagent_hands_back_and_resumes(tmp_path: Path) -> None:
     env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "demo", "--headless"],
+        [*STDIN_OFF_PTY, sys.executable, "-m", "imp", "new", "demo"],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as s:
         quest_home = _await_change_dir(tmp_path, timeout=E2E_POLL_TIMEOUT)
@@ -163,7 +164,7 @@ def test_sigint_during_subagent_hands_back_and_resumes(tmp_path: Path) -> None:
     # Resume continues the interrupt-paused step and runs to completion: the quest
     # recovers with the handback already in the parent's transcript (exit 0).
     with TerminalSession(
-        [sys.executable, "-m", "imp", "resume", slug, "--headless"],
+        [*STDIN_OFF_PTY, sys.executable, "-m", "imp", "resume", slug],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as r:
         rc2 = r.run_to_completion(hard=E2E_POLL_TIMEOUT)

@@ -11,6 +11,7 @@ from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests.impty.e2e_support import (
     E2E_SUBPROCESS_TIMEOUT,
+    STDIN_OFF_PTY,
     can_pty,
     clean_env,
     default_workflow_script,
@@ -42,7 +43,7 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
 
     # Drive the real binary through impty to completion + merge.
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "--title", "demo change", "--headless"],
+        [*STDIN_OFF_PTY, sys.executable, "-m", "imp", "new", "--title", "demo change"],
         cwd=str(clone), env=env, cols=100, rows=40,
     ) as s:
         rc = s.run_to_completion(hard=deadline - time.monotonic())
