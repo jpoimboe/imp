@@ -1416,3 +1416,22 @@ def test_plan_review_notes_var_declared_as_empty_string() -> None:
     # "" on resume and task-lead.md's StrictUndefined render cannot fail.
     assert wf.vars.defaults()["plan_review_notes"] == ""
     assert wf.vars.types()["plan_review_notes"] == "string"
+
+
+def _workflow_comment_text() -> str:
+    # The pin rule: strip each line's leading `#`, then collapse whitespace runs.
+    raw = (bundled_workflow_dir("default") / "workflow.yaml").read_text()
+    return " ".join(" ".join(re.sub(r"^\s*#", "", ln) for ln in raw.splitlines()).split())
+
+
+def test_workflow_comments_describe_one_slow_verify_and_the_review_skip() -> None:
+    flat = _workflow_comment_text()
+    assert ("rebases, runs the quest's one slow verify, reviews the integration "
+            "(skipped on a green, base-unmoved pass with no reconciler fix),") in flat
+    assert ("Rebase, run the quest's one slow verify, review the integration (skipped "
+            "on a green, base-unmoved pass with no reconciler fix), then the human "
+            "gate.") in flat
+    assert "slow-re-verifies only when the base moved" not in flat
+    assert "slow re-verify only when the base moved" not in flat
+    converge = flat.split("── converge:", 1)[1].split("- name: converge", 1)[0]
+    assert "slow" not in converge

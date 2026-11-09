@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -213,3 +214,17 @@ def test_base_unmoved_tolerated_flag_normalized_from_capitalized_bool(tmp_path: 
     _stamp(pr, "last_verified_tree_slow")
     r = _run(pr, tolerated="True")
     assert r.returncode == 2, r.stderr
+
+
+def _exit_table() -> dict[str, str]:
+    return {ln.split("->", 1)[0].strip("# "): ln
+            for ln in SCRIPT.read_text().splitlines() if re.match(r"#\s+\d\s+->", ln)}
+
+
+def test_header_exit_table_names_the_real_routes() -> None:
+    table = _exit_table()
+    assert "already cleared by an earlier slow pass or toleration" in table["2"]
+    assert "-> validate-memory -> integration-verify -> integration-reviewer" in table["0"]
+    assert "(the normal first pass: converge runs no slow gate)" in table["7"]
+    assert "-> validate-memory -> integration-verify; reviewer skipped on green" in table["7"]
+    assert "recovery" not in SCRIPT.read_text()
