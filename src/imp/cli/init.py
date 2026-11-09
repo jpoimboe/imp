@@ -266,14 +266,24 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _ensure_imp_gitignore(project_root: Path) -> None:
+class GitignoreChange(Enum):
+    CREATED = "created"
+    APPENDED = "appended"
+    UNTOUCHED = "untouched"
+
+
+def _ensure_imp_gitignore(project_root: Path) -> GitignoreChange:
     """Ensure `.imp/` (the per-worktree quest-home symlink dir) is gitignored; idempotent."""
     project_gi = project_root / ".gitignore"
-    existing = project_gi.read_text() if project_gi.exists() else ""
-    existing_lines = {ln.strip() for ln in existing.splitlines()}
-    if ".imp/" not in existing_lines:
-        sep = "" if existing.endswith("\n") or not existing else "\n"
-        project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
+    if not project_gi.exists():
+        project_gi.write_text("\n# imp\n.imp/\n")
+        return GitignoreChange.CREATED
+    existing = project_gi.read_text()
+    if ".imp/" in {ln.strip() for ln in existing.splitlines()}:
+        return GitignoreChange.UNTOUCHED
+    sep = "" if existing.endswith("\n") or not existing else "\n"
+    project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
+    return GitignoreChange.APPENDED
 
 
 def _build_project_config(default_workflow: str, default_base: str) -> dict[str, Any]:
@@ -911,11 +921,16 @@ def _interactive_confirm_screen(
             prompt_fn(cursor, _edit_default(state, cursor)))
 
 
-def write_init_files(project_root: Path, settings: InitSettings) -> tuple[str, ...]:
+class InitWrite(NamedTuple):
+    committed: tuple[str, ...]
+    gitignore: GitignoreChange
+
+
+def write_init_files(project_root: Path, settings: InitSettings) -> InitWrite:
     """Write imp/config.yaml + the memory scaffold from `settings`, ensure `.imp/`
     is gitignored, and commit the init files. Returns the committed paths (empty
-    when no commit was made). Callers ensure the git repo exists first (base
-    resolution needs it)."""
+    when no commit was made) and what happened to `.gitignore`. Callers ensure the
+    git repo exists first (base resolution needs it)."""
     imp_dir = project_root / "imp"
     imp_dir.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(
@@ -940,10 +955,13 @@ def write_init_files(project_root: Path, settings: InitSettings) -> tuple[str, .
     (imp_dir / "config.yaml").write_text(
         body + test_block + setup_block + pythonpath_block + _memory_pointer())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
-    _ensure_imp_gitignore(project_root)
-    return _commit_init_files(
-        project_root,
-        extra_paths=(f"imp/memory/{settings.default_workflow}/all.md",),
+    gitignore = _ensure_imp_gitignore(project_root)
+    return InitWrite(
+        _commit_init_files(
+            project_root,
+            extra_paths=(f"imp/memory/{settings.default_workflow}/all.md",),
+        ),
+        gitignore,
     )
 
 
@@ -1012,9 +1030,14 @@ def _machine_path_lines(user_path: Path) -> list[str]:
     return [line] if _fits(line) else [f"  {path}", f"    {_MACHINE_NOTE}"]
 
 
-def _created_repo_lines(workflow: str) -> list[str]:
-    return ["  imp/config.yaml", "  imp/memory/all.md",
-            f"  imp/memory/{workflow}/all.md"]
+def _created_repo_lines(workflow: str, gitignore: GitignoreChange) -> list[str]:
+    lines = ["  imp/config.yaml", "  imp/memory/all.md",
+             f"  imp/memory/{workflow}/all.md"]
+    if gitignore is GitignoreChange.CREATED:
+        lines.append("  .gitignore")
+    elif gitignore is GitignoreChange.APPENDED:
+        lines.append("  .gitignore  (added .imp/)")
+    return lines
 
 
 def run_init(
@@ -1177,7 +1200,7 @@ def run_init(
             setup=detect_worktree_setup(project_root),
             roots=detect_import_roots(project_root)))
     _persist_machine_config(allow_unsandboxed=allow_unsandboxed)
-    committed = write_init_files(project_root, settings)
+    written = write_init_files(project_root, settings)
 
     output_fn("")
     output_fn(pal.ansi("Configured:", "wordmark", enabled=color_on))
@@ -1185,12 +1208,12 @@ def run_init(
         output_fn(pal.ansi(line, "dim", enabled=color_on))
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
-    for line in _created_repo_lines(settings.default_workflow):
+    for line in _created_repo_lines(settings.default_workflow, written.gitignore):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
     for line in _machine_path_lines(user_path):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
-    if committed:
-        output_fn(pal.ansi(_committed_line(committed), "dim", enabled=color_on))
+    if written.committed:
+        output_fn(pal.ansi(_committed_line(written.committed), "dim", enabled=color_on))
     output_fn("")
     output_fn("Try: " + pal.ansi(
         'imp new "Add a dark-mode toggle"', "wordmark", enabled=color_on))
@@ -1286,7 +1309,7 @@ def run_init_noninteractive(
         test_cmd_fast=test_cmd_fast,
         worktree_setup=detected_setup.command if detected_setup else None,
         pythonpath=roots)
-    committed = write_init_files(project_root, settings)
+    written = write_init_files(project_root, settings)
 
     if wrote_user_config:
         _bootstrap_user_config(
@@ -1295,7 +1318,7 @@ def run_init_noninteractive(
         _set_user_providers(user_path, providers)
 
     output_fn("Created:")
-    for line in _created_repo_lines(settings.default_workflow):
+    for line in _created_repo_lines(settings.default_workflow, written.gitignore):
         output_fn(line)
-    if committed:
-        output_fn(_committed_line(committed))
+    if written.committed:
+        output_fn(_committed_line(written.committed))
