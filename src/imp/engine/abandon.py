@@ -84,6 +84,7 @@ def save_as_draft(quest: Quest, reason: str | None = None) -> None:
     with ProjectLock(quest.quest_dir / "lock").acquire():
         state = State.load(quest.state_dir)
         state.status = "paused"
+        state.halt_condition = None
         state.arm_step_resume(should_continue=False)
         state.save(quest.state_dir)
         payload = {"interrupt_reason": reason} if reason else {}

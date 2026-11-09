@@ -2534,6 +2534,35 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
     assert "Traceback (most recent call last):" not in capsys.readouterr().err
 
 
+def test_main_load_failure_clears_a_waiting_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A load failure on a question-parked quest drops the waiting marker."""
+    import imp.remote.session.daemon as daemon
+    from imp.engine.errors import LoadError
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    parked = State.load(quest.state_dir)
+    parked.status = "paused"
+    parked.halt_condition = "waiting"
+    parked.save(quest.state_dir)
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: quest))
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise LoadError("bad yaml")
+
+    monkeypatch.setattr(daemon.anyio, "run", _raise)
+
+    rc = daemon.main(["--pinned", "--control-root", str(tmp_path), "--quest-id", "feat"])
+    assert rc == 2
+
+    state = State.load(quest.state_dir)
+    assert state.status == "paused"
+    assert state.halt_condition is None
+
+
 def test_steer_copy_is_verbatim_and_shared() -> None:
     from imp.engine.completion import INTERRUPT_STEER_HINT, steer_hint
     from imp.remote.session.daemon import (

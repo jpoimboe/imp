@@ -280,8 +280,11 @@ def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
     assert rc == 0
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
-    assert msg == (f"Started quest {quest.id} (running autonomously in the "
-                   f"background; appears in the active list).")
+    assert msg == (
+        f"Started quest {quest.id} (running autonomously in the background; "
+        f"appears in the active list).\n"
+        f"If it needs your answer it waits: imp list shows it as waiting, "
+        f"and imp resume {quest.id} answers it.")
     assert quest.origin == "draft"
     assert started["qid"] == quest.id
     meta = json.loads((quest.quest_dir / "quest.json").read_text())

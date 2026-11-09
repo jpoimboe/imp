@@ -57,7 +57,7 @@ def test_home_digest_survives_json_round_trip_including_bytes() -> None:
 def test_quest_card_none_and_bytes_survive_round_trip() -> None:
     assert _card_from_wire(_json_round_trip(_card_to_wire(None))) is None
     card = QuestCard(
-        quest_id="q1", status="paused", pause_reason="detached", step="plan",
+        quest_id="q1", status="paused", pause_reason="detached", question="Which DB?", step="plan",
         last="", title="Q", created="", step_label=None, phase_label=None,
         workflow="memory", base_branch="main",
         merge_commit=None, parent={"id": "par1", "title": "Parent"},
@@ -72,8 +72,9 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
     assert got.workflow == "memory"
     assert got.seed_opening == "summarize foo.py"
     assert got.seeded_vars == {"retries": 5, "strict": True}
+    assert got.question == "Which DB?"
     card2 = QuestCard(
-        quest_id="q1", status="active", pause_reason=None, step="plan",
+        quest_id="q1", status="active", pause_reason=None, question=None, step="plan",
         last="", title="Q", created="", step_label=None, phase_label=None,
         workflow="default", base_branch="main",
         merge_commit=None, parent=None,

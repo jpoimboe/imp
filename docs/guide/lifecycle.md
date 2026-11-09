@@ -21,8 +21,9 @@ at-rest status plus two runtime facts — whether a live process holds the quest
 lock, and a durable **halt-condition** recorded on `state.json`:
 
 - `running` — a live process holds the lock and is working.
-- `waiting` — a live process is parked at a human input gate (halt-condition
-  `waiting`).
+- `waiting` — waiting for your input: a live session parked at an input gate,
+  or a stopped quest parked on an unanswered question (halt-condition
+  `waiting`); `imp resume` answers either.
 - `error` — a not-live failure halt (stored `error`).
 - `completed` — finished its workflow (stored `completed`): merged into its base
   branch, or — for a workflow with no merge step — its commits left on `imp/<id>`.
@@ -30,7 +31,8 @@ lock, and a durable **halt-condition** recorded on `state.json`:
 - `abandoned` — closed for good; searchable, not resumable (stored `abandoned`).
 - `archived` — an archived, resumable conversation (stored `archived`).
 - `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
-- `paused` — not live, a clean stop (a yield or interrupt).
+- `paused` — not live, a clean stop: an interrupt (Ctrl-D, `/pause`) or another
+  non-question yield.
 - `new` — created, never started.
 
 Only `running` and `waiting` are derived and never stored; every other word is

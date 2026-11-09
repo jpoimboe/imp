@@ -777,7 +777,11 @@ async def run_quest(
                     state.status = "error"
                 else:
                     state.status = "paused"
-                state.halt_condition = None
+                # A detached question park stays visibly waiting; every other pause clears it.
+                state.halt_condition = (
+                    "waiting"
+                    if reason == "awaiting_user" and interrupt_reason is None
+                    else None)
                 state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(

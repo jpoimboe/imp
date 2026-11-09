@@ -50,6 +50,7 @@ class QuestCard:
     quest_id: str
     status: str
     pause_reason: str | None
+    question: str | None   # the pending bare-turn-end question; set only while waiting
     step: str
     last: str
     title: str
@@ -197,6 +198,7 @@ class LocalStore:
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.engine import quest_refs
+        from imp.engine.resume_gate import pending_question
         from imp.providers.effective import resolve_default_workflow
         if not _is_quest_id(quest_id):
             return None
@@ -209,6 +211,7 @@ class LocalStore:
         state = _quest_state(self.control_root, quest_id) or {}
         return QuestCard(
             quest_id=_id, status=status, pause_reason=_last_pause_reason(events),
+            question=pending_question(events) if status == "waiting" else None,
             step=step, last=last, title=title,
             created=created, step_label=step_label, phase_label=phase_label,
             workflow=(meta.get("workflow")
@@ -567,10 +570,13 @@ def resolve_display_status(
     Liveness is resolved by the caller (daemon-side, where the lock is visible)
     and handed in as `lock_live`: live + a `waiting` halt-condition reads
     `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
-    every stored word passes through unchanged (stored == displayed). The resolved
-    word is what the membership gates and the STATUS_COLORS key consume, so
-    `merge_blocked` stays underscored here."""
-    return ("waiting" if halt_condition == "waiting" else "running") if lock_live else status
+    a stored `paused` with a `waiting` halt-condition reads `waiting` (stopped on
+    an unanswered question); every other stored word passes through unchanged.
+    The resolved word is what the membership gates and the STATUS_COLORS key
+    consume, so `merge_blocked` stays underscored here."""
+    if lock_live:
+        return "waiting" if halt_condition == "waiting" else "running"
+    return "waiting" if status == "paused" and halt_condition == "waiting" else status
 
 
 # Row = (id, status, step, last_activity, title, created_at, step_label,

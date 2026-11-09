@@ -40,7 +40,7 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
 
     def fake_card(cid: str) -> QuestCard:
         return QuestCard(
-            quest_id=cid, status="paused", pause_reason=None, step="plan",
+            quest_id=cid, status="paused", pause_reason=None, question=None, step="plan",
             last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
             created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
             workflow="default", base_branch=None, merge_commit=None, parent=None,
@@ -96,7 +96,7 @@ def test_exit_ambiguous_sizes_columns_to_content(
     class FakeStore:
         def quest_card(self, cid: str) -> QuestCard:
             return QuestCard(
-                quest_id=cid, status="paused", pause_reason=None, step="plan",
+                quest_id=cid, status="paused", pause_reason=None, question=None, step="plan",
                 last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
                 created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
                 workflow="default", base_branch=None, merge_commit=None, parent=None,
@@ -125,7 +125,7 @@ def test_exit_ambiguous_sizes_around_missing_and_titleless_cards(
 
     def card(cid: str, title: str | None, seed_opening: str | None) -> QuestCard:
         return QuestCard(
-            quest_id=cid, status="paused", pause_reason=None, step="plan",
+            quest_id=cid, status="paused", pause_reason=None, question=None, step="plan",
             last="2026-06-11T11:45:00+00:00", title=title,
             created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
             workflow="default", base_branch=None, merge_commit=None, parent=None,

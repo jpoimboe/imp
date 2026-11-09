@@ -71,7 +71,7 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
     if c is None:
         return None
     return {"quest_id": c.quest_id, "status": c.status,
-            "pause_reason": c.pause_reason, "step": c.step,
+            "pause_reason": c.pause_reason, "question": c.question, "step": c.step,
             "last": c.last, "title": c.title, "created": c.created,
             "step_label": c.step_label, "phase_label": c.phase_label,
             "workflow": c.workflow,
@@ -88,7 +88,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         return None
     return QuestCard(
         quest_id=d["quest_id"], status=d["status"],
-        pause_reason=d["pause_reason"], step=d["step"],
+        pause_reason=d["pause_reason"], question=d["question"], step=d["step"],
         last=d["last"], title=d["title"], created=d["created"],
         step_label=d["step_label"], phase_label=d["phase_label"],
         workflow=d["workflow"],

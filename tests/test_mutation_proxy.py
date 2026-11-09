@@ -248,7 +248,9 @@ def test_run_mutation_new_background_starts_quest(
     qid = started["qid"]
     assert result["message"] == (
         f"Started quest {qid} (running autonomously in the background; "
-        f"appears in the active list).")
+        f"appears in the active list).\n"
+        f"If it needs your answer it waits: imp list shows it as waiting, "
+        f"and imp resume {qid} answers it.")
 
 
 @pytest.mark.anyio

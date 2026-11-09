@@ -11,6 +11,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import imp.cli.main as m
 import imp.cli.store as s
 from imp.cli.store import HomeDigest
@@ -50,11 +52,21 @@ def test_resolver_completed_passes_through() -> None:
     assert status == "completed"
 
 
+def test_resolver_not_live_question_park_is_waiting() -> None:
+    status = s.resolve_display_status("paused", lock_live=False, halt_condition="waiting")
+    assert status == "waiting"
+
+
+@pytest.mark.parametrize("stored", ["archived", "new", "error", "completed", "merge_blocked"])
+def test_resolver_not_live_marker_lifts_only_paused(stored: str) -> None:
+    assert s.resolve_display_status(stored, lock_live=False, halt_condition="waiting") == stored
+
+
 def test_membership_gates_reflect_derived_words() -> None:
     assert "waiting" in s._INFLIGHT and "error" in s._INFLIGHT
     assert "draft" not in s._INFLIGHT
     assert "error" in m.RESUMABLE          # a failed quest stays resumable
-    assert "waiting" not in m.RESUMABLE    # live-only, never a resume target
+    assert "waiting" in m.RESUMABLE        # needs your answer: attach live, else inert resume
     assert "draft" not in m.RESUMABLE
     assert "archived" in m.RESUMABLE        # an archived conversation rehydrates and resumes
 

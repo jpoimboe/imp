@@ -390,6 +390,7 @@ def _record_load_failure(quest: Quest, exc: LoadError | LoadErrors) -> int:
         payload={"reason": "config", "kind": type(exc).__name__})
     state = State.load(quest.state_dir)
     state.status = "paused"
+    state.halt_condition = None
     state.save(quest.state_dir)
     return 2
 

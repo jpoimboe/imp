@@ -1039,7 +1039,9 @@ def apply_new(
         from imp.remote.daemon import spawn
         spawn.start_quest(control, quest_id)
         return 0, (f"Started quest {quest_id} (running autonomously in the "
-                   f"background; appears in the active list).")
+                   f"background; appears in the active list).\n"
+                   f"If it needs your answer it waits: imp list shows it as "
+                   f"waiting, and imp resume {quest_id} answers it.")
 
     if idea is not None:
         if not idea.strip():
@@ -2128,6 +2130,10 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
             quest_row.display_word(card.status),
             15, color=color),
     ]
+    if card.question is not None:
+        lines.append(_card_field(
+            "reason:", f"a question needs your answer (imp resume {card.quest_id})",
+            15, color=color))
     reason = _card_pause_token(card.status, card.pause_reason)
     if reason:
         lines.append(_card_field(
@@ -2161,6 +2167,12 @@ def _quest_card(card: QuestCard, *, now: datetime, color: bool,
     lines.extend(_vars_row(card.seeded_vars, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
+    if card.question is not None:
+        from imp.cli.inert_resume import render_inert_question
+        lines.append("")
+        lines.append(pal.ansi("question:", "dim", enabled=color))
+        lines.extend(render_inert_question(
+            card.question, width=_term_width(), color=color).splitlines())
     if card.intent:
         lines.append("")
         lines.append(pal.ansi("intent:", "dim", enabled=color))
@@ -2215,6 +2227,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
+        "question": card.question,
         "vars": dict(card.vars),
         "summary": None,
         "files": list(card.files),
@@ -2980,7 +2993,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return quest
 
 
-RESUMABLE = ("new", "paused", "error", "merge_blocked", "archived")
+RESUMABLE = ("new", "paused", "waiting", "error", "merge_blocked", "archived")
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:

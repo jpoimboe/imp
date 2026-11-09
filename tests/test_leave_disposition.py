@@ -317,3 +317,33 @@ def test_leave_disposition_names_no_trigger_off_save_or_archive(
     ch = _draft_with_exchange(tmp_path, "tg3")
     assert m._print_leave_disposition(ch, leave_state, trigger="ctrl-d") == 130
     assert capsys.readouterr().out == out
+
+
+def test_save_as_draft_at_a_question_gate_clears_the_waiting_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unmaterialized Ctrl-D cancels the run scope, so only save_as_draft can
+    clear the `waiting` marker the gate already persisted."""
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="dqg001",
+                            base_branch="main", workflow="default")
+    log = ch.event_log()
+    log.append(agent_id=None, type="user_message", payload={
+        "role": "user", "subtype": "intent",
+        "content": [{"type": "text", "text": "wire up the widget"}]})
+    log.append(agent_id=None, type="awaiting_user_input", payload={
+        "steer_hint": "", "last_agent_message": "Which DB?", "interrupt": False})
+    st = State.load(ch.state_dir)
+    st.halt_condition = "waiting"
+    st.save(ch.state_dir)
+
+    save_as_draft(ch, "ctrl-d")
+
+    assert State.load(ch.state_dir).halt_condition is None
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert m.main(["list"]) == 0
+    line = next(ln for ln in capsys.readouterr().out.splitlines() if "dqg001" in ln)
+    assert "paused (threshold)" in line
+    assert "waiting" not in line
