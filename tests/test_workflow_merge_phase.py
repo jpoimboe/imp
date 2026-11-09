@@ -226,7 +226,7 @@ def test_validate_memory_gates_post_rebase() -> None:
     step = next(s for s in wf.flat_steps() if s.name == "validate-memory")
     assert step.kind == "script"
     assert step.command == (
-        'python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"')
+        '"$IMP_PYTHON" -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"')
     assert step.max_loops == 6
     m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
     assert isinstance(m0.action, Goto) and m0.action.target == "integration-verify"

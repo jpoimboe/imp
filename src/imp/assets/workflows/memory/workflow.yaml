@@ -32,7 +32,7 @@ phases:
       - name: validate-memory
         show_label: false
         label: checking memory files
-        command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
+        command: "\"$IMP_PYTHON\" -m imp.providers.validate_memory_cli \"$IMP_PROJECT_ROOT\""
         max_loops: 6
         rules:
           - {if: {exit: 0}, continue: true}
