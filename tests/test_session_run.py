@@ -866,7 +866,8 @@ async def test_run_session_client_threads_provided_leave_state(
     seen: dict[str, object] = {}
 
     def _fake_disposition(
-        quest: object, leave_state: object, *, intent: str | None = None,
+        quest: object, leave_state: object, *, trigger: str | None = None,
+        intent: str | None = None,
     ) -> None:
         seen["leave_state"] = leave_state
         return None
@@ -1757,6 +1758,59 @@ async def test_the_clients_own_leave_outranks_the_end_frame_disposition(
 
 
 @pytest.mark.anyio
+async def test_an_end_frame_disposition_names_no_trigger_of_this_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, "2026-09-22-end-save-own-trigger")
+
+    async def _stub(**kwargs: Any) -> tuple[StreamEnding, RunWitness]:
+        coord = kwargs["coord"]
+        coord.escalation_event = anyio.Event()
+        coord.escalation_event.set()
+        coord.leave_reason = "ctrl-d"
+        witness = RunWitness()
+        witness.note_end(EndOfRun("save"))
+        return StreamEnding.ENDED, witness
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _stub)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 130
+    assert out == f"{quest.id} · T · paused\nresume: imp resume {quest.id}\n\n"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("intent", ["archive", "clear"])
+async def test_an_archive_or_clear_leave_renders_a_bare_archived_spine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], intent: str,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _paused_quest(tmp_path, f"2026-09-22-leave-{intent}")
+    # /archive and /clear set the escalation event but no leave_reason.
+    monkeypatch.setattr(
+        session_run, "run_terminal_client",
+        _leaving(None, intent=intent, disposition="archive"))
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
+    out = capsys.readouterr().out
+    assert rc == 130
+    assert out == (f"{quest.id} · T · archived\n"
+                   f"resume: imp resume {quest.id} — or find it later with imp search\n\n")
+
+
+@pytest.mark.anyio
 async def test_ctrl_d_leave_still_renders_its_pause_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1837,7 +1891,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
 
 
 @pytest.mark.anyio
-async def test_pause_leave_on_a_draft_renders_only_the_paused_spine(
+async def test_pause_leave_on_a_draft_renders_the_paused_spine_with_its_trigger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1855,14 +1909,13 @@ async def test_pause_leave_on_a_draft_renders_only_the_paused_spine(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        f"{quest.id} · T · paused\n"
+        f"{quest.id} · T · paused · /pause\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
-    assert "paused · /pause" not in out   # the disposition outranks the trigger
 
 
 @pytest.mark.anyio
-async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine(
+async def test_a_keystroke_leave_with_a_disposition_renders_the_draft_spine_with_its_trigger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1882,11 +1935,10 @@ async def test_a_keystroke_leave_with_a_disposition_renders_only_the_draft_spine
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        f"{quest.id} · T · paused\n"
+        f"{quest.id} · T · paused · Ctrl-D\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "> Ctrl-D" not in out          # row 1 prints no caret row
-    assert "paused · Ctrl-D" not in out   # …and no trigger head
 
 
 @pytest.mark.anyio

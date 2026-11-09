@@ -547,12 +547,16 @@ _LEAVE_TAILS: dict[str, str] = {
 
 def _emit_leave_block(
     quest: Quest, disposition: str, *, intent: str | None, removed: str | None = None,
+    trigger: str | None = None,
 ) -> None:
-    """The closing block for a leave the daemon applies, whichever client sent it."""
+    """The closing block for a daemon-applied leave; a resumable tail names the stamped trigger."""
     color = should_use_color(sys.stdout)
     intent = quest_row.fallback_intent(intent, quest.seed_opening)
+    qualifier = (MANUAL_STOP_LABELS.get(trigger)
+                 if trigger is not None and disposition in (CONTROL_SAVE, CONTROL_ARCHIVE)
+                 else None)
     print(_status_spine(quest.id, quest.title, _LEAVE_TAILS[disposition], "wordmark",
-                        color=color, intent=intent))
+                        color=color, intent=intent, qualifier=qualifier))
     if disposition == CONTROL_SAVE:
         print(_resume_line(quest.id))
     elif disposition == CONTROL_ARCHIVE:
@@ -563,7 +567,8 @@ def _emit_leave_block(
 
 
 def _print_leave_disposition(
-    quest: Quest, leave_state: dict[str, str], *, intent: str | None = None,
+    quest: Quest, leave_state: dict[str, str], *, trigger: str | None = None,
+    intent: str | None = None,
 ) -> ExitCode | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
@@ -577,7 +582,7 @@ def _print_leave_disposition(
         return ExitCode.USER_ENDED
     disposition = leave_state.get("disposition")
     if disposition is not None:
-        _emit_leave_block(quest, disposition, intent=intent)
+        _emit_leave_block(quest, disposition, intent=intent, trigger=trigger)
         return ExitCode.USER_ENDED
     if leave_state.get("send_failed"):
         color = should_use_color(sys.stdout)

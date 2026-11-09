@@ -268,7 +268,8 @@ def test_message_after_clear_echoes_once(tmp_path: Path, hint_first: bool) -> No
         assert rc == 130, _screen(s)
         rows = s.lines()
         assert rows.count("> next thing") == 1, _screen(s)
-        head = next((row for row in rows if row.endswith(" · next thing · archived")), None)
+        head = next((row for row in rows
+                     if row.endswith(" · next thing · archived · Ctrl-D")), None)
         assert head is not None, _screen(s)
         _assert_closing_layout(rows, head)
 

@@ -267,3 +267,53 @@ def test_leave_disposition_renders_the_intent_it_is_handed(
     out = capsys.readouterr().out
     assert "tl5 · what the client witnessed · paused" in out
     assert "the log's own intent" not in out     # the spine no longer re-reads the log
+
+
+@pytest.mark.parametrize(("disposition", "trigger", "spine", "resume"), [
+    ("save", "pause", "paused · /pause", "resume: imp resume tg1"),
+    ("save", "ctrl-d", "paused · Ctrl-D", "resume: imp resume tg1"),
+    ("archive", "ctrl-d", "archived · Ctrl-D",
+     "resume: imp resume tg1 — or find it later with imp search"),
+    ("save", None, "paused", "resume: imp resume tg1"),
+    ("archive", None, "archived",
+     "resume: imp resume tg1 — or find it later with imp search"),
+])
+def test_leave_disposition_names_a_save_or_archive_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    disposition: str, trigger: str | None, spine: str, resume: str,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    ch = _draft_with_exchange(tmp_path, "tg1")
+    rc = m._print_leave_disposition(ch, {"disposition": disposition}, trigger=trigger)
+    assert rc == 130
+    assert capsys.readouterr().out == f"tg1 · Draft · {spine}\n{resume}\n\n"
+
+
+def test_leave_disposition_trigger_is_a_dim_trailing_segment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli import palette as pal
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: True)
+    ch = _draft_with_exchange(tmp_path, "tg2")
+    m._print_leave_disposition(ch, {"disposition": "save"}, trigger="pause")
+    spine = capsys.readouterr().out.splitlines()[0]
+    assert spine == (f'{pal.ansi("tg2", "wordmark")} · Draft · '
+                     f'{pal.ansi("paused", "wordmark")}{pal.ansi(" · /pause", "dim")}')
+
+
+@pytest.mark.parametrize(("leave_state", "out"), [
+    ({"disposition": "discard"}, "tg3 · Draft · discarded\n\n"),
+    ({"intent": "abandon"}, "tg3 · Draft · abandoned\n\n"),
+    ({"send_failed": "1"}, "tg3 · Draft · left running\nresume: imp resume tg3\n\n"),
+])
+def test_leave_disposition_names_no_trigger_off_save_or_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    leave_state: dict[str, str], out: str,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    ch = _draft_with_exchange(tmp_path, "tg3")
+    assert m._print_leave_disposition(ch, leave_state, trigger="ctrl-d") == 130
+    assert capsys.readouterr().out == out
