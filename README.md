@@ -375,7 +375,9 @@ Local models are not (yet) supported.  Pull requests welcome :-)
 - **Notifications** — imp can ping you on [Telegram](docs/guide/remote-control.md)
   if your attention is needed, where you can reply directly
 - **Auto merge** — If there are no open issues for you to decide on, it
-  auto-merges to your integration branch (this default is configurable)
+  auto-merges to your integration branch (this default is configurable);
+  calls imp made on its own are listed in the quest summary rather than
+  stopping the merge
 - **Local git only** — imp doesn't push to or fetch from any git remotes; you
   are free to push the quest-specific branch, or create your own PR on GitHub
   (GitHub integration is planned)

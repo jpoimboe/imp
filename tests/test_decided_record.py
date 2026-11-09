@@ -216,3 +216,14 @@ def test_summarizer_lists_decided_calls_after_the_headline() -> None:
     assert (flat.index("- **Headline**")
             < flat.index("- **Decided without asking you**")
             < flat.index("- **Optional diagram**"))
+
+
+def test_docs_describe_the_decided_record() -> None:
+    readme = _flat(Path("README.md").read_text())
+    assert ("- **Auto merge** — If there are no open issues for you to decide on, it "
+            "auto-merges to your integration branch (this default is configurable); calls "
+            "imp made on its own are listed in the quest summary rather than stopping the "
+            "merge") in readme
+    arch = _flat(Path("docs/internals/architecture.md").read_text())
+    assert ("(any agent may file a `— needs-decision:` item for a human call, or a "
+            "born-ticked `— decided:` record of a call it already made)") in arch
