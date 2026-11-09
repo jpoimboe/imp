@@ -137,7 +137,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep when there is anything to drain, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips spec finalization, spec review and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on disk and announces it; everything from `implement` onward is identical.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, and the once-per-quest deferred sweep when there is anything to drain. `integrate` then holds the merge lane while it rebases, runs the quest's one slow test run, reviews the integration (skipped when the base did not move, the slow run passed and nothing was reconciled), and ends at the human gate. An **express** quest (chosen at threshold) skips spec finalization, spec review and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on disk and announces it; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -282,10 +282,12 @@ ahead of other waiting verify gates. `integrate-rebase` routes on four outcomes:
 unmoved with the tree already cleared skips straight to `summarizer` with no re-review; a
 clean rebase or an uncleared tree goes to `validate-memory`; a conflict hands off to
 `reconciler`; a bad base ref or dirty tree pauses. `validate-memory` re-runs imp's own
-load-time memory validation over the merged tree. `integration-verify` routes to
-`integration-reviewer` on **both** pass and failure — a failure asks the reviewer to
-adjudicate fix-vs-tolerate rather than pausing. `check-cleared` then re-asks the shared
-clearance predicate at the merge door: a tree the slow gate never passed — an
+load-time memory validation over the merged tree. A failing `integration-verify` always
+goes to `integration-reviewer`, which adjudicates fix-vs-tolerate rather than pausing. A
+pass goes to `integration-reviewer` too, unless the base did not move and no reconciler
+fix landed since `integrate-rebase`: with no incoming diff to review, it goes straight
+to `check-cleared`. `check-cleared` then re-asks the shared clearance predicate at the
+merge door: a tree the slow gate never passed — an
 environmental failure the reviewer repaired, say — routes back to `integration-verify`
 instead of reaching the human. `finalize` is the human gate; a rework releases the merge
 lane on its way back to `plan-writer`.
@@ -316,6 +318,7 @@ flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
+  IV -->|"green, base unmoved, no reconciler fix"| CC
   IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}

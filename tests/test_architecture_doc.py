@@ -435,7 +435,15 @@ def test_architecture_default_workflow_intro_is_the_six_phase_text() -> None:
         "runs once per outline plan, carrying **no** code review and **no** deferred "
         "sweep in the per-plan loop." in text
     )
-    assert "After the last plan of a multi-plan quest, `converge` runs **once**" in text
+    assert (
+        "After the last plan of a multi-plan quest, `converge` runs **once**: the coverage "
+        "backstop, the single quest-wide code review, and the once-per-quest deferred "
+        "sweep when there is anything to drain. `integrate` then holds the merge lane "
+        "while it rebases, runs the quest's one slow test run, reviews the integration "
+        "(skipped when the base did not move, the slow run passed and nothing was "
+        "reconciled), and ends at the human gate." in text
+    )
+    assert "a slow test gate on the quest's own base" not in text
     assert (
         "An **express** quest (chosen at threshold) skips spec finalization, spec review "
         "and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on "
@@ -549,6 +557,7 @@ INTEGRATE_DIAGRAM = """flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
+  IV -->|"green, base unmoved, no reconciler fix"| CC
   IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}
@@ -616,6 +625,20 @@ def test_architecture_integrate_phase_prose_names_the_merge_door() -> None:
         "reviewer repaired, say — routes back to `integration-verify` instead of "
         "reaching the human." in flat
     )
+
+
+def test_architecture_integrate_prose_describes_the_review_skip() -> None:
+    flat = " ".join(_phase_section(ARCH.read_text(), "integrate").split())
+    assert "on **both** pass and failure" not in flat
+    assert (
+        "A failing `integration-verify` always goes to `integration-reviewer`, which "
+        "adjudicates fix-vs-tolerate rather than pausing."
+    ) in flat
+    assert (
+        "unless the base did not move and no reconciler fix landed since "
+        "`integrate-rebase`: with no incoming diff to review, it goes straight to "
+        "`check-cleared`."
+    ) in flat
 
 
 def test_architecture_names_no_retired_reviewer_verdict_field() -> None:
