@@ -1219,10 +1219,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if reason is not None:
             _emit_cli_error(f"--provider: {reason}")
             return 2
+    try:
+        seed = resolve_spec_seed(args)
+    except (SeedError, ValueError) as e:
+        _emit_cli_error(f"{e}")
+        return 2
+
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         _refuse_foreign_cwd()
         return _emit_mutation_result(await proxy_mutation_async("new", {
-            "opening": getattr(args, "opening", None),
+            "opening": seed.seed_text,
             "title": getattr(args, "title", None),
             "workflow": getattr(args, "workflow", None),
             "base": getattr(args, "base", None),
@@ -1254,7 +1260,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     if getattr(args, "background", False):
         rc, message = apply_new(
-            control, opening=getattr(args, "opening", None),
+            control, opening=seed.seed_text,
             title=getattr(args, "title", None), workflow=wf_arg,
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
@@ -1284,12 +1290,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         quest_vars = resolve_var_flags(
             control, workflow=wf_arg, raw=getattr(args, "var", None))
     except (VarFlagError, LoadError, LoadErrors) as e:
-        _emit_cli_error(f"{e}")
-        return 2
-
-    try:
-        seed = resolve_spec_seed(args)
-    except (SeedError, ValueError) as e:
         _emit_cli_error(f"{e}")
         return 2
 

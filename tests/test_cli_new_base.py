@@ -435,3 +435,42 @@ def test_cmd_new_on_a_branch_prints_no_detached_notice(
 
     assert rc == 2
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("opening_argv", [["x"], ["--message", "x"]])
+def test_new_background_seeds_the_opening_from_positional_or_message(
+    tmp_path: Path, monkeypatch, opening_argv,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    import imp.remote.daemon.spawn as spawn_mod
+    monkeypatch.setattr(spawn_mod, "_spawn_detached", lambda argv, env, cwd: None)
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--title", "T", *opening_argv])
+
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+
+    (quest_id,) = main._live_quest_ids(tmp_path)
+    assert Quest.load(tmp_path, quest_id).seed_opening == "T\n\nx"
+
+
+def test_new_background_rejects_both_positional_and_message(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    import imp.remote.daemon.spawn as spawn_mod
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn_mod, "_spawn_detached", lambda argv, env, cwd: spawned.append(argv))
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--message", "x", "y"])
+
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+
+    assert ("Pass the opening message once — as the positional argument or "
+            "--message, not both.") in capsys.readouterr().err
+    assert spawned == []
+    assert not (project_state_dir(tmp_path) / "quests").exists()

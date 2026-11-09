@@ -424,3 +424,34 @@ def test_async_cmd_new_proxy_forwards_background(
     assert seen["op"] == "new"
     assert seen["args"]["background"] is True
     assert seen["args"]["autonomous"] is autonomous
+
+
+def test_async_cmd_new_proxy_sends_the_resolved_message_as_the_opening(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+    seen: dict[str, object] = {}
+
+    async def _fake(op: str, args: dict) -> dict:
+        seen["args"] = args
+        return {"returncode": 0, "message": "Started quest q9"}
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
+    args = main._build_parser().parse_args(["new", "--background", "--message", "x"])
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+    assert seen["args"]["opening"] == "x"
+
+
+def test_async_cmd_new_proxy_rejects_both_openings_without_proxying(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+
+    async def _boom(op: str, args: dict) -> dict:
+        raise AssertionError("must not proxy a rejected opening")
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _boom)
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--message", "x", "y"])
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+    assert "Pass the opening message once" in capsys.readouterr().err
