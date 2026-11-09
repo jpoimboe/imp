@@ -121,12 +121,15 @@ def test_introspection_bare_events_call_names_the_id() -> None:
     assert "most recent quest" not in body.lower()
 
 
-def test_introspection_documents_events_full_and_one_row() -> None:
+def test_introspection_documents_events_line_cap_and_full() -> None:
     body = _introspection_doc()
-    low = body.lower()
-    # The digest tier documents the one-terminal-row clip and the --full widen.
-    assert "one terminal row" in low
-    assert "--full" in body
+    flat = " ".join(body.split())
+    low = flat.lower()
+    assert ("Each compact line is capped at 200 characters, the same on a TTY and "
+            "through a pipe; add `--full` to lift the cap and render the full "
+            "untruncated line (still one logical line per event).") in flat
+    assert "one terminal row" not in low
+    assert "effectively unclipped" not in low
     # The stale "--json is byte-capped" claim is gone from the raw tier.
     assert "byte-capped" not in low
 
@@ -441,8 +444,9 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     assert ("- `imp events <id>` — the agent-facing digest, where event content "
             "actually lives: bare prints an index (steps, subagents, types); add a "
             "leaf selector (`--limit N`, `--type`, `--agent <handle>`, a range, "
-            "`--all`) for one compact line per event, `--step <name>` to scope, "
-            "`--json` for exact payloads.") in flat
+            "`--all`) for one compact line per event (rows cap at 200 chars, "
+            "`--full` lifts), `--step <name>` to scope, `--json` for exact "
+            "payloads.") in flat
     # the wording that steered agents at the folded human view is gone
     assert "the readable narrative of what happened" not in flat
     assert "the event index (steps, subagents, types)" not in flat
