@@ -47,3 +47,10 @@ def test_knowledge_map_names_the_shared_partials_overlay() -> None:
     # the overlay is local-first, into each quest's workflow/partials/
     assert "workflow/partials/" in text
     assert "local-first" in low
+
+
+def test_knowledge_map_names_where_each_install_reads_the_corpus() -> None:
+    text = DOC.read_text()
+    # wheels bundle the corpus as imp/assets/docs; a clone reads the repo's docs/
+    assert "imp/assets/docs" in text
+    assert "does not require bundling" not in text

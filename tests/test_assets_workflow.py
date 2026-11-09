@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
+import pytest
 import yaml
 
 from imp.assets import bundled_workflow_dir, bundled_workflow_names
@@ -1296,6 +1299,24 @@ def test_bundled_assets_dir_is_the_root_of_the_asset_pools() -> None:
         assert (root / sub).is_dir(), sub
     assert bundled_skills_dir().parent == root
     assert bundled_partials_dir().parent == root
+
+
+@pytest.mark.parametrize(("call", "label", "rel"), [
+    (lambda a: a.bundled_skills_dir(), "bundled skills pool", ("skills",)),
+    (lambda a: a.bundled_partials_dir(), "bundled shared partials pool", ("partials",)),
+    (lambda a: a.bundled_workflow_dir("nope"), "bundled workflow 'nope'", ("workflows", "nope")),
+], ids=["skills", "partials", "workflow"])
+def test_a_missing_asset_pool_says_the_install_is_incomplete(
+        call: Callable[[ModuleType], object], label: str, rel: tuple[str, ...],
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.assets as assets
+    monkeypatch.setattr(assets, "files", lambda package: tmp_path)
+    with pytest.raises(RuntimeError) as exc:
+        call(assets)
+    assert str(exc.value) == (
+        f"{label} not found at {tmp_path.joinpath(*rel)}; "
+        "the imp install is incomplete — reinstall imp"
+    )
 
 
 def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:

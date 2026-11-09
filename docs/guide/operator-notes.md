@@ -111,8 +111,9 @@ pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
   type mid-run left a freshly spawned in-sandbox `imp log` / `imp show` reading
   post-merge code while the process answering it was pre-merge, and it died with
   a raw `KeyError`. Two things outside the snapshot do still change under a
-  running quest: imp's `docs/` corpus, which agents read live from the checkout,
-  and the project's local config layer above.
+  running quest: imp's `docs/` corpus, which agents read live in place (a
+  clone's `docs/`, a wheel install's packaged copy), and the project's local
+  config layer above.
 - `imp resume <id>` (after Ctrl-D) is how a running quest moves onto newer code:
   the resumed daemon takes a fresh source snapshot. Old snapshots need no
   tending — the next daemon started in that home deletes any whose owning process
