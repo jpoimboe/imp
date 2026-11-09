@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 WF = Path("src/imp/assets/workflows/default")
 
 
@@ -111,3 +113,68 @@ def test_finalize_description_frames_head_of_queue() -> None:
     desc = parse_agent_file((WF / "agents" / "finalize.md").resolve()).description
     assert "head of the merge queue" in desc
     assert "Integration review happens later" not in desc
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+_DECIDED_NEVER_GATES = (
+    "A `— decided:` line is **never** in `open_items`: it records a call an agent already "
+    "made, born ticked, so it does not count toward the auto-merge empty-set condition, is "
+    "never walked as a needs-decision item, and is never seeded to the backlog — the "
+    "summary lists it instead.")
+
+
+@pytest.mark.parametrize("autonomous", [False, True])
+def test_decided_lines_never_gate_or_seed_in_either_render(
+        tmp_path: Path, autonomous: bool) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=autonomous))
+    assert _DECIDED_NEVER_GATES in out
+
+
+def test_autonomous_branch_never_seeds_a_decided_line(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=True))
+    assert ("Never seed a `— decided:` line — it is a call already made, not an open "
+            "question; leave it untouched.") in out
+    interactive = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=False))
+    assert "Never seed a `— decided:` line" not in interactive
+
+
+def test_interactive_gate_paragraph_absent_from_autonomous_render(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=True))
+    assert "A `— decided:` line is **not** walked" not in out
+
+
+def test_auto_merge_empty_set_ignores_decided_lines(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=False))
+    assert ("is empty (`— decided:` lines never count toward it) AND there is no "
+            "unrecoverable problem") in out
+    assert "and is never seeded on **defer**" in out
+
+
+def test_auto_merge_comments_point_at_the_summary(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=True, autonomous=False))
+    assert ("state in `comments` that you merged automatically because nothing needed a "
+            "decision, and that any calls made along the way are listed in the summary.") in out
+    assert "because there were no open items" not in out
+
+
+def test_gate_fix_strikes_a_decided_line(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=False, autonomous=False))
+    assert ("A `— decided:` line is **not** walked — the summary you open with already "
+            "lists it") in out
+    assert ("When the human asks to change one, map it to **fix**: collect the change into "
+            "the rework brief and rewrite the line to "
+            "`- [x] DEFERRED <src>: <desc> [scope: …] — overridden-at-gate`, so a re-run "
+            "summary stops listing it. That is the only rewrite a `— decided:` line ever "
+            "gets.") in out
+
+
+def test_absent_summary_fallback_lists_decided_lines(tmp_path: Path) -> None:
+    out = _flat(_render_finalize(tmp_path, auto_merge=False, autonomous=False))
+    assert ("when that artifact is absent, a concise summary you compose from the audit "
+            "record, followed — when `/ctl/.imp/quests/x/deferred.md` has any `— decided:` "
+            "lines — by `Decided without asking you:` and one "
+            "`- <what was decided> — <why>` bullet per line), then the verification state "
+            "in plain terms.") in out
