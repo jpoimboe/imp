@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""TerminalStream — a pyte ByteStream that drops the two escape-sequence classes
-pyte mis-parses, before they reach the parser.
+"""TerminalStream — a pyte ByteStream that drops the escape-sequence classes pyte
+mis-parses, before they reach the parser.
 
-pyte discards the private prefix of a `<`/`=`/`>` CSI and dispatches the sequence
-as if it were unprefixed, so a secondary DA (`ESC[>c`) answers as a primary DA and
-the surplus reply is typed into the pane, and XTMODKEYS (`ESC[>4;2m`) lands as SGR
-4;2 and underlines everything after it. pyte also does not implement string
-sequences at all, drawing a DCS/SOS/PM/APC payload onto the grid as text. OSC and
-`?`-prefixed CSI are deliberately left alone: `?` carries the DECSET alt-screen
-switch TerminalScreen's regime tracking depends on, and TerminalScreen guards the
-few `?` forms pyte mis-dispatches (device status, and SGR). The stream also routes
-the SU/SD/REP finals (`S`, `T`, `b`), absent from pyte's CSI table, to
-TerminalScreen.
+pyte discards the private prefix of a `<`/`=`/`>` CSI and dispatches the sequence as
+if it were unprefixed, so a secondary DA (`ESC[>c`) answers as a primary DA and the
+surplus reply is typed into the pane, and XTMODKEYS (`ESC[>4;2m`) lands as SGR 4;2
+and underlines everything after it. pyte takes a CSI intermediate byte (0x20-0x2F)
+for the final, so DECSTR (`ESC[!p`) draws `p` and SL (`ESC[2 @`) runs as ICH. pyte
+also does not implement string sequences at all, drawing a DCS/SOS/PM/APC payload
+onto the grid as text. OSC and `?`-prefixed CSI without an intermediate byte are
+deliberately left alone: `?` carries the DECSET alt-screen switch TerminalScreen's
+regime tracking depends on, and TerminalScreen guards the few `?` forms pyte
+mis-dispatches (device status, and SGR). The stream also routes the SU/SD/REP finals
+(`S`, `T`, `b`), absent from pyte's CSI table, to TerminalScreen.
 """
 
 from __future__ import annotations
@@ -34,16 +35,17 @@ class _State(enum.Enum):
     GROUND = "ground"
     ESC = "esc"
     CSI = "csi"
-    PRIVATE = "private"
+    CSI_DROP = "csi_drop"
     STRING = "string"
     STRING_ESC = "string_esc"
 
 
 class TerminalStream(pyte.ByteStream):
     """Byte-level filter in front of pyte's parser: the output is the input minus
-    whole private-prefixed CSI and string sequences. The state alone encodes the
-    held bytes, so at most two (`ESC`, `ESC [`) are ever pending across a chunk
-    boundary and a string payload costs no buffer at all.
+    whole private-prefixed CSI, intermediate-byte CSI and string sequences.
+    Pending across a chunk boundary: `ESC`, or `ESC [` plus the CSI parameter
+    bytes held until a final byte releases them or an intermediate byte drops
+    them. A dropped sequence or string payload costs no buffer at all.
     """
 
     # No ClassVar: mypy rejects it against pyte's instance-variable declaration.
@@ -54,6 +56,7 @@ class TerminalStream(pyte.ByteStream):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._state = _State.GROUND
+        self._csi_params = bytearray()
 
     # bytes narrows Stream.feed's str, exactly as pyte's own ByteStream.feed does.
     def feed(self, data: bytes) -> None:  # type: ignore[override]
@@ -69,6 +72,7 @@ class TerminalStream(pyte.ByteStream):
                     out.append(byte)
             elif self._state is _State.ESC:
                 if byte == _CSI_INTRO:
+                    self._csi_params.clear()
                     self._state = _State.CSI
                 elif byte in _STRING_INTRO:
                     self._state = _State.STRING
@@ -79,13 +83,19 @@ class TerminalStream(pyte.ByteStream):
                     self._state = _State.GROUND
                     i -= 1
             elif self._state is _State.CSI:
-                if byte in _PRIVATE_PREFIX:
-                    self._state = _State.PRIVATE
+                if byte in _PRIVATE_PREFIX and not self._csi_params:
+                    self._state = _State.CSI_DROP
+                elif 0x30 <= byte <= 0x3F:  # parameter byte
+                    self._csi_params.append(byte)
+                elif 0x20 <= byte <= 0x2F:  # intermediate byte
+                    self._state = _State.CSI_DROP
                 else:
-                    out += b"\x1b["
+                    # A final byte completes the sequence, anything else aborts
+                    # it: either way pyte gets exactly the bytes it would have.
+                    out += b"\x1b[" + self._csi_params
                     self._state = _State.GROUND
                     i -= 1
-            elif self._state is _State.PRIVATE:
+            elif self._state is _State.CSI_DROP:
                 if 0x40 <= byte <= 0x7E:  # final byte ends the sequence
                     self._state = _State.GROUND
                 elif not (0x20 <= byte <= 0x3F):  # not a param/intermediate

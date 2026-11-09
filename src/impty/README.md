@@ -176,7 +176,7 @@ per-quest scratch dir is bound writable — leaves them where they are.
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 
 Child output goes through `impty.stream.TerminalStream` before pyte's parser. It
-drops exactly two classes of sequence whole, and nothing else:
+drops exactly three classes of sequence whole, and nothing else:
 
 - **Private-prefixed CSI** — `ESC [` followed by `<`, `=` or `>`: secondary DA
   (`ESC[>c`), XTVERSION, XTMODKEYS (`ESC[>4;2m`), the kitty keyboard protocol.
@@ -186,15 +186,21 @@ drops exactly two classes of sequence whole, and nothing else:
   the pane — and XTMODKEYS lands as SGR `4;2`, underlining everything after it.
   `<` and `=` it treats as *final* bytes, so the rest of the sequence is drawn as
   screen text (`ESC[=5u` leaves a stray `5u`).
+- **Intermediate-byte CSI** — a CSI carrying an intermediate byte (0x20–0x2F):
+  DECSTR (`ESC[!p`, sent by `reset`), DECSCL (`ESC[1"p`), SL (`ESC[2 @`), DECSCUSR
+  (`ESC[2 q`), and `?`-prefixed forms such as DECRQM (`ESC[?2026$p`). pyte takes
+  the intermediate for the final, so the real final is drawn (a stray `p`) or run
+  as another command (SL as ICH).
 - **String sequences** — DCS (`ESC P`), SOS (`ESC X`), PM (`ESC ^`), APC
   (`ESC _`), through their `ESC \` or BEL terminator. pyte does not implement
   them and draws the payload as screen text (a kitty-graphics app splatters
   base64 across the grid).
 
-OSC (`ESC ]`) and `?`-prefixed CSI are deliberately left to pyte — `?` carries the
-DECSET alt-screen switch `regime()` depends on, and `TerminalScreen` guards the few
-`?` forms pyte mis-dispatches (below). The filter is a byte-level state machine, not
-a regex, so it is safe across chunk boundaries and holds at most two bytes.
+OSC (`ESC ]`) and `?`-prefixed CSI without an intermediate byte are deliberately
+left to pyte — `?` carries the DECSET alt-screen switch `regime()` depends on, and
+`TerminalScreen` guards the few `?` forms pyte mis-dispatches (below). The filter
+is a byte-level state machine, not a regex, so it is safe across chunk boundaries
+and holds only `ESC`, or `ESC [` plus the parameter bytes of the CSI in progress.
 
 Nothing is answered in a dropped sequence's place. A query impty does not
 genuinely emulate gets silence, never a fabricated reply, so a program falls back
