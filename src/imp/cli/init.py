@@ -844,6 +844,9 @@ def _run_confirm_app(
     def _render() -> list[tuple[str, str]]:
         return _confirm_rows(current, row, get_app().output.get_size().columns)
 
+    def _height() -> Dimension:
+        return Dimension.exact(sum(text.count("\n") for _style, text in _render()) + 1)
+
     kb = KeyBindings()
 
     @kb.add("up")
@@ -877,8 +880,7 @@ def _run_confirm_app(
 
     control = FormattedTextControl(
         text=cast("AnyFormattedText", _render), focusable=True, show_cursor=False)
-    height = sum(text.count("\n") for _style, text in _render()) + 1
-    body = Window(content=control, height=Dimension(min=height, max=height))
+    body = Window(content=control, height=_height)
     app: Any = Application(
         layout=Layout(HSplit([body])),
         key_bindings=kb,

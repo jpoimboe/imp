@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, NamedTuple
 
+import pyte
 import pytest
 import yaml
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.output.vt100 import Vt100_Output
 
 from imp.assets import bundled_assets_dir
 from imp.cli.init import (
@@ -27,7 +32,9 @@ from imp.cli.init import (
     _interactive_confirm_screen,
     _row_cells,
     _row_prompt_message,
+    _run_confirm_app,
     _screen_state_from_detection,
+    _ScreenAction,
     _workflow_blurb,
 )
 from imp.cli.pythonpath_detect import ImportRoots
@@ -633,4 +640,124 @@ def test_the_worktree_setup_row_sits_between_tests_and_import_root() -> None:
         ScreenRow.WORKTREE_SETUP, ScreenRow.IMPORT_ROOT]
 
 
+class _Terminal:
+    """A pyte screen behind the write/flush stream a Vt100_Output draws into."""
 
+    def __init__(self, columns: int) -> None:
+        self.size = Size(rows=40, columns=columns)
+        self.screen = pyte.Screen(columns, self.size.rows)
+        self._stream = pyte.Stream(self.screen)
+
+    def write(self, data: str) -> None:
+        self._stream.feed(data)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def resize(self, columns: int) -> None:
+        self.size = Size(rows=self.size.rows, columns=columns)
+        self.screen.resize(self.size.rows, columns)
+
+
+class _Frame(NamedTuple):
+    columns: int
+    window_height: int
+    lines: list[str]  # the screen's non-blank lines, right-stripped
+
+
+def _render_frames(
+    monkeypatch: pytest.MonkeyPatch, state: InitScreenState, cursor: ScreenRow,
+    *, start: int, resizes: Sequence[int] = (),
+) -> list[_Frame]:
+    """Run the confirm screen on a `start`-column terminal and snapshot every render
+    while the app is live (it erases itself on exit), resizing to each of `resizes`
+    in turn before accepting."""
+    import prompt_toolkit as pt
+
+    term = _Terminal(start)
+    pending = list(resizes)
+    frames: list[_Frame] = []
+    real_application = pt.Application
+
+    def _snapshot(app: Any) -> None:
+        if app.is_done:
+            return  # the erase-on-exit pass
+        window = next(app.layout.find_all_windows())
+        frames.append(_Frame(
+            term.size.columns, window.render_info.window_height,
+            [line.rstrip() for line in term.screen.display if line.strip()]))
+        if pending:
+            term.resize(pending.pop(0))
+            app._on_resize()  # what SIGWINCH triggers
+        else:
+            app.exit(result=_ScreenAction.ACCEPT)
+
+    def spy(*args: object, **kwargs: object) -> object:
+        app = real_application(*args, **kwargs)
+        app.after_render += _snapshot
+        return app
+
+    monkeypatch.setattr(pt, "Application", spy)
+    output = Vt100_Output(term, lambda: term.size, enable_cpr=False)
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        _run_confirm_app(state, cursor, _WORKFLOWS)
+    return frames
+
+
+def _line_count(state: InitScreenState, cursor: ScreenRow, width: int) -> int:
+    return _text(_confirm_rows(state, cursor, width)).count("\n") + 1
+
+
+def test_the_live_screen_at_80_columns_wraps_the_blurb_into_the_note_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _detected_state()
+    [frame] = _render_frames(monkeypatch, state, ScreenRow.WORKFLOW, start=80)
+    blurb = "full pipeline — spec, plan, implement, review, merge"
+    assert " ".join(line[44:] for line in frame.lines[1:3]) == blurb
+    assert frame.lines[2] == " " * 44 + "implement, review, merge"
+    laid_out = [line for line in _text(_confirm_rows(state, ScreenRow.WORKFLOW, 80))
+                .split("\n") if line.strip()]
+    assert frame.lines == laid_out
+    assert all(len(line) <= 80 for line in laid_out)
+
+
+def test_the_window_fits_every_line_when_started_narrower_than_80(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _long_value_state()
+    [frame] = _render_frames(monkeypatch, state, ScreenRow.WORKFLOW, start=60)
+    assert frame.window_height == _line_count(state, ScreenRow.WORKFLOW, 60)
+    assert frame.lines[-2] == " " * 42 + "pyproject.toml"
+    assert frame.lines[-1] == _HINT
+
+
+def test_the_window_grows_when_a_resize_wraps_more_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _long_value_state()
+    frames = _render_frames(
+        monkeypatch, state, ScreenRow.WORKFLOW, start=80, resizes=[60])
+    assert [frame.columns for frame in frames] == [80, 60]
+    resized = frames[-1]
+    assert resized.window_height == _line_count(state, ScreenRow.WORKFLOW, 60)
+    assert resized.window_height > _line_count(state, ScreenRow.WORKFLOW, 80)
+    assert resized.lines[-2] == " " * 42 + "pyproject.toml"
+    assert resized.lines[-1] == _HINT
+
+
+def test_the_rows_re_flow_to_the_live_width_after_a_resize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _render_frames(
+        monkeypatch, _detected_state(), ScreenRow.WORKFLOW, start=120, resizes=[80])
+    assert [frame.columns for frame in frames] == [120, 80]
+    wide, narrow = frames
+    assert wide.lines[1].endswith("full pipeline — spec, plan, implement, review, merge")
+    assert narrow.lines[1:3] == [
+        "> workflow            default               full pipeline — spec, plan,",
+        " " * 44 + "implement, review, merge",
+    ]
