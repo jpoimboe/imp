@@ -81,7 +81,8 @@ def test_plan_writer_and_reviewer_accept_recorded_scope_deviations() -> None:
     # Neither re-litigates a recorded scope deviation in the loop.
     assert ("plan-reviewer accepts a scope deviation recorded this way rather than "
             "re-litigating it in the loop") in writer
-    assert "ride to the" in reviewer
+    assert ("a scope-contradicting decision is not yours to block on, provided it "
+            "is recorded") in " ".join(reviewer.split())
 
 
 def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:

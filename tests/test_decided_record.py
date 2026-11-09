@@ -152,3 +152,16 @@ def test_reconciler_splits_on_the_human_decision_bar() -> None:
     assert bar < text.index(_record("reconciler"))
     assert (text.index(_record("reconciler"))
             < text.index("A mechanical conflict resolution gets no line"))
+
+
+def test_plan_reviewer_accepts_a_decided_line_as_recorded() -> None:
+    decisions = _flat(_section(_agent("plan-reviewer"), "## The Decisions section"))
+    assert ("- **Recorded** — a matching `— decided:` line (an already-made call: "
+            "listed in the quest summary, never ratified at the merge gate) or "
+            "`— needs-decision:` line (a genuine human call `finalize` walks at the "
+            "gate): do **not** raise Critical/Major.") in decisions
+    assert ("- **Unrecorded** — a scope contradiction with neither a `— decided:` "
+            "nor a `— needs-decision:` line (a sneak-by): flag it **Major**.") in decisions
+    # The old "every recorded deviation is ratified at the gate" framing is gone.
+    assert "ratifies it once" not in decisions
+    assert "ride to the merge gate" not in decisions

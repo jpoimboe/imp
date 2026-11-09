@@ -115,17 +115,18 @@ The plan may end with a `## Decisions` audit trail marked "*(decided during
 planning)*" / "*(user-confirmed during planning)*". This is expected plan format —
 do not flag it as a placeholder, and defer to it on approach (which library, how
 to structure). Its marker is not a reliable signal of user intent on scope — but a
-scope-contradicting decision is the human's call at the merge gate, not yours to
-block on, provided it is surfaced. So when a decision contradicts an explicit spec
-acceptance criterion — especially a scope boundary — verify it is recorded as a
-`— needs-decision:` Deferred Followup open item in `{{ quest.home }}/deferred.md`:
+scope-contradicting decision is not yours to block on, provided it is recorded. So
+when a decision contradicts an explicit spec acceptance criterion — especially a
+scope boundary — verify `{{ quest.home }}/deferred.md` carries a matching
+Deferred Followup line for it:
 
-- **Recorded** — the deviation rides to the merge gate as a `— needs-decision:`
-  open item: do **not** raise Critical/Major. Note it **non-blocking** and let it
-  ride to the merge gate, where `finalize` ratifies it once.
-- **Unrecorded** — a scope contradiction with no corresponding `— needs-decision:`
-  open item (a sneak-by): flag it **Major**. The missing open item is the real
-  defect — without it the human never ratifies the deviation at the gate.
+- **Recorded** — a matching `— decided:` line (an already-made call: listed in the
+  quest summary, never ratified at the merge gate) or `— needs-decision:` line (a
+  genuine human call `finalize` walks at the gate): do **not** raise Critical/Major.
+  Note it **non-blocking**.
+- **Unrecorded** — a scope contradiction with neither a `— decided:` nor a
+  `— needs-decision:` line (a sneak-by): flag it **Major**. The missing line is the
+  real defect — without it the human never sees the deviation.
 
 ## Severity & output
 

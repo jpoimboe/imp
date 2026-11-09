@@ -42,7 +42,7 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
     assert "in `{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
 
     prv = _imp("plan-reviewer.md")
-    assert "Deferred Followup open item in `{{ quest.home }}/deferred.md`:" in prv
+    assert "verify `{{ quest.home }}/deferred.md` carries a matching" in prv
 
 
 def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:
