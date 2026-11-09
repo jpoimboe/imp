@@ -53,7 +53,6 @@ def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
     assert conv_names == [
         "gap-check", "quest-review", "deferred-check", "deferred-sweep",
-        "converge-verify",
     ]
 
 
@@ -284,29 +283,19 @@ def test_batch_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None
 
 def test_converge_cleanup_steps_removed() -> None:
     names = [s.name for s in _wf().flat_steps()]
+    assert "converge-verify" not in names
     assert "cleanup-sweep" not in names
     assert "autosquash-resolve-sweep" not in names
 
 
 def test_deferred_check_skips_the_sweep_only_on_exit_one() -> None:
     """AC 10. Exit 1 — the script's sole "nothing to drain" signal — jumps to the
-    slow gate; every other exit code continues positionally into deferred-sweep."""
+    merge queue; every other exit code continues positionally into deferred-sweep."""
     step = _steps(_wf())["deferred-check"]
     assert step.kind == "script"
     assert step.command == "./scripts/deferred-check.sh"
     skip = evaluate_rules(step.rules, vars=_BASE_VARS, output={"exit": 1})
-    assert isinstance(skip.action, Goto) and skip.action.target == "converge-verify"
+    assert isinstance(skip.action, Goto) and skip.action.target == "wait-for-head"
     for code in (0, 2, 124, 127):
         m = evaluate_rules(step.rules, vars=_BASE_VARS, output={"exit": code})
         assert isinstance(m.action, Continue), code
-
-
-def test_slow_gate_triage_still_resumes_the_sweep_not_the_guard() -> None:
-    """AC 11. converge-verify's failure rule names deferred-sweep by name, so it
-    jumps over the guard: slow-gate triage always dispatches the agent."""
-    step = _steps(_wf())["converge-verify"]
-    fail = evaluate_rules(step.rules, vars=_BASE_VARS, output={"exit": 1})
-    assert isinstance(fail.action, Goto)
-    assert fail.action.target == "deferred-sweep"
-    assert fail.action.resume is True
-

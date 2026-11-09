@@ -161,10 +161,19 @@ def test_failed_archiving_does_not_abort_scan(
     assert not archive_read.is_archived(tmp_path, "brokn")
 
 
+def _parked(control: Path, cid: str) -> Path:
+    """A stranded `archived` home a pre-17 run left on the retired slow gate."""
+    home = _home(control, cid, "archived", step="converge-verify",
+                 resume_pending="converge-verify", step_label="waiting to test")
+    meta = json.loads((home / "quest.json").read_text())
+    (home / "quest.json").write_text(json.dumps({**meta, "workflow": "default"}))
+    return home
+
+
 def test_a_failed_archive_after_a_heal_still_hands_over_the_healed_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    home = _home(tmp_path, "hlth", "done")
+    home = _parked(tmp_path, "hlth")
 
     def _boom(control: Path, quest_id: str, **kw: object) -> None:
         raise RuntimeError("blob store unavailable")
@@ -172,7 +181,7 @@ def test_a_failed_archive_after_a_heal_still_hands_over_the_healed_bytes(
     monkeypatch.setattr(archive, "archive_quest", _boom)
     digest = next(h for h in make_store(tmp_path).scan_homes() if h.quest_id == "hlth")
     assert digest.state_json is not None
-    assert json.loads(digest.state_json)["status"] == "completed"
+    assert json.loads(digest.state_json)["step"] == "wait-for-head"
     assert digest.state_json == _state_bytes(home)
     assert not archive_read.is_archived(tmp_path, "hlth")
 
@@ -186,20 +195,22 @@ def _list(control: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     return buf.getvalue()
 
 
-def test_list_heals_and_archives_a_legacy_home_in_a_markerless_project(
+def test_list_heals_and_archives_a_parked_home_in_a_markerless_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_control(tmp_path)
-    home = _home(tmp_path, "nomg", "done")
+    home = _parked(tmp_path, "nomg")
     assert not archive.data_version_path(tmp_path).exists()
 
     _list(tmp_path, monkeypatch)
 
-    assert json.loads(_state_bytes(home))["status"] == "completed"
+    assert json.loads(_state_bytes(home))["step"] == "wait-for-head"
     rec = record.read_record(records_root(tmp_path), "nomg")
-    assert rec is not None and rec["resumable"] is False
-    assert rec["final_state"]["status"] == "completed"
-    assert archive.data_version_path(tmp_path).read_text().strip() == "16"
+    assert rec is not None and rec["resumable"] is True
+    assert rec["final_state"]["step"] == "wait-for-head"
+    assert rec["final_state"]["step_label"] == "waiting in merge queue"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
 
 
 def test_list_heals_a_home_a_stale_process_finished_after_the_upgrade(
@@ -208,30 +219,21 @@ def test_list_heals_a_home_a_stale_process_finished_after_the_upgrade(
     _seed_control(tmp_path)
     first = _home(tmp_path, "frst", "completed")
     _archive_stranded_home(tmp_path, "frst", first, _state_bytes(first))
-    assert archive.data_version_path(tmp_path).read_text().strip() == "16"
-    home = _home(tmp_path, "strg", "merged", merge_commit="c0ffee2")
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+    home = _parked(tmp_path, "strg")
 
-    out = _list(tmp_path, monkeypatch)
+    _list(tmp_path, monkeypatch)
 
-    assert json.loads(_state_bytes(home))["status"] == "completed"
+    assert json.loads(_state_bytes(home))["step"] == "wait-for-head"
     rec = record.read_record(records_root(tmp_path), "strg")
     assert rec is not None
-    assert rec["final_state"]["status"] == "completed"
-    assert rec["final_state"]["merge_commit"] == "c0ffee2"
-    block = out.split("completed:", 1)[1]
-    assert any(ln.lstrip().startswith("strg") for ln in block.splitlines())
+    assert rec["final_state"]["step"] == "wait-for-head"
+    assert rec["final_state"]["resume_pending"] is None
 
 
-def test_scan_hands_the_digest_the_healed_bytes(tmp_path: Path) -> None:
-    home = _home(tmp_path, "nomg", "done")
-    digest = next(h for h in make_store(tmp_path).scan_homes() if h.quest_id == "nomg")
-    assert digest.state_json is not None
-    assert digest.state_json == _state_bytes(home)
-    assert json.loads(digest.state_json)["status"] == "completed"
-
-
-def test_live_locked_legacy_home_is_not_rewritten(tmp_path: Path) -> None:
-    home = _home(tmp_path, "busy", "merged")
+def test_live_locked_parked_home_is_not_rewritten(tmp_path: Path) -> None:
+    home = _parked(tmp_path, "busy")
     (home / "lock").write_text(str(os.getpid()))
     before = _state_bytes(home)
 
@@ -243,10 +245,10 @@ def test_live_locked_legacy_home_is_not_rewritten(tmp_path: Path) -> None:
     assert not archive_read.is_archived(tmp_path, "busy")
 
 
-def test_an_unwritable_legacy_home_is_left_as_is(
+def test_an_unwritable_parked_home_is_left_as_is(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rdon = _home(tmp_path, "rdon", "done")
+    rdon = _parked(tmp_path, "rdon")
     _home(tmp_path, "fine", "completed")
     before = _state_bytes(rdon)
     target = rdon / "state" / "state.json"

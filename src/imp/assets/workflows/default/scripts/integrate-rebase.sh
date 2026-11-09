@@ -3,18 +3,19 @@
 # Copyright 2026 Josh Poimboeuf
 # At-head integration: the quest is head of its merge-queue lane, so the base
 # cannot move under it. Rebase the branch ONTO the base tip ONLY when the base
-# moved (non-empty base-side incoming diff); otherwise merge directly. Linear
-# history, no merge commit; the eventual branch->base merge is the only merge.
-# On the clean (0), conflict (6), and recovery (7) paths the bare pre-rebase fork
+# moved (non-empty base-side incoming diff); otherwise skip the rebase and merge
+# the branch as is. Linear history, no merge commit; the eventual branch->base
+# merge is the only merge.
+# On the clean (0), conflict (6), and unmoved-base (7) paths the bare pre-rebase fork
 # SHA P is printed on STDOUT (and nothing else) so the workflow can capture it into
 # the integration_fork var; the base tip B is always recoverable downstream as
 # `git rev-parse "${BASE}^{commit}"`. All human-readable status goes to STDERR.
 #   3  -> bad/missing base ref -> pause
 #   5  -> dirty entry tree / leftover rebase / git refused to start -> pause
-#   2  -> base unmoved AND tree already cleared for merge: merge directly, NO review, no fork SHA
-#   0  -> clean rebase (base moved, no conflict) -> integration-reviewer
+#   2  -> base unmoved AND this exact tree already cleared by an earlier slow pass or toleration: merge directly, NO review, no fork SHA
+#   0  -> clean rebase (base moved, no conflict) -> validate-memory -> integration-verify -> integration-reviewer
 #   6  -> rebase stopped on a conflict (left in progress) -> reconciler
-#   7  -> base unmoved but tree NOT cleared for merge -> integration-verify (recovery), prints fork SHA
+#   7  -> base unmoved, tree NOT cleared (the normal first pass: converge runs no slow gate) -> validate-memory -> integration-verify; reviewer skipped on green, prints fork SHA
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_here/lib-verify-clear.sh"
@@ -50,17 +51,17 @@ P=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP
 [ -n "$P" ] || { echo "cur_base_head is empty in quest.json; pausing" >&2; exit 5; }
 
 # Base-side incoming diff: what base added since the fork point P. Empty => base
-# has not moved relative to this branch -> merge directly, no integration/review,
-# no fork SHA. Leave cur_base_head untouched.
+# has not moved relative to this branch -> no rebase: a cleared tree merges directly
+# (2); an uncleared one goes to the slow verify (7). Leave cur_base_head untouched.
 if git diff --quiet "$P" "$B"; then
   tree=$(git rev-parse 'HEAD^{tree}') || { echo "could not resolve HEAD tree; pausing" >&2; exit 5; }
   if _cleared_for_merge "$tree" "$tolerated"; then
     echo "base ($BASE) unmoved; tree already verified/accepted; merging directly" >&2
-    exit 2 # -> summarizer (fast path, unchanged)
+    exit 2 # -> summarizer (fast path)
   fi
   echo "base ($BASE) unmoved but tree not verified/accepted; routing to integration-verify" >&2
   echo "$P"                                 # fork SHA for the downstream reviewer's diff
-  exit 7 # -> integration-verify (recovery)
+  exit 7 # -> validate-memory -> integration-verify (the normal first pass)
 fi
 
 # Base moved: rebase the branch onto base. rerere replays any recorded resolution;

@@ -109,8 +109,6 @@ def _route_lines(events: list[dict[str, Any]]) -> list[str]:
          "↩ checking plan coverage → writing plan for coverage gaps"),
         ("default", "quest-review", "task-lead", 0,
          "↩ reviewing entire diff → addressing code review feedback"),
-        ("default", "converge-verify", "deferred-sweep", 0,
-         "↩ running tests → triaging slow test failures"),
         ("default", "integration-reviewer", "reconciler", 0,
          "↩ reviewing merge → addressing integration review feedback"),
         ("default", "integration-reviewer", "reconciler", 1,
@@ -181,7 +179,8 @@ def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) ->
 
 def _merged_tree_gate_rule(exit_code: int) -> Rule:
     rule = evaluate_rules(_step("default", "integration-verify").rules,
-                          vars={}, output={"exit": exit_code}).rule
+                          vars={"integration_review_needed": True},
+                          output={"exit": exit_code}).rule
     assert rule is not None
     return rule
 
@@ -225,7 +224,6 @@ def test_passing_merged_tree_gate_reaches_the_reviewer_unlabeled(quest: Quest) -
         ("default", "spec-verify-commit", "spec-finalizer", "fixing the spec file"),
         ("default", "plan-verify-commit", "plan-writer", "writing the missing plan"),
         ("default", "gap-check", "plan-writer", "writing plan for coverage gaps"),
-        ("default", "converge-verify", "deferred-sweep", "triaging slow test failures"),
         ("default", "integration-verify", "integration-reviewer",
          "triaging slow test failures on the merged tree"),
         ("default", "validate-memory", "reconciler", "fixing memory files"),

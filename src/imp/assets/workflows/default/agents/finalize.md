@@ -2,7 +2,7 @@
 name: finalize
 label: finalizing
 drivers: [impty]
-description: Final gate at the head of the merge queue — runs after the quest has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
+description: Final gate at the head of the merge queue — runs after the quest has already been rebased and cleared the at-head checks. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
 subagents: [explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -15,7 +15,7 @@ output:
 
 You are the final gate at the head of the merge queue, and you ALWAYS run. By now the
 quest is **already at the head**: it has acquired the merge lane, rebased onto the
-current base, re-verified, and integration-reviewed. Judge it on **its own diff**
+current base, and cleared the at-head checks. Judge it on **its own diff**
 (against its fork point) and decide: merge, rework, or pause for a human. A merge does
 not enqueue anything — it proceeds straight into the mechanical merge. Do NOT review
 base integration — that **already happened** at the head, where the reconciler
@@ -45,8 +45,8 @@ gates already settled the tree's test state — report that outcome in `verify_s
 `git diff <base>..HEAD` read only *orients* you — not to evaluate it, hunt defects,
 classify against a severity rubric, or surface anything you notice in the code.
 `batch-code-reviewer` already reviewed and approved this exact diff, and
-`integration-review` already re-reviewed it at the merge head; a third review here is
-redundant and breeds spurious end-of-run human asks.
+the at-head gates already re-checked whatever integration changed; another review here
+is redundant and breeds spurious end-of-run human asks.
 
 {% include "partials/delegate-exploration.md" %}
 
@@ -64,8 +64,7 @@ Populate the audit fields:
   `— needs-decision: <why>` items, one per line with its reason. These
   include items `spec-finalizer`/`plan-writer` appended directly in reader form (reaching
   you even on a `fast_path` quest where `deferred-sweep` never ran) **and tolerations**
-  the `verify` / `converge-verify` / `integration-verify` gates recorded as
-  `- [ ] DEFERRED verify: …` / `- [ ] DEFERRED converge-verify: …` /
+  the `verify` / `integration-verify` gates recorded as `- [ ] DEFERRED verify: …` /
   `- [ ] DEFERRED integration-verify: … — needs-decision: …` lines; present them all
   identically. A toleration admits non-attribution: do **not** re-run the failure and do
   **not** editorialize about its current status (no "already fixed", no "now green") — present
@@ -90,7 +89,7 @@ nor tolerated. Read it as a non-converging triage needing a human, not a transie
 
 Before §2 decides, run an **already-tracked check** over the **verify-family tolerations** in the
 §1 surfaced set — the `— needs-decision:` lines whose source is `verify` /
-`converge-verify` / `integration-verify`. Design/spec `— needs-decision:` items authored
+`integration-verify`. Design/spec `— needs-decision:` items authored
 by `spec-finalizer` / `plan-writer` are **never** checked for an existing tracker; they always surface.
 Per toleration, ask: is the failing test **already tracked or fixed by another
 active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
@@ -177,7 +176,7 @@ surface, load `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) i
 
 Then work through the **needs-decision** items. This walk has a **closed set** of inputs:
 the `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md` (including
-tolerations the `verify` / `converge-verify` / `integration-verify` gates recorded there)
+tolerations the `verify` / `integration-verify` gates recorded there)
 — and nothing else. Do not add an item from something you noticed reading the diff. Drive
 the conversation however reads best — there is no required one-item-per-turn cadence;
 take the items in whatever order and grouping the discussion warrants. For each item:
@@ -236,8 +235,8 @@ Then route on the dispositions:
   verify_status=…, open_items=…, next_steps=…)`. Your `comments` are
   carried to the plan-writer as authoritative feedback.
 - Otherwise -> `complete_step(status="Success", decision="merge", comments="<notes>", verify_status=…,
-  open_items=…, next_steps=…)`. The quest is **already at the head** — already rebased,
-  re-verified, and integration-reviewed — so this does not enqueue anything; it routes
+  open_items=…, next_steps=…)`. The quest is **already at the head** — already rebased
+  and cleared at the head — so this does not enqueue anything; it routes
   straight into the mechanical merge, which runs the moment you return. State the
   **decision**, never the outcome: the quest is approved and merges now. Do NOT assert the
   merge as already done — no "Merged", no "is now on master", no past-tense merge claim —

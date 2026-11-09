@@ -194,8 +194,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(verdict="approve", findings=""),
             ]}],
             "deferred-sweep": [{"text": "sweep", "tools": [
-                done(converge_verify_tolerated=False,
-                     summary="no deferred items"),
+                done(summary="no deferred items"),
             ]}],
             "gap-check": [{"text": "check", "tools": [
                 done(more_plans=False, plan_total=1,

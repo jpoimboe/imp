@@ -137,7 +137,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep when there is anything to drain, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips spec finalization, spec review and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on disk and announces it; everything from `implement` onward is identical.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, and the once-per-quest deferred sweep when there is anything to drain. `integrate` then holds the merge lane while it rebases, runs the quest's one slow test run, reviews the integration (skipped when the base did not move, the slow run passed and nothing was reconciled), and ends at the human gate. An **express** quest (chosen at threshold) skips spec finalization, spec review and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on disk and announces it; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -256,12 +256,10 @@ a gap authors a corrective plan (the **supercycle**) beyond the outline, and a c
 latches `coverage_settled` so a later rework re-enters at `quest-review` and never
 re-runs the backstop. `quest-review` is the single quest-wide code review over
 `cur_base_head..HEAD`. `deferred-check` then guards the sweep — a script step, because a
-rule condition cannot read the filesystem: with nothing to drain it skips straight to the
-slow gate, and it fails closed, so any doubt dispatches. `deferred-sweep` therefore runs
-only when the quest's deferred list holds an open item, and drains the whole list once
-when it does. `converge-verify` runs the slow gate on the quest's own base; a failure
-resumes the sweep in fix-vs-tolerate triage — naming `deferred-sweep` directly, so triage
-jumps over the guard — and a toleration escapes forward so the gate never re-runs.
+rule condition cannot read the filesystem: with nothing to drain it skips straight to
+`wait-for-head`, and it fails closed, so any doubt dispatches. `deferred-sweep`
+therefore runs only when the quest's deferred list holds an open item, drains the whole
+list once when it does, and then hands the quest to the merge queue.
 
 ```mermaid
 flowchart TD
@@ -271,13 +269,9 @@ flowchart TD
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
   QR --> DC{{"deferred-check"}}
-  DC -->|"nothing to drain"| CV
+  DC -->|"nothing to drain"| out([→ wait-for-head])
   DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
-  DS -->|"slow gate tolerated"| out([→ wait-for-head])
-  DS --> CV{{"converge-verify · slow"}}
-  CV -. "fail → triage" .-> DS
-  CV -. timeout .-> HUMAN
-  CV --> out
+  DS --> out
 ```
 
 ### Phase integrate
@@ -288,10 +282,12 @@ ahead of other waiting verify gates. `integrate-rebase` routes on four outcomes:
 unmoved with the tree already cleared skips straight to `summarizer` with no re-review; a
 clean rebase or an uncleared tree goes to `validate-memory`; a conflict hands off to
 `reconciler`; a bad base ref or dirty tree pauses. `validate-memory` re-runs imp's own
-load-time memory validation over the merged tree. `integration-verify` routes to
-`integration-reviewer` on **both** pass and failure — a failure asks the reviewer to
-adjudicate fix-vs-tolerate rather than pausing. `check-cleared` then re-asks the shared
-clearance predicate at the merge door: a tree the slow gate never passed — an
+load-time memory validation over the merged tree. A failing `integration-verify` always
+goes to `integration-reviewer`, which adjudicates fix-vs-tolerate rather than pausing. A
+pass goes to `integration-reviewer` too, unless the base did not move and no reconciler
+fix landed since `integrate-rebase`: with no incoming diff to review, it goes straight
+to `check-cleared`. `check-cleared` then re-asks the shared clearance predicate at the
+merge door: a tree the slow gate never passed — an
 environmental failure the reviewer repaired, say — routes back to `integration-verify`
 instead of reaching the human. `finalize` is the human gate; a rework releases the merge
 lane on its way back to `plan-writer`.
@@ -322,6 +318,7 @@ flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
+  IV -->|"green, base unmoved, no reconciler fix"| CC
   IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}
@@ -360,7 +357,7 @@ name:
 | `gap-check` | `gap-check` | high | Once-per-quest coverage backstop: do the implemented plans cover the spec, or is a corrective plan needed. |
 | `batch-code-reviewer` | `quest-review` | high | The single quest-wide code review of the whole diff vs the spec; routes approve / task_gap. |
 | `deferred-sweep` | `deferred-sweep` | high | Drain the quest's deferred followups once; may dispatch coder + code-reviewer for fixes. |
-| `reconciler` | `reconciler` | high | Reconcile the branch against a moved base: resolve conflicts, fix what the base broke. |
+| `reconciler` | `reconciler` | high | Reconcile the branch at the merge head: resolve conflicts, fix what the base or the slow run broke. |
 | `integration-review` | `integration-reviewer` | high | At-head semantic integration review; classifies findings and routes back to the reconciler. |
 | `summarizer` | `summarizer` | medium | Write the quest's intent-level summary artifact. |
 | `finalize` | `finalize` | high | The human gate: merge / rework / pause. |
@@ -392,7 +389,7 @@ The columns list the **principal** writers and readers, not an exhaustive census
 | `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases, `imp show` |
 | `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |
 | `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` step (merge commit body), `imp show` |
-| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / `integration-verify` gates | `imp show` |
+| `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
 | `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
 

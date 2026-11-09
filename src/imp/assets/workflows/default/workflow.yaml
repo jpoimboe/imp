@@ -9,12 +9,12 @@ description: |
 # sole coverage backstop; latches coverage_settled) -> quest-review (the single
 # quest-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-check
 # (skips the sweep when there is nothing to drain) -> deferred-sweep (drains the
-# whole quest's Deferred list once) -> converge-verify (slow, on the
-# quest's own base). integrate then
-# acquires the merge lane, rebases, slow-re-verifies only when the base moved,
-# reviews the integration, check-cleared re-checks tree clearance (re-gates if
-# this tree was never verified), and ends at the human gate (summarizer ->
-# finalize) so the human blesses the locked, rebased, slow-tested state.
+# whole quest's Deferred list once). integrate then acquires the merge lane,
+# rebases, runs the quest's one slow verify, reviews the integration (skipped on
+# a green, base-unmoved pass with no reconciler fix), check-cleared re-checks
+# tree clearance (re-gates if this tree was never verified), and ends at the
+# human gate (summarizer -> finalize) so the human blesses the locked, rebased,
+# slow-tested state.
 # cleanup.sh folds fixups and stamps the Quest: trailer once, over
 # cur_base_head..HEAD.
 
@@ -25,6 +25,7 @@ vars:
   plan_review_notes:      {type: string, default: ""}
   integration_fork:       {type: string, default: ""}
   slow_verify_tolerated:  {type: bool, default: false}
+  integration_review_needed: {type: bool, default: true}
   plan_index:             {type: int, default: 1}
   plan_total:             {type: int, default: 1}
   task_total:             {type: int, default: 0}
@@ -191,8 +192,8 @@ phases:
           - {else: true, goto: gap-check}
 
   # ── converge: runs ONCE per quest (quest-local, NO lock). The coverage backstop,
-  # the single quest-wide code review, the deferred sweep when there is anything to
-  # drain, and the slow verify on the quest's own base.
+  # the single quest-wide code review, and the deferred sweep when there is anything
+  # to drain.
   - name: converge
     label: "convergence phase"
     steps:
@@ -224,14 +225,13 @@ phases:
 
       # Guard: the sweep is a high-tier agent dispatch, so skip it when the quest's
       # Deferred Followups list has nothing to drain. Fails closed — exit 1 is the
-      # only skip signal; any error exits 0 and dispatches. converge-verify's failure
-      # rule names deferred-sweep directly, so slow-gate triage jumps this guard.
+      # only skip signal; any error exits 0 and dispatches.
       - name: deferred-check
         show_label: false
         label: checking deferred tasks
         command: ./scripts/deferred-check.sh
         rules:
-          - {if: {exit: 1}, goto: converge-verify}
+          - {if: {exit: 1}, goto: wait-for-head}
           - {else: true, continue: true}
 
       - name: deferred-sweep
@@ -239,25 +239,11 @@ phases:
         tier: high
         label: sweeping deferred tasks
         rules:
-          - {if: {converge_verify_tolerated: true}, set: {slow_verify_tolerated: true}, goto: wait-for-head}
-          - {else: true, continue: true}
+          - {else: true, goto: wait-for-head}
 
-      # Slow tests on the quest's own base (off-lock). Clean -> enter integrate. A failure
-      # resumes deferred-sweep in slow-gate triage: a fix loops back through converge-verify;
-      # a "not ours" toleration emits converge_verify_tolerated
-      # -> wait-for-head (forward escape; this gate never re-runs).
-      - name: converge-verify
-        command: ./scripts/run-verify.sh slow
-        interruptible: true
-        acquire: test-lane
-        label: running tests
-        rules:
-          - {if: {exit: 0}, goto: wait-for-head}
-          - {if: {exit: 124}, pause: true}
-          - {else: true, resume: deferred-sweep, label: "triaging slow test failures", feedback: "The slow verify gate (converge-verify) failed. Triage fix-vs-tolerate:"}
-
-  # ── integrate: the FIFO merge queue (base lock from wait-for-head). Rebase, slow
-  # re-verify only when the base moved, review the integration, then the human gate.
+  # ── integrate: the FIFO merge queue (base lock from wait-for-head). Rebase, run
+  # the quest's one slow verify, review the integration (skipped on a green,
+  # base-unmoved pass with no reconciler fix), then the human gate.
   - name: integrate
     label: "integration phase"
     steps:
@@ -273,8 +259,8 @@ phases:
         command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: validate-memory}
-          - {if: {exit: 7}, set: {integration_fork: output.stdout}, goto: validate-memory}
+          - {if: {exit: 0}, set: {integration_fork: output.stdout, integration_review_needed: true}, goto: validate-memory}
+          - {if: {exit: 7}, set: {integration_fork: output.stdout, integration_review_needed: false}, goto: validate-memory}
           - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
 
@@ -284,7 +270,7 @@ phases:
         label: resolving merge conflicts
         rules:
           - {if: {stuck: true}, pause: true}
-          - {else: true, continue: true}
+          - {else: true, set: {integration_review_needed: true}, continue: true}
 
       # Post-rebase memory gate: re-runs imp's own load-time memory validation over
       # the fully-merged worktree (quest changes + latest base) against the rebased
@@ -305,6 +291,7 @@ phases:
         acquire: test-lane
         label: running tests
         rules:
+          - {if: {exit: 0, integration_review_needed: false}, goto: check-cleared}
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
           - {else: true, goto: integration-reviewer, label: "triaging slow test failures on the merged tree", feedback: "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"}

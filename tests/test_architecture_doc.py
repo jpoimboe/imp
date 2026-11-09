@@ -288,8 +288,8 @@ def test_operator_notes_document_archive_version_skew() -> None:
     assert ("a blob migration that changes an index-visible value must also bump "
             "the index schema version") in section
     # the index-visible rule carries its worked example
-    assert "the status it rewrites is the index's `status` column" in section
-    assert "`index._SCHEMA_VERSION` went 8 → 9" in section
+    assert "the step it rewrites is the index's `step` column" in section
+    assert "`index._SCHEMA_VERSION` went 9 → 10" in section
 
 
 def test_operator_notes_skew_says_an_active_board_match_ignores_the_archive() -> None:
@@ -330,31 +330,40 @@ def test_operator_notes_state_the_below_floor_refusal_and_its_cost() -> None:
             "already made") in section
     assert "The fix is to update every imp that writes here" not in section
     assert "Writes are deliberately unguarded" not in section
-    # one migration now ships, and it heals exactly the 15 -> 16 step
+    # one migration now ships, and it heals exactly the 16 -> 17 step
     assert "No blob migration ships in the tree" not in section
     assert "One blob migration ships in the tree" in section
-    assert "a marker reading 15 is upgraded to 16 in place" in section
+    assert "a marker reading 16 is upgraded to 17 in place" in section
     assert "`check_data_floor` runs the upgrade" in section
     assert ("the heal at the top of `ensure_current` runs it for the index-only "
             "readers") in section
-    assert "renames the stored statuses `merged` and `done` to `completed`" in section
-    # live homes the hop cannot reach are healed by the sweep
-    assert "is healed and archived by the stranded-home sweep" in section
-    # the retired 14 -> 15 and 13 -> 14 hops leave no narrative behind
+    assert ("moves every quest parked on `converge-verify`, the slow test step the "
+            "default workflow retired, to `wait-for-head`") in section
+    # the heal predicate: a workflow still shipping the step is left alone
+    assert ("has a `wait-for-head` step and no `converge-verify` step") in section
+    assert "a committed fork of `default` that still ships the step" in section
+    # live-locked homes, a stale pre-17 runner and the no-marker case fall to the sweep
+    assert "skips a live home whose lock is live" in section
+    assert "a project whose archive has no marker yet, where the upgrade never runs" in section
+    assert "is healed by the stranded-home sweep" in section
+    assert "A pre-17 imp refuses to archive into a v17 archive" in section
+    # the retired hops leave no narrative behind
+    assert "15 → 16" not in section
+    assert "renames the stored statuses" not in section
     assert "14 → 15" not in section
     assert "shelved" not in section
     assert "13 → 14" not in section
     assert "`commits` list" not in section
     # permanence still holds for every other below-floor version
-    assert ("for records written below any version but 15 the stranding is "
+    assert ("for records written below any version but 16 the stranding is "
             "permanent") in section
     # the constraint a future _DATA_VERSION bump has to honour names both hooks
     assert ("ship the migration and hang it off both hooks — `check_data_floor` "
             "for blob-backed access, and the heal at the top of `ensure_current` "
             "for index-only readers") in section
     assert "Hooking `ensure_current` instead never runs at all" not in section
-    # the one v15 archive the migration cannot heal, and its remedy
-    assert ("a v15 archive on a read-only archive root is refused rather than "
+    # the one v16 archive the migration cannot heal, and its remedy
+    assert ("a v16 archive on a read-only archive root is refused rather than "
             "healed") in section
     assert "make the archive root writable" in section
     assert "an archive below the blob floor is never reindexed" in section
@@ -435,7 +444,15 @@ def test_architecture_default_workflow_intro_is_the_six_phase_text() -> None:
         "runs once per outline plan, carrying **no** code review and **no** deferred "
         "sweep in the per-plan loop." in text
     )
-    assert "After the last plan of a multi-plan quest, `converge` runs **once**" in text
+    assert (
+        "After the last plan of a multi-plan quest, `converge` runs **once**: the coverage "
+        "backstop, the single quest-wide code review, and the once-per-quest deferred "
+        "sweep when there is anything to drain. `integrate` then holds the merge lane "
+        "while it rebases, runs the quest's one slow test run, reviews the integration "
+        "(skipped when the base did not move, the slow run passed and nothing was "
+        "reconciled), and ends at the human gate." in text
+    )
+    assert "a slow test gate on the quest's own base" not in text
     assert (
         "An **express** quest (chosen at threshold) skips spec finalization, spec review "
         "and the `plan-reviewer` gate — `spec-written` only checks the drafted spec is on "
@@ -532,13 +549,9 @@ CONVERGE_DIAGRAM = """flowchart TD
   QR -->|task_gap| totl([→ task-lead])
   QR -. Error .-> HUMAN([pause → human])
   QR --> DC{{"deferred-check"}}
-  DC -->|"nothing to drain"| CV
+  DC -->|"nothing to drain"| out([→ wait-for-head])
   DC --> DS["deferred-sweep<br/>coder + code-reviewer"]
-  DS -->|"slow gate tolerated"| out([→ wait-for-head])
-  DS --> CV{{"converge-verify · slow"}}
-  CV -. "fail → triage" .-> DS
-  CV -. timeout .-> HUMAN
-  CV --> out"""
+  DS --> out"""
 
 INTEGRATE_DIAGRAM = """flowchart TD
   in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
@@ -553,6 +566,7 @@ INTEGRATE_DIAGRAM = """flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
+  IV -->|"green, base unmoved, no reconciler fix"| CC
   IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}
@@ -593,6 +607,14 @@ def test_architecture_back_phase_diagrams_match_the_workflow() -> None:
         assert diagram in text, diagram.splitlines()[1]
 
 
+def test_architecture_converge_phase_runs_no_slow_gate() -> None:
+    text = ARCH.read_text()
+    section = text.split("### Phase converge", 1)[1].split("### Phase integrate", 1)[0]
+    flat = " ".join(section.split())
+    assert "with nothing to drain it skips straight to `wait-for-head`" in flat
+    assert "slow" not in flat
+
+
 def test_architecture_implement_phase_disclaims_the_moved_work() -> None:
     # the phase prose is hard-wrapped; compare against a whitespace-flattened copy
     flat = " ".join(ARCH.read_text().split())
@@ -612,6 +634,20 @@ def test_architecture_integrate_phase_prose_names_the_merge_door() -> None:
         "reviewer repaired, say — routes back to `integration-verify` instead of "
         "reaching the human." in flat
     )
+
+
+def test_architecture_integrate_prose_describes_the_review_skip() -> None:
+    flat = " ".join(_phase_section(ARCH.read_text(), "integrate").split())
+    assert "on **both** pass and failure" not in flat
+    assert (
+        "A failing `integration-verify` always goes to `integration-reviewer`, which "
+        "adjudicates fix-vs-tolerate rather than pausing."
+    ) in flat
+    assert (
+        "unless the base did not move and no reconciler fix landed since "
+        "`integrate-rebase`: with no incoming diff to review, it goes straight to "
+        "`check-cleared`."
+    ) in flat
 
 
 def test_architecture_names_no_retired_reviewer_verdict_field() -> None:
@@ -691,7 +727,8 @@ def test_architecture_agent_reference_drops_the_deleted_agents() -> None:
 
 def test_what_is_imp_lists_converge_between_implement_and_integrate() -> None:
     text = Path("docs/guide/what-is-imp.md").read_text()
-    assert "- **converge** — reviewing and testing everything built, once." in text
+    assert "- **converge** — reviewing everything built, once." in text
+    assert "- **integrate** — testing and landing the result." in text
     # user-facing copy uses only imp-canon nouns (docs/internals/conventions.md)
     # canon noun is "quest"; ban the noun sense only — "changes"/"unchanged" are fine
     assert not re.search(r"(?i)\b(?:a|the|this|each|per|your)\s+changes?\b", text)
@@ -791,8 +828,8 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
         "gap-check, batch-code-reviewer, deferred-sweep, summarizer, `imp show` |",
         "| `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` "
         "step (merge commit body), `imp show` |",
-        "| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / "
-        "`integration-verify` gates | `imp show` |",
+        "| `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates "
+        "| `imp show` |",
         "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |",
     ):
         assert row in text, row
@@ -815,7 +852,7 @@ def _default_workflow_section(text: str) -> str:
 
 def _undocumented_steps(step_names: list[str], section: str) -> list[str]:
     # `verify`/`finalize` are substrings of longer step names, so a bare-word check would
-    # be satisfied by `converge-verify`/`plan-finalized`; demand the backticked span
+    # be satisfied by `integration-verify`/`plan-finalized`; demand the backticked span
     ambiguous = {n for n in step_names for other in step_names if n != other and n in other}
     return [n for n in step_names if (f"`{n}`" if n in ambiguous else n) not in section]
 
@@ -836,8 +873,8 @@ def test_step_guard_flags_a_step_the_doc_never_mentions() -> None:
     assert _undocumented_steps([*steps, "brand-new-step"], section) == ["brand-new-step"]
     # the longer name never satisfies the shorter one's check
     assert _undocumented_steps(
-        ["verify", "converge-verify", "finalize", "plan-finalized"],
-        "converge-verify runs, then plan-finalized",
+        ["verify", "integration-verify", "finalize", "plan-finalized"],
+        "integration-verify runs, then plan-finalized",
     ) == ["verify", "finalize"]
 
 

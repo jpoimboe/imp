@@ -5293,9 +5293,9 @@ async def test_bounce_through_shipped_route_label_reaches_every_surface(tmp_path
     from imp.remote.drivers.telegram import step_divider
 
     shipped = load_workflow(bundled_workflow_dir("default"))
-    gate = next(s for s in shipped.flat_steps() if s.name == "converge-verify")
+    gate = next(s for s in shipped.flat_steps() if s.name == "validate-memory")
     route = next(r for r in gate.rules
-                 if isinstance(r.action, Goto) and r.action.target == "deferred-sweep")
+                 if isinstance(r.action, Goto) and r.action.target == "reconciler")
     label = json.dumps(route.label)
 
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -5325,7 +5325,7 @@ async def test_bounce_through_shipped_route_label_reaches_every_surface(tmp_path
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.PAUSED
 
     state = State.load(quest.state_dir)
-    assert (state.step, state.step_label) == ("lead", "triaging slow test failures")
+    assert (state.step, state.step_label) == ("lead", "fixing memory files")
 
     events = list(quest.event_log().read())
     bounce = next(i for i, e in enumerate(events) if e["type"] == "step_transition")
@@ -5336,8 +5336,8 @@ async def test_bounce_through_shipped_route_label_reaches_every_surface(tmp_path
         builder.add(event)
     activity = builder.current_activity()
     assert activity is not None
-    assert activity.verb == "triaging slow test failures"
-    assert step_divider(started) == "— triaging slow test failures —"
+    assert activity.verb == "fixing memory files"
+    assert step_divider(started) == "— fixing memory files —"
 
 
 @pytest.mark.anyio

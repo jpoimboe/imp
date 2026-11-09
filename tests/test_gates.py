@@ -354,8 +354,8 @@ def test_route_script_nonzero_composes_configured_feedback_with_diagnostics(
     tmp_path, resume: bool,
 ) -> None:
     """On a non-zero exit the configured feedback: leads and the gate's diagnostics follow —
-    the converge-verify and integration-verify triage agents key on the wording and reason
-    over the output they are forbidden to re-run, so both must arrive."""
+    the integration-verify triage agent keys on the wording and reasons over the output it
+    is forbidden to re-run, so both must arrive."""
     import types
 
     import anyio

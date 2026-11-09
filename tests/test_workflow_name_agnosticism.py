@@ -10,6 +10,8 @@ import imp
 from imp.assets import bundled_workflow_dir
 
 _PACKAGES = ("engine", "cli", "agents", "providers")
+# Retired with the 16 -> 17 archive hop: the heal must name the retired step and its successor.
+_EXEMPT = {"engine/archive/step_heal.py"}
 
 
 def _src_imp_root() -> Path:
@@ -56,6 +58,8 @@ def test_no_distinctive_workflow_names_hardcoded_in_packages() -> None:
     offenders: list[str] = []
     for pkg in _PACKAGES:
         for py in sorted((root / pkg).rglob("*.py")):
+            if py.relative_to(root).as_posix() in _EXEMPT:
+                continue
             for name in sorted(_hardcoded_names(py.read_text(encoding="utf-8"), blocklist)):
                 offenders.append(f"{py.relative_to(root)}: {name!r}")
     assert not offenders, (
@@ -72,3 +76,6 @@ def test_guard_blocklist_and_scanner_are_live() -> None:
     assert _hardcoded_names('STEPS = {"plan-reviewer": 1}\n', blocklist) == {"plan-reviewer"}
     # A hyphenated non-workflow string is not flagged.
     assert _hardcoded_names('x = "not-a-step"\n', blocklist) == set()
+    # An exemption cannot outlive the module it covers.
+    root = _src_imp_root()
+    assert all((root / rel).is_file() for rel in _EXEMPT), _EXEMPT

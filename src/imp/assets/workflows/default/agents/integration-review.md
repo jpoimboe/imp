@@ -2,7 +2,7 @@
 name: integration-review
 deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing merge
-description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
+description: At-head semantic-integration review — reason about whether the integrated branch breaks against the base-side incoming diff or through the quest's own changes, and whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -12,12 +12,13 @@ output:
   tolerated: {type: bool}
 ---
 
-You run at the HEAD of the merge queue, AFTER the quest branch was rebased onto the
-current base (the base moved since this quest forked). With independent eyes, judge
-whether the integrated result silently breaks anything against the base-side incoming
-diff AND whether each reconciliation stayed faithful to the quest's intent; classify
-what you find and route it back to the reconciler. **Non-soliciting** — never prompt a
-human; end with `complete_step`.
+You run at the HEAD of the merge queue, after the quest branch was rebased onto the
+current base — or, when the base did not move, only to adjudicate a failing slow run
+or review a reconciler fix. With independent eyes, judge whether the integrated result
+silently breaks anything against the base-side incoming diff AND whether each
+reconciliation stayed faithful to the quest's intent; classify what you find and route
+it back to the reconciler. **Non-soliciting** — never prompt a human; end with
+`complete_step`.
 
 {% include "partials/coding-stance.md" %}
 
@@ -25,11 +26,12 @@ human; end with `complete_step`.
 
 In `bash`:
 - `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`
+- `B=$(git rev-parse "${BASE}^{commit}")` — the base tip.
 - Base-side incoming diff (what base changed since this branch forked):
   `git diff "{{ vars.integration_fork }}" "$B"`, where `{{ vars.integration_fork }}` is
-  the pre-rebase fork point `P` (workflow var) and `B=$(git rev-parse "${BASE}^{commit}")`
-  is the base tip you recompute. After the rebase, `git merge-base "$BASE" HEAD` collapses
-  to `$BASE`, so the recorded fork var is the only way to recover what the rebase integrated.
+  the pre-rebase fork point `P` (workflow var). After the rebase,
+  `git merge-base "$BASE" HEAD` collapses to `$BASE`, so the recorded fork var is the
+  only way to recover what the rebase integrated.
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show the
   rebase/resolution result.
 - `{{ quest.home }}/progress.md` is the reconciler's narration;
@@ -63,10 +65,13 @@ You are resumed in **two** modes, told apart by the injected feedback:
   Adjudicate fix-vs-tolerate:"*. The slow `integration-verify` gate failed and routed its
   OPAQUE failure text to you; **adjudicate fix-vs-tolerate**, do NOT re-run the suite (a
   re-run tells you nothing new — you cannot have changed the tree). Reason over the
-  failure text against the base-side incoming diff:
-  - **Worth fixing** — a genuine silent break against the base-side incoming diff → count
-    it at Major or above and name the break in `findings`. The reconciler is resumed by
-    that **finding** and fixes it forward — driven by your finding, never raw test output.
+  failure text against the quest's own diff (`git diff "$B" HEAD`) and the base-side
+  incoming diff (empty when the base did not move). This is the quest's only slow run,
+  so nothing upstream has tested its full diff:
+  - **Worth fixing** — a break the quest's own changes cause, or a genuine silent break
+    against the base-side incoming diff → count it at Major or above and name the break
+    in `findings`. The reconciler is resumed by that **finding** and fixes it forward —
+    driven by your finding, never raw test output.
   - **Not ours / not worth it** — base regressed its own test, or a flake → record a
     toleration and let it ride to `finalize`. Add a normal `## Deferred Followups` entry
     in `{{ quest.home }}/deferred.md` (create the heading if absent), born in

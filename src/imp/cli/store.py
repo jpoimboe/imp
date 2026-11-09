@@ -155,7 +155,7 @@ class LocalStore:
 
     def scan_homes(self) -> list[HomeDigest]:
         from imp.cli.render_helpers import conversation_prose
-        from imp.engine.archive import heal_live_status
+        from imp.engine.archive.step_heal import heal_live_home
         from imp.engine.state import lock_is_live
 
         out: list[HomeDigest] = []
@@ -175,7 +175,7 @@ class LocalStore:
             if state_json is not None and not lock_live:
                 # one unhealable or unarchivable home must not abort the whole listing
                 with contextlib.suppress(Exception):
-                    state_json = heal_live_status(state_path) or state_json
+                    state_json = heal_live_home(self.control_root, cdir) or state_json
                     _archive_stranded_home(
                         self.control_root, quest_id, cdir, state_json)
             events_path = cdir / "events.jsonl"
