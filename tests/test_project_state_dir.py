@@ -12,7 +12,13 @@ import pytest
 
 from imp import paths
 from imp.engine.worktree import PreconditionError, find_control_root
-from imp.paths import claimed_state_dir, display_path, imp_home, project_state_dir
+from imp.paths import (
+    claimed_state_dir,
+    display_path,
+    imp_home,
+    project_state_dir,
+    resolve_state_dir,
+)
 from tests.conftest import _git, _init_repo
 
 
@@ -211,3 +217,40 @@ def test_claimed_state_dir_returns_the_override_verbatim_when_imp_state_dir_is_s
     assert claimed_state_dir(root) == override
     assert not override.exists()
 
+
+def test_resolve_state_dir_names_the_dir_a_claim_would_pick_and_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path, "widget")
+    assert resolve_state_dir(root) == (imp_home() / "projects" / "widget", False)
+    assert not (imp_home() / "projects").exists()
+    state = project_state_dir(root)
+    assert state == imp_home() / "projects" / "widget"
+    assert (state / "repo").read_text() == f"{root.resolve()}\n"
+
+
+def test_resolve_state_dir_skips_a_slug_another_root_owns(tmp_path: Path) -> None:
+    taken = imp_home() / "projects" / "widget"
+    taken.mkdir(parents=True)
+    (taken / "repo").write_text(f"{tmp_path / 'somewhere' / 'widget'}\n")
+    root = _repo(tmp_path, "widget")
+    assert resolve_state_dir(root) == (imp_home() / "projects" / "widget-2", False)
+    assert project_state_dir(root) == imp_home() / "projects" / "widget-2"
+
+
+def test_resolve_state_dir_reports_a_claimed_dir_as_claimed(tmp_path: Path) -> None:
+    root = _repo(tmp_path, "widget")
+    state = project_state_dir(root)
+    assert resolve_state_dir(root) == (state, True)
+
+
+def test_resolve_state_dir_reads_a_missing_override_as_unclaimed_and_creates_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override = tmp_path / "elsewhere" / "state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    root = _repo(tmp_path, "widget")
+    assert resolve_state_dir(root) == (override, False)
+    assert project_state_dir(root) == override
+    assert not override.exists()
+    assert not (imp_home() / "projects").exists()

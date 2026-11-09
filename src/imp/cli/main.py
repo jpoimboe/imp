@@ -40,7 +40,7 @@ from imp.cli.help_format import (
 from imp.cli.narrative import MANUAL_STOP_LABELS
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, OPENING_HINTS, Prompt
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir, resolve_state_dir
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -617,9 +617,9 @@ def _settings_root() -> Path:
 
 
 def _claiming_settings_root() -> Path | None:
-    """`_settings_root()` when it is a real project, else None. Resolving a state
-    directory CLAIMS a slug, and `_settings_root` falls back to the bare cwd
-    outside a project — which would squat a slug on every `imp` run anywhere."""
+    """`_settings_root()` when it is a real project, else None: state-dir lookups
+    key only to a real project, never to the bare cwd `_settings_root` falls
+    back to outside one."""
     root = _settings_root()
     return root if (root / "imp" / "config.yaml").is_file() else None
 
@@ -4316,8 +4316,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if explain is not None:
         render_explain(eff, explain, buf, color=color)
     else:
-        render_config(eff, buf,
-                      state_dir=None if root is None else project_state_dir(root),
+        state_dir, state_claimed = (None, True) if root is None else resolve_state_dir(root)
+        render_config(eff, buf, state_dir=state_dir, state_claimed=state_claimed,
                       color=color, show_all=args.all)
     _emit_human(buf.getvalue().splitlines())
     return 0
@@ -5149,9 +5149,11 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_cli_error(error)
                 return 2
         with contextlib.suppress(Exception):
-            if (claiming := _claiming_settings_root()) is not None:
-                install_stack_dumper(
-                    project_state_dir(claiming) / f"cli.{os.getpid()}.stack-dump.txt")
+            # An $IMP_STATE_DIR override reads as claimed before it exists.
+            if ((root := _claiming_settings_root()) is not None
+                    and (dump_dir := claimed_state_dir(root)) is not None
+                    and dump_dir.is_dir()):
+                install_stack_dumper(dump_dir / f"cli.{os.getpid()}.stack-dump.txt")
         result = _dispatch_meta(args, parser)
         if result is not None:
             # _dispatch_meta may have printed the overview/unknown-command

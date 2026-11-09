@@ -33,7 +33,7 @@ SHOTS="$REPORTS/$(date +%F)-imp-ux-shots"; mkdir -p "$SHOTS"; echo "$SHOTS"   # 
 WT=${TMPDIR:-/tmp}/imp-ux-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
 echo "$WT"                                # cwd for every imp run
-cd "$WT" && imp config >/dev/null         # claims this clone's state dir under ~/.imp/projects/
+cd "$WT" && imp config set --local theme dark  # claims this clone's state dir; the heredoc below overwrites the file
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
 test -f "$STATE/repo"                     # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'

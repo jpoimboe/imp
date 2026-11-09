@@ -41,7 +41,7 @@ Force a single provider via the **local** layer — this clone's own state direc
 operator names one):
 
 ```bash
-cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+cd "$WT" && imp config set --local theme ansi  # claims this clone's state dir; the heredoc below overwrites the file
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'

@@ -71,9 +71,10 @@ its own). Pair with `imp-knowledge` for the stable picture.
 - **Merged effective config** — run `imp config` for the resolved providers,
   tiers, `default-workflow`, and test/lint commands, each tagged in brackets with
   the layer it came from. Its first line, `project state:`, names this checkout's
-  state directory. Run from inside a worktree, it still reports the main
-  checkout's settings. Mind its blind spots: it omits `imp/memory/` and
-  `default-base` — read those from the files.
+  state directory. Before imp first claims it (starting a quest or a `--local`
+  write), that line ends `(not created yet)`. Run from inside a worktree, it
+  still reports the main checkout's settings. Mind its blind spots: it omits
+  `imp/memory/` and `default-base` — read those from the files.
 
 When the user asks what the standing instructions say, read the applicable
 `imp/memory/` files and quote them verbatim rather than paraphrasing.

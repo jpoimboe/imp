@@ -23,6 +23,7 @@ from imp.paths import imp_home, project_state_dir
 from imp.providers.effective import FLOOR_SRC, load_effective_config
 from imp.providers.paths import global_config_path
 from imp.remote.daemon.runner import read_pid, write_pid
+from tests._init_config import write_real_init_config
 from tests.conftest import _init_repo
 
 
@@ -107,6 +108,30 @@ def test_read_commands_outside_a_project_claim_no_state_dir(
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_repo(repo)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    with contextlib.suppress(SystemExit):
+        main(argv)
+
+    assert not (tmp_path / "imphome" / "projects").exists()
+
+
+@pytest.mark.parametrize("argv", [
+    ["--help"], ["--version"], ["help"], ["list"], ["search", "x"],
+    ["show", "nope"], ["log", "nope"], ["events", "nope"], ["config"],
+], ids=" ".join)
+def test_read_commands_in_an_unclaimed_project_claim_no_state_dir(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.main import main
+
+    for name in [k for k in os.environ if k.startswith("IMP_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_real_init_config(repo)
     monkeypatch.chdir(repo)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 

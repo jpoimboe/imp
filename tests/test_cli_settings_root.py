@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.paths import display_path, project_state_dir
+from imp.paths import display_path, imp_home
 from imp.providers import register_builtin_providers, resolve
 from tests._init_config import write_real_init_config
 from tests.conftest import _git
@@ -70,8 +70,10 @@ def test_config_from_a_worktree_shows_the_main_checkout(
     assert "branch lies" not in out   # the worktree's file is not a layer
     lines = out.splitlines()
     assert lines[0] == (
-        f"project state: {display_path(project_state_dir(control))}")
+        f"project state: {display_path(imp_home() / 'projects' / control.name)}"
+        " (not created yet)")
     assert lines[1] == ""
+    assert not (imp_home() / "projects").exists()
 
 
 def test_the_active_theme_comes_from_the_main_checkout(

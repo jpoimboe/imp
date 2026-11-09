@@ -419,6 +419,37 @@ def test_local_unset_does_nothing_when_config_is_absent(
     assert not (state / "config.yaml").exists()
 
 
+def test_project_and_global_sets_in_an_unclaimed_project_claim_nothing(
+    project: Path, imp_home: Path,
+) -> None:
+    assert main(["config", "set", "test_cmd_fast", "pytest -q"]) == 0
+    assert main(["config", "set", "theme", "dark"]) == 0
+
+    assert (imp_home / "config.yaml").read_text() == "theme: dark\n"
+    assert not (imp_home / "projects").exists()
+
+
+def test_local_unset_in_an_unclaimed_project_claims_nothing(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    label = display_path(imp_home / "projects" / "proj" / "config.yaml")
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+
+    assert capsys.readouterr().out == f"{label}: theme is not set (nothing to do)\n"
+    assert not (imp_home / "projects").exists()
+
+
+def test_local_set_in_an_unclaimed_project_claims_the_state_dir(
+    project: Path, imp_home: Path,
+) -> None:
+    assert main(["config", "set", "--local", "theme", "dark"]) == 0
+
+    state = imp_home / "projects" / "proj"
+    assert (state / "repo").read_text() == f"{project.resolve()}\n"
+    assert read_back(state / "config.yaml", ("theme",)) == "dark"
+
+
 def test_project_only_keys_reject_the_local_layer(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -448,7 +479,8 @@ def test_bare_config_and_explain_are_unchanged(
     out = capsys.readouterr().out
     assert "settings:" in out
     assert out.splitlines()[0] == (
-        f"project state: {display_path(project_state_dir(project))}")
+        f"project state: {display_path(imp_home / 'projects' / 'proj')} (not created yet)")
+    assert not (imp_home / "projects").exists()
 
     assert main(["config", "--explain", "high"]) == 0
     explained = capsys.readouterr().out
@@ -457,6 +489,17 @@ def test_bare_config_and_explain_are_unchanged(
 
     assert main(["config", "--all"]) == 0
     assert "tiers:" in capsys.readouterr().out
+
+
+def test_bare_config_in_a_claimed_project_shows_the_bare_state_line(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+
+    assert main(["config"]) == 0
+
+    assert capsys.readouterr().out.splitlines()[0] == (
+        f"project state: {display_path(state)}")
 
 
 @pytest.mark.parametrize("tier", ["bogus", ""])
@@ -491,7 +534,7 @@ def test_rejected_global_set_writes_no_config_and_accepted_set_leaves_no_scratch
     capsys.readouterr()
     assert imp_home.is_dir()
     assert (imp_home / "config.yaml").read_text() == "theme: light\n"
-    assert sorted(p.name for p in imp_home.iterdir()) == ["config.yaml", "projects"]
+    assert sorted(p.name for p in imp_home.iterdir()) == ["config.yaml"]
 
 
 def _config_action_parser(name: str) -> argparse.ArgumentParser:
