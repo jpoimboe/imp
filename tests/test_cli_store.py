@@ -161,7 +161,7 @@ def test_search_active_zone(tmp_path: Path) -> None:
                         merged_after=None)
     hits = store.search("darkmode", zones)
     assert [h.quest_id for h in hits] == ["liveone"]
-    assert hits[0].zone == "active"
+    assert (hits[0].status, hits[0].zone) == ("new", "active")
 
     assert store.search("no-such-text", zones) == []
 

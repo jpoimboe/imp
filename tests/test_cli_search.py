@@ -13,6 +13,7 @@ from imp.cli.main import _build_parser, _cmd_search, _command_names
 from imp.create import create_draft_quest
 from imp.engine import archive
 from imp.engine.quest import Quest
+from imp.engine.state import State
 from tests.conftest import _seed_control
 from tests.test_cli_search_helpers import _init_git_commits
 
@@ -137,7 +138,7 @@ def test_cmd_search_prints_matching_archived_change(tmp_path: Path, capsys) -> N
     assert rc == 0
     assert "darkid" in out and "Dark mode toggle" in out
     assert "loginid" not in out
-    assert "· history ·" in out                       # zone label, not status
+    assert "· abandoned ·" in out                     # real status, not zone
 
 
 _EVENTS_HINT = "Try another term, or `imp events search` to include tool calls and results."
@@ -182,7 +183,7 @@ def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) ->
     out = capsys.readouterr().out
     assert rc == 0
     assert "liveid" in out and "Dark mode inflight" in out
-    assert "· active ·" in out                         # in-flight is the active zone
+    assert "· new ·" in out                            # in-flight shows its status
 
 
 def test_cmd_search_includes_matching_backlog_change(tmp_path: Path, capsys) -> None:
@@ -227,7 +228,7 @@ def test_cmd_search_default_shows_excerpt_but_list_is_terse(tmp_path: Path, caps
     rc = _cmd_search(_ns("300s", list=True), tmp_path)
     list_out = capsys.readouterr().out
     assert rc == 0
-    assert "liveid" in list_out and "· active ·" in list_out
+    assert "liveid" in list_out and "· new ·" in list_out
     assert not any(ln.startswith("  ") for ln in list_out.splitlines())
 
 
@@ -261,7 +262,7 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
     rc = _cmd_search(_ns("dark", completed=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "alpha" in out and "· history ·" in out    # history zone tag from _search_list_line
+    assert "alpha" in out and "· completed ·" in out  # stored status from _search_list_line
     assert "beta" not in out                           # abandoned excluded
 
 
@@ -272,7 +273,7 @@ def test_cmd_search_archived_filters_to_archived(tmp_path: Path, capsys) -> None
     out = capsys.readouterr().out
     assert rc == 0
     assert "shlv" in out and "done" not in out
-    assert "· history ·" in out
+    assert "· archived ·" in out
 
 
 def test_cmd_search_merged_after_alone_enables_completed(tmp_path: Path, capsys) -> None:
@@ -395,7 +396,7 @@ def test_cmd_search_archived_shows_last_activity_age(tmp_path: Path, capsys) -> 
     rc = _cmd_search(_ns("dark"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert re.search(r"· history · \d", out)
+    assert re.search(r"· abandoned · \d", out)
 
 
 def test_cmd_search_default_includes_no_merge_completion(tmp_path: Path, capsys) -> None:
@@ -404,7 +405,7 @@ def test_cmd_search_default_includes_no_merge_completion(tmp_path: Path, capsys)
     out = capsys.readouterr().out
     assert rc == 0
     assert "dn1" in out
-    assert "· history ·" in out
+    assert "· completed ·" in out
 
 
 def test_cmd_search_missing_timestamp_renders_dash_age(tmp_path: Path, capsys) -> None:
@@ -412,7 +413,7 @@ def test_cmd_search_missing_timestamp_renders_dash_age(tmp_path: Path, capsys) -
     rc = _cmd_search(_ns("dark"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "· history · -" in out
+    assert "· abandoned · -" in out
 
 
 def test_cmd_search_output_is_plain_when_color_off(tmp_path: Path, capsys) -> None:
@@ -421,7 +422,7 @@ def test_cmd_search_output_is_plain_when_color_off(tmp_path: Path, capsys) -> No
     out = capsys.readouterr().out
     assert rc == 0
     assert "\x1b[" not in out
-    assert "· history ·" in out
+    assert "· abandoned ·" in out
 
 
 def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
@@ -431,7 +432,7 @@ def test_cmd_search_terse_is_headings_only(tmp_path: Path, capsys) -> None:
     lines = capsys.readouterr().out.splitlines()
     assert rc == 0
     assert len(lines) == 2
-    assert all(" · history · " in ln for ln in lines)
+    assert all(" · abandoned · " in ln for ln in lines)
 
 
 _OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
@@ -506,6 +507,48 @@ def test_cmd_search_names_titleless_quests_in_every_zone(
         assert _cmd_search(_ns("foo.py", list=listed), tmp_path) == 0
         heads = {ln.split(" · ")[0]: ln for ln in capsys.readouterr().out.splitlines()
                  if " · " in ln and not ln.startswith(" ")}
-        assert heads["act001"].startswith(f"act001 · {_OPENING} · active · ")
+        assert heads["act001"].startswith(f"act001 · {_OPENING} · new · ")
         assert heads["bk0001"].startswith("bk0001 · Brief foo.py one more body · backlog · ")
-        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · history · ")
+        assert heads["arc001"].startswith(f"arc001 · {_OPENING} · archived · ")
+
+
+def _paused(tmp_path: Path, quest_id: str, title: str) -> None:
+    q = Quest.create(tmp_path, title=title, quest_id=quest_id, base_branch="main")
+    st = State.load(q.state_dir)
+    st.status = "paused"
+    st.save(q.state_dir)
+
+
+def test_cmd_search_paused_quest_heading_reads_paused(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _seed_control(tmp_path)
+    _paused(tmp_path, "pzd001", "Dark paused work")
+    for listed in (False, True):
+        assert _cmd_search(_ns("dark", list=listed), tmp_path) == 0
+        out = capsys.readouterr().out
+        assert re.search(r"^pzd001 · Dark paused work · paused · \S+$", out, re.M), out
+        assert "· active ·" not in out
+
+
+def test_cmd_search_orders_active_then_backlog_then_history(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "should_use_color", lambda stream: False)
+    _seed_control(tmp_path)
+    # Recency runs opposite to zone order, so only the zone-major sort yields the expected order.
+    _archive_conv(tmp_path, "darkarc", "Dark archived", "2099-01-01T00:00:00+00:00")
+    draft = Quest.create_draft(
+        tmp_path, title="Dark backlog", quest_id="darkbk", base_branch="main",
+        origin="idea", seed_opening="Dark backlog")
+    draft.events_path.write_text(json.dumps({
+        "type": "step_started", "timestamp": "2026-06-12T00:00:00+00:00",
+        "payload": {}}) + "\n")
+    _paused(tmp_path, "darkact", "Dark active")
+    Quest.load(tmp_path, "darkact").events_path.write_text(json.dumps({
+        "type": "step_started", "timestamp": "2020-01-01T00:00:00+00:00",
+        "payload": {}}) + "\n")
+    assert _cmd_search(_ns("dark", list=True), tmp_path) == 0
+    heads = [ln.split(" · ")[0] for ln in capsys.readouterr().out.splitlines() if ln]
+    assert heads == ["darkact", "darkbk", "darkarc"]

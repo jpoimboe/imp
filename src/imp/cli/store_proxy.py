@@ -101,7 +101,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
 
 
 def _hit_to_wire(h: SearchHit) -> dict[str, Any]:
-    return {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
+    return {"quest_id": h.quest_id, "title": h.title, "status": h.status,
             "content": h.content, "last_activity": h.last_activity, "intent": h.intent}
 
 

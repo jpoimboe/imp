@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from imp.cli.main import _selected_search
 from imp.cli.store import (
     HomeDigest,
     Readiness,
+    SearchHit,
     SearchZones,
     _merged_after,
     _search_active,
     _search_archived,
     _search_backlog,
+    zone_of,
 )
 from imp.engine import archive
 from imp.engine.quest import Quest
+from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
@@ -96,7 +103,7 @@ def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
                   quest_id="liveid", base_branch="main")
     hits = _search_active(tmp_path, "dark")
     assert [h.quest_id for h in hits] == ["liveid"]
-    assert hits[0].zone == "active"
+    assert (hits[0].status, hits[0].zone) == ("new", "active")
     assert hits[0].title == "Dark mode inflight"
 
 
@@ -108,7 +115,7 @@ def test_search_backlog_matches_seed_opening_body(tmp_path: Path) -> None:
     # Term lives only in the description body, not the id or title.
     hits = _search_backlog(tmp_path, "test_widget_timeout")
     assert [h.quest_id for h in hits] == ["bk1"]
-    assert hits[0].zone == "backlog"
+    assert (hits[0].status, hits[0].zone) == ("backlog", "backlog")
     assert "test_widget_timeout" in hits[0].content
 
 
@@ -125,7 +132,7 @@ def test_search_archived_filters_by_disposition_and_labels_zone(tmp_path: Path) 
     _archive(tmp_path, "arcaband", "Dark archived abandoned", status="abandoned")
     hits = _search_archived(tmp_path, "dark", {"abandoned"}, None)
     assert [h.quest_id for h in hits] == ["arcaband"]   # completed excluded by status
-    assert hits[0].zone == "history"
+    assert (hits[0].status, hits[0].zone) == ("abandoned", "history")
 
 
 def _user_msg_line(text: str) -> str:
@@ -152,7 +159,7 @@ def test_search_active_matches_conversation_prose_only(tmp_path: Path) -> None:
     # "300s" is in neither the id nor the title — only the conversation prose.
     hits = _search_active(tmp_path, "300s")
     assert [h.quest_id for h in hits] == ["liveid"]
-    assert hits[0].zone == "active"
+    assert (hits[0].status, hits[0].zone) == ("new", "active")
     assert "300s" in hits[0].content
 
 
@@ -235,3 +242,54 @@ def test_search_backlog_takes_the_body_from_the_store_scan(
     assert [h.quest_id for h in hits] == ["bk9"]
     assert "test_widget_timeout" in hits[0].content
     assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
+
+
+def _inflight(tmp_path: Path, quest_id: str, status: str = "new", *,
+              waiting: bool = False, lock_live: bool = False) -> None:
+    q = Quest.create(tmp_path, title=f"Dark {quest_id}", quest_id=quest_id,
+                     base_branch="main")
+    st = State.load(q.state_dir)
+    st.status = status
+    if waiting:
+        st.halt_condition = "waiting"
+    st.save(q.state_dir)
+    if lock_live:
+        (q.quest_dir / "lock").write_text(str(os.getpid()))
+
+
+@pytest.mark.parametrize(("stored", "kw", "shown"), [
+    ("paused", {}, "paused"),
+    ("merge_blocked", {}, "merge_blocked"),
+    ("error", {}, "error"),
+    ("new", {"lock_live": True}, "running"),
+    ("paused", {"waiting": True, "lock_live": True}, "waiting"),
+])
+def test_search_active_hit_carries_resolved_status(
+        tmp_path: Path, stored: str, kw: dict, shown: str) -> None:
+    _seed_control(tmp_path)
+    _inflight(tmp_path, "darkq1", stored, **kw)
+    hits = _search_active(tmp_path, "dark")
+    assert [(h.quest_id, h.status, h.zone) for h in hits] == [("darkq1", shown, "active")]
+
+
+@pytest.mark.parametrize("status", ["completed", "abandoned", "archived"])
+def test_search_archived_hit_carries_stored_status(tmp_path: Path, status: str) -> None:
+    _archive(tmp_path, "darkarc", "Dark archived", status=status)
+    hits = _search_archived(tmp_path, "dark", {"completed", "abandoned", "archived"}, None)
+    assert [(h.status, h.zone) for h in hits] == [(status, "history")]
+
+
+@pytest.mark.parametrize(("status", "zone"), [
+    ("running", "active"), ("waiting", "active"), ("paused", "active"),
+    ("error", "active"), ("new", "active"), ("merge_blocked", "active"),
+    ("backlog", "backlog"),
+    ("completed", "history"), ("abandoned", "history"), ("archived", "history"),
+])
+def test_search_hit_zone_is_derived_from_status(status: str, zone: str) -> None:
+    assert zone_of(status) == zone
+    assert SearchHit("q", "T", status, "", None, None).zone == zone
+
+
+def test_search_hit_stores_no_zone_field() -> None:
+    names = [f.name for f in dataclasses.fields(SearchHit)]
+    assert "zone" not in names and "status" in names

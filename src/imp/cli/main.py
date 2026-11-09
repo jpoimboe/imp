@@ -4119,11 +4119,11 @@ def _render_search_hit(
 def _search_list_line(
     hit: SearchHit, *, query: str, now: datetime, color: bool,
 ) -> str:
-    """Spine heading id · name · zone · age; query highlighted; name dropped when absent."""
+    """Spine heading id · name · status · age; query highlighted; name dropped when absent."""
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
     age = quest_row.relative_age(hit.last_activity, now=now)
-    tail = pal.ansi(f"{hit.zone} · {age}", "dim", enabled=color)
+    tail = pal.ansi(f"{quest_row.display_word(hit.status)} · {age}", "dim", enabled=color)
     name = _search_name_segment(hit.title, hit.intent, query, color=color)
     if name is None:
         return f"{id_seg} · {tail}"
