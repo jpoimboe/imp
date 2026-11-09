@@ -81,7 +81,7 @@ async def test_fatal_error_pause_writes_error_halt(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_awaiting_user_park_writes_clean_halt(tmp_path: Path) -> None:
+async def test_question_park_keeps_the_waiting_marker(tmp_path: Path) -> None:
     quest = _seed_single_agent(tmp_path)
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
@@ -96,7 +96,8 @@ async def test_awaiting_user_park_writes_clean_halt(tmp_path: Path) -> None:
     _register(_AwaitingRunner)
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    assert State.load(quest.state_dir).halt_condition is None
+    st = State.load(quest.state_dir)
+    assert (st.status, st.halt_condition) == ("paused", "waiting")
 
 
 @pytest.mark.anyio
@@ -117,7 +118,8 @@ async def test_ctrl_d_interrupt_writes_clean_halt(tmp_path: Path) -> None:
     _register(_InterruptingRunner)
     result = await run_quest(quest, on_event=lambda _e: None, coordinator=coord)
     assert result is RunResult.PAUSED
-    assert State.load(quest.state_dir).halt_condition is None
+    st = State.load(quest.state_dir)
+    assert (st.status, st.halt_condition) == ("paused", None)
 
 
 @pytest.mark.anyio
@@ -175,3 +177,58 @@ async def test_resume_entry_clears_stale_halt_before_work(tmp_path: Path) -> Non
     _register(_PeekRunner)
     await run_quest(quest, on_event=lambda _e: None)
     assert seen == [None]
+
+
+@pytest.mark.anyio
+async def test_leave_at_a_question_gate_then_disconnect_clears_the_marker(
+    tmp_path: Path,
+) -> None:
+    """Ctrl-D at an idle question gate only latches the interrupt; the gate unwinds
+    when the client disconnects (AwaitingUserInput, interrupt=False) and
+    drive_invocation upgrades it to an interrupt via coordinator.interrupted."""
+    quest = _seed_single_agent(tmp_path)
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    coord = InterruptCoordinator()
+
+    class _LeaveThenDisconnectRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="ctrl-d")
+            raise AwaitingUserInput("Which DB should I use?", interrupt=False)
+            yield  # unreachable — makes run() an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    _register(_LeaveThenDisconnectRunner)
+    result = await run_quest(quest, on_event=lambda _e: None, coordinator=coord)
+    assert result is RunResult.PAUSED
+    st = State.load(quest.state_dir)
+    assert (st.status, st.halt_condition) == ("paused", None)
+
+
+@pytest.mark.anyio
+async def test_side_effect_pause_at_a_question_gate_clears_the_marker(
+    tmp_path: Path,
+) -> None:
+    """A /compact at the question gate yields reason=awaiting_user but carries an
+    interrupt_reason, so it is not a question park."""
+    quest = _seed_single_agent(tmp_path)
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    coord = InterruptCoordinator()
+
+    class _CompactRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="compact")
+            raise AwaitingUserInput("nothing more to do", interrupt=False)
+            yield  # unreachable — makes run() an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    _register(_CompactRunner)
+    result = await run_quest(quest, on_event=lambda _e: None, coordinator=coord)
+    assert result is RunResult.PAUSED
+    st = State.load(quest.state_dir)
+    assert (st.status, st.halt_condition) == ("paused", None)

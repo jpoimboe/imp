@@ -39,10 +39,9 @@ Status = Literal[
     "new", "paused", "merge_blocked", "completed", "archived", "abandoned", "error"
 ]
 
-# Durable live-gate marker written to state.json. `waiting` = live, parked at a
-# human input gate; None = working / clean at rest. A not-live failure halt is now
-# the first-class stored status `error` (not a halt-condition). Governed by lock
-# liveness like `lock`.
+# Durable gate marker written to state.json. `waiting` = parked at a human input
+# gate, either live or persisted through a question pause; None = working / clean
+# at rest. A not-live failure halt is the stored status `error`, not a halt-condition.
 HaltCondition = Literal["waiting"]
 
 # workflow_paused reasons that are NOT failures: a bare-turn-end yield, a lane
@@ -166,9 +165,9 @@ class State:
     # here (restored into the coordinator on resume, cleared at step advance).
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
     started_at: str | None = None  # durable: ISO-8601 UTC instant work began; None until first run
-    # Durable halt/gate condition (state.json). Written eagerly at a human gate
-    # (waiting), at pause (error vs clean), cleared when work resumes and on
-    # normal step advance. Staleness is governed by lock liveness like `lock`.
+    # Durable gate condition (state.json). Written eagerly at a human gate
+    # (waiting), kept through a question pause, cleared by every other pause,
+    # when work resumes, and on normal step advance.
     halt_condition: HaltCondition | None = None
     has_started: bool = False  # durable: True once >=1 step has begun executing
     completion_pending: bool = False  # §3: navigation ran off the end under an
