@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, NamedTuple
 
+import pyte
 import pytest
 import yaml
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.output.vt100 import Vt100_Output
 
 from imp.assets import bundled_assets_dir
 from imp.cli.init import (
@@ -25,8 +30,11 @@ from imp.cli.init import (
     _default_row_prompt,
     _edit_default,
     _interactive_confirm_screen,
+    _row_cells,
     _row_prompt_message,
+    _run_confirm_app,
     _screen_state_from_detection,
+    _ScreenAction,
     _workflow_blurb,
 )
 from imp.cli.pythonpath_detect import ImportRoots
@@ -35,6 +43,10 @@ from imp.cli.verify_detect import DetectedTestCommand
 
 _WORKFLOWS = ["default", "minimal"]
 _LABELS = ["workflow", "branch", "tests", "worktree setup", "Python import path"]
+_HEADER = "Here's how imp will set up this project:"
+_HINT = "↑↓ move · space change · enter accept · esc cancel"
+_WIDE = 120  # no row of any state these tests build wraps at this width
+_LONG_SETUP = "uv sync --all-extras --frozen && pre-commit install --install-hooks"
 
 
 def _detected_state() -> InitScreenState:
@@ -45,6 +57,18 @@ def _detected_state() -> InitScreenState:
         setup=DetectedSetupCommand("uv sync --all-extras", "from uv.lock"),
         roots=ImportRoots(["src"], "from pyproject.toml"),
     )
+
+
+def _long_value_state() -> InitScreenState:
+    return replace(_detected_state(), worktree_setup=_LONG_SETUP, setup_provenance="you set this")
+
+
+def _text(rows: list[tuple[str, str]]) -> str:
+    return "".join(text for _style, text in rows)
+
+
+def _squash(text: str) -> str:
+    return "".join(text.split())
 
 
 def test_state_from_detection_keeps_each_value_with_its_own_provenance() -> None:
@@ -109,13 +133,13 @@ def test_cycle_workflow_advances_wraps_and_touches_nothing_else() -> None:
 
 
 def _body(state: InitScreenState, cursor: ScreenRow) -> list[str]:
-    """Each row's text with the two-character caret/gutter prefix removed."""
+    """Each row's single line at a width where nothing wraps, caret/gutter removed."""
     return [text[2:].rstrip("\n")
-            for _style, text in _confirm_rows(state, cursor)[2:-1]]
+            for _style, text in _confirm_rows(state, cursor, _WIDE)[2:-1]]
 
 
 def test_confirm_rows_header_and_hint_are_verbatim() -> None:
-    rows = _confirm_rows(_detected_state(), ScreenRow.WORKFLOW)
+    rows = _confirm_rows(_detected_state(), ScreenRow.WORKFLOW, 80)
     # screen-owned: erased with the screen, so it never renders flush against splash or re-draws
     assert rows[0] == ("", "\n")
     assert rows[1] == ("bold", "Here's how imp will set up this project:\n\n")
@@ -149,13 +173,115 @@ def test_confirm_rows_pad_each_column_to_its_widest_entry() -> None:
 
 
 def test_confirm_rows_mark_the_cursor_row_with_a_render_safe_caret() -> None:
-    rows = _confirm_rows(_detected_state(), ScreenRow.TESTS)
+    rows = _confirm_rows(_detected_state(), ScreenRow.TESTS, _WIDE)
     styles = [style for style, _text in rows[2:-1]]
     texts = [text for _style, text in rows[2:-1]]
     assert styles == ["", "", "ansiyellow bold", "", ""]
     assert texts[2].startswith("> ")
     assert "❯" not in texts[2]
     assert all(t.startswith("  ") for i, t in enumerate(texts) if i != 2)
+
+
+def test_confirm_rows_wrap_the_workflow_blurb_in_its_note_column_at_80() -> None:
+    state = replace(_detected_state(), branch="main", branch_provenance="current branch")
+    rows = _confirm_rows(state, ScreenRow.WORKFLOW, 80)
+    assert _text(rows) == "\n" + _HEADER + "\n\n" + "".join(f"{line}\n" for line in [
+        "> workflow            default               full pipeline — spec, plan,",
+        " " * 44 + "implement, review, merge",
+        "  branch              main                  current branch",
+        "  tests               make check            from Makefile",
+        "  worktree setup      uv sync --all-extras  from uv.lock",
+        "  Python import path  src                   from pyproject.toml",
+    ]) + "\n" + _HINT
+
+
+def test_confirm_rows_wrap_a_long_value_within_its_own_column_at_80() -> None:
+    # Every note stays on screen; the value column caps at 32 and its continuation
+    # lines start at the value column; --install-hooks is never split at its hyphen.
+    state = replace(_long_value_state(), branch="main", branch_provenance="current branch")
+    rows = _confirm_rows(state, ScreenRow.WORKTREE_SETUP, 80)
+    assert _text(rows) == "\n" + _HEADER + "\n\n" + "".join(f"{line}\n" for line in [
+        "  workflow            default                           full pipeline — spec,",
+        " " * 56 + "plan, implement, review,",
+        " " * 56 + "merge",
+        "  branch              main                              current branch",
+        "  tests               make check                        from Makefile",
+        "> worktree setup      uv sync --all-extras --frozen &&  you set this",
+        " " * 22 + "pre-commit install",
+        " " * 22 + "--install-hooks",
+        "  Python import path  src                               from pyproject.toml",
+    ]) + "\n" + _HINT
+
+
+_VALUE_COL = 22  # 2-char gutter + the widest label (18) + a 2-char gap
+
+
+def _read_back(rows: list[tuple[str, str]], value_w: int) -> list[tuple[str, str]]:
+    """Each row's (value, note), whitespace-squashed, read off the rendered grid."""
+    note_col = _VALUE_COL + value_w + 2
+    read: list[tuple[str, str]] = []
+    for _style, line in rows[2:-1]:
+        if line[2:_VALUE_COL].strip():
+            read.append(("", ""))
+        value, note = read[-1]
+        read[-1] = (value + _squash(line[_VALUE_COL:note_col]), note + _squash(line[note_col:]))
+    return read
+
+
+def _squashed_cells(state: InitScreenState) -> list[tuple[str, str]]:
+    cells = _row_cells(state)
+    return [(_squash(cells[row][1]), _squash(cells[row][2])) for row in ScreenRow]
+
+
+@pytest.mark.parametrize(("state", "width", "value_w"), [
+    (_detected_state(), 80, 20),
+    (_detected_state(), 60, 18),
+    (_detected_state(), 40, 8),
+    (_long_value_state(), 80, 32),
+    (_long_value_state(), 60, 18),
+    (_long_value_state(), 40, 8),
+])
+def test_confirm_rows_wrap_within_the_width_and_drop_nothing(
+    state: InitScreenState, width: int, value_w: int,
+) -> None:
+    rows = _confirm_rows(state, ScreenRow.WORKFLOW, width)
+    assert all(len(line) <= width for line in _text(rows).split("\n"))
+    assert _read_back(rows, value_w) == _squashed_cells(state)
+
+
+@pytest.mark.parametrize("state", [_detected_state(), _long_value_state()])
+def test_confirm_rows_at_a_tiny_width_still_show_every_character(
+    state: InitScreenState,
+) -> None:
+    assert _read_back(_confirm_rows(state, ScreenRow.WORKFLOW, 10), 1) == (
+        _squashed_cells(state))
+
+
+def test_confirm_rows_wrap_only_once_the_columns_overflow_the_width() -> None:
+    state = _detected_state()
+    cells = _row_cells(state).values()
+    fit = 6 + sum(max(len(cell[i]) for cell in cells) for i in range(3))
+    assert len(_confirm_rows(state, ScreenRow.WORKFLOW, fit)[2:-1]) == len(ScreenRow)
+    assert len(_confirm_rows(state, ScreenRow.WORKFLOW, fit - 1)[2:-1]) > len(ScreenRow)
+
+
+def test_a_wrapped_cursor_row_is_highlighted_on_every_line_with_one_caret() -> None:
+    rows = _confirm_rows(_long_value_state(), ScreenRow.WORKTREE_SETUP, 80)[2:-1]
+    assert [style for style, _line in rows] == (
+        [""] * 5 + ["ansiyellow bold"] * 3 + [""])
+    assert rows[5][1].startswith("> worktree setup")
+    assert all(text.startswith("  ") for _style, text in rows[6:8])
+
+
+def test_header_and_hint_word_wrap_when_the_terminal_is_narrower() -> None:
+    rows = _confirm_rows(_detected_state(), ScreenRow.WORKFLOW, 30)
+    assert rows[1][0] == "bold" and rows[-1][0] == "ansibrightblack"
+    header = rows[1][1].removesuffix("\n\n").split("\n")
+    hint = rows[-1][1].removeprefix("\n").split("\n")
+    for lines, original in ((header, _HEADER), (hint, _HINT)):
+        assert len(lines) > 1
+        assert all(len(line) <= 30 for line in lines)
+        assert " ".join(lines).split() == original.split()
 
 
 def test_confirm_rows_show_none_when_no_command_or_roots_were_detected() -> None:
@@ -514,4 +640,124 @@ def test_the_worktree_setup_row_sits_between_tests_and_import_root() -> None:
         ScreenRow.WORKTREE_SETUP, ScreenRow.IMPORT_ROOT]
 
 
+class _Terminal:
+    """A pyte screen behind the write/flush stream a Vt100_Output draws into."""
 
+    def __init__(self, columns: int) -> None:
+        self.size = Size(rows=40, columns=columns)
+        self.screen = pyte.Screen(columns, self.size.rows)
+        self._stream = pyte.Stream(self.screen)
+
+    def write(self, data: str) -> None:
+        self._stream.feed(data)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def resize(self, columns: int) -> None:
+        self.size = Size(rows=self.size.rows, columns=columns)
+        self.screen.resize(self.size.rows, columns)
+
+
+class _Frame(NamedTuple):
+    columns: int
+    window_height: int
+    lines: list[str]  # the screen's non-blank lines, right-stripped
+
+
+def _render_frames(
+    monkeypatch: pytest.MonkeyPatch, state: InitScreenState, cursor: ScreenRow,
+    *, start: int, resizes: Sequence[int] = (),
+) -> list[_Frame]:
+    """Run the confirm screen on a `start`-column terminal and snapshot every render
+    while the app is live (it erases itself on exit), resizing to each of `resizes`
+    in turn before accepting."""
+    import prompt_toolkit as pt
+
+    term = _Terminal(start)
+    pending = list(resizes)
+    frames: list[_Frame] = []
+    real_application = pt.Application
+
+    def _snapshot(app: Any) -> None:
+        if app.is_done:
+            return  # the erase-on-exit pass
+        window = next(app.layout.find_all_windows())
+        frames.append(_Frame(
+            term.size.columns, window.render_info.window_height,
+            [line.rstrip() for line in term.screen.display if line.strip()]))
+        if pending:
+            term.resize(pending.pop(0))
+            app._on_resize()  # what SIGWINCH triggers
+        else:
+            app.exit(result=_ScreenAction.ACCEPT)
+
+    def spy(*args: object, **kwargs: object) -> object:
+        app = real_application(*args, **kwargs)
+        app.after_render += _snapshot
+        return app
+
+    monkeypatch.setattr(pt, "Application", spy)
+    output = Vt100_Output(term, lambda: term.size, enable_cpr=False)
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=output):
+        _run_confirm_app(state, cursor, _WORKFLOWS)
+    return frames
+
+
+def _line_count(state: InitScreenState, cursor: ScreenRow, width: int) -> int:
+    return _text(_confirm_rows(state, cursor, width)).count("\n") + 1
+
+
+def test_the_live_screen_at_80_columns_wraps_the_blurb_into_the_note_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _detected_state()
+    [frame] = _render_frames(monkeypatch, state, ScreenRow.WORKFLOW, start=80)
+    blurb = "full pipeline — spec, plan, implement, review, merge"
+    assert " ".join(line[44:] for line in frame.lines[1:3]) == blurb
+    assert frame.lines[2] == " " * 44 + "implement, review, merge"
+    laid_out = [line for line in _text(_confirm_rows(state, ScreenRow.WORKFLOW, 80))
+                .split("\n") if line.strip()]
+    assert frame.lines == laid_out
+    assert all(len(line) <= 80 for line in laid_out)
+
+
+def test_the_window_fits_every_line_when_started_narrower_than_80(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _long_value_state()
+    [frame] = _render_frames(monkeypatch, state, ScreenRow.WORKFLOW, start=60)
+    assert frame.window_height == _line_count(state, ScreenRow.WORKFLOW, 60)
+    assert frame.lines[-2] == " " * 42 + "pyproject.toml"
+    assert frame.lines[-1] == _HINT
+
+
+def test_the_window_grows_when_a_resize_wraps_more_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _long_value_state()
+    frames = _render_frames(
+        monkeypatch, state, ScreenRow.WORKFLOW, start=80, resizes=[60])
+    assert [frame.columns for frame in frames] == [80, 60]
+    resized = frames[-1]
+    assert resized.window_height == _line_count(state, ScreenRow.WORKFLOW, 60)
+    assert resized.window_height > _line_count(state, ScreenRow.WORKFLOW, 80)
+    assert resized.lines[-2] == " " * 42 + "pyproject.toml"
+    assert resized.lines[-1] == _HINT
+
+
+def test_the_rows_re_flow_to_the_live_width_after_a_resize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _render_frames(
+        monkeypatch, _detected_state(), ScreenRow.WORKFLOW, start=120, resizes=[80])
+    assert [frame.columns for frame in frames] == [120, 80]
+    wide, narrow = frames
+    assert wide.lines[1].endswith("full pipeline — spec, plan, implement, review, merge")
+    assert narrow.lines[1:3] == [
+        "> workflow            default               full pipeline — spec, plan,",
+        " " * 44 + "implement, review, merge",
+    ]

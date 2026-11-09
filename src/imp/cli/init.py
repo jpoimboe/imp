@@ -15,9 +15,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import textwrap
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
+from itertools import zip_longest
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -708,21 +710,41 @@ def _settings_summary(settings: InitSettings) -> list[str]:
     return [f"  {_ROW_LABELS[row]:<{label_w}}  {values[row]}" for row in ScreenRow]
 
 
+def _wrap(text: str, width: int) -> list[str]:
+    # break_on_hyphens=False keeps flags like --install-hooks whole
+    return textwrap.wrap(text, width, break_on_hyphens=False)
+
+
 def _confirm_rows(
-    state: InitScreenState, cursor: ScreenRow,
+    state: InitScreenState, cursor: ScreenRow, width: int,
 ) -> list[tuple[str, str]]:
     """The confirmation screen's fragments — the sibling of `_picker_rows`.
-    Three columns, each padded to its widest entry."""
+    Three columns, each padded to its widest entry; when that overflows `width`,
+    value and note share the rest and word-wrap. One fragment per row line."""
     cells = _row_cells(state)
     label_w = max(len(label) for label, _value, _note in cells.values())
-    value_w = max(len(value) for _label, value, _note in cells.values())
-    out: list[tuple[str, str]] = [("", "\n"), ("bold", f"{_CONFIRM_HEADER}\n\n")]
+    widest_value = max(len(value) for _label, value, _note in cells.values())
+    widest_note = max(len(note) for _label, _value, note in cells.values())
+    room = width - label_w - 6  # 2-char gutter + two 2-char gaps
+    if widest_value + widest_note <= room:
+        value_w, note_w = widest_value, widest_note
+    else:
+        # the note keeps 24 columns, or half the room when there's less
+        value_w = max(1, min(widest_value, max(room - 24, room // 2)))
+        note_w = max(1, room - value_w)
+    header = "\n".join(_wrap(_CONFIRM_HEADER, width))
+    out: list[tuple[str, str]] = [("", "\n"), ("bold", f"{header}\n\n")]
     for row in ScreenRow:
         label, value, note = cells[row]
-        arrow = "> " if row is cursor else "  "
         style = "ansiyellow bold" if row is cursor else ""
-        out.append((style, f"{arrow}{label:<{label_w}}  {value:<{value_w}}  {note}\n"))
-    out.append(("ansibrightblack", f"\n{_CONFIRM_HINT}"))
+        pieces = zip_longest(_wrap(value, value_w), _wrap(note, note_w), fillvalue="")
+        for i, (value_piece, note_piece) in enumerate(pieces):
+            gutter = "> " if row is cursor and i == 0 else "  "
+            row_label = label if i == 0 else ""
+            line = f"{gutter}{row_label:<{label_w}}  {value_piece:<{value_w}}  {note_piece}"
+            out.append((style, f"{line.rstrip()}\n"))
+    hint = "\n".join(_wrap(_CONFIRM_HINT, width))
+    out.append(("ansibrightblack", f"\n{hint}"))
     return out
 
 
@@ -808,6 +830,7 @@ def _run_confirm_app(
     it exited with. Cancel (esc / ctrl-c) raises KeyboardInterrupt, as the
     provider picker does. `erase_when_done` keeps a re-render from stacking."""
     from prompt_toolkit import Application
+    from prompt_toolkit.application import get_app
     from prompt_toolkit.formatted_text import AnyFormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout
@@ -819,7 +842,10 @@ def _run_confirm_app(
     current = state
 
     def _render() -> list[tuple[str, str]]:
-        return _confirm_rows(current, row)
+        return _confirm_rows(current, row, get_app().output.get_size().columns)
+
+    def _height() -> Dimension:
+        return Dimension.exact(sum(text.count("\n") for _style, text in _render()) + 1)
 
     kb = KeyBindings()
 
@@ -854,8 +880,7 @@ def _run_confirm_app(
 
     control = FormattedTextControl(
         text=cast("AnyFormattedText", _render), focusable=True, show_cursor=False)
-    height = sum(text.count("\n") for _style, text in _render()) + 1
-    body = Window(content=control, height=Dimension(min=height, max=height))
+    body = Window(content=control, height=_height)
     app: Any = Application(
         layout=Layout(HSplit([body])),
         key_bindings=kb,
