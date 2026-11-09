@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from imp.paths import project_state_dir
@@ -33,7 +34,8 @@ def _run(
     return subprocess.run(
         ["bash", str(ASSERT), tolerated], cwd=pr.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
-             "IMP_QUEST_DIR": str(_home(pr)), "IMP_QUEST_ID": quest_id},
+             "IMP_QUEST_DIR": str(_home(pr)), "IMP_QUEST_ID": quest_id,
+             "IMP_PYTHON": sys.executable},
         capture_output=True, text=True, check=False,
     )
 

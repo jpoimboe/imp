@@ -25,7 +25,7 @@ it back to the reconciler. **Non-soliciting** — never prompt a human; end with
 ## Orient
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`
+- `BASE=$("$IMP_PYTHON" -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`
 - `B=$(git rev-parse "${BASE}^{commit}")` — the base tip.
 - Base-side incoming diff (what base changed since this branch forked):
   `git diff "{{ vars.integration_fork }}" "$B"`, where `{{ vars.integration_fork }}` is

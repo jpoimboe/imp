@@ -47,7 +47,7 @@ The engine enters you in exactly one. Detect it from `git status` and any inject
 
 In `bash`:
 - `git status` — rebase in progress? unmerged paths?
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`.
+- `BASE=$("$IMP_PYTHON" -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`.
 - `git log --oneline -8` and `git diff` (the conflicted hunks).
 - Recover the integration endpoints. The pre-rebase fork point `P` is
   `{{ vars.integration_fork }}` — the SHA the branch was planted on before this
@@ -112,7 +112,7 @@ Drive to a clean state, then verify it:
 - Record the new plant ONLY if you drove a rebase to completion this round (the
   conflicted-rebase context): after the branch is clean and linear, set
   `cur_base_head := B` in `quest.json`:
-  `python3 -c "import json,sys;p='{{ quest.home }}/quest.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
+  `"$IMP_PYTHON" -c "import json,sys;p='{{ quest.home }}/quest.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
   In the resumed context the branch is already planted on `B`; leave `cur_base_head`
   unchanged.
 

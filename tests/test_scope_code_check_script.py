@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from imp.assets import bundled_workflow_dir
@@ -40,11 +41,12 @@ def _quest_dir(tmp_path: Path, fork: str) -> Path:
     return qd
 
 
-def _run(root: Path, quest_dir: Path) -> subprocess.CompletedProcess[str]:
+def _run(root: Path, quest_dir: Path,
+         path: str = os.environ["PATH"]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(SCRIPT)], cwd=root,
         env={"IMP_PROJECT_ROOT": str(root), "IMP_QUEST_DIR": str(quest_dir),
-             "IMP_QUEST_ID": "id1", "PATH": os.environ["PATH"]},
+             "IMP_QUEST_ID": "id1", "IMP_PYTHON": sys.executable, "PATH": path},
         capture_output=True, text=True,
     )
 
@@ -91,3 +93,24 @@ def test_invalid_fork_fails(tmp_path: Path) -> None:
     qd = _quest_dir(tmp_path, "deadbeef" * 5)
     proc = _run(root, qd)
     assert proc.returncode == 1
+
+
+def test_reads_the_fork_without_a_working_python3_on_path(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    fork = _init_repo(root)
+    (root / "leak.py").write_text("x = 1\n")
+    _git(root, "add", "leak.py")
+    _git(root, "commit", "-q", "-m", "leak")
+    qd = _quest_dir(tmp_path, fork)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name in ("python3", "python"):
+        stub = stubs / name
+        stub.write_text("#!/bin/sh\n"
+                        "echo \"ModuleNotFoundError: No module named 'imp.providers'\" >&2\n"
+                        "exit 1\n")
+        stub.chmod(0o755)
+
+    proc = _run(root, qd, path=f"{stubs}{os.pathsep}{os.environ['PATH']}")
+    assert proc.returncode == 1
+    assert f"git reset --hard {fork}" in proc.stderr

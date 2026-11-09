@@ -10,7 +10,7 @@ from types import ModuleType
 import pytest
 import yaml
 
-from imp.assets import bundled_workflow_dir, bundled_workflow_names
+from imp.assets import bundled_assets_dir, bundled_workflow_dir, bundled_workflow_names
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto
@@ -1456,3 +1456,33 @@ def test_workflow_comments_describe_one_slow_verify_and_the_review_skip() -> Non
     assert "slow re-verify only when the base moved" not in flat
     converge = flat.split("── converge:", 1)[1].split("- name: converge", 1)[0]
     assert "slow" not in converge
+
+
+_BARE_PYTHON = re.compile(r"\bpython3?\s+-[cm]\b")
+
+
+def test_bare_python_pattern_matches_only_unpinned_invocations() -> None:
+    assert _BARE_PYTHON.search('python3 -c "import json"')
+    assert _BARE_PYTHON.search("python -m imp.providers.validate_memory_cli")
+    assert not _BARE_PYTHON.search('"$IMP_PYTHON" -c "import json"')
+    assert not _BARE_PYTHON.search('"$IMP_PYTHON" -m imp.providers.validate_memory_cli')
+
+
+def test_no_shipped_asset_invokes_a_bare_python() -> None:
+    # PATH's python3 may not import imp (e.g. a uv tool install); assets use the
+    # engine's interpreter via $IMP_PYTHON.
+    root = bundled_assets_dir()
+    hits = [
+        f"{p.relative_to(root)}:{n}: {line.strip()}"
+        for p in sorted(root.rglob("*"))
+        if p.suffix in {".sh", ".md", ".yaml"}
+        for n, line in enumerate(p.read_text().splitlines(), 1)
+        if _BARE_PYTHON.search(line)
+    ]
+    hits += [
+        f"{name}/{s.name}: {s.command}"
+        for name in bundled_workflow_names()
+        for s in load_workflow(bundled_workflow_dir(name)).flat_steps()
+        if s.command and _BARE_PYTHON.search(s.command)
+    ]
+    assert hits == []

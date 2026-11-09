@@ -19,7 +19,7 @@ ID="${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}"
 # Toleration flag from the workflow (bool var renders capitalized) -> lowercase.
 # Portable normalization (tr), not the bash-4-only ${x,,}, so this parses on bash 3.2.
 tolerated="$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]')"
-FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
+FORK=$("$IMP_PYTHON" -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
 [ -n "$FORK" ] || { echo "empty cur_base_head in quest.json" >&2; exit 1; }
 
 # A here-string carries no pipe partner, so pipefail/SIGPIPE cannot make this spuriously
