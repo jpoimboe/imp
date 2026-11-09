@@ -81,8 +81,21 @@ def test_script_blocked_renders_error_above_paused_line() -> None:
                    if "error: [script] cleanup-merge blocked (exit 1)" in ln)
     detail_idx = next(i for i, ln in enumerate(out)
                       if "fixup! commit still present" in ln)
-    paused_idx = next(i for i, ln in enumerate(out) if "paused (" in ln)
+    paused_idx = next(i for i, ln in enumerate(out) if "paused — " in ln)
     assert err_idx < detail_idx < paused_idx
+
+
+def test_script_blocked_pause_renders_plain_copy() -> None:
+    tree = nv.build_tree([
+        {"type": "script_blocked",
+         "payload": {"step": "validate-memory", "exit": 1, "stdout": "",
+                     "stderr": "ModuleNotFoundError: No module named 'imp.providers'"}},
+        {"type": "workflow_paused", "payload": {"reason": "script_blocked"}},
+    ])
+    out = "\n".join(render_tree(tree, full=True, color=False, width=200))
+    assert ("paused — a script step stopped the workflow; the quest is paused and "
+            "resumable — the error above names the cause; fix it, then resume") in out
+    assert "paused (script_blocked)" not in out
 
 
 def test_lean_script_block_shows_detail() -> None:

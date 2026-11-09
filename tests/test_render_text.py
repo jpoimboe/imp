@@ -3298,7 +3298,7 @@ def test_header_line_drops_route_suffix_when_equal_to_label() -> None:
         f"spec phase · {reason} · claude-opus"
 
 
-def test_other_pause_reasons_render_exactly_as_before() -> None:
+def test_other_pause_reasons_render_their_copy() -> None:
     def line(reason: str) -> str:
         node = nv.PauseNode(reason=reason)
         return "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
@@ -3310,7 +3310,9 @@ def test_other_pause_reasons_render_exactly_as_before() -> None:
         "paused — the OS sandbox could not start the step (a sandbox-setup "
         "failure, not a gate result); the quest is paused and resumable — the "
         "warnings above name the cause")
-    assert line("script_blocked") == "paused (script_blocked)"
+    assert line("script_blocked") == (
+        "paused — a script step stopped the workflow; the quest is paused and "
+        "resumable — the error above names the cause; fix it, then resume")
 
 
 def test_subagent_provider_digs_the_provider_out_of_the_nested_step_context() -> None:
