@@ -259,10 +259,8 @@ def test_a_command_outside_a_project_claims_no_slug_directory(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     monkeypatch.chdir(scratch)
-    # Assumes tmp_path is not inside a git work tree: under a --basetemp within
-    # the checkout, main()'s stack dumper resolves a control root and claims a
-    # slug before dispatch, which would look like a regression here. git walks
-    # UP, so this must probe the resolver, not just scratch/.git.
+    # The premise needs scratch outside any git work tree (a --basetemp inside a
+    # checkout would put it in a project). git walks UP, so probe the resolver.
     with pytest.raises(worktree.PreconditionError):
         worktree.find_control_root(scratch)
     main(["list"])
