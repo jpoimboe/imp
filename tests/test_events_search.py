@@ -712,7 +712,7 @@ def test_events_search_help_exits_zero_with_bounded_contract(
     out = capsys.readouterr().out
     assert "Show at most LIMIT matched quests (default: 3, except with --list)." in out
     assert "Show every matched quest and matching event; conflicts with --limit." in out
-    assert ("One terse line per matched quest (id, title, zone); combine with --limit to cap."
+    assert ("One terse line per matched quest (id, title, status); combine with --limit to cap."
             in out)
     assert "Structured output, bounded like the default view unless --all." in out
 

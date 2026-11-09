@@ -4478,7 +4478,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
         help="Show every matched quest and matching event; conflicts with --limit.")
     p.add_argument(
         "-l", "--list", action="store_true", dest="list",
-        help="One terse line per matched quest (id, title, zone); combine with --limit to cap.")
+        help="One terse line per matched quest (id, title, status); combine with --limit to cap.")
     p.add_argument(
         "--json", action="store_true",
         help="Structured output, bounded like the default view unless --all.")
