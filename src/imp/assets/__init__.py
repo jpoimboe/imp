@@ -44,8 +44,8 @@ def bundled_skills_dir() -> Path:
     p = Path(str(files("imp.assets").joinpath("skills")))
     if not p.is_dir():
         raise RuntimeError(
-            f"bundled skills pool not found at {p}; was the package installed "
-            f"without its assets? Try `pip install -e .` from a checkout."
+            f"bundled skills pool not found at {p}; "
+            "the imp install is incomplete — reinstall imp"
         )
     return p
 
@@ -56,29 +56,28 @@ def bundled_partials_dir() -> Path:
     p = Path(str(files("imp.assets").joinpath("partials")))
     if not p.is_dir():
         raise RuntimeError(
-            f"bundled shared partials pool not found at {p}; was the package "
-            f"installed without its assets? Try `pip install -e .` from a checkout."
+            f"bundled shared partials pool not found at {p}; "
+            "the imp install is incomplete — reinstall imp"
         )
     return p
 
 
 def bundled_docs_dir() -> Path:
-    """Return a real filesystem Path to imp's repo-root docs/ corpus, resolved
-    relative to the install (editable-from-a-clone), mirroring
-    bundled_skills_dir. Read in place — never copied into a quest snapshot, so
-    a threshold agent can grep it in any project. Raises if absent."""
-    source_root = Path(str(files("imp.assets"))).parents[1]
-    marker = source_root / SOURCE_ROOT_MARKER
+    """Return imp's docs corpus in place: a wheel's imp/assets/docs, else a clone's docs/."""
+    root = Path(str(files("imp.assets"))).parents[1]
+    marker = root / SOURCE_ROOT_MARKER
     if marker.is_file():
-        # A snapshot holds no docs/: its provenance names the checkout that does.
-        source_root = Path(marker.read_text().strip())
-    p = source_root.parent / "docs"
-    if not p.is_dir():
-        raise RuntimeError(
-            f"imp docs corpus not found at {p}; was the package installed "
-            f"without its repo checkout? Try `pip install -e .` from a checkout."
-        )
-    return p
+        # A snapshot reads the corpus from the install its provenance names.
+        root = Path(marker.read_text().strip())
+    packaged = root / "imp" / "assets" / "docs"
+    checkout = root.parent / "docs"
+    for p in (packaged, checkout):
+        if p.is_dir():
+            return p
+    raise RuntimeError(
+        f"imp docs corpus not found at {packaged} or {checkout}; "
+        "the imp install is incomplete — reinstall imp"
+    )
 
 
 def bundled_workflow_dir(name: str) -> Path:
@@ -91,8 +90,8 @@ def bundled_workflow_dir(name: str) -> Path:
     p = Path(str(files("imp.assets").joinpath("workflows", name)))
     if not p.is_dir():
         raise RuntimeError(
-            f"bundled workflow {name!r} not found at {p}; was the package "
-            f"installed without its assets? Try `pip install -e .` from a checkout."
+            f"bundled workflow {name!r} not found at {p}; "
+            "the imp install is incomplete — reinstall imp"
         )
     return p
 

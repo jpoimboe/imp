@@ -1,4 +1,4 @@
-"""Tests for bundled_docs_dir() — imp's repo-root docs/ corpus resolver."""
+"""Tests for bundled_docs_dir() — imp's docs corpus resolver."""
 
 from __future__ import annotations
 
@@ -51,3 +51,31 @@ def test_docs_resolve_through_a_snapshots_source_root_marker(
 
     assert bundled_docs_dir() == checkout / "docs"
     assert (bundled_docs_dir() / "guide.md").read_text() == "# real corpus\n"
+
+
+def test_a_packaged_corpus_wins_over_a_sibling_docs_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A wheel install: the corpus ships inside the package as imp/assets/docs.
+    root = tmp_path / "site-packages"
+    packaged = root / "imp" / "assets" / "docs"
+    packaged.mkdir(parents=True)
+    (tmp_path / "docs").mkdir()
+    monkeypatch.setattr(assets, "files", lambda package: root / "imp" / "assets")
+
+    assert bundled_docs_dir() == packaged
+
+
+def test_a_missing_corpus_names_both_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "site-packages"
+    (root / "imp" / "assets").mkdir(parents=True)
+    monkeypatch.setattr(assets, "files", lambda package: root / "imp" / "assets")
+
+    with pytest.raises(RuntimeError) as exc:
+        bundled_docs_dir()
+    assert str(exc.value) == (
+        f"imp docs corpus not found at {root / 'imp' / 'assets' / 'docs'} or "
+        f"{tmp_path / 'docs'}; the imp install is incomplete — reinstall imp"
+    )
