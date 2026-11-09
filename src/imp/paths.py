@@ -63,6 +63,19 @@ def claimed_state_dir(control_root: Path) -> Path | None:
     return None  # unreachable — the candidate stream is unbounded, which mypy can't infer
 
 
+def resolve_state_dir(control_root: Path) -> tuple[Path, bool]:
+    """The state dir a claim would pick, and whether it is already claimed; creates nothing."""
+    root = control_root.resolve()
+    override = os.environ.get("IMP_STATE_DIR")
+    if override:
+        state_dir = _checked_override(Path(override), root)
+        return state_dir, state_dir.is_dir()
+    claimed = claimed_state_dir(root)
+    if claimed is not None:
+        return claimed, True
+    return next(c for c in _state_dir_candidates(root) if not c.exists()), False
+
+
 def project_state_dir(control_root: Path) -> Path:
     """This project's state directory — where its quests, worktrees and archive
     live. `$IMP_STATE_DIR` wins verbatim when set. Otherwise resolution claims:
@@ -71,10 +84,10 @@ def project_state_dir(control_root: Path) -> Path:
     a different control root is skipped for `<slug>-2`, `-3`, …"""
     root = control_root.resolve()
     while True:
-        claimed = claimed_state_dir(root)
-        if claimed is not None:
-            return claimed
-        candidate = next(c for c in _state_dir_candidates(root) if not c.exists())
+        candidate, claimed = resolve_state_dir(root)
+        # An override is used verbatim even before it exists: never created or marked.
+        if claimed or os.environ.get("IMP_STATE_DIR"):
+            return candidate
         try:
             candidate.mkdir(parents=True)
         except FileExistsError:
