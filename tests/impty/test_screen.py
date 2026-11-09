@@ -147,6 +147,7 @@ def test_plain_cursor_position_report_still_answers(prefix: bytes, expected: str
 
 
 def test_plain_primary_device_attributes_still_answers() -> None:
+    # Keep below VT420: a first parameter >= 64 makes tmux send DECSLRM, unemulated.
     assert _replies(b"\x1b[c") == ["\x1b[?6c"]
 
 
