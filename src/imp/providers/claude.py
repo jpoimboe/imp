@@ -382,7 +382,7 @@ async def _reap_transport_group(client: Any) -> None:
             return  # exited within grace; already reaped
         await kill_process_group(process, signal.SIGKILL)
         with contextlib.suppress(Exception):
-            await process.wait()
+            await asyncio.wait_for(process.wait(), timeout=_REAP_GRACE_SECONDS)
 
 
 def _is_terminated_process_teardown(exc: BaseException) -> bool:
@@ -1797,6 +1797,7 @@ class ClaudeSession(ObserveSession):
                 if self.runner._cancel:
                     return
                 self.runner._turn_ended.clear()
+                self.runner._awaiting_result = True
                 await client.query(self._next_query)
                 requery = False
                 got_result = False
@@ -1811,8 +1812,12 @@ class ClaudeSession(ObserveSession):
                         # message; the model-API/CLI latency between messages is the
                         # longest registry-blind gap under this provider.
                         await _bg._sweep_bg(self.ctx)
+                        is_result = type(sdk_msg).__name__ == "ResultMessage"
+                        if is_result:
+                            # Before the yield: a terminal turn closes this generator there.
+                            self.runner._awaiting_result = False
                         yield sdk_msg
-                        if type(sdk_msg).__name__ == "ResultMessage":
+                        if is_result:
                             got_result = True
                             if self._requery_pending:
                                 self._requery_pending = False
@@ -2347,6 +2352,8 @@ class ClaudeAgentRunner:
         self._steer_requested = False
         self._turn_ended = asyncio.Event()
         self._turn_ended.set()
+        # True from a query until its ResultMessage; run()'s finally kills a cut-short CLI first.
+        self._awaiting_result = False
         self._interrupt_tasks: set[asyncio.Task[None]] = set()
         # Tier A proactive-handoff intent flag (separate from _steer_requested):
         # set when the threshold watchdog interrupts the live turn, consumed at the
@@ -2507,6 +2514,7 @@ class ClaudeAgentRunner:
         finally:
             # Before the sweep below, so interrupt() can spawn no task after it.
             self._turn_ended.set()
+            cut_short, self._awaiting_result = self._awaiting_result, False
             # A leave control cancels the run; teardown must still complete.
             with anyio.CancelScope(shield=True):
                 if self._state is not None:
@@ -2525,10 +2533,6 @@ class ClaudeAgentRunner:
                     from imp.agents.tools.context import teardown_tool_context
                     with contextlib.suppress(Exception):
                         await teardown_tool_context(self._ctx)
-                # run()'s finally explicitly exits the client context manager
-                # (graceful disconnect) then reaps the transport group as a safety
-                # net, and drops the stale handle so a late interrupt() is a no-op
-                # rather than disconnecting a dead client.
                 if self._impty_driver is not None:
                     with contextlib.suppress(Exception):
                         self._impty_driver.close()
@@ -2539,12 +2543,16 @@ class ClaudeAgentRunner:
                     t.cancel()
                 if pending:
                     await asyncio.wait(pending)
+                if cut_short and self._client is not None:
+                    # SDK close waits out a mid-turn CLI to save a session file imp never reads.
+                    await _reap_transport_group(self._client)
                 if self._client_ctx is not None:
                     with contextlib.suppress(Exception):
                         await self._client_ctx.__aexit__(None, None, None)
                     self._client_ctx = None
-                if self._client is not None:
+                if not cut_short and self._client is not None:
                     await _reap_transport_group(self._client)
+                # Drop the stale handle so a late interrupt() is a no-op.
                 self._client = None
                 if self._stderr_sink is not None:
                     self._stderr_sink.close()

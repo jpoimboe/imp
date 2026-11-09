@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import signal
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,7 +19,7 @@ from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic
 from tests.async_wait import HANG_BACKSTOP
-from tests.cc_fakes import FakeClaudeSDKClient
+from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 from tests.codex_fakes import FakeCodex
 from tests.openai_fakes import FakeResponsesClient
 from tests.test_anthropic_runner import _inv as _anthropic_inv
@@ -221,6 +222,111 @@ async def test_claude_leave_cancel_removes_the_resume_config_dir(
     assert existed == [True]
     assert not cfg.exists()
     assert runner._config_dir is None
+
+
+_SDK_CLOSE_GRACE = 5.0
+
+
+class _CliProc:
+    """Transport child stand-in; a mid-turn one ignores stdin EOF and exits only on a signal."""
+
+    pid = 4343
+
+    def __init__(self, *, mid_turn: bool) -> None:
+        self.signalled = anyio.Event()
+        self._mid_turn = mid_turn
+
+    async def wait(self) -> int:
+        if self._mid_turn:
+            await self.signalled.wait()
+        await anyio.sleep(0)
+        return 0
+
+
+class _GracefulExitClient(FakeClaudeSDKClient):
+    """Its context exit waits on the transport child, bounded like the SDK's close()."""
+
+    def __init__(self, opts: Any, order: list[Any], process: _CliProc,
+                 scripted: list[Any]) -> None:
+        super().__init__(opts, scripted_messages=scripted)
+        self._order = order
+        self._transport = SimpleNamespace(_process=process)
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        self._order.append("client_exit")
+        with anyio.move_on_after(_SDK_CLOSE_GRACE):
+            await self._transport._process.wait()
+        self.closed = True
+        return False
+
+
+class _ParkedGracefulExitClient(_GracefulExitClient):
+    def __init__(self, opts: Any, order: list[Any], process: _CliProc,
+                 entered: anyio.Event) -> None:
+        super().__init__(opts, order, process, scripted=[])
+        self._entered = entered
+        self.parked_at = 0.0
+
+    async def receive_response(self) -> Any:
+        self.parked_at = time.monotonic()
+        self._entered.set()
+        await anyio.Event().wait()
+        yield  # unreachable; makes this an async generator
+
+
+def _record_kills(monkeypatch: pytest.MonkeyPatch, order: list[Any]) -> None:
+    async def _kill(process: Any, sig: int) -> None:
+        order.append(("kill", sig))
+        process.signalled.set()
+
+    monkeypatch.setattr(claude_provider, "kill_process_group", _kill)
+
+
+@pytest.mark.anyio
+async def test_claude_leave_cancel_kills_mid_turn_cli_before_disconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, torn_down: list[Any],
+) -> None:
+    order: list[Any] = []
+    _record_kills(monkeypatch, order)
+    entered = anyio.Event()
+    proc = _CliProc(mid_turn=True)
+    clients: list[_ParkedGracefulExitClient] = []
+
+    def factory(opts: Any) -> _ParkedGracefulExitClient:
+        clients.append(_ParkedGracefulExitClient(opts, order, proc, entered))
+        return clients[-1]
+
+    runner = ClaudeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    await _leave_mid_run(runner, _claude_inv(tmp_path), entered)
+    elapsed = time.monotonic() - clients[0].parked_at
+    assert order == [("kill", signal.SIGTERM), "client_exit"]
+    assert elapsed < 2.0, f"teardown took {elapsed:.1f}s"
+    assert clients[0].closed
+    assert len(torn_down) == 1
+
+
+@pytest.mark.anyio
+async def test_claude_concluded_turn_disconnects_before_reaping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "art").mkdir()
+    order: list[Any] = []
+    _record_kills(monkeypatch, order)
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success", "note": "ok"})),
+        result(),
+    ]
+    runner = ClaudeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: _GracefulExitClient(
+            opts, order, _CliProc(mid_turn=False), scripted))
+    events: list[Any] = []
+    with anyio.fail_after(HANG_BACKSTOP):
+        async for ev in runner.run(_claude_inv(tmp_path)):
+            events.append(ev)
+    assert events[-1]["type"] == "agent_result"
+    assert order == ["client_exit", ("kill", signal.SIGTERM)]
 
 
 class _ParkedCodexEvents:
