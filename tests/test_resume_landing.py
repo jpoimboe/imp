@@ -372,7 +372,7 @@ async def test_second_resume_recaps_from_the_latest_leave(tmp_path: Path) -> Non
     for e in j[:r2 + 1]:   # a later workflow_paused would clear the recap anchor
         b.add(e)
     now = datetime.fromisoformat(latest["timestamp"]) + timedelta(seconds=120)
-    assert b.interrupt_recap(now.isoformat()) == "paused 2m ago"
+    assert b.interrupt_recap(now.isoformat(), shown_marker=None) == "paused 2m ago"
 
 
 @pytest.mark.anyio

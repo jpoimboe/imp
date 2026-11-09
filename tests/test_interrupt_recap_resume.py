@@ -38,6 +38,7 @@ from tests.test_narrative_interrupt_recap import (
     _opening_thinking,
     _saying,
     _spec_review,
+    _spec_review_resumed,
     _sub_work,
     _task_lead,
     _timed,
@@ -363,16 +364,33 @@ async def test_quiet_attach_other_clients_leave_after_a_resume_shows_no_age(
     pytest.param(True, ["banner", ""], id="splash"),
     pytest.param(False, ["feat · demo · resuming", ""], id="header"),
 ])
-@pytest.mark.parametrize(("texts", "block"), [
-    pytest.param((PROSE,), [BLOCK, "", "paused · resumed 1s later", ""], id="prose"),
-    pytest.param((), [], id="no-prose"),
+@pytest.mark.parametrize(("texts", "block", "recap"), [
+    pytest.param((PROSE,), [BLOCK, "", "paused · resumed 1s later", ""],
+                 "was: reviewing spec", id="prose"),
+    pytest.param((), [], SPEC_RECAP_AGED, id="no-prose"),
 ])
 def test_tail_sits_one_blank_above_the_recap(
-    splash: bool, top: list[str], texts: tuple[str, ...], block: list[str],
+    splash: bool, top: list[str], texts: tuple[str, ...], block: list[str], recap: str,
 ) -> None:
     events = _timed(_saying(_spec_review(), SPEC_REVIEW, *texts))
-    assert (_prompt_screen(events, [LIVE_GATE], splash=splash)
-            == [*top, *block, SPEC_RECAP_AGED, "", "> PROMPT"])
+    lines = _prompt_screen(events, [LIVE_GATE], splash=splash)
+    assert lines == [*top, *block, recap, "", "> PROMPT"]
+    assert any("ago" in line for line in lines) == (not texts)
+
+
+@pytest.mark.usefixtures("frozen_now")
+def test_a_resume_that_draws_no_marker_keeps_the_recap_age() -> None:
+    events = _saying(_spec_review_resumed({"reason": "interrupt"}), SPEC_REVIEW, PROSE)
+    lines = _prompt_screen(events, [LIVE_GATE])
+    assert not any("paused · resumed" in line for line in lines)
+    assert lines[-3:] == [SPEC_RECAP_AGED, "", "> PROMPT"]
+
+
+@pytest.mark.usefixtures("frozen_now")
+def test_shown_marker_and_no_label_prints_no_recap_line() -> None:
+    events = _timed(_saying(_opening_thinking(), THRESHOLD, PROSE))
+    assert (_prompt_screen(events, [LIVE_GATE])
+            == ["banner", "", BLOCK, "", "paused · resumed 1s later", "", "> PROMPT"])
 
 
 # AC7(d)

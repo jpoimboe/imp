@@ -444,6 +444,7 @@ class LiveDriver:
         self._tail_start: nv.AgentTextNode | None = None
         self._show_tail = suppress_replay
         self._recap_pending = suppress_replay
+        self._shown_resume_marker: nv.ResumeMarkerNode | None = None
         self._emissions = 0
         self._deferred: list[tuple[list[str], bool, str]] = []
         # Every event this driver consumed, and the accounting total derived from
@@ -526,7 +527,8 @@ class LiveDriver:
                 or self._live_emitted):
             return
         self._recap_pending = False
-        text = self._builder.interrupt_recap(datetime.now(UTC).isoformat())
+        text = self._builder.interrupt_recap(datetime.now(UTC).isoformat(),
+                                             self._shown_resume_marker)
         if text is None or self._prompt_active:
             return
         self._prev_prose = True
@@ -828,6 +830,9 @@ class LiveDriver:
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
+        # Suppression lives in _print_lines; a marker always renders one line, so this was shown.
+        if isinstance(node, nv.ResumeMarkerNode) and not self._suppressing:
+            self._shown_resume_marker = node
         leaf_lines = list(rt._render(node, depth=depth, cats=self._cats, color=self._color,
                                      width=self._cur_width(),
                                      display_width=self._cur_display_width(),

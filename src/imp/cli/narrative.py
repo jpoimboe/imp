@@ -484,6 +484,12 @@ class ResumeMarkerNode:
     collapsible = False
 
 
+@dataclass
+class _ResumeAnchor:
+    pause_ts: str | None
+    marker: ResumeMarkerNode | None = None
+
+
 @dataclass(frozen=True)
 class LeaveMarkerNode:
     """The history ends on this unresumed manual stop (batch-only: live owns the leave block)."""
@@ -736,8 +742,8 @@ class NarrativeBuilder:
         self._pending_pause: Literal["solicit", "halt"] | None = None
         # The pause a resume marker measures from; a step boundary closes it.
         self._open_pause: OpenPause | None = None
-        # The pause the current `imp resume` resumed from; cleared once the run executes.
-        self._resumed_pause_ts: str | None = None
+        # This `imp resume`'s pause and the marker it drew; cleared once the run executes.
+        self._resume_anchor: _ResumeAnchor | None = None
         # Armed by an engine_message completion nudge; the next prose agent_message
         # consumes it and drops a bare WAITING protocol reply (pure plumbing).
         # Survives non-prose events.
@@ -813,8 +819,8 @@ class NarrativeBuilder:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]
 
-    def interrupt_recap(self, now_iso: str) -> str | None:
-        """Resume recap `was: <label> · <helper> · paused <age> ago`; None if all absent."""
+    def interrupt_recap(self, now_iso: str, shown_marker: ResumeMarkerNode | None) -> str | None:
+        """Recap `was: <label> · <helper> · paused <age> ago`; ageless if shown_marker is ours."""
         top = self._step_stack[-1] if self._step_stack else None
         folds = list(self._cut_off.values())
         helper: str | None = None
@@ -823,7 +829,12 @@ class NarrativeBuilder:
         elif folds:
             helper = folds[0].label or f"subagent({folds[0].subagent_name})"
         body = _join(top.label if top is not None else None, helper)
-        gap = elapsed_seconds(self._resumed_pause_ts, now_iso)
+        anchor = self._resume_anchor
+        # Identity, not equality: an equal marker from an earlier resume is a different node.
+        shown = (anchor is not None and anchor.marker is not None
+                 and shown_marker is anchor.marker)
+        gap = (elapsed_seconds(anchor.pause_ts, now_iso)
+               if anchor is not None and not shown else None)
         age = f"paused {_pause_gap_text(int(gap))} ago" if gap is not None and gap >= 1 else None
         return _join(f"was: {body}" if body else None, age)
 
@@ -1110,9 +1121,9 @@ class NarrativeBuilder:
 
         if etype == "workflow_resumed" and not payload.get("in_process"):
             if self._open_pause is not None:
-                self._resumed_pause_ts = self._open_pause.timestamp
+                self._resume_anchor = _ResumeAnchor(pause_ts=self._open_pause.timestamp)
         elif etype not in _KEEPS_RESUME_ANCHOR:
-            self._resumed_pause_ts = None
+            self._resume_anchor = None
 
         # 0. context-bar update: latest_context_tokens tracks THIS builder's own agent.
         if etype == "agent_message":
@@ -1939,7 +1950,10 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         return
     gap = elapsed_seconds(opened.timestamp, event.get("timestamp"))
     if gap is not None and gap >= 1:
-        _place_beside_held_step(self, ResumeMarkerNode(gap_s=int(gap)))
+        marker = ResumeMarkerNode(gap_s=int(gap))
+        _place_beside_held_step(self, marker)
+        assert self._resume_anchor is not None  # add() armed it under this same condition
+        self._resume_anchor.marker = marker
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused

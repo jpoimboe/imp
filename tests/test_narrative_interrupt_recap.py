@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from imp.cli.narrative import AgentTextNode, NarrativeBuilder, build_tree
+from imp.cli.narrative import AgentTextNode, NarrativeBuilder, ResumeMarkerNode, build_tree
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import agent_text, ev
 from tests.test_narrative_resume_marker import SHARED_DURATIONS
@@ -29,11 +29,15 @@ def _at(secs: float) -> str:
 NOW = _at(180)
 
 
-def _recap(events: list[Event], now: str = NOW) -> str | None:
+def _built(events: list[Event]) -> NarrativeBuilder:
     b = NarrativeBuilder()
     for e in events:
         b.add(e)
-    return b.interrupt_recap(now)
+    return b
+
+
+def _recap(events: list[Event], now: str = NOW) -> str | None:
+    return _built(events).interrupt_recap(now, shown_marker=None)
 
 
 def _raw(eid: str, etype: str, payload: dict[str, Any]) -> Event:
@@ -490,3 +494,68 @@ def _coder_said() -> list[Event]:
 ])
 def test_latest_step_message(events: list[Event], expected: str | None) -> None:
     assert _message(events) == expected
+
+
+def _resume_markers(b: NarrativeBuilder) -> list[ResumeMarkerNode]:
+    found: list[ResumeMarkerNode] = []
+    stack: list[Any] = [b.tree.root]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ResumeMarkerNode):
+            found.append(node)
+        stack.extend(getattr(node, "children", ()))
+    return found
+
+
+def _spec_review_resumed(pause: dict[str, Any], resumed_at: float = 1) -> list[Event]:
+    """`_spec_review` left by a `pause` stamped T0, then resumed `resumed_at` s later."""
+    return [*_spec_review()[:2], *_ctrl_c("a", SPEC_REVIEW),
+            ev("a-wp", "workflow_paused", timestamp=_at(0), **pause),
+            ev("a-wr", "workflow_resumed", timestamp=_at(resumed_at)),
+            ev("a-ca", "cli_attached")]
+
+
+SPEC_AGED = "was: reviewing spec · paused 3m ago"
+
+
+@pytest.mark.parametrize(("pause", "resumed_at"), [
+    pytest.param({"reason": "interrupt"}, 1, id="plain-interrupt"),
+    pytest.param({"reason": "compact"}, 1, id="compact"),
+    pytest.param({"reason": "interrupt", "interrupt_reason": "ctrl-c"}, 0.5,
+                 id="sub-second-gap"),
+])
+def test_a_resume_without_a_marker_keeps_the_age(
+    pause: dict[str, Any], resumed_at: float,
+) -> None:
+    b = _built([*_spec_review_resumed(pause, resumed_at), LIVE_GATE])
+    assert _resume_markers(b) == []
+    assert b.interrupt_recap(NOW, shown_marker=None) == SPEC_AGED
+
+
+@pytest.mark.parametrize(("events", "expected"), [
+    pytest.param(_spec_review(), "was: reviewing spec", id="labelled"),
+    pytest.param(_opening_thinking(), None, id="age-only-recap-empties"),
+])
+def test_showing_this_resumes_marker_drops_the_age(
+    events: list[Event], expected: str | None,
+) -> None:
+    b = _built([*_timed(events), LIVE_GATE])
+    [marker] = _resume_markers(b)
+    assert b.interrupt_recap(NOW, shown_marker=marker) == expected
+
+
+def test_an_equal_but_distinct_marker_keeps_the_age() -> None:
+    b = _built([*_timed(_spec_review()), LIVE_GATE])
+    [marker] = _resume_markers(b)
+    twin = ResumeMarkerNode(gap_s=marker.gap_s)
+    assert twin == marker and twin is not marker
+    assert b.interrupt_recap(NOW, shown_marker=twin) == SPEC_AGED
+
+
+def test_a_rearmed_anchor_forgets_the_earlier_marker() -> None:
+    b = _built([*_timed(_spec_review()),
+                ev("c-wp", "workflow_paused", reason="compact", timestamp=_at(100)),
+                ev("c-wr", "workflow_resumed", timestamp=_at(101)),
+                ev("c-ca", "cli_attached"), LIVE_GATE])
+    [m1] = _resume_markers(b)
+    assert b.interrupt_recap(_at(280), shown_marker=m1) == SPEC_AGED
