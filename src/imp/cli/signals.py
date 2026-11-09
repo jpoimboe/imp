@@ -186,7 +186,7 @@ async def prompt_signal_guard() -> AsyncIterator[None]:
 
 def _reason_for_signal(sig: int) -> str:
     """Map an incoming POSIX signal number to the pause-reason string surfaced
-    on the final `paused (<reason>)` headline. Unknown signals default to the
+    as the pause spine's dim qualifier. Unknown signals default to the
     historical `ctrl-c` so an unexpected source never blocks the pause."""
     if sig == signal.SIGTERM:
         return "sigterm"
@@ -220,7 +220,7 @@ class InterruptCoordinator:
         calls `signal_pause(reason=...)`.
       - The executor checks `coord.should_pause` between events; on True it
         returns RunResult.PAUSED. The CLI then reads `coord.pause_reason`
-        (default "ctrl-c") to render `paused (<reason>)`.
+        (default "ctrl-c") to qualify the pause spine (`· paused · <Display>`).
       - Runners attach/detach an `interrupt()` callback per step; the signal
         receiver invokes it via `signal_pause`.
     """

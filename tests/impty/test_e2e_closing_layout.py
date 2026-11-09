@@ -202,12 +202,12 @@ def test_sigterm_with_stdout_piped_writes_no_row_above_the_block(tmp_path: Path)
             proc.wait()
 
     rows = out_path.read_text().splitlines()
-    assert "paused · SIGTERM" in rows, "\n".join(rows)
-    at = rows.index("paused · SIGTERM")
+    spine = f"{quest_dir.name} · piped · paused · SIGTERM"
+    assert spine in rows, "\n".join(rows)
+    at = rows.index(spine)
     assert at >= 1, "\n".join(rows)
     assert rows[at - 1] != "", "\n".join(rows)
-    assert rows[at + 1:at + 3] == [
-        f"{quest_dir.name} · piped", f"resume: imp resume {quest_dir.name}"], "\n".join(rows)
+    assert rows[at + 1] == f"resume: imp resume {quest_dir.name}", "\n".join(rows)
 
 
 def test_live_resume_has_one_blank_above_its_first_prompt_and_its_closing_block(
@@ -268,7 +268,8 @@ def test_message_after_clear_echoes_once(tmp_path: Path, hint_first: bool) -> No
         assert rc == 130, _screen(s)
         rows = s.lines()
         assert rows.count("> next thing") == 1, _screen(s)
-        head = next((row for row in rows if row.endswith(" · next thing · archived")), None)
+        head = next((row for row in rows
+                     if row.endswith(" · next thing · archived · Ctrl-D")), None)
         assert head is not None, _screen(s)
         _assert_closing_layout(rows, head)
 

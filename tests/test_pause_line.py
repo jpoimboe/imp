@@ -4,49 +4,66 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _pause_lines
+from imp.cli import palette as pal
+from imp.cli.main import _pause_lines, _PauseInfo
 from imp.paths import project_state_dir
 
 
-def test_pause_lines_named_reasonless_pause_uses_paused_headline() -> None:
-    lines = _pause_lines("dufa26", "dufa26", title="Add version flag", color=False)
-    assert lines == [
-        "paused",
-        "dufa26 · Add version flag",
-        "resume: imp resume dufa26",
-    ]
+def _gold(s: str) -> str:
+    return pal.ansi(s, "wordmark")
 
 
-def test_pause_lines_titleless_pause_shows_bare_id() -> None:
-    lines = _pause_lines("dufa26", "dufa26", color=False)
-    assert lines == ["paused", "dufa26", "resume: imp resume dufa26"]
-    assert "(untitled)" not in "\n".join(lines)
+def _dim(s: str) -> str:
+    return pal.ansi(s, "dim")
 
 
-def test_pause_lines_reason_becomes_the_headline_no_at_locator_no_parens() -> None:
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="Add version flag",
-                         info=_PauseInfo("interrupt", None), color=False)
-    assert lines == [
-        "interrupt",
-        "dufa26 · Add version flag",
-        "resume: imp resume dufa26",
-    ]
-    joined = "\n".join(lines)
-    assert " at " not in joined
-    assert "(" not in joined
+# (info, plain first line, colored text after the gold id and ` · T · `)
+_CLEAN_SPINES = [
+    pytest.param(_PauseInfo("pause", None), "dufa26 · T · paused · /pause",
+                 _gold("paused") + _dim(" · /pause"), id="pause"),
+    pytest.param(_PauseInfo("ctrl-d", None), "dufa26 · T · paused · Ctrl-D",
+                 _gold("paused") + _dim(" · Ctrl-D"), id="ctrl-d"),
+    pytest.param(_PauseInfo("ctrl-c", None), "dufa26 · T · paused · Ctrl-C",
+                 _gold("paused") + _dim(" · Ctrl-C"), id="ctrl-c"),
+    pytest.param(_PauseInfo("sigterm", None), "dufa26 · T · paused · SIGTERM",
+                 _gold("paused") + _dim(" · SIGTERM"), id="sigterm"),
+    pytest.param(_PauseInfo("sighup", None), "dufa26 · T · paused · SIGHUP",
+                 _gold("paused") + _dim(" · SIGHUP"), id="sighup"),
+    pytest.param(_PauseInfo("sigquit", None), "dufa26 · T · paused · SIGQUIT",
+                 _gold("paused") + _dim(" · SIGQUIT"), id="sigquit"),
+    pytest.param(_PauseInfo("max_loops", None), "dufa26 · T · paused · loop limit",
+                 _gold("paused") + _dim(" · loop limit"), id="max_loops"),
+    pytest.param(_PauseInfo("context_window", None),
+                 "dufa26 · T · paused · context handoff limit",
+                 _gold("paused") + _dim(" · context handoff limit"),
+                 id="context_window-no-cause"),
+    pytest.param(_PauseInfo("context_window", "prompt is too long: 210000 tokens > 200000"),
+                 "dufa26 · T · paused · context handoff limit",
+                 _gold("paused") + _dim(" · context handoff limit"),
+                 id="context_window-provider-cause"),
+    pytest.param(None, "dufa26 · T · paused", _gold("paused"), id="bare"),
+    pytest.param(_PauseInfo("interrupt", None), "dufa26 · T · interrupt",
+                 _gold("interrupt"), id="raw-base"),
+]
 
 
-def test_pause_lines_clean_reason_headline_is_gold() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("interrupt", None), color=True)
-    assert lines[0] == pal.ansi("interrupt", "wordmark")            # gold headline, own line
-    assert lines[1] == f'{pal.ansi("dufa26", "wordmark")} · T'      # gold id · plain title
-    assert lines[2] == "resume: imp resume dufa26"                  # resume line stays plain
-    assert "⏸" not in lines[0]
-    assert "paused" not in lines[0]  # a reason replaces the bare word
+@pytest.mark.parametrize(("info", "plain", "colored_tail"), _CLEAN_SPINES)
+def test_pause_lines_clean_pause_is_one_spine_line_then_resume(
+    info: _PauseInfo | None, plain: str, colored_tail: str,
+) -> None:
+    assert _pause_lines("dufa26", "dufa26", title="T", info=info, color=False) == [
+        plain, "resume: imp resume dufa26"]
+    assert _pause_lines("dufa26", "dufa26", title="T", info=info, color=True) == [
+        f"{_gold('dufa26')} · T · {colored_tail}", "resume: imp resume dufa26"]
+
+
+def test_pause_lines_untitled_quest_shows_dim_untitled_middle_segment() -> None:
+    assert _pause_lines("dufa26", "dufa26", info=_PauseInfo("ctrl-d", None),
+                        color=True) == [
+        f"{_gold('dufa26')} · {_dim('(untitled)')} · {_gold('paused')}{_dim(' · Ctrl-D')}",
+        "resume: imp resume dufa26"]
+    assert _pause_lines("dufa26", "dufa26", color=False) == [
+        "dufa26 · (untitled) · paused", "resume: imp resume dufa26"]
 
 
 def test_pause_lines_error_reason_tail_is_red_id_stays_gold() -> None:
@@ -74,65 +91,9 @@ def test_pause_lines_internal_error_reason_tail_is_red() -> None:
     assert lines[0] == pal.ansi("internal error: project has no fact 'guidance'", "red")
 
 
-def test_pause_lines_keystroke_leave_head_is_paused_with_dim_display() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.main import _pause_lines, _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("ctrl-d", None), color=True)
-    assert lines == [
-        pal.ansi("paused", "wordmark") + pal.ansi(" · Ctrl-D", "dim"),
-        f'{pal.ansi("dufa26", "wordmark")} · T',
-        "resume: imp resume dufa26",
-    ]
-
-
-@pytest.mark.parametrize("reason,display", [
-    ("sigterm", "SIGTERM"),
-    ("sighup", "SIGHUP"),
-    ("sigquit", "SIGQUIT"),
-])
-def test_pause_lines_signal_leave_head_plain_is_paused_dot_display(
-    reason: str, display: str,
-) -> None:
-    from imp.cli.main import _pause_lines, _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo(reason, None), color=False)
-    assert lines == [
-        f"paused · {display}",
-        "dufa26 · T",
-        "resume: imp resume dufa26",
-    ]
-
-
-def test_pause_lines_ctrl_c_leave_head_is_paused_dot_ctrl_c() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.main import _pause_lines, _PauseInfo
-    plain = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("ctrl-c", None), color=False)
-    assert plain == [
-        "paused · Ctrl-C",
-        "dufa26 · T",
-        "resume: imp resume dufa26",
-    ]
-    colored = _pause_lines("dufa26", "dufa26", title="T",
-                           info=_PauseInfo("ctrl-c", None), color=True)
-    assert colored[0] == pal.ansi("paused", "wordmark") + pal.ansi(" · Ctrl-C", "dim")
-
-
-def test_pause_lines_non_leave_head_stays_bare_gold_reason() -> None:
-    # Guard: a non-leave interrupt head is unchanged — a bare gold reason, not the
-    # `paused · <Display>` leave head.
-    from imp.cli import palette as pal
-    from imp.cli.main import _pause_lines, _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("interrupt", None), color=True)
-    assert lines[0] == pal.ansi("interrupt", "wordmark")
-    assert "paused · " not in "\n".join(lines)
-
-
 @pytest.mark.parametrize(("title", "identity"), [
     ("Add version flag", "qzbscf · Add version flag"),
-    ("", "qzbscf"),
+    ("", "qzbscf · (untitled)"),
 ], ids=["titled", "untitled"])
 def test_paused_summary_renders_the_quests_own_id_and_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -149,7 +110,7 @@ def test_paused_summary_renders_the_quests_own_id_and_title(
     _emit_paused_summary(quest, info=None)
     # The bare id is the resume token, never a slugified handle.
     assert capsys.readouterr().out == (
-        f"paused\n{identity}\nresume: imp resume qzbscf\n\n")
+        f"{identity} · paused\nresume: imp resume qzbscf\n\n")
 
 
 def test_leave_trigger_returns_reason_only_when_escalated_and_stamped() -> None:
@@ -330,29 +291,6 @@ def test_pause_lines_error_block_untitled_leaves_bare_gold_id() -> None:
     assert lines[-1].count(" · ") == 0
 
 
-def test_pause_lines_max_loops_reads_as_loop_limit() -> None:
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="Add version flag",
-                         info=_PauseInfo("max_loops", None), color=False)
-    assert lines == [
-        "paused · loop limit",
-        "dufa26 · Add version flag",
-        "resume: imp resume dufa26",
-    ]
-    assert "max_loops" not in "\n".join(lines)
-
-
-def test_pause_lines_max_loops_head_is_gold_paused_dim_qualifier() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("max_loops", None), color=True)
-    assert lines[0] == (pal.ansi("paused", "wordmark")
-                        + pal.ansi(" · loop limit", "dim"))
-    assert lines[1] == f'{pal.ansi("dufa26", "wordmark")} · T'
-    assert lines[2] == "resume: imp resume dufa26"
-
-
 def test_pause_qualifier_holds_exactly_its_eight_entries() -> None:
     from imp.cli.main import _PAUSE_QUALIFIER, _PauseInfo
     assert _PAUSE_QUALIFIER == {
@@ -368,7 +306,7 @@ def test_pause_qualifier_holds_exactly_its_eight_entries() -> None:
     for trigger, display in _PAUSE_QUALIFIER.items():
         lines = _pause_lines("dufa26", "dufa26", title="T",
                              info=_PauseInfo(trigger, None), color=False)
-        assert lines[0] == f"paused · {display}"
+        assert lines[0] == f"dufa26 · T · paused · {display}"
 
 
 def test_pause_qualifier_derives_from_the_narrative_manual_stop_labels() -> None:
@@ -377,19 +315,3 @@ def test_pause_qualifier_derives_from_the_narrative_manual_stop_labels() -> None
     assert _PAUSE_QUALIFIER == {**nv.MANUAL_STOP_LABELS, "max_loops": "loop limit",
                                 "context_window": "context handoff limit"}
     assert not hasattr(nv, "_HUMAN_INTERRUPT_REASONS")
-
-
-@pytest.mark.parametrize("cause", [None, "prompt is too long: 210000 tokens > 200000"],
-                         ids=["no-cause", "provider-cause"])
-def test_pause_lines_context_window_is_gold_handoff_limit_with_resume(
-    cause: str | None,
-) -> None:
-    from imp.cli import palette as pal
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", title="T",
-                         info=_PauseInfo("context_window", cause), color=True)
-    assert lines == [
-        pal.ansi("paused", "wordmark") + pal.ansi(" · context handoff limit", "dim"),
-        f'{pal.ansi("dufa26", "wordmark")} · T',
-        "resume: imp resume dufa26",
-    ]

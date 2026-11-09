@@ -152,7 +152,9 @@ def _closing_block(
     )
     from imp.cli.store import _resolve_intent
     intent = witness.intent()
-    disposition_rc = _print_leave_disposition(quest, leave_state, intent=intent)
+    trigger = _leave_trigger(coord)
+    disposition_rc = _print_leave_disposition(quest, leave_state, trigger=trigger,
+                                              intent=intent)
     if disposition_rc is not None:
         return disposition_rc
     leave = witness.leave()
@@ -176,7 +178,6 @@ def _closing_block(
             quest, terminal.payload.get("reason"), terminal.payload.get("detail"),
             terminal.payload.get("note"), intent=intent)
         return ExitCode.FAILED
-    trigger = _leave_trigger(coord)
     if trigger is not None:
         # A deliberate leave outranks a witnessed pause, but never a completion seen
         # on the stream or on disk.

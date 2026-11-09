@@ -105,12 +105,12 @@ def _assert_closing_layout(rows: list[str], head: str) -> int:
     return at
 
 
-def _assert_pause_block(s: TerminalSession, head: str, quest_id: str, title: str) -> int:
-    """The closing layout above `head`, then the identity and resume rows; returns its index."""
+def _assert_pause_block(s: TerminalSession, outcome: str, quest_id: str, title: str) -> int:
+    """The closing layout above the `<id> · <title> · <outcome>` spine, then the resume
+    row; returns the spine's index."""
     rows = s.lines()
-    at = _assert_closing_layout(rows, head)
-    assert rows[at + 1:at + 3] == [
-        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], "\n".join(rows)
+    at = _assert_closing_layout(rows, f"{quest_id} · {title} · {outcome}")
+    assert rows[at + 1] == f"resume: imp resume {quest_id}", "\n".join(rows)
     return at
 
 
@@ -174,7 +174,7 @@ def test_pause_at_a_built_quests_question_pauses_like_ctrl_d(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(("command", "tail", "resume_suffix"), [
-    ("/pause", "paused", ""),
+    ("/pause", "paused · /pause", ""),
     ("/archive", "archived", " — or find it later with imp search"),
 ])
 def test_leave_command_in_chat_after_an_exchange_exits_130(
@@ -191,8 +191,10 @@ def test_leave_command_in_chat_after_an_exchange_exits_130(
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=(
-            f" · {tail}", f"resume: imp resume {quest_dir.name}{resume_suffix}"))
+        rows = s.lines()
+        at = _assert_closing_layout(rows, f"{quest_dir.name} · hello there · {tail}")
+        assert rows[at + 1] == f"resume: imp resume {quest_dir.name}{resume_suffix}", (
+            "\n".join(rows))
 
 
 @pytest.mark.parametrize("interrupt", ["cooperative", "hard_kill"])
@@ -212,7 +214,7 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: s
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · SIGTERM",))
+        assert_screen(s, contains=(f"{quest_dir.name} · sigterm mid run · paused · SIGTERM",))
 
     # Left mid-run: resume runs the agent on, not the interrupted-steer prompt.
     assert _poll(lambda: _flock_free(quest_dir / "lock"), timeout=E2E_POLL_TIMEOUT)
@@ -268,4 +270,41 @@ def test_ctrl_d_in_chat_after_an_exchange_exits_130_archived(tmp_path: Path) -> 
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        _assert_closing_layout(s.lines(), f"{quest_dir.name} · hello there · archived")
+        rows = s.lines()
+        at = _assert_closing_layout(rows, f"{quest_dir.name} · hello there · archived · Ctrl-D")
+        assert rows[at + 1] == (f"resume: imp resume {quest_dir.name}"
+                                " — or find it later with imp search"), "\n".join(rows)
+
+
+def test_pause_then_ctrl_d_on_a_resumed_chat_name_their_triggers(tmp_path: Path) -> None:
+    script = _seed_scripted_gate_project(tmp_path, turns=_CHAT_TURNS)
+    env = _env(script)
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "chat", "hello there"],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as s:
+        quest_dir = _at_the_question(s, tmp_path)
+        assert not Quest.load(tmp_path, quest_dir.name).materialized
+        s.send("/pause\r")
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(s.lines())
+        paused_at = _assert_pause_block(s, "paused · /pause", quest_dir.name, "hello there")
+        pause_spine = s.lines()[paused_at]
+    assert _poll(lambda: _flock_free(quest_dir / "lock"), timeout=E2E_POLL_TIMEOUT)
+
+    with TerminalSession(
+        [sys.executable, "-m", "imp", "resume", quest_dir.name],
+        cwd=str(tmp_path), env=env, cols=80, rows=24,
+    ) as r:
+        assert _poll(lambda: any("waiting for you" in ln for ln in r.lines()),
+                     timeout=E2E_POLL_TIMEOUT), "\n".join(r.lines())
+        r.wait_idle()
+        r.send("\x04")
+        rc = r.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
+
+        assert rc == 130, "\n".join(r.lines())
+        ctrl_d_spine = r.lines()[_assert_ctrl_d_block(r, quest_dir.name, "hello there")]
+
+    stem = f"{quest_dir.name} · hello there · paused"
+    assert (pause_spine, ctrl_d_spine) == (f"{stem} · /pause", f"{stem} · Ctrl-D")
