@@ -114,7 +114,7 @@ def test_every_shipped_load_skill_name_resolves() -> None:
     sites = _call_sites()
     # Non-vacuity: the scan really finds the known call sites, both kinds of pool.
     assert ("src/imp/assets/partials/imp-grounding.md", "imp-knowledge") in sites
-    assert ("src/imp/assets/workflows/default/agents/batch-code-reviewer.md",
+    assert ("src/imp/assets/workflows/default/agents/task-lead.md",
             "receiving-code-review") in sites
     unresolved = [site for site in sites if not _resolves(Path(site[0]), site[1])]
     assert unresolved == [], f"shipped load_skill names that resolve to nothing: {unresolved}"

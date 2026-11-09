@@ -4,7 +4,7 @@ Code review is technical evaluation, not emotional performance. **Verify before 
 
 ## Role in imp
 
-The `task-lead` adjudicates: it decides which reviewer findings are technically valid for this codebase and what to apply; the coder applies only accepted findings. This skill governs that evaluation — subject feedback to technical rigor, don't rubber-stamp it.
+`task-lead` (reviewer findings) and `deferred-sweep` (deferred items) adjudicate: they decide which findings are technically valid for this codebase and what to apply. This skill governs that evaluation — subject feedback to technical rigor, don't rubber-stamp it.
 
 ## The Response Pattern
 

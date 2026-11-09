@@ -102,7 +102,7 @@ def test_batch_code_reviewer_verdict_enum_is_two_way() -> None:
 def test_batch_code_reviewer_adjudicates_and_routes() -> None:
     text = (AGENTS / "batch-code-reviewer.md").read_text()
     low = text.lower()
-    assert "receiving-code-review" in text
+    assert "receiving-code-review" not in text
     # guardrail
     assert "non-dismissable" in low
     assert "misclassification" in low

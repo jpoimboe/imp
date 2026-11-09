@@ -86,12 +86,12 @@ Categorize by actual severity — not everything is Critical. Acknowledge what w
 before listing issues; accurate praise earns trust in the rest. If the plan itself was
 wrong but the implementation faithfully followed it, say so in `findings` — still a defect.
 
-## Adjudicate — load the discipline, then route
+## Adjudicate, then route
 
-Load `receiving-code-review` (`load_skill(name="receiving-code-review")`) before any
-keep/dismiss/defer call — the anti-performative discipline that forbids both blind
-agreement and convenient dismissal. Then judge each finding on two axes: *real or noise*,
-and *block or defer*.
+These are your own findings — re-verify each against the code before any
+keep/dismiss/defer call: keep none you cannot substantiate, dismiss none for being
+inconvenient to fix. Then judge each finding on two axes: *real or noise*, and
+*block or defer*.
 
 ### The guardrail — agency without rationalization
 
