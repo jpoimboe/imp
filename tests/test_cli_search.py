@@ -552,3 +552,10 @@ def test_cmd_search_orders_active_then_backlog_then_history(
     assert _cmd_search(_ns("dark", list=True), tmp_path) == 0
     heads = [ln.split(" · ")[0] for ln in capsys.readouterr().out.splitlines() if ln]
     assert heads == ["darkact", "darkbk", "darkarc"]
+
+
+def test_search_help_describes_list_as_id_title_status(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["search", "--help"])
+    assert "One terse line per quest (id, title, status); no excerpts." in capsys.readouterr().out

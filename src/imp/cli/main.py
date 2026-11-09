@@ -4906,7 +4906,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "(implies --completed).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
-        help="One terse line per quest (id, title, zone); no excerpts.")
+        help="One terse line per quest (id, title, status); no excerpts.")
     p_search.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
