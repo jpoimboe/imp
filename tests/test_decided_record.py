@@ -132,3 +132,23 @@ def test_task_lead_resolved_forward_boundary_crossing_is_decided() -> None:
     # The resolved-forward note itself is unchanged.
     assert ("- resolved-forward: `- resolved-forward task-lead: <one-line "
             "description of what you fixed>`") in text
+
+
+def test_reconciler_splits_on_the_human_decision_bar() -> None:
+    text = _agent("reconciler")
+    flat = _flat(text)
+    assert ("`— needs-decision:` is only for a reconciliation that clears that bar "
+            "— intent-level, costly to reverse, no reasonable default.") in flat
+    assert ("A call you already made — settling a conflict between base's and the "
+            "quest's intents with a reasonable default — takes one born-ticked line "
+            "in the same section instead") in flat
+    assert "A mechanical conflict resolution gets no line" in flat
+    assert "it never gates the merge, and the quest summary lists it" in flat
+    assert _record("reconciler") in text
+    assert ("Both forms are a durable record for asynchronous human triage and "
+            "integration-review's synchronous read") in flat
+    assert "a human should still ratify it" not in flat
+    bar = text.index('{% include "partials/human-decision.md" %}')
+    assert bar < text.index(_record("reconciler"))
+    assert (text.index(_record("reconciler"))
+            < text.index("A mechanical conflict resolution gets no line"))
