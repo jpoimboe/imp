@@ -100,9 +100,9 @@ def test_finalize_frames_change_as_already_at_head() -> None:
     assert "enqueues the change in the" not in body
     assert "enqueued into the merge queue" not in body
     assert "Integration review happens later, at the head of the queue" not in body
-    # The change is described as already at the head, with integration-review already done.
+    # The change is described as already at the head, with the at-head checks already done.
     assert "already at the head" in body
-    assert "already re-reviewed it at the merge head" in body
+    assert "already re-checked whatever integration changed" in body
 
 
 def test_finalize_description_frames_head_of_queue() -> None:
