@@ -58,7 +58,7 @@ The `_replay` filter is not decoration — see the replay handshake below.
 
 ```python
 create_quest(control_root, prompt, *, workflow=None, base=None, title=None,
-             background=False, vars=None) -> QuestHandle
+             background=False, autonomous=False, vars=None) -> QuestHandle
 ```
 
 `control_root` is the git checkout imp manages. Creation is synchronous and happens in
@@ -78,8 +78,11 @@ un-created, so every rejection happens first.
 (`{"jurisdiction": "us", "strict": True}`). A name the workflow does not declare, or a
 value of the wrong type, raises `InvalidVar` — again before the quest exists.
 
-`background=True` additionally starts a detached autonomous run you never have to attach
-to. Leave it false for anything interactive.
+`background=True` starts a detached run you never have to attach to; add
+`autonomous=True` to have imp take its own recommendation at routine decision
+points. Without it, the run pauses at its first question. Leave both false for
+anything interactive. `autonomous=True` without `background=True` raises `ValueError`,
+before anything is written.
 
 ## Listing quests
 

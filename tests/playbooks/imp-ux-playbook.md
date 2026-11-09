@@ -167,7 +167,7 @@ to score).
     nothing. impty advertises truecolor, so expect `dark` and that line; to see the silent
     `ansi` path, spawn with `env={"COLORTERM":""}`.
   - `imp new -h` — the flag surface (`--title`, `--backlog`, `--background`, `--depends-on`,
-    `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
+    `--workflow`, `--var`, `--autonomous`, `--message`, `--base`,
     `--provider`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
   - `imp resume -h` — the flag surface; the resume itself is driven in the walk spine (step 4)

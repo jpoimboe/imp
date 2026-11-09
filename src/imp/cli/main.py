@@ -1000,12 +1000,22 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     return 0
 
 
+def _background_launch_message(
+    verb: Literal["Started", "Resumed"], quest_id: str, *, autonomous: bool,
+) -> str:
+    mode = "autonomously " if autonomous else ""
+    return (f"{verb} quest {quest_id} (running {mode}in the background; "
+            f"appears in the active list).\n"
+            f"If it needs your answer it waits: imp list shows it as waiting, "
+            f"and imp resume {quest_id} answers it.")
+
+
 def apply_new(
     control: Path, *, opening: str | None, title: str | None,
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
-    background: bool = False, var_flags: list[str] | None = None,
-    provider: str | None = None,
+    background: bool = False, autonomous: bool = False,
+    var_flags: list[str] | None = None, provider: str | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1037,11 +1047,8 @@ def apply_new(
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
-        spawn.start_quest(control, quest_id)
-        return 0, (f"Started quest {quest_id} (running autonomously in the "
-                   f"background; appears in the active list).\n"
-                   f"If it needs your answer it waits: imp list shows it as "
-                   f"waiting, and imp resume {quest_id} answers it.")
+        spawn.start_quest(control, quest_id, autonomous=autonomous)
+        return 0, _background_launch_message("Started", quest_id, autonomous=autonomous)
 
     if idea is not None:
         if not idea.strip():
@@ -1144,8 +1151,6 @@ async def _run_fresh_session(
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
-    if getattr(args, "non_interactive", False):
-        return "--headless"
     if getattr(args, "message", None) is not None:
         return "--message"
     if getattr(args, "autonomous", False):
@@ -1218,10 +1223,28 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if reason is not None:
             _emit_cli_error(f"--provider: {reason}")
             return 2
+    try:
+        seed = resolve_spec_seed(args)
+    except (SeedError, ValueError) as e:
+        _emit_cli_error(f"{e}")
+        return 2
+
+    if getattr(args, "idea", None) is not None:
+        if getattr(args, "title", None):
+            _emit_cli_error("--backlog and --title cannot be combined (--backlog is the title)")
+            return 2
+        run_only = _backlog_run_only_flag(args)
+        if run_only is not None:
+            _emit_cli_error(
+                f"--backlog files an idea instantly and never runs; {run_only} "
+                f"only applies to a run.\nDrop one. Start a filed idea later with "
+                f"`imp resume <id>`.")
+            return 2
+
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         _refuse_foreign_cwd()
         return _emit_mutation_result(await proxy_mutation_async("new", {
-            "opening": getattr(args, "opening", None),
+            "opening": seed.seed_text,
             "title": getattr(args, "title", None),
             "workflow": getattr(args, "workflow", None),
             "base": getattr(args, "base", None),
@@ -1229,6 +1252,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "depends_on": getattr(args, "depends_on", None),
             "var_flags": getattr(args, "var", None),
             "background": getattr(args, "background", False),
+            "autonomous": bool(getattr(args, "autonomous", False)),
             "provider": provider_arg}))
     from imp.cli.signals import InterruptCoordinator
 
@@ -1252,26 +1276,17 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     if getattr(args, "background", False):
         rc, message = apply_new(
-            control, opening=getattr(args, "opening", None),
+            control, opening=seed.seed_text,
             title=getattr(args, "title", None), workflow=wf_arg,
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
             var_flags=list(getattr(args, "var", None) or []),
-            background=True, provider=provider_arg)
+            background=True, autonomous=bool(getattr(args, "autonomous", False)),
+            provider=provider_arg)
         print(message, file=sys.stderr if rc else sys.stdout)
         return rc
 
     if getattr(args, "idea", None) is not None:
-        if getattr(args, "title", None):
-            _emit_cli_error("--backlog and --title cannot be combined (--backlog is the title)")
-            return 2
-        run_only = _backlog_run_only_flag(args)
-        if run_only is not None:
-            _emit_cli_error(
-                f"--backlog files an idea instantly and never runs; {run_only} "
-                f"is for headless\nruns. Drop one. Start a filed idea later with "
-                f"`imp resume <id>`.")
-            return 2
         if not args.idea.strip():
             _emit_cli_error("--backlog title must be non-empty")
             return 2
@@ -1281,12 +1296,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         quest_vars = resolve_var_flags(
             control, workflow=wf_arg, raw=getattr(args, "var", None))
     except (VarFlagError, LoadError, LoadErrors) as e:
-        _emit_cli_error(f"{e}")
-        return 2
-
-    try:
-        seed = resolve_spec_seed(args)
-    except (SeedError, ValueError) as e:
         _emit_cli_error(f"{e}")
         return 2
 
@@ -1454,6 +1463,27 @@ def _warn_if_blocked(quest: Quest) -> None:
             f"{', '.join(unmerged)}; starting anyway.")
 
 
+def _resume_in_background(
+    quest: Quest, args: argparse.Namespace, *, lock_live: bool, fresh: bool,
+) -> int:
+    from imp.remote.daemon import spawn
+    # The detached child's stdio is DEVNULL: refuse and warn here, where it shows.
+    if lock_live:
+        _emit_cli_error(
+            f"quest {quest.id} is already running in a live session; attach with "
+            f"`imp resume {quest.id}`, or pause it first.")
+        return 2
+    if fresh:
+        _warn_if_blocked(quest)
+    autonomous = bool(getattr(args, "autonomous", False))
+    spawn.start_quest(
+        quest.control_root, quest.id, autonomous=autonomous,
+        message=getattr(args, "message", None),
+        provider=getattr(args, "provider", None))
+    print(_background_launch_message("Resumed", quest.id, autonomous=autonomous))
+    return 0
+
+
 def _build_resume_driver(
     *, quest: Quest, state: State, status: LiveStatus,
     color: bool, stream: WatchedStream, preceded_by_blank: bool = False,
@@ -1525,6 +1555,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False)))
     if isinstance(target, int):
         return target
+    args.non_interactive = getattr(args, "message", None) is not None
     quest_id = target
     loaded = _load_or_rehydrate(control, quest_id)
     if isinstance(loaded, int):
@@ -1542,6 +1573,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             _emit_cli_error(f"--provider: {reason}")
             return 2
     if _resume_opens_fresh(quest):
+        if getattr(args, "background", False):
+            return _resume_in_background(
+                quest, args, lock_live=lock_is_live(quest.quest_dir / "lock"),
+                fresh=True)
         if (provider_arg is not None
                 and provider_arg != current_provider(quest, None)):
             quest.set_provider(provider_arg)
@@ -1555,6 +1590,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return 2
 
     lock_live = lock_is_live(quest.quest_dir / "lock")
+    if getattr(args, "background", False):
+        return _resume_in_background(quest, args, lock_live=lock_live, fresh=False)
     pending_provider: str | None = None
     if (provider_arg is not None
             and provider_arg != current_provider(quest, state)):
@@ -1588,19 +1625,17 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             resume=True, status=status, non_interactive=True,
             leave_mode=quest.create_mode, autonomous=autonomous,
             provider=pending_provider, stream=watched)
-    if not getattr(args, "message", None):
-        question = bare_turn_end_question(quest)
-        if question is not None:
-            return await _resume_inert(
-                quest, question, marker=marker, notice=live_notice,
-                autonomous=autonomous, provider=pending_provider)
+    question = bare_turn_end_question(quest)
+    if question is not None:
+        return await _resume_inert(
+            quest, question, marker=marker, notice=live_notice,
+            autonomous=autonomous, provider=pending_provider)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     color = should_use_color(sys.stdout)
     _print_resume_opening(quest, marker, live_notice, color=color)
-    splash_shown = _print_splash_banner(interactive=_is_interactive(
-        non_interactive=bool(getattr(args, "non_interactive", False))))
+    splash_shown = _print_splash_banner(interactive=_is_interactive(non_interactive=False))
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(watched)
@@ -4594,16 +4629,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step sets one if omitted.")
-    p_new.add_argument("--headless", action="store_true", dest="non_interactive",
-                       help="Run headless: no live prompt; supply the opening "
-                            "message via the positional argument or --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Take imp's recommendation at routine decision points "
                             "instead of asking you; questions only you can answer "
-                            "still pause for you. Independent of --headless.")
+                            "still pause for you. Combine with --background for a "
+                            "hands-off run.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Alias for the positional opening message (seeds the "
-                            "opening step); convenient for headless/remote callers.")
+                            "opening step); convenient for scripts and remote callers.")
     new_mode = p_new.add_mutually_exclusive_group()
     new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                           help="File an idea for your backlog with this TITLE and "
@@ -4611,10 +4644,11 @@ def _build_parser() -> argparse.ArgumentParser:
                                "MESSAGE is an optional longer brief). Start it later "
                                "with `imp resume <id>`.")
     new_mode.add_argument("--background", action="store_true",
-                          help="Create the quest and launch it detached in the "
-                               "background, running headless and autonomous; it "
-                               "appears in the active list. Implies --headless "
-                               "and --autonomous.")
+                          help="Launch the quest detached in the background with no "
+                               "live prompt; it appears in the active list. A "
+                               "question pauses it until you answer with `imp resume "
+                               "<id>`. Add --autonomous to have imp make routine "
+                               "decisions itself.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A quest id this quest depends on (repeatable). "
@@ -4652,13 +4686,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
-    p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
-                        help="Headless: no live prompt; supply the opening message "
-                             "via the positional argument or --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Take imp's recommendation at routine decision points "
                              "instead of asking you; questions only you can answer "
-                             "still pause for you. Independent of --headless.")
+                             "still pause for you.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Alias for the positional opening message.")
     p_chat.add_argument("--provider", metavar="NAME", default=None,
@@ -4676,17 +4707,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument(
         "token", nargs="?", metavar="ID",
         help="id of the quest to resume, or any unique part of it.")
-    p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
-                          help="Headless: no live prompt; supply the reply via --message.")
+    # Pre-merge spawners still pass this; their children have no TTY, so it is moot.
+    p_resume.add_argument("--headless", action="store_true", dest="legacy_headless",
+                          help=argparse.SUPPRESS)
+    p_resume.add_argument("--background", action="store_true",
+                          help="Continue the quest detached in the background with no "
+                               "live prompt. Combine with --message to answer the "
+                               "pending question first.")
     p_resume.add_argument("--autonomous", action="store_true",
                           help="Take imp's recommendation at routine decision points "
                                "instead of asking you; questions only you can answer "
-                               "still pause for you. Independent of --headless.")
+                               "still pause for you. Combine with --background for a "
+                               "hands-off run.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
-                          help="Headless reply to the question the quest is waiting "
-                               "on (or the next one it asks); answer a later question "
-                               "by resuming again with another --message. "
-                               "Requires --headless.")
+                          help="Reply to the question the quest is waiting on (or "
+                               "the next one it asks), with no live prompt; answer a "
+                               "later question by resuming again with another --message.")
     p_resume.add_argument("--provider", metavar="NAME", default=None,
                           help="Switch the quest to NAME for its remaining "
                                "steps; the current step picks up from the "

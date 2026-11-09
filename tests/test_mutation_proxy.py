@@ -234,20 +234,28 @@ def test_run_mutation_new_records_parent(tmp_path: Path) -> None:
     assert meta["parent"] == "mom99"
 
 
+@pytest.mark.parametrize(("extra", "want", "word"), [
+    ({}, False, ""),
+    ({"autonomous": True}, True, "autonomously "),
+])
 def test_run_mutation_new_background_starts_quest(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        extra: dict, want: bool, word: str) -> None:
     _seed_control(tmp_path)
     started: dict[str, object] = {}
     monkeypatch.setattr(
         spawn_mod, "start_quest",
-        lambda control, qid: started.update(qid=qid))
+        lambda control, qid, *, autonomous: started.update(
+            qid=qid, autonomous=autonomous))
     result = run_mutation(tmp_path, "new", {
         "opening": "brief", "title": "T", "workflow": None, "base": None,
-        "idea": None, "depends_on": None, "var_flags": None, "background": True})
+        "idea": None, "depends_on": None, "var_flags": None, "background": True,
+        **extra})
     assert result["returncode"] == 0
     qid = started["qid"]
+    assert started["autonomous"] is want
     assert result["message"] == (
-        f"Started quest {qid} (running autonomously in the background; "
+        f"Started quest {qid} (running {word}in the background; "
         f"appears in the active list).\n"
         f"If it needs your answer it waits: imp list shows it as waiting, "
         f"and imp resume {qid} answers it.")
@@ -396,8 +404,9 @@ def test_new_mutation_threads_var_flags_to_apply_new(
     assert seen["var_flags"] == ["retries=5"]
 
 
+@pytest.mark.parametrize("autonomous", [False, True])
 def test_async_cmd_new_proxy_forwards_background(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch: pytest.MonkeyPatch, autonomous: bool) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
     monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
     seen: dict[str, object] = {}
@@ -410,7 +419,66 @@ def test_async_cmd_new_proxy_forwards_background(
     monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(
         opening="brief", title="T", workflow=None, base=None, idea=None,
-        depends_on=None, background=True)
+        depends_on=None, background=True, autonomous=autonomous)
     assert asyncio.run(main._async_cmd_new(args)) == 0
     assert seen["op"] == "new"
     assert seen["args"]["background"] is True
+    assert seen["args"]["autonomous"] is autonomous
+
+
+def test_async_cmd_new_proxy_sends_the_resolved_message_as_the_opening(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+    seen: dict[str, object] = {}
+
+    async def _fake(op: str, args: dict) -> dict:
+        seen["args"] = args
+        return {"returncode": 0, "message": "Started quest q9"}
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
+    args = main._build_parser().parse_args(["new", "--background", "--message", "x"])
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+    assert seen["args"]["opening"] == "x"
+
+
+def test_async_cmd_new_proxy_rejects_both_openings_without_proxying(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+
+    async def _boom(op: str, args: dict) -> dict:
+        raise AssertionError("must not proxy a rejected opening")
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _boom)
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--message", "x", "y"])
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+    assert "Pass the opening message once" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flags", "expected"), [
+    (["--message", "M"],
+     "imp: --backlog files an idea instantly and never runs; --message "
+     "only applies to a run.\nDrop one. Start a filed idea later with "
+     "`imp resume <id>`.\n"),
+    (["--autonomous"],
+     "imp: --backlog files an idea instantly and never runs; --autonomous "
+     "only applies to a run.\nDrop one. Start a filed idea later with "
+     "`imp resume <id>`.\n"),
+    (["--title", "X"],
+     "imp: --backlog and --title cannot be combined (--backlog is the title)\n"),
+])
+def test_async_cmd_new_proxy_rejects_backlog_conflicts_without_proxying(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        flags: list[str], expected: str) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+
+    async def _boom(op: str, args: dict) -> dict:
+        raise AssertionError("must not proxy a conflicting --backlog")
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _boom)
+    args = main._build_parser().parse_args(["new", "--backlog", "T", *flags])
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+    assert capsys.readouterr().err == expected

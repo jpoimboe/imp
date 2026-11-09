@@ -30,7 +30,7 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
     script_path = seed_minimal_repo(tmp_path, script=script)
 
     proc = subprocess.run(
-        [sys.executable, "-m", "imp", "new", "demo", "--title", "demo change", "--headless"],
+        [sys.executable, "-m", "imp", "new", "demo", "--title", "demo change"],
         cwd=tmp_path,
         env=clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi"),
         capture_output=True, text=True, timeout=E2E_SUBPROCESS_TIMEOUT,

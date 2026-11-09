@@ -1,4 +1,4 @@
-"""imp.api.create_quest(background=True): a detached autonomous run, no attach."""
+"""imp.api.create_quest(background=True): a detached run, no attach."""
 
 from __future__ import annotations
 
@@ -59,18 +59,56 @@ def _await_archived_status(
     return last
 
 
+@pytest.mark.parametrize("autonomous", [False, True])
 def test_background_flag_calls_start_quest_with_the_created_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, autonomous: bool,
+) -> None:
+    _seed_control(tmp_path)
+    started: dict[str, object] = {}
+    monkeypatch.setattr(
+        "imp.remote.daemon.spawn.start_quest",
+        lambda control, quest_id, *, autonomous: started.update(
+            control=control, id=quest_id, autonomous=autonomous))
+
+    handle = create_quest(tmp_path, "go", background=True, autonomous=autonomous)
+
+    assert started == {"control": tmp_path, "id": handle.id, "autonomous": autonomous}
+
+
+def test_background_alone_starts_a_non_autonomous_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
     started: dict[str, object] = {}
     monkeypatch.setattr(
         "imp.remote.daemon.spawn.start_quest",
-        lambda control, quest_id: started.update(control=control, id=quest_id))
+        lambda control, quest_id, *, autonomous: started.update(autonomous=autonomous))
 
-    handle = create_quest(tmp_path, "go", background=True)
+    create_quest(tmp_path, "go", background=True)
 
-    assert started == {"control": tmp_path, "id": handle.id}
+    assert started == {"autonomous": False}
+
+
+def test_autonomous_without_background_raises_and_writes_no_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+
+    def _boom(control: Path, quest_id: str, *, autonomous: bool) -> None:
+        raise AssertionError("start_quest must not run without background=True")
+
+    monkeypatch.setattr("imp.remote.daemon.spawn.start_quest", _boom)
+
+    with pytest.raises(ValueError, match=r"^autonomous=True requires background=True$"):
+        create_quest(tmp_path, "go", autonomous=True)
+
+    assert not (project_state_dir(tmp_path) / "quests").exists()
+
+
+def test_create_quest_docstring_documents_background_and_autonomous() -> None:
+    doc = " ".join((create_quest.__doc__ or "").split())
+    assert ("`background=True` also starts a detached run needing no attach; "
+            "`autonomous=True` makes it take imp's recommendations.") in doc
 
 
 def test_no_background_flag_spawns_nothing(
@@ -78,7 +116,7 @@ def test_no_background_flag_spawns_nothing(
 ) -> None:
     _seed_control(tmp_path)
 
-    def _boom(control: Path, quest_id: str) -> None:
+    def _boom(control: Path, quest_id: str, *, autonomous: bool) -> None:
         raise AssertionError("start_quest must not run without background=True")
 
     monkeypatch.setattr("imp.remote.daemon.spawn.start_quest", _boom)
@@ -105,7 +143,7 @@ def test_background_create_reaches_a_terminal_state_with_no_attach(
     monkeypatch.setenv("IMP_SCRIPTED_SCRIPT", str(script_path))
     _seed_scripted_repo(tmp_path)
 
-    handle = create_quest(tmp_path, "do the thing", background=True)
+    handle = create_quest(tmp_path, "do the thing", background=True, autonomous=True)
 
     status = _await_archived_status(tmp_path, handle.id, "completed")
     assert status == "completed", (

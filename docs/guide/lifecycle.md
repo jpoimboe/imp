@@ -77,7 +77,8 @@ there too.
 - `imp resume <id>` — pick a parked or left quest back up. It first replays the
   agent's last message and what followed, then continues; the full history stays
   in `imp log <id>`. Resuming one whose session is still live attaches to (joins)
-  that live run.
+  that live run. `--background` continues it detached with no live prompt instead
+  (add `--message` to answer its pending question first); it refuses a live one.
 
 ## What happens to a left draft
 

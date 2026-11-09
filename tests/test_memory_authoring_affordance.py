@@ -19,7 +19,7 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
     assert "Work out the target file (narrowest scope that fits):" in text
     assert "be reluctant with either `all.md`" in text
     assert "Never invent a step name." in text
-    assert "imp new --workflow memory --background" in text
+    assert "imp new --workflow memory --background --autonomous --title" in text
     assert "intent, not file bytes" in text
     assert "never `.imp/`" in text
     assert "Coupled to code you're scoping? Fold it in, don't background it." in text

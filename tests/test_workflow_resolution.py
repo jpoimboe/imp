@@ -213,7 +213,7 @@ def test_selectable_workflow_names_drops_internal_workflows(tmp_path: Path) -> N
     assert names == sorted(set(bundled_workflow_names()) - INTERNAL_WORKFLOWS)
     assert "memory" not in names
     # the full set is deliberately unchanged: memory-tree validation and quest
-    # creation (`imp new --workflow memory --background`) both need it
+    # creation (`imp new --workflow memory --background --autonomous`) both need it
     assert "memory" in available_workflow_names(tmp_path)
     assert resolve_workflow_dir(tmp_path, "memory").is_dir()
 

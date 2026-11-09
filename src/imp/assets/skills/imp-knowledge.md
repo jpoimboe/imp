@@ -37,7 +37,8 @@ lands stays maintainable.
   append-only log that is the single source of truth.
 - **Pause, resume, interrupt.** Ctrl-D or `/pause` to set a quest aside for later;
   Ctrl-C to interrupt a running agent and re-steer; a run interrupted mid-call
-  resumes from the log with nothing lost.
+  resumes from the log with nothing lost. `imp resume <id> --background` sends a
+  paused quest back to running detached; `--message` answers its question first.
 - **Full provenance.** Trace any line of code back through the run to the
   conversation that spawned it.
 - **Search & backlog.** Full search across every quest, and a tracked backlog
@@ -119,7 +120,7 @@ layered broad→narrow (`all.md` → every agent; `<workflow>/<step>.md` → one
 Keep each memory very succinct and use it sparingly — every line is injected into
 agent context on every run; for anything long, keep a doc and point the memory at
 its path. Don't hand-edit the tree. A standalone change is recorded with a background
-memory quest (`imp new --workflow memory --background "<what to change>"`); a change
+memory quest (`imp new --workflow memory --background --autonomous "<what to change>"`); a change
 coupled to a code quest rides that quest's spec as a Memory changes item and lands
 with the code.
 

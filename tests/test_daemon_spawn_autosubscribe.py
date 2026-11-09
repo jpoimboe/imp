@@ -25,5 +25,4 @@ def test_create_quest_sets_autosubscribe_env_on_the_resume_it_spawns(
     quest_id = spawn.create_quest(tmp_path, "add dark mode")
 
     assert captured["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
-    assert captured["argv"] == [
-        sys.executable, "-m", "imp", "resume", quest_id, "--headless"]
+    assert captured["argv"] == [sys.executable, "-m", "imp", "resume", quest_id]

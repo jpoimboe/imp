@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -266,31 +267,67 @@ def test_apply_new_draft_defers_seed(tmp_path: Path, monkeypatch) -> None:
     assert meta["parent"] == "pdraft"
 
 
-def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(("kwargs", "want", "word"), [
+    ({}, False, ""),
+    ({"autonomous": True}, True, "autonomously "),
+])
+def test_apply_new_background_starts_quest(
+    tmp_path: Path, monkeypatch, kwargs, want, word,
+) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     started: dict[str, object] = {}
     import imp.remote.daemon.spawn as spawn_mod
     monkeypatch.setattr(
         spawn_mod, "start_quest",
-        lambda control, qid: started.update(control=control, qid=qid))
+        lambda control, qid, *, autonomous: started.update(
+            control=control, qid=qid, autonomous=autonomous))
     rc, msg = main.apply_new(
         tmp_path, opening="do the thing", title="Task", workflow=None,
-        base=None, idea=None, depends_on=None, background=True, parent="mom3")
+        base=None, idea=None, depends_on=None, background=True, parent="mom3",
+        **kwargs)
     assert rc == 0
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     assert msg == (
-        f"Started quest {quest.id} (running autonomously in the background; "
+        f"Started quest {quest.id} (running {word}in the background; "
         f"appears in the active list).\n"
         f"If it needs your answer it waits: imp list shows it as waiting, "
         f"and imp resume {quest.id} answers it.")
     assert quest.origin == "draft"
     assert started["qid"] == quest.id
+    assert started["autonomous"] is want
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["parent"] == "mom3"
     assert started["control"] == tmp_path
     assert State.load(quest.quest_dir / "state").step is None
+
+
+@pytest.mark.parametrize(("extra", "word"), [
+    ([], ""),
+    (["--autonomous"], "autonomously "),
+])
+def test_new_background_argv_spawns_resume_with_only_the_given_flags(
+    tmp_path: Path, monkeypatch, capsys, extra, word,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    import imp.remote.daemon.spawn as spawn_mod
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn_mod, "_spawn_detached", lambda argv, env, cwd: spawned.append(argv))
+    args = main._build_parser().parse_args(["new", "--background", *extra, "x"])
+
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+
+    (quest_id,) = main._live_quest_ids(tmp_path)
+    assert spawned == [[sys.executable, "-m", "imp", "resume", quest_id, *extra]]
+    assert (
+        f"Started quest {quest_id} (running {word}in the background; appears in "
+        f"the active list).\nIf it needs your answer it waits: imp list shows it "
+        f"as waiting, and imp resume {quest_id} answers it.\n"
+    ) in capsys.readouterr().out
 
 
 def _new_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -308,9 +345,29 @@ def test_new_background_help_verbatim() -> None:
     p_new = _new_subparser(main._build_parser())
     bg = next(a for a in p_new._actions if a.dest == "background")
     assert bg.help == (
-        "Create the quest and launch it detached in the background, "
-        "running headless and autonomous; it appears in the active list. "
-        "Implies --headless and --autonomous."
+        "Launch the quest detached in the background with no live prompt; it "
+        "appears in the active list. A question pauses it until you answer with "
+        "`imp resume <id>`. Add --autonomous to have imp make routine decisions "
+        "itself."
+    )
+
+
+def test_new_autonomous_help_verbatim() -> None:
+    p_new = _new_subparser(main._build_parser())
+    auto = next(a for a in p_new._actions if a.dest == "autonomous")
+    assert auto.help == (
+        "Take imp's recommendation at routine decision points instead of asking "
+        "you; questions only you can answer still pause for you. Combine with "
+        "--background for a hands-off run."
+    )
+
+
+def test_new_message_help_verbatim() -> None:
+    p_new = _new_subparser(main._build_parser())
+    msg = next(a for a in p_new._actions if a.dest == "message")
+    assert msg.help == (
+        "Alias for the positional opening message (seeds the opening step); "
+        "convenient for scripts and remote callers."
     )
 
 
@@ -378,3 +435,42 @@ def test_cmd_new_on_a_branch_prints_no_detached_notice(
 
     assert rc == 2
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("opening_argv", [["x"], ["--message", "x"]])
+def test_new_background_seeds_the_opening_from_positional_or_message(
+    tmp_path: Path, monkeypatch, opening_argv,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    import imp.remote.daemon.spawn as spawn_mod
+    monkeypatch.setattr(spawn_mod, "_spawn_detached", lambda argv, env, cwd: None)
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--title", "T", *opening_argv])
+
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+
+    (quest_id,) = main._live_quest_ids(tmp_path)
+    assert Quest.load(tmp_path, quest_id).seed_opening == "T\n\nx"
+
+
+def test_new_background_rejects_both_positional_and_message(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    import imp.remote.daemon.spawn as spawn_mod
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn_mod, "_spawn_detached", lambda argv, env, cwd: spawned.append(argv))
+    args = main._build_parser().parse_args(
+        ["new", "--background", "--message", "x", "y"])
+
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+
+    assert ("Pass the opening message once — as the positional argument or "
+            "--message, not both.") in capsys.readouterr().err
+    assert spawned == []
+    assert not (project_state_dir(tmp_path) / "quests").exists()

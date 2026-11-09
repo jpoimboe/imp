@@ -15,6 +15,7 @@ from impty import TerminalSession
 from tests.impty.e2e_support import (
     E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
+    STDIN_OFF_PTY,
     _event_types,
     _flock_free,
     _poll,
@@ -285,7 +286,7 @@ def _assert_one_blank_under_the_header(rows: list[str]) -> None:
 def test_run_with_no_intent_has_one_blank_under_the_header_on_a_terminal(tmp_path: Path) -> None:
     script = _seed_scripted_gate_project(tmp_path, turns=_QUESTION_TURNS)
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "--title", "t", "--headless"],
+        [*STDIN_OFF_PTY, sys.executable, "-m", "imp", "new", "--title", "t"],
         cwd=str(tmp_path), env=_env(script), cols=80, rows=24,
     ) as s:
         s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
@@ -297,7 +298,7 @@ def test_run_with_no_intent_has_one_blank_under_the_header_when_piped(tmp_path: 
     out_path = tmp_path / "stdout.txt"
     with out_path.open("w") as out:
         subprocess.run(
-            [sys.executable, "-m", "imp", "new", "--title", "t", "--headless"],
+            [sys.executable, "-m", "imp", "new", "--title", "t"],
             cwd=tmp_path, env=_env(script), stdin=subprocess.DEVNULL, stdout=out,
             stderr=subprocess.STDOUT, timeout=E2E_EXIT_POLL_TIMEOUT)
     _assert_one_blank_under_the_header(out_path.read_text().splitlines())

@@ -166,3 +166,13 @@ def test_example_only_touches_real_attributes() -> None:
         assert node.attr in _members(owner), f"{node.value.id}.{node.attr}"
         checked += 1
     assert checked >= 5, f"the example exercises too little of the API ({checked})"
+
+
+def test_embedding_doc_documents_background_and_autonomous() -> None:
+    flat = _flat()
+    assert ("background=False, autonomous=False, vars=None) -> QuestHandle") in flat
+    assert ("`background=True` starts a detached run you never have to attach to; add "
+            "`autonomous=True` to have imp take its own recommendation at routine "
+            "decision points. Without it, the run pauses at its first question. Leave "
+            "both false for anything interactive.") in flat
+    assert "detached autonomous run" not in flat
