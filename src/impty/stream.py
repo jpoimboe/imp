@@ -10,7 +10,8 @@ the surplus reply is typed into the pane, and XTMODKEYS (`ESC[>4;2m`) lands as S
 sequences at all, drawing a DCS/SOS/PM/APC payload onto the grid as text. OSC and
 `?`-prefixed CSI are deliberately left alone: `?` carries the DECSET alt-screen
 switch TerminalScreen's regime tracking depends on, and TerminalScreen guards the
-few `?` forms pyte mis-dispatches (device status, and SGR).
+few `?` forms pyte mis-dispatches (device status, and SGR). The stream also routes
+the SU/SD finals (`S`, `T`), absent from pyte's CSI table, to TerminalScreen.
 """
 
 from __future__ import annotations
@@ -43,6 +44,9 @@ class TerminalStream(pyte.ByteStream):
     held bytes, so at most two (`ESC`, `ESC [`) are ever pending across a chunk
     boundary and a string payload costs no buffer at all.
     """
+
+    # No ClassVar: mypy rejects it against pyte's instance-variable declaration.
+    csi = {**pyte.Stream.csi, "S": "scroll_up", "T": "scroll_down"}  # noqa: RUF012
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
