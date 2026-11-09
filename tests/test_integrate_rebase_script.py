@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from imp.paths import project_state_dir
@@ -21,7 +22,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _run(project_root: Path, tolerated: str = "false") -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root),
-           "IMP_QUEST_DIR": str(_home(project_root))}
+           "IMP_QUEST_DIR": str(_home(project_root)), "IMP_PYTHON": sys.executable}
     return subprocess.run(["bash", str(SCRIPT), tolerated], cwd=project_root.parent,
                           env=env, capture_output=True, text=True, check=False)
 

@@ -27,16 +27,17 @@ phases:
           - {else: true, continue: true}
 
       # Mechanical validation gate: re-runs imp's own load-time memory validation
-      # over the edited worktree. On an invalid tree it exits non-zero; the engine
-      # injects the validator's errors as the resumed editor's feedback.
+      # over the edited worktree. An invalid tree exits 3 and the engine injects the
+      # validator's errors as the resumed editor's feedback; any other failure pauses.
       - name: validate-memory
         show_label: false
         label: checking memory files
-        command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
+        command: "\"$IMP_PYTHON\" -m imp.providers.validate_memory_cli \"$IMP_PROJECT_ROOT\""
         max_loops: 6
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: memory-editor, label: "fixing memory files"}
+          - {if: {exit: 3}, resume: memory-editor, label: "fixing memory files"}
+          - {else: true, pause: true}
 
       - name: wait-for-head
         acquire: merge-lane

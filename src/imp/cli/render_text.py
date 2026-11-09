@@ -62,6 +62,9 @@ _PAUSE_REASON_COPY: dict[str, str] = {
     "detached":
         "the terminal running this quest went away; the quest is paused and "
         "resumable — resume to pick it up where it stopped",
+    "script_blocked":
+        "a script step stopped the workflow; the quest is paused and resumable "
+        "— the error above names the cause; fix it, then resume",
 }
 
 

@@ -25,7 +25,7 @@ cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || { echo "could no
 tolerated="$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]')"
 QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
 QUEST_JSON="$QUEST_DIR/quest.json"
-BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['base_branch'])") || { echo "could not read base_branch from quest.json; pausing" >&2; exit 5; }
+BASE=$("$IMP_PYTHON" -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['base_branch'])") || { echo "could not read base_branch from quest.json; pausing" >&2; exit 5; }
 [ -n "$BASE" ] || { echo "base_branch is empty in quest.json; pausing" >&2; exit 5; }
 
 # A bad base_branch makes `--is-ancestor` exit 128; verify the ref up front.
@@ -47,7 +47,7 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 fi
 
 # P is the pre-rebase fork point: the SHA the branch is currently planted on.
-P=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])") || { echo "could not read cur_base_head from quest.json; pausing" >&2; exit 5; }
+P=$("$IMP_PYTHON" -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])") || { echo "could not read cur_base_head from quest.json; pausing" >&2; exit 5; }
 [ -n "$P" ] || { echo "cur_base_head is empty in quest.json; pausing" >&2; exit 5; }
 
 # Base-side incoming diff: what base added since the fork point P. Empty => base
@@ -69,7 +69,7 @@ fi
 # is handed to the workflow on stdout for the integration_fork var.
 if git -c rerere.enabled=true -c rerere.autoupdate=true rebase --empty=drop "$BASE" 1>&2; then
   # Clean replant complete: the branch now sits on B. Record cur_base_head := B.
-  python3 -c "import json,sys;p=sys.argv[1];m=json.load(open(p));m['cur_base_head']=sys.argv[2];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$QUEST_JSON" "$B" || { echo "could not record cur_base_head after rebase; pausing" >&2; exit 5; }
+  "$IMP_PYTHON" -c "import json,sys;p=sys.argv[1];m=json.load(open(p));m['cur_base_head']=sys.argv[2];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$QUEST_JSON" "$B" || { echo "could not record cur_base_head after rebase; pausing" >&2; exit 5; }
   echo "clean rebase onto $BASE (no conflicts); handing to integration-reviewer" >&2
   echo "$P"
   exit 0

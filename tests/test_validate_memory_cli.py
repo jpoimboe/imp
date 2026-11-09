@@ -21,12 +21,13 @@ def test_absent_memory_tree_exits_zero(tmp_path: Path) -> None:
     assert main([str(tmp_path)]) == 0
 
 
-def test_invalid_memory_tree_exits_nonzero_with_errors(
+def test_invalid_memory_tree_exits_3_with_errors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # 3, not 1: the gate must tell an invalid tree apart from a crash.
     _write_memory(tmp_path, "bogus/all.md")
     rc = main([str(tmp_path)])
-    assert rc == 1
+    assert rc == 3
     err = capsys.readouterr().err
     assert "bogus" in err
     assert "not a known workflow" in err

@@ -913,9 +913,8 @@ def test_plan_reviewer_green_bullet_includes_guard_tests() -> None:
 def _gate_failure_feedback(gate: str, target: str) -> str:
     wf = load_workflow(bundled_workflow_dir("default"))
     step = next(s for s in wf.flat_steps() if s.name == gate)
-    action = next(r.action for r in step.rules if r.condition is None)
-    assert isinstance(action, Goto)
-    assert action.target == target
+    action = next(r.action for r in step.rules
+                  if isinstance(r.action, Goto) and r.action.target == target)
     assert action.feedback is not None
     return " ".join(action.feedback.split())
 

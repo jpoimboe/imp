@@ -14,7 +14,7 @@ set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
 
-FORK=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['cur_base_head'])" "$QUEST_DIR/quest.json")
+FORK=$("$IMP_PYTHON" -c "import json,sys;print(json.load(open(sys.argv[1]))['cur_base_head'])" "$QUEST_DIR/quest.json")
 [ -n "$FORK" ] || { echo "empty fork (no cur_base_head in quest.json)" >&2; exit 1; }
 
 # Fail closed: a git error (e.g. an invalid $FORK) must not read as "clean". Capture

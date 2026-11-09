@@ -1,6 +1,10 @@
 from imp.assets import bundled_workflow_dir
+from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Goto, Pause
+from imp.engine.types import Continue, Goto, Pause
+
+_VALIDATE_MEMORY_COMMAND = (
+    '"$IMP_PYTHON" -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"')
 
 
 def _wf():
@@ -39,9 +43,18 @@ def test_wait_for_head_is_branch_acquiring_merge_lane() -> None:
     assert by["wait-for-head"].acquire == "merge-lane"
 
 
-def test_validate_step_invokes_memory_cli() -> None:
+def test_validate_step_runs_memory_cli_under_engine_interpreter() -> None:
     by = {s.name: s for s in _wf().flat_steps()}
-    assert "imp.providers.validate_memory_cli" in by["validate-memory"].command
+    assert by["validate-memory"].command == _VALIDATE_MEMORY_COMMAND
+
+
+def test_validate_memory_commands_are_byte_identical_across_workflows() -> None:
+    default = load_workflow(bundled_workflow_dir("default"))
+    default_cmd = next(
+        s for s in default.flat_steps() if s.name == "validate-memory").command
+    memory_cmd = next(
+        s for s in _wf().flat_steps() if s.name == "validate-memory").command
+    assert default_cmd == memory_cmd == _VALIDATE_MEMORY_COMMAND
 
 
 def test_memory_editor_error_rule_pauses() -> None:
@@ -66,3 +79,15 @@ def test_merge_and_validate_resume_routing() -> None:
     validate = by["validate-memory"]
     resume_rule = next(r for r in validate.rules if isinstance(r.action, Goto) and r.action.resume)
     assert resume_rule.action.feedback is None
+
+
+def test_validate_memory_routes_on_exit_class() -> None:
+    rules = next(s for s in _wf().flat_steps() if s.name == "validate-memory").rules
+    assert isinstance(evaluate_rules(rules, vars={}, output={"exit": 0}).action, Continue)
+    m3 = evaluate_rules(rules, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Goto) and m3.action.target == "memory-editor"
+    assert m3.action.resume is True
+    assert m3.action.feedback is None
+    for code in (1, 127):
+        m = evaluate_rules(rules, vars={}, output={"exit": code})
+        assert isinstance(m.action, Pause), code

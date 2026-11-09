@@ -5,8 +5,9 @@
 Invoked by the bundled `memory` workflow's validation gate. Loads the memory
 snapshot from the given root and runs the same `validate_project_memory` the
 executor runs at run entry, so "valid at the gate" == "loads at the next run".
-Exits non-zero, printing the errors, on an invalid tree. imp's own tooling —
-exempt from the "intent, not a runner" prompt invariant.
+Exits 3, printing the errors, on an invalid tree, so the gate can tell it apart
+from a crash (Python's exit 1). imp's own tooling — exempt from the "intent, not
+a runner" prompt invariant.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_project_memory(root, memory)
     except (LoadError, LoadErrors) as exc:
         print(str(exc), file=sys.stderr)
-        return 1
+        return 3
     return 0
 
 

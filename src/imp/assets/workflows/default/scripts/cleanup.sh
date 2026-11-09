@@ -21,7 +21,7 @@ STATE="$QUEST_DIR/state"
 
 # Range base: the quest fork (cur_base_head from quest.json). The whole quest is
 # in range, so any in-range fixup! folds.
-FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
+FORK=$("$IMP_PYTHON" -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
 [ -n "$FORK" ] || { echo "empty fork (no cur_base_head)" >&2; exit 1; }
 
 # grep -q in a pipeline with pipefail is unreliable (SIGPIPE makes git log fail even

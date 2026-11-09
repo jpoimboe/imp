@@ -274,16 +274,18 @@ phases:
 
       # Post-rebase memory gate: re-runs imp's own load-time memory validation over
       # the fully-merged worktree (quest changes + latest base) against the rebased
-      # workflow defs. Byte-identical command to the memory workflow's gate.
+      # workflow defs. Byte-identical command to the memory workflow's gate. Exit 3
+      # (invalid tree) goes back to reconciler; any other failure pauses.
       - name: validate-memory
         show_label: false
         label: checking memory files
-        command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
+        command: "\"$IMP_PYTHON\" -m imp.providers.validate_memory_cli \"$IMP_PROJECT_ROOT\""
         max_loops: 6
         rules:
           - {if: {exit: 0}, goto: integration-verify}
-          - {else: true, resume: reconciler, label: "fixing memory files",
+          - {if: {exit: 3}, resume: reconciler, label: "fixing memory files",
              feedback: "The imp/memory/ tree is invalid against the rebased workflows. Fix the memory file paths:"}
+          - {else: true, pause: true}
 
       - name: integration-verify
         command: ./scripts/run-verify.sh slow
