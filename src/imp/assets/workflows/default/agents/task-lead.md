@@ -218,7 +218,7 @@ unimplemented task, or the re-opened task from injected feedback):
 
    | Note type | Meaning | Downstream consumer |
    |---|---|---|
-   | **resolved-forward** | You fixed it (dispatch the coder); tree green. Informational, plus an optional `— needs-decision:` if it crossed a spec/AC boundary and wants ratification. | `finalize` ratifies the needs-decision, if any; `gap-check` ignores it for coverage. |
+   | **resolved-forward** | You fixed it (dispatch the coder); tree green. Informational, plus a `— decided:` line if it crossed a spec/AC boundary. | The quest summary lists the decided line, if any — it never gates the merge; `gap-check` ignores it for coverage. |
    | **needs-decision** | A genuine human call, no code action taken; recorded as a `— needs-decision:` Deferred Followup. | `finalize` gate's needs-decision walk; suppresses the `gap-check` backstop for its scope. |
    | **needs-replan** | You couldn't fix forward; a corrective plan is required. | `gap-check` → `more_plans: true` → `plan-writer` authors `N+1`. |
 
@@ -229,8 +229,7 @@ unimplemented task, or the re-opened task from injected feedback):
 
    - **Local + bounded + tree-stays-green** → make the forward fix (dispatch the
      coder), record a **resolved-forward** note, continue. If the fix crosses a spec
-     scope/AC boundary, add a `— needs-decision:` line so the human ratifies it at the
-     merge gate.
+     scope/AC boundary, also append its `— decided:` record (shape below).
    - **Needs real redesign / spans tasks / can't get green** → record a
      **needs-replan** note and continue. If a *committed* task is wrong and can't be
      fixed forward in place, **revert it forward**: dispatch the coder to make a
@@ -241,13 +240,15 @@ unimplemented task, or the re-opened task from injected feedback):
    `plan-writer` invocation that `gap-check` triggers; every fix still goes through
    the coder (step 4).
 
-   Record both note types by appending to `{{ quest.home }}/deferred.md` — the
+   Record these notes by appending to `{{ quest.home }}/deferred.md` — the
    append-only ledger, alongside the `## Deferred Followups` / `— needs-decision:`
    lines and never the wholesale-rewritten `progress.md` status. Because
    `deferred.md` is never collapsed, the note survives every end-of-plan `progress.md` rewrite
    and is intact when `gap-check` reads it. The EXACT shapes:
 
    - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
+   - boundary-crossing resolved-forward, under `## Deferred Followups` (born ticked):
+     `- [x] DEFERRED task-lead: <what was decided> [scope: quest] — decided: <why>`
    - needs-replan (a checkbox, so its open/addressed state is explicit):
 
      `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: quest]`

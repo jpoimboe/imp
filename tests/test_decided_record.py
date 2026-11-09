@@ -115,3 +115,20 @@ def test_plan_writer_records_boundary_calls_as_decided() -> None:
         "if it *contradicts* the spec, record it the same way plus one `— decided:` line",
     ):
         assert path in ask, path
+
+
+def test_task_lead_resolved_forward_boundary_crossing_is_decided() -> None:
+    text = _agent("task-lead")
+    row = next(ln for ln in text.splitlines()
+               if ln.strip().startswith("| **resolved-forward** |"))
+    assert "a `— decided:` line if it crossed a spec/AC boundary" in row
+    assert "needs-decision" not in row
+    assert "ratif" not in row
+    flat = _flat(text)
+    assert ("If the fix crosses a spec scope/AC boundary, also append its "
+            "`— decided:` record (shape below).") in flat
+    assert "so the human ratifies it" not in flat
+    assert _record("task-lead") in text
+    # The resolved-forward note itself is unchanged.
+    assert ("- resolved-forward: `- resolved-forward task-lead: <one-line "
+            "description of what you fixed>`") in text
