@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 """Symlink-safe unsandboxed reads of a live quest home's artifacts/ tree."""
 from __future__ import annotations
 
