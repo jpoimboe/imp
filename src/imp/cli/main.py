@@ -1004,8 +1004,8 @@ def apply_new(
     control: Path, *, opening: str | None, title: str | None,
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
-    background: bool = False, var_flags: list[str] | None = None,
-    provider: str | None = None,
+    background: bool = False, autonomous: bool = False,
+    var_flags: list[str] | None = None, provider: str | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1037,8 +1037,9 @@ def apply_new(
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
-        spawn.start_quest(control, quest_id, autonomous=True)
-        return 0, (f"Started quest {quest_id} (running autonomously in the "
+        spawn.start_quest(control, quest_id, autonomous=autonomous)
+        mode = "autonomously " if autonomous else ""
+        return 0, (f"Started quest {quest_id} (running {mode}in the "
                    f"background; appears in the active list).\n"
                    f"If it needs your answer it waits: imp list shows it as "
                    f"waiting, and imp resume {quest_id} answers it.")
@@ -1229,6 +1230,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "depends_on": getattr(args, "depends_on", None),
             "var_flags": getattr(args, "var", None),
             "background": getattr(args, "background", False),
+            "autonomous": bool(getattr(args, "autonomous", False)),
             "provider": provider_arg}))
     from imp.cli.signals import InterruptCoordinator
 
@@ -1257,7 +1259,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
             var_flags=list(getattr(args, "var", None) or []),
-            background=True, provider=provider_arg)
+            background=True, autonomous=bool(getattr(args, "autonomous", False)),
+            provider=provider_arg)
         print(message, file=sys.stderr if rc else sys.stdout)
         return rc
 
@@ -4600,10 +4603,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--autonomous", action="store_true",
                        help="Take imp's recommendation at routine decision points "
                             "instead of asking you; questions only you can answer "
-                            "still pause for you. Independent of --headless.")
+                            "still pause for you. Combine with --background for a "
+                            "hands-off run.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Alias for the positional opening message (seeds the "
-                            "opening step); convenient for headless/remote callers.")
+                            "opening step); convenient for scripts and remote callers.")
     new_mode = p_new.add_mutually_exclusive_group()
     new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                           help="File an idea for your backlog with this TITLE and "
@@ -4611,10 +4615,11 @@ def _build_parser() -> argparse.ArgumentParser:
                                "MESSAGE is an optional longer brief). Start it later "
                                "with `imp resume <id>`.")
     new_mode.add_argument("--background", action="store_true",
-                          help="Create the quest and launch it detached in the "
-                               "background, running headless and autonomous; it "
-                               "appears in the active list. Implies --headless "
-                               "and --autonomous.")
+                          help="Launch the quest detached in the background with no "
+                               "live prompt; it appears in the active list. A "
+                               "question pauses it until you answer with `imp resume "
+                               "<id>`. Add --autonomous to have imp make routine "
+                               "decisions itself.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A quest id this quest depends on (repeatable). "

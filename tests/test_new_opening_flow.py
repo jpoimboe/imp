@@ -512,10 +512,11 @@ async def test_new_background_delegates_to_apply_new(
     args = Namespace(
         description=None, idea=None, workflow=None, non_interactive=False,
         title="T", opening="brief", message=None, base=None,
-        background=True, depends_on=["d1"])
+        background=True, depends_on=["d1"], autonomous=True)
     rc = await m._async_cmd_new(args, leave_mode="new")
     assert rc == 0
     assert calls["background"] is True
+    assert calls["autonomous"] is True
     assert calls["depends_on"] == ["d1"]
     assert calls.get("idea") is None
     out = capsys.readouterr()
