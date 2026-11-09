@@ -165,3 +165,19 @@ def test_plan_reviewer_accepts_a_decided_line_as_recorded() -> None:
     # The old "every recorded deviation is ratified at the gate" framing is gone.
     assert "ratifies it once" not in decisions
     assert "ride to the merge gate" not in decisions
+
+
+def test_gap_check_treats_decided_alterations_as_settled() -> None:
+    text = _agent("gap-check")
+    backstop = _flat(_section(text, "## Coverage decision"))
+    assert ("Scope that a `— decided:` line deliberately altered is **settled**: "
+            "judge it against the decided behavior, not the spec's original wording; "
+            "met as decided, it does not trigger a plan.") in backstop
+    assert ("never author a `— needs-decision:` or `— decided:` line; your sole "
+            "lever is `more_plans`") in backstop
+    walk = _flat(_section(text, "## Walk the acceptance criteria clause by clause"))
+    assert ("A clause deliberately altered by a `— decided:` line is **settled**: "
+            "judge it against the decided behavior, not the spec's original wording; "
+            "met as decided, it does not drive a plan.") in walk
+    # Still a pure reader of the ledger.
+    assert "read `deferred.md` and never write it" in walk
