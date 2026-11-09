@@ -120,3 +120,85 @@ def test_esc_inside_a_string_payload_opens_a_fresh_sequence() -> None:
     stream.feed(b"a\x1bPpayload\x1b[1mZ")
     assert screen.display[0].rstrip() == "aZ"
     assert screen.buffer[0][1].bold is True
+
+
+# CSI sequences carrying an intermediate byte (0x20-0x2F). pyte treats the
+# intermediate as the final, so the real final leaks: drawn, or run as another
+# command. Each must vanish whole; the text after it renders normally.
+INTERMEDIATE = [
+    (b"x\x1b[!py", "xy"),            # DECSTR, sent by reset(1)
+    (b"x\x1b[1\"py", "xy"),          # DECSCL
+    (b"abc\x1b[1G\x1b[2 @", "abc"),  # SL; pyte runs it as ICH
+    (b"x\x1b[2 qy", "xy"),           # DECSCUSR; pyte happens to skip SP
+    (b"x\x1b[?2026$py", "xy"),       # DECRQM, `?`-prefixed
+]
+
+
+@pytest.mark.parametrize(("payload", "expected"), INTERMEDIATE, ids=repr)
+def test_intermediate_byte_csi_is_dropped_whole(payload: bytes, expected: str) -> None:
+    screen, stream, replies = _stream()
+    stream.feed(payload)
+    assert screen.display[0].rstrip() == expected
+    assert replies == []
+
+
+@pytest.mark.parametrize(("payload", "expected"), INTERMEDIATE, ids=repr)
+def test_intermediate_byte_csi_is_dropped_one_byte_at_a_time(
+    payload: bytes, expected: str
+) -> None:
+    screen, stream, replies = _stream()
+    for i in range(len(payload)):
+        stream.feed(payload[i : i + 1])
+    assert screen.display[0].rstrip() == expected
+    assert replies == []
+
+
+def test_parameterised_csi_split_across_chunks_still_applies() -> None:
+    # Held parameter bytes are released whole once the final byte arrives.
+    screen, stream, _ = _stream()
+    stream.feed(b"ab\x1b[4")
+    stream.feed(b";1")
+    stream.feed(b"2Hz")
+    assert screen.display[3].rstrip() == " " * 11 + "z"
+
+
+def test_malformed_csi_hands_held_bytes_and_an_embedded_c0_to_pyte() -> None:
+    # A C0 aborts the hold: pyte gets exactly the bytes master gave it, and
+    # executes the CR/LF inside the CSI as a real terminal does.
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b[2\r\nC")
+    assert (screen.cursor.x, screen.cursor.y) == (2, 1)
+
+
+# Aborted or non-leading-private CSI: pyte gets the same bytes it got before CSI
+# parameters were held. (payload, row 0, cursor x, replies)
+HELD_CSI = [
+    (b"\x1b[1\x1b[2mX", "[2mX", 4, []),  # ESC restarts: the first CSI is cut off
+    (b"\x1b[1\x18X", "X", 1, []),  # CAN
+    (b"\x1b[1\x1aX", "X", 1, []),  # SUB
+    (b"\x1b[0>cX", "X", 1, ["\x1b[?6c"]),  # '>' after a parameter is ordinary
+    (b"\x1b[6>nX", "X", 1, ["\x1b[1;1R"]),
+    (b"\x1b[1<cX", "cX", 2, []),
+    (b"\x1b[1=cX", "cX", 2, []),
+    (b"ab\x1b[1?KX", "  X", 3, []),  # '?' after a parameter: still erases to cursor
+]
+HELD_CSI_IDS = [repr(payload) for payload, *_ in HELD_CSI]
+
+
+@pytest.mark.parametrize(("payload", "row", "x", "expected"), HELD_CSI, ids=HELD_CSI_IDS)
+def test_held_csi_abort_matches_what_pyte_always_saw(
+    payload: bytes, row: str, x: int, expected: list[str]
+) -> None:
+    screen, stream, replies = _stream()
+    stream.feed(payload)
+    assert (screen.display[0].rstrip(), screen.cursor.x, replies) == (row, x, expected)
+
+
+@pytest.mark.parametrize(("payload", "row", "x", "expected"), HELD_CSI, ids=HELD_CSI_IDS)
+def test_held_csi_abort_one_byte_at_a_time_matches_whole_feed(
+    payload: bytes, row: str, x: int, expected: list[str]
+) -> None:
+    screen, stream, replies = _stream()
+    for i in range(len(payload)):
+        stream.feed(payload[i : i + 1])
+    assert (screen.display[0].rstrip(), screen.cursor.x, replies) == (row, x, expected)

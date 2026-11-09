@@ -147,6 +147,7 @@ def test_plain_cursor_position_report_still_answers(prefix: bytes, expected: str
 
 
 def test_plain_primary_device_attributes_still_answers() -> None:
+    # Keep below VT420: a first parameter >= 64 makes tmux send DECSLRM, unemulated.
     assert _replies(b"\x1b[c") == ["\x1b[?6c"]
 
 
@@ -187,3 +188,129 @@ def test_plain_sgr_still_applies_attributes() -> None:
     assert screen.buffer[0][0].underscore     # "u" of "under"
     assert screen.buffer[0][5].bold           # "b" of "bold"
     assert not screen.buffer[0][5].underscore  # ESC[0m reset held
+
+
+_SIX_ROWS = b"r1\r\nr2\r\nr3\r\nr4\r\nr5\r\nr6"
+
+
+def _rows(screen: TerminalScreen) -> list[str]:
+    return [line.rstrip() for line in screen.display]
+
+
+def _history_top(screen: TerminalScreen) -> list[str]:
+    return [
+        "".join(row[x].data for x in range(screen.columns)).rstrip()
+        for row in screen.history.top
+    ]
+
+
+def _region() -> tuple[TerminalScreen, TerminalStream]:
+    # Margins on rows 2-4 (DECSTBM homes the cursor), then park the cursor
+    # below the region at row 6, column 3.
+    screen, stream = _filtered()
+    stream.feed(_SIX_ROWS + b"\x1b[2;4r\x1b[6;3H")
+    return screen, stream
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"\x1b[1S", ["r1", "r3", "r4", "", "r5", "r6"]),
+        (b"\x1b[S", ["r1", "r3", "r4", "", "r5", "r6"]),
+        (b"\x1b[0S", ["r1", "r3", "r4", "", "r5", "r6"]),
+        (b"\x1b[1T", ["r1", "", "r2", "r3", "r5", "r6"]),
+        (b"\x1b[9999S", ["r1", "", "", "", "r5", "r6"]),
+        (b"\x1b[9999T", ["r1", "", "", "", "r5", "r6"]),
+        # xterm's five-parameter highlight-mouse-tracking form, not SD.
+        (b"\x1b[1;2;3;4;5T", ["r1", "r2", "r3", "r4", "r5", "r6"]),
+        # Private forms: XTSMGRAPHICS is a graphics query, never a scroll.
+        (b"\x1b[?1;1;0S", ["r1", "r2", "r3", "r4", "r5", "r6"]),
+        (b"\x1b[?1T", ["r1", "r2", "r3", "r4", "r5", "r6"]),
+    ],
+    ids=repr,
+)
+def test_scroll_shifts_only_the_region_and_never_moves_the_cursor(
+    seq: bytes, expected: list[str]
+) -> None:
+    screen, stream = _region()
+    stream.feed(seq)
+    assert _rows(screen) == expected
+    assert (screen.cursor.x, screen.cursor.y) == (2, 5)
+
+
+def test_full_screen_scroll_up_sends_the_top_lines_to_history() -> None:
+    screen, stream = _filtered()
+    stream.feed(_SIX_ROWS + b"\x1b[2S")
+    assert _rows(screen) == ["r3", "r4", "r5", "r6", "", ""]
+    assert _history_top(screen) == ["r1", "r2"]
+
+
+def test_an_oversized_scroll_up_sends_only_one_screenful_to_history() -> None:
+    screen, stream = _filtered()
+    stream.feed(_SIX_ROWS + b"\x1b[9999S")
+    assert _rows(screen) == [""] * 6
+    assert _history_top(screen) == ["r1", "r2", "r3", "r4", "r5", "r6"]
+
+
+def test_an_oversized_scroll_down_is_capped_at_the_screen_height() -> None:
+    screen, stream = _filtered()
+    stream.feed(_SIX_ROWS + b"\x1b[9999T")
+    assert _rows(screen) == [""] * 6
+    # Each reverse_index at the top margin pushes one row here: the cap's trace.
+    assert len(screen.history.bottom) == 6
+
+
+def test_scroll_up_on_the_alt_screen_adds_no_history() -> None:
+    screen, stream = _filtered()
+    stream.feed(b"\x1b[?1049h" + _SIX_ROWS + b"\x1b[2S")
+    assert _rows(screen) == ["r3", "r4", "r5", "r6", "", ""]
+    assert len(screen.history.top) == 0
+
+
+def test_delete_lines_clears_rows_whose_source_row_is_absent() -> None:
+    # One chunk, never reading display in between: the trailing CRLF scrolls
+    # and index() pops row 5, so DL's source row is absent from the buffer.
+    screen, stream = _filtered(cols=10, rows=5)
+    stream.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n\x1b[3;1H\x1b[2M")
+    assert _rows(screen) == ["b", "c", "", "", ""]
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"a\x1b[3b", "aaaa"),
+        (b"a\x1b[b", "aa"),
+        (b"a\x1b[0b", "aa"),
+        (b"ab\x1b[2b", "abbb"),
+        # Nothing drawn yet: nothing to repeat.
+        (b"\x1b[3bx", "x"),
+        # Private form is not REP.
+        (b"a\x1b[?3b", "a"),
+    ],
+    ids=repr,
+)
+def test_rep_repeats_the_last_drawn_character(seq: bytes, expected: str) -> None:
+    screen, stream = _filtered()
+    stream.feed(seq)
+    assert _rows(screen)[0] == expected
+
+
+def test_rep_wraps_at_the_right_edge_under_autowrap() -> None:
+    screen, stream = _filtered(cols=4, rows=3)
+    stream.feed(b"ab\x1b[4b")
+    assert _rows(screen) == ["abbb", "bb", ""]
+    assert (screen.cursor.x, screen.cursor.y) == (2, 1)
+
+
+def test_rep_inserts_under_insert_mode() -> None:
+    screen, stream = _filtered()
+    stream.feed(b"xa\x1b[4h\x1b[1;1H\x1b[2b")
+    assert _rows(screen)[0] == "aaxa"
+
+
+def test_an_oversized_rep_draws_at_most_one_screenful() -> None:
+    # 1 + 8 cells on a 4x2 screen scrolls exactly one row into history.
+    screen, stream = _filtered(cols=4, rows=2)
+    stream.feed(b"a\x1b[1000b")
+    assert _rows(screen) == ["aaaa", "a"]
+    assert len(screen.history.top) == 1
