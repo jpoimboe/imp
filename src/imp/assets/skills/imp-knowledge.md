@@ -100,7 +100,8 @@ bookkeeping. Ask the CLI instead:
   rejected once materialized). `--base <branch>` re-points the fork at another existing
   branch (also before go-live only).
 - `imp config` — the effective settings and the layer each came from, led by this
-  checkout's `project state:` directory (not under `--explain`);
+  checkout's `project state:` directory (not under `--explain`), suffixed
+  `(not created yet)` before the first claim;
   `imp config set <key> <value>` / `unset <key>` edits the setting's own layer
   (the main checkout's `imp/config.yaml` or `~/.imp/config.yaml`; `--project` /
   `--global` / `--local` forces one — `--local` is this checkout's uncommitted

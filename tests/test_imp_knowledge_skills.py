@@ -403,6 +403,8 @@ def test_memory_doc_names_the_local_write_scope() -> None:
             "which tops the stack and is never committed") in flat
     # `imp config` leads with the resolved state directory
     assert "Its first line, `project state:`, names this checkout's state directory." in flat
+    assert ("Before imp first claims it (starting a quest or a `--local` write), "
+            "that line ends `(not created yet)`.") in flat
 
 
 def test_memory_doc_documents_worktree_setup() -> None:
@@ -418,6 +420,7 @@ def test_memory_doc_documents_worktree_setup() -> None:
 def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert "led by this checkout's `project state:` directory (not under `--explain`)" in flat
+    assert "suffixed `(not created yet)` before the first claim" in flat
     assert "`--project` / `--global` / `--local` forces one" in flat
     assert "`~/.imp/projects/<name>/config.yaml`" in flat
 

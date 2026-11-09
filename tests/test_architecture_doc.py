@@ -152,8 +152,11 @@ def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
     assert "`repo` marker" in text
     assert ("Read-only lookups — live quest listing, archive index reads, the "
             "remote-control pid, the local config layer — use `claimed_state_dir()` "
-            "and see an unclaimed project as empty, so imp claims a slug only inside "
-            "a project with `imp/config.yaml` or on a deliberate write.") in text
+            "and see an unclaimed project as empty, so imp claims a slug only on a "
+            "deliberate write (starting a quest, a `--local` config write); read-only "
+            "commands — including `imp config`, `--help`, `--version` — never claim."
+            ) in text
+    assert "only inside a project with `imp/config.yaml`" not in text
     # AC 26(b): the backfill touches only imp-owned dirs, so this promise stays true.
     assert "overrides the per-project path verbatim — no slug walk, no marker written" in text
     for entry in ("`quests/<id>/`", "`worktrees/<id>/`", "`archive/`"):
@@ -182,8 +185,15 @@ def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     assert "orphaned" in flat
     # the manual recovery: re-slug the directory, repoint the marker, repair git
     assert "git worktree repair" in text
-    # imp already claimed an empty <new-name>; an unguarded mv nests the
-    # orphaned dir inside that stub, leaving `imp config` correct over wrong contents
+    # $NEW may already exist: a marker-only stub is cleared, anything more STOPs the
+    # move; an unguarded mv would nest the orphaned dir inside it
+    assert "If it holds only a `repo` marker there is nothing to keep" in flat
+    assert "If it holds anything more" in flat
+    assert "the guard STOPs: merge the two directories by hand" in flat
+    assert "marked `(not created yet)` while nothing has" in flat
+    for stale in ("imp claimed when you ran it here", "already claimed",
+                  "any imp command you ran"):
+        assert stale not in flat, stale
     assert '[ -e "$NEW" ]' in text
     assert 'mv "$OLD" "$NEW"' in text
     assert '[ "$(ls -A "$NEW" 2>/dev/null)" = repo ] && rm -rf "$NEW"' in text
