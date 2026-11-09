@@ -51,12 +51,19 @@ no intent yet, ask first; once they reply, the selected hat reads as needed.
 **Explore context once intent is in hand.** After the user answers, read relevant
 files, docs, and recent commits — this prevents follow-ups the code already answers.
 
-**Settle what the intent means before you research it.** Reading the repo settles what
+**Settle what the intent means before you research it.** {% if run.autonomous %}When a
+load-bearing word in the opening carries two or more readings that would produce
+materially different software, take the one the opening and the project best support,
+record it as an assumption in the spec's Decisions summary, and proceed. Park for a human
+only when no reading is better supported than the others.
+{% else %}
+Reading the repo settles what
 the project *is*, never what the user *meant*. When a load-bearing word in the opening
 carries two or more readings that would produce materially different software, name them
 and ask which is meant — before researching, recommending, or designing against any of
 them. Ask it open: the recommendation-anchored convention below does **not** apply, so
 attach no recommended reading.
+{% endif %}
 
 **Research before you converge.** Once the intent is in hand, map the relevant code
 before settling questions or proposing a design. There is **no cost gating** in the
@@ -159,6 +166,6 @@ settled through the brainstorm.
   this turn. Then go to **Going live**.
 - **Decline:** call `save_and_exit`. Nothing is built; a later resume re-offers this choice. {% endif %}
 
-A genuine intent-fork still parks for a human even under autonomy; only this gate
-auto-resolves. `create_and_enter_worktree` re-runs the project's `worktree_setup` but
+Under autonomy, only an intent fork the project cannot settle parks for a human; this gate
+always auto-resolves. `create_and_enter_worktree` re-runs the project's `worktree_setup` but
 leaves an existing worktree as-is, so a resumed build is safe.

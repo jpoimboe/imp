@@ -135,6 +135,48 @@ def test_threshold_has_no_headless_branch(tmp_path) -> None:
         assert 'ceremony="full"' not in out
 
 
+_ATTENDED_INTENT_RULE = (
+    "**Settle what the intent means before you research it.** Reading the repo "
+    "settles what\nthe project *is*, never what the user *meant*. When a "
+    "load-bearing word in the opening\ncarries two or more readings that would "
+    "produce materially different software, name them\nand ask which is meant — "
+    "before researching, recommending, or designing against any of\nthem. Ask "
+    "it open: the recommendation-anchored convention below does **not** "
+    "apply, so\nattach no recommended reading.\n\n**Research before you "
+    "converge.**")
+
+
+def test_threshold_intent_rule_branches_on_autonomy(tmp_path) -> None:
+    body = _wf().agents["threshold"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+
+    def _render(autonomous: bool) -> str:
+        return render_prompt(body, build_context(
+            quest_title="t", event_log=log, quest_id="abc",
+            quest_home=".imp/quests/abc", autonomous=autonomous),
+            workflow_dir=bundled_workflow_dir("default"))
+
+    autonomous, attended = _render(True), _render(False)
+    flat_auto, flat_att = " ".join(autonomous.split()), " ".join(attended.split())
+
+    take = "take the one the opening and the project best support"
+    assert take in flat_auto and "Ask it open" not in flat_auto
+    assert "Ask it open" in flat_att and take not in flat_att
+    assert ("record it as an assumption in the spec's Decisions summary, and "
+            "proceed. Park for a human only when no reading is better "
+            "supported than the others.") in flat_auto
+    # Attended wording and layout are byte-identical to before the branch.
+    assert _ATTENDED_INTENT_RULE in attended
+    # The autonomous branch still ends its paragraph before the next one.
+    assert ("better supported than the others.\n\n"
+            "**Research before you converge.**") in autonomous
+
+    for flat in (flat_auto, flat_att):
+        assert ("Under autonomy, only an intent fork the project cannot settle "
+                "parks for a human; this gate always auto-resolves.") in flat
+        assert "A genuine intent-fork still parks" not in flat
+
+
 def test_threshold_includes_both_brainstorm_partials() -> None:
     fd = FRONT_DOOR.read_text()
     assert '{% include "partials/spec-design-principles.md" %}' in fd
