@@ -132,13 +132,11 @@ The spec is your contract, so your bar to escalate is **higher** than the spec-f
 **Decide-and-record is the default even for a call that *contradicts* an explicit spec
 scope/AC boundary**, as long as a reasonable default exists: decide the correct call,
 implement it, record the rationale in `## Decisions`, and — because it crosses a spec
-scope/AC boundary — surface it as **one**
-`— needs-decision:` open item in `{{ quest.home }}/deferred.md` (the reader form under
-"Surfacing a decision you cannot resolve", which is load-bearing). Do **not** yield to the
-human for it: `finalize` ratifies it once at the merge gate, where it already walks
-`— needs-decision:` items, at near-zero marginal cost (one batched walk) — whereas a
-mid-planning ask is a second, earlier, blocking interruption, justified only when it saves
-an expensive wrong-guess unwind.
+scope/AC boundary — record it as **one** `— decided:` line in
+`{{ quest.home }}/deferred.md` (the form under "Recording a call you already made").
+Do **not** yield to the human for it: a `— decided:` line never gates the merge — the
+quest summary lists it — whereas a mid-planning ask is a blocking interruption, justified
+only when it saves an expensive wrong-guess unwind.
 
 **When to ask — all three must hold** to yield to the human:
 
@@ -148,16 +146,17 @@ an expensive wrong-guess unwind.
    the spec's own Goal or ships a broken feature, that is a default, not a fork;
 3. a wrong guess forces a replan, not a localized rework lap.
 
-Everything else → decide the most reasonable call, implement it, and surface it as one open
-item at the gate. **Recognition note:** an apparent scope-fork where one branch contradicts
-the spec's own Goal is a correction-with-a-default, not a fork.
+Everything else → decide the most reasonable call, implement it, and — when it crosses a
+spec scope/AC boundary — record it as one `— decided:` line. **Recognition note:** an
+apparent scope-fork where one branch contradicts the spec's own Goal is a
+correction-with-a-default, not a fork.
 
 A plan-time answer that fills a gap records the chosen reading with "*(user-confirmed during
-planning)*"; if it *contradicts* the spec, record it the same way and route it to the gate
-as a `— needs-decision:` open item — the committed spec stays stale by design (there is no
-plan→spec edge), and the flipped plan-reviewer guardrail lets a recorded scope deviation
-ride to the gate rather than re-litigating it in the loop. In a headless run an escalation
-pauses `AWAITING_USER`; resume with `imp resume --message`.
+planning)*"; if it *contradicts* the spec, record it the same way plus one `— decided:`
+line — the committed spec stays stale by design (there is no plan→spec edge), and the
+plan-reviewer accepts a scope deviation recorded this way rather than re-litigating it in
+the loop. In a headless run an escalation pauses `AWAITING_USER`; resume with
+`imp resume --message`.
 
 ## Surfacing a decision you cannot resolve
 
@@ -173,11 +172,21 @@ not bury it in prose. Append it to the **Deferred Followups** list in
 Reader form is **load-bearing**: on a trivial `fast_path` corrective the `deferred-sweep`
 step never runs, so an item not already in `— needs-decision:` form would be silently
 dropped before the merge gate. Reader form guarantees it reaches `finalize` whether or not
-`deferred-sweep` runs. This is for genuine human-decision items only — keep deciding the
-technical calls yourself and recording them in the `## Decisions` section (see "Ask vs.
-decide").
+`deferred-sweep` runs. `— needs-decision:` is only for calls that clear the bar above; a
+call you already made and implemented takes the `— decided:` record below. Keep deciding
+the technical calls yourself and recording them in the `## Decisions` section (see "Ask
+vs. decide").
 
-New user-facing copy — any string a human sees, or LLM prompt text — whose wording the spec left unpinned is this same decide-and-record case: implement a sensible default styled after neighbouring copy and ensure one `— needs-decision:` line carries the wording to the gate — never stop mid-plan for copy.
+### Recording a call you already made
+
+A call you made and implemented that the human should see but need not approve — a spec
+scope/AC deviation (see "Ask vs. decide") or unpinned copy — gets one born-ticked line in
+the same **Deferred Followups** list. It never gates the merge and is never re-raised; the
+quest summary lists it:
+
+`- [x] DEFERRED plan-writer: <what was decided> [scope: quest] — decided: <why>`
+
+New user-facing copy — docs/README prose, UI strings, messages, or LLM prompt text — whose wording the spec left unpinned is this case: implement a sensible default styled after neighbouring copy and record the wording as one `— decided:` line — never stop mid-plan for copy.
 
 ## Explore the Codebase First
 

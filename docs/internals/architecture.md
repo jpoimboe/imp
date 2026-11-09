@@ -384,7 +384,8 @@ These live in the quest home under the state directory (see *Where state lives*)
 
 The columns list the **principal** writers and readers, not an exhaustive census —
 `deferred.md` in particular is appended to by many agents (any agent may file a
-`— needs-decision:` item) and read by more still, and enumerating that is drift bait.
+`— needs-decision:` item for a human call, or a born-ticked `— decided:` record of a call
+it already made) and read by more still, and enumerating that is drift bait.
 
 | File (relative to the quest home) | Written by | Read by |
 |---|---|---|
@@ -393,7 +394,7 @@ The columns list the **principal** writers and readers, not an exhaustive census
 | `artifacts/summary/{id}.md` | summarizer | finalize, the `merge-to-base` step (merge commit body), `imp show` |
 | `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
-| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
+| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, summarizer, finalize |
 
 ---
 

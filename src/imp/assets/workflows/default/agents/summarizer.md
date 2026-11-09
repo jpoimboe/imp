@@ -16,6 +16,7 @@ Read to ground the summary:
 - `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — **Goal** and **Decisions summary** are the primary source for the *why*;
 - newest plan(s) under `{{ quest.home }}/artifacts/plans/`;
 - `{{ quest.home }}/progress.md`;
+- `{{ quest.home }}/deferred.md` — its `— decided:` lines are calls agents made without asking the user;
 - `git diff <base>..HEAD` (via `bash`) for the *what*.
 
 When the spec is thin on the *why* — always so on an express quest, whose spec is typically Goal + Acceptance criteria — recover the threshold rationale, what was said and not current state, with `imp events {{ quest.id }}` as a fallback.
@@ -25,6 +26,7 @@ When the spec is thin on the *why* — always so on an express quest, whose spec
 Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — `read_file` it first if it exists (you are being re-entered and revising your own earlier draft):
 
 - **Headline** — one tight paragraph: what this quest accomplishes and why, intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in `progress.md`, commit messages, and `imp log`). Lead the file with this paragraph — no heading above it — hard-wrapped at 75 columns. Everything before the first blank line becomes the merge commit's body.
+- **Decided without asking you** — when `deferred.md` has any `— decided:` lines, follow the headline's blank line with a line reading exactly `Decided without asking you:`, then one `- <what was decided> — <why>` bullet per line, in plain user terms. A line rewritten to `— overridden-at-gate` is no longer decided; leave it out. Omit the section entirely when there are none.
 - **Optional diagram** — text/ASCII only; include **only when the quest genuinely altered structure** (new component, changed data flow); must render in a terminal — no mermaid. Omit when structure did not change.
 
 ## Finish

@@ -72,7 +72,10 @@ Populate the audit fields:
   `— fixed in "<subject>"` items (trusted and re-reviewed) or `— dismissed: <why>` items (judged
   not worth doing; never surfaced). **Never originate a decision item from your own
   reading of the diff or code** — if it is not a recorded `— needs-decision:` line, it is
-  not surfaced here.
+  not surfaced here. A `— decided:` line is **never** in `open_items`: it records a call
+  an agent already made, born ticked, so it does not count toward the auto-merge
+  empty-set condition, is never walked as a needs-decision item, and is never seeded to
+  the backlog — the summary lists it instead.
 - `next_steps`: suggested follow-on work.
 
 These three fields (`verify_status` / `open_items` / `next_steps`) are the **audit
@@ -141,21 +144,24 @@ split unrelated ones, whatever fits. When the item is a verify-family toleration
 the brief must embed the failing test's identity (node id / name / signature) so a
 later quest's already-tracked check matches it instead of seeding a duplicate. Then rewrite each
 `deferred.md` line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`.
-With every item now trusted-and-merged or seeded, take the **merge** disposition. The one
-exception is an **unrecoverable problem** (e.g. the non-converging verify-triage case
-above) — that still **pauses** for a human even under autonomy; do not force it through.
+Never seed a `— decided:` line — it is a call already made, not an open question; leave
+it untouched. With every item now trusted-and-merged or seeded, take the **merge**
+disposition. The one exception is an **unrecoverable problem** (e.g. the non-converging
+verify-triage case above) — that still **pauses** for a human even under autonomy; do not
+force it through.
 Then route on the dispositions below.
 {% else %}
 {% if vars.auto_merge %}
 **Auto-merge — this run merges clean quests without asking.** When the §1
-**needs-decision** closed set — already reduced by the §1a already-tracked check — is empty AND
-there is no unrecoverable problem (e.g. the non-converging verify-triage case above), do
-**not** open the live gate or solicit a decision: take the **merge** disposition directly
-and route on the dispositions below. Still emit the full audit record (`verify_status` /
-`open_items` (empty) / `next_steps`) on `complete_step`, and state in `comments` that you
-merged automatically because there were no open items. When open items **do** exist, or
-an unrecoverable problem is present, ignore this shortcut and fall through to the
-interactive gate text below.
+**needs-decision** closed set — already reduced by the §1a already-tracked check — is empty
+(`— decided:` lines never count toward it) AND there is no unrecoverable problem (e.g.
+the non-converging verify-triage case above), do **not** open the live gate or solicit a
+decision: take the **merge** disposition directly and route on the dispositions below.
+Still emit the full audit record (`verify_status` / `open_items` (empty) / `next_steps`)
+on `complete_step`, and state in `comments` that you merged automatically because nothing
+needed a decision, and that any calls made along the way are listed in the summary. When
+open items **do** exist, or an unrecoverable problem is present, ignore this shortcut and
+fall through to the interactive gate text below.
 {% endif %}
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never a
 labelled **field-dump**.
@@ -163,7 +169,9 @@ labelled **field-dump**.
 {% include "partials/live-gate-dialogue.md" %}
 
 Open with the intent-level summary from §1 (when that artifact is absent, a concise
-summary you compose from the audit record), then the verification state in plain terms.
+summary you compose from the audit record, followed — when `{{ quest.home }}/deferred.md`
+has any `— decided:` lines — by `Decided without asking you:` and one
+`- <what was decided> — <why>` bullet per line), then the verification state in plain terms.
 Name genuinely controversial decisions **only when there were any** — do not manufacture
 controversy. The structured fields are the audit record (§1); your prose is what the
 human reads. When you recap the reader's own choice, address them directly — "you chose
@@ -211,6 +219,12 @@ take the items in whatever order and grouping the discussion warrants. For each 
 - **Engage a concern straight.** When the human raises a worry, address it directly; do
   not minimize it ("negligible", "within normal noise") or argue it down to defend your
   recommendation. One restrained line.
+
+A `— decided:` line is **not** walked — the summary you open with already lists it — and
+is never seeded on **defer**. When the human asks to change one, map it to **fix**: collect
+the change into the rework brief and rewrite the line to
+`- [x] DEFERRED <src>: <desc> [scope: …] — overridden-at-gate`, so a re-run summary stops
+listing it. That is the only rewrite a `— decided:` line ever gets.
 
 `seeded <id>`, `ignored-at-gate`, and `tracked-by <id>` are all **terminal**: a later
 `deferred-sweep` or `finalize` pass treats them like `dismissed` and never re-raises

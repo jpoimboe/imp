@@ -98,3 +98,14 @@ def test_case_and_suffix_variant_heading_dispatches_the_sweep(tmp_path: Path) ->
         "- [ ] DEFERRED task-lead: some open item [scope: plan]\n",
     )
     assert _run(qd).returncode == 0
+
+
+def test_decided_record_alone_skips_the_sweep(tmp_path: Path) -> None:
+    # A `— decided:` record is born ticked, so it is never sweep work.
+    qd = _quest_dir(
+        tmp_path,
+        "## Deferred Followups\n\n"
+        "- [x] DEFERRED plan-writer: kept the README bullet terse [scope: quest] "
+        "— decided: matches the neighbouring bullets\n",
+    )
+    assert _run(qd).returncode == 1

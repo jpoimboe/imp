@@ -91,15 +91,21 @@ conflicts resolved, any semantic concern reconciled.
 
 {% include "partials/human-decision.md" %}
 
-For a reconciliation that clears that bar — resolved defensively but a human should still
-ratify it — append a line to the `## Deferred Followups` section in
-`{{ quest.home }}/deferred.md` in reader form (create the file/heading if absent):
+`— needs-decision:` is only for a reconciliation that clears that bar — intent-level,
+costly to reverse, no reasonable default. Append it to the `## Deferred Followups` section
+in `{{ quest.home }}/deferred.md` in reader form (create the file/heading if absent):
 
 `- [ ] DEFERRED reconciler: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
-These are a durable record for asynchronous human triage and integration-review's
-synchronous read — not input to any automated sweep. Never mutate the spec or plan
-artifacts; they remain historical intent.
+A call you already made — settling a conflict between base's and the quest's intents with
+a reasonable default — takes one born-ticked line in the same section instead; it never
+gates the merge, and the quest summary lists it:
+
+`- [x] DEFERRED reconciler: <what was decided> [scope: quest] — decided: <why>`
+
+A mechanical conflict resolution gets no line. Both forms are a durable record for
+asynchronous human triage and integration-review's synchronous read — not input to any
+automated sweep. Never mutate the spec or plan artifacts; they remain historical intent.
 
 ## Finish
 

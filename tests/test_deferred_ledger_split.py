@@ -16,8 +16,11 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
         "`{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading"
         " if absent)"
     ) in pw
-    # The ask-vs-decide scope-deviation surface moved too.
-    assert "open item in `{{ quest.home }}/deferred.md` (the reader" in pw
+    # The ask-vs-decide scope-deviation record lives in deferred.md too.
+    assert (
+        "`{{ quest.home }}/deferred.md` (the form under \"Recording a call you"
+        " already made\")"
+    ) in pw
     # The forward-note (NEEDS-REPLAN) lifecycle handle is read from deferred.md.
     assert "note in `{{ quest.home }}/deferred.md` (a `task-lead` needs-replan that" in pw
 
@@ -39,7 +42,7 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
     assert "in `{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
 
     prv = _imp("plan-reviewer.md")
-    assert "Deferred Followup open item in `{{ quest.home }}/deferred.md`:" in prv
+    assert "verify `{{ quest.home }}/deferred.md` carries a matching" in prv
 
 
 def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:

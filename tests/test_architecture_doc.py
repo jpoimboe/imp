@@ -850,7 +850,8 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
         "step (merge commit body), `imp show` |",
         "| `artifacts/verify/{id}.md` | the `verify` / `integration-verify` gates "
         "| `imp show` |",
-        "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |",
+        "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, summarizer, "
+        "finalize |",
     ):
         assert row in text, row
     # the last two retired names lived only in this table, unbackticked
