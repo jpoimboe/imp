@@ -133,10 +133,11 @@ A correct imp does **all** of:
     - **A mid-run leave** (Ctrl-D, SIGTERM, SIGHUP, SIGQUIT while the agent streams or a tool
       runs, with no Ctrl-C first) takes the same disposition as a prompt-state Ctrl-D —
       including `discard`, which deletes the draft, if you haven't sent a message yet (an
-      unseeded opening turn). The in-flight work is torn down; the only event is the
-      `conversation_saved` (carrying `interrupt_reason`) or `conversation_archived` — no
-      `workflow_paused`, `interrupt_requested`, or `interrupt_delivered`. After a save or an
-      archive, `imp resume` continues the agent. **A Ctrl-D at the inline steer gate** (after a
+      unseeded opening turn). The in-flight work is torn down promptly (the agent turn is
+      killed, not waited out); the only event is the `conversation_saved` (carrying
+      `interrupt_reason`) or `conversation_archived` — no `workflow_paused`,
+      `interrupt_requested`, or `interrupt_delivered`. After a save or an archive, `imp resume`
+      continues the agent. **A Ctrl-D at the inline steer gate** (after a
       Ctrl-C) takes the same disposition and prints the same spine (not `_pause_lines`), but the
       log keeps the Ctrl-C's `interrupt_requested`/`interrupt_delivered` and a `workflow_paused`
       relabelled `interrupt_reason == "ctrl-d"`, followed by the `conversation_saved` or
