@@ -92,3 +92,32 @@ async def test_reap_transport_group_noop_when_absent() -> None:
         _transport = _Transport()
 
     await _reap_transport_group(_NoProcess())
+
+
+@pytest.mark.anyio
+async def test_reap_transport_group_returns_when_process_ignores_sigkill() -> None:
+    """A process whose wait() never completes (D-state, ignores SIGKILL) must not
+    wedge the reap: both signals are sent, then the bounded waits give up."""
+    import asyncio
+
+    calls: list[str] = []
+
+    class _StuckProcess:
+        def terminate(self) -> None:
+            calls.append("terminate")
+
+        def kill(self) -> None:
+            calls.append("kill")
+
+        async def wait(self) -> int:
+            await asyncio.Event().wait()
+            return 0
+
+    class _FakeTransport:
+        _process = _StuckProcess()
+
+    class _FakeClient:
+        _transport = _FakeTransport()
+
+    await asyncio.wait_for(_reap_transport_group(_FakeClient()), timeout=5)
+    assert calls == ["terminate", "kill"]
