@@ -1312,6 +1312,7 @@ def _fake_config(**over):
     base = dict(sandbox={},
                 test_cmd_fast=None, test_cmd_slow=None,
                 test_cmd_fast_timeout=None, test_cmd_slow_timeout=None,
+                worktree_setup=None,
                 pythonpath=())
     base.update(over)
     return _types.SimpleNamespace(**base)
