@@ -77,10 +77,14 @@ def create_quest(
     base: str | None = None,
     title: str | None = None,
     background: bool = False,
+    autonomous: bool = False,
     vars: Mapping[str, bool | int | str] | None = None,
 ) -> QuestHandle:
     """Mint a quest id and write its draft synchronously, in this process.
-    `background=True` also starts a detached autonomous run needing no attach."""
+    `background=True` also starts a detached run needing no attach;
+    `autonomous=True` makes it take imp's recommendations."""
+    if autonomous and not background:
+        raise ValueError("autonomous=True requires background=True")
     from imp.cli.main import BaseResolutionError
     from imp.cli.var_flags import VarFlagError
     from imp.create import create_draft_quest
@@ -98,7 +102,7 @@ def create_quest(
     if background:
         from imp.remote.daemon import spawn
         try:
-            spawn.start_quest(control_root, quest.id, autonomous=True)
+            spawn.start_quest(control_root, quest.id, autonomous=autonomous)
         except OSError as e:
             raise ImpError(
                 f"quest {quest.id} was created but its run could not start: {e}") from e
