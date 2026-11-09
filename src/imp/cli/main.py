@@ -4442,10 +4442,9 @@ def _cmd_events(args: argparse.Namespace) -> int:
             json.dumps(ei.events_json(selected), indent=2).splitlines(),
             no_pager=args.no_pager)
         return 0
-    width = None if args.full else _term_width()
     overlays = ei.usage_patch_overlays(indexed)
     _page_or_print(
-        [ei.digest_line(o, ev, handle_map, width=width, overlay=overlays.get(o))
+        [ei.digest_line(o, ev, handle_map, full=args.full, overlay=overlays.get(o))
          for o, ev in selected],
         no_pager=args.no_pager, trailing_blank=True)
     return 0
@@ -4811,8 +4810,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="All event lines (escape hatch from the index/filters).")
     p_events.add_argument(
         "--full", action="store_true",
-        help="Render full untruncated event lines (lift the one-terminal-row "
-             "width clip); composes with every filter.")
+        help="Render full untruncated event lines (lift the 200-character "
+             "line cap); composes with every filter.")
     p_events.add_argument(
         "--json", action="store_true",
         help="Structured output instead of text.")

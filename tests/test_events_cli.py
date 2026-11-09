@@ -199,23 +199,49 @@ def test_events_subtype_reaches_system_prompt(tmp_path, monkeypatch):
     assert "please do X" not in out
 
 
-def test_events_full_widens_past_the_width_clip(tmp_path, monkeypatch) -> None:
-    # Content is short (~38 chars) so the per-field cap still present until Task 3
-    # neither truncates it nor injects a `…`; the assembled compact line still far
-    # exceeds the forced 40-column width, so only the line-level clip bites.
-    long_result = {
-        "type": "tool_result", "agent_id": "step:d/spec",
-        "payload": {"id": "t1", "error": False,
-                    "content": "Y" * 30 + "TAILMARK"},
-    }
-    _make_live_quest(tmp_path, "bbb222", [long_result])
-    monkeypatch.setenv("COLUMNS", "40")             # force a narrow clip width
-    clipped = _run(monkeypatch, tmp_path, "events", "bbb222", "--all")
-    full = _run(monkeypatch, tmp_path, "events", "bbb222", "--all", "--full")
-    assert "…" in clipped                           # clipped to $COLUMNS
-    assert "TAILMARK" not in clipped                # the tail was clipped off
-    assert "TAILMARK" in full                       # --full lifts the clip
+_LONG_RESULT = {
+    "type": "tool_result", "agent_id": "step:d/spec",
+    "payload": {"id": "t1", "error": False, "content": "Y" * 300 + "TAILMARK"},
+}
+
+
+def _row(out: str) -> str:
+    return next(line for line in out.splitlines() if "tool_result" in line)
+
+
+def test_events_caps_lines_at_200_and_full_lifts_the_cap(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "bbb222", [_LONG_RESULT])
+    monkeypatch.delenv("COLUMNS", raising=False)
+    capped = _row(_run(monkeypatch, tmp_path, "events", "bbb222", "--all"))
+    full = _row(_run(monkeypatch, tmp_path, "events", "bbb222", "--all", "--full"))
+    assert len(capped) == 200
+    assert capped.endswith("…")
+    assert "TAILMARK" not in capped
+    assert full.endswith("Y" * 300 + "TAILMARK")
     assert "…" not in full
+
+
+def test_events_output_ignores_terminal_width(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "ccc333", [*_EVENTS, _LONG_RESULT])
+    monkeypatch.setenv("NO_COLOR", "1")
+    outs = []
+    for cols in ("40", "300", None):
+        if cols is None:
+            monkeypatch.delenv("COLUMNS", raising=False)
+        else:
+            monkeypatch.setenv("COLUMNS", cols)
+        outs.append(_run(monkeypatch, tmp_path, "events", "ccc333", "--all"))
+    assert outs[0] == outs[1] == outs[2]
+
+
+def test_events_full_help_names_the_200_character_cap(monkeypatch, capsys) -> None:
+    from imp.cli.main import _build_parser
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["events", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert ("Render full untruncated event lines (lift the 200-character line cap); "
+            "composes with every filter.") in out
 
 
 def test_events_compact_renders_context_occupancy_per_provider_shape(

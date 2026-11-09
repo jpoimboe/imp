@@ -415,18 +415,20 @@ def digest_summary(event: dict[str, Any], overlay: dict[str, Any] | None = None)
     return summarize(event)
 
 
+_DIGEST_LINE_CAP = 200
+
+
 def digest_line(
     ordinal: int, event: dict[str, Any], handle_map: dict[str, str],
-    *, width: int | None = None, overlay: dict[str, Any] | None = None,
+    *, full: bool = False, overlay: dict[str, Any] | None = None,
 ) -> str:
     """Compact one-line rendering: `#N  <type>  [agent]  <summary>` — no
-    wall-clock timestamp (the ordinal conveys order). When `width` is an int the
-    assembled line is clipped to that many columns (one reserved for a trailing
-    `…`); `width=None` renders the full untruncated line (the `--full` path)."""
+    wall-clock timestamp (the ordinal conveys order). Capped at
+    `_DIGEST_LINE_CAP` characters, `…` last; `full=True` renders the whole line."""
     line = (digest_prefix(ordinal, event, handle_map)
             + digest_summary(event, overlay)).rstrip()
-    if width is not None and len(line) > width:
-        line = line[: width - 1] + "…"
+    if not full and len(line) > _DIGEST_LINE_CAP:
+        line = line[: _DIGEST_LINE_CAP - 1] + "…"
     return line
 
 
