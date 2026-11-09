@@ -2980,7 +2980,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return quest
 
 
-RESUMABLE = ("new", "paused", "error", "merge_blocked", "archived")
+RESUMABLE = ("new", "paused", "waiting", "error", "merge_blocked", "archived")
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:

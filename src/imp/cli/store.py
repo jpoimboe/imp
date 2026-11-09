@@ -567,10 +567,13 @@ def resolve_display_status(
     Liveness is resolved by the caller (daemon-side, where the lock is visible)
     and handed in as `lock_live`: live + a `waiting` halt-condition reads
     `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
-    every stored word passes through unchanged (stored == displayed). The resolved
-    word is what the membership gates and the STATUS_COLORS key consume, so
-    `merge_blocked` stays underscored here."""
-    return ("waiting" if halt_condition == "waiting" else "running") if lock_live else status
+    a stored `paused` with a `waiting` halt-condition reads `waiting` (stopped on
+    an unanswered question); every other stored word passes through unchanged.
+    The resolved word is what the membership gates and the STATUS_COLORS key
+    consume, so `merge_blocked` stays underscored here."""
+    if lock_live:
+        return "waiting" if halt_condition == "waiting" else "running"
+    return "waiting" if status == "paused" and halt_condition == "waiting" else status
 
 
 # Row = (id, status, step, last_activity, title, created_at, step_label,
