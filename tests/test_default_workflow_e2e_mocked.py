@@ -974,6 +974,7 @@ async def test_reconciled_memory_fix_is_reviewed(tmp_path: Path) -> None:
     _, result, started = await _run_integrate(tmp_path, rebase_exit=7, on_started=on_started)
     assert result is RunResult.COMPLETED
     tail = _integrate_tail(started)
-    assert tail[:4] == [
-        "integrate-rebase", "validate-memory", "reconciler", "validate-memory"], tail
+    assert tail[:5] == [
+        "integrate-rebase", "validate-memory", "reconciler", "sync-worktree",
+        "validate-memory"], tail
     assert tail.index("integration-verify") < tail.index("integration-reviewer"), tail

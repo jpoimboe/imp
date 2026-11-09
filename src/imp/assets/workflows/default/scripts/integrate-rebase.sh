@@ -13,7 +13,7 @@
 #   3  -> bad/missing base ref -> pause
 #   5  -> dirty entry tree / leftover rebase / git refused to start -> pause
 #   2  -> base unmoved AND this exact tree already cleared by an earlier slow pass or toleration: merge directly, NO review, no fork SHA
-#   0  -> clean rebase (base moved, no conflict) -> validate-memory -> integration-verify -> integration-reviewer
+#   0  -> clean rebase (base moved, no conflict) -> sync-worktree -> validate-memory -> integration-verify -> integration-reviewer
 #   6  -> rebase stopped on a conflict (left in progress) -> reconciler
 #   7  -> base unmoved, tree NOT cleared (the normal first pass: converge runs no slow gate) -> validate-memory -> integration-verify; reviewer skipped on green, prints fork SHA
 set -uo pipefail

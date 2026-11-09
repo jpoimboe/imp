@@ -280,9 +280,12 @@ The FIFO merge queue. `wait-for-head` acquires the merge lane and normally holds
 the rest of the phase. A quest holding the merge lane takes the next free test-lane slot
 ahead of other waiting verify gates. `integrate-rebase` routes on four outcomes: base
 unmoved with the tree already cleared skips straight to `summarizer` with no re-review; a
-clean rebase or an uncleared tree goes to `validate-memory`; a conflict hands off to
-`reconciler`; a bad base ref or dirty tree pauses. `validate-memory` re-runs imp's own
-load-time memory validation over the merged tree. An invalid tree goes back to
+clean rebase goes to `sync-worktree`, and an uncleared tree on an unmoved base straight to
+`validate-memory`; a conflict hands off to `reconciler`; a bad base ref or dirty tree
+pauses. `sync-worktree` re-runs the project's `worktree_setup`, so the worktree's
+gitignored dependencies match the rebased base before the gates; `reconciler` falls
+through into it too, and a setup failure or timeout pauses. `validate-memory` re-runs
+imp's own load-time memory validation over the merged tree. An invalid tree goes back to
 `reconciler`; any other failure pauses. A failing `integration-verify` always
 goes to `integration-reviewer`, which adjudicates fix-vs-tolerate rather than pausing. A
 pass goes to `integration-reviewer` too, unless the base did not move and no reconciler
@@ -310,11 +313,14 @@ flowchart TD
   in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
   WFH --> IR{{"integrate-rebase"}}
   IR -->|"base unmoved, tree cleared"| SUM
-  IR -->|"rebased / needs re-verify"| VM
+  IR -->|rebased| SW
+  IR -->|"base unmoved, needs re-verify"| VM
   IR -->|conflicts| REC["reconciler"]
   IR -. "bad ref / dirty tree" .-> HUMAN([pause → human])
-  REC --> VM{{"validate-memory"}}
+  REC --> SW{{"sync-worktree"}}
   REC -. stuck .-> HUMAN
+  SW -. "setup failed / timed out" .-> HUMAN
+  SW --> VM{{"validate-memory"}}
   VM -. "invalid imp/memory/" .-> REC
   VM -. "other failure" .-> HUMAN
   VM --> IV{{"integration-verify · slow"}}

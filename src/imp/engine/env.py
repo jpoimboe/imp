@@ -26,27 +26,29 @@ from imp.paths import imp_home, project_state_dir
 
 @dataclass(frozen=True, slots=True)
 class TestGates:
-    """Resolved tiered gate commands + per-tier timeouts, threaded to every gate
-    subprocess. A falsy command (None or "") => its IMP_TEST_CMD_* var is omitted
-    (treated as not configured); a None timeout => its var is omitted and the gate
-    script applies its own default."""
+    """Resolved tiered gate commands + per-tier timeouts, plus the worktree setup
+    command, threaded to every gate subprocess. A falsy command (None or "") => its
+    IMP_TEST_CMD_* / IMP_WORKTREE_SETUP var is omitted (treated as not configured);
+    a None timeout => its var is omitted and the gate script applies its own default."""
 
     __test__ = False  # pytest: not a test class — these are test-command gates
     fast: str | None = None
     slow: str | None = None
     fast_timeout: int | None = None
     slow_timeout: int | None = None
+    worktree_setup: str | None = None
 
     @classmethod
     def from_config(cls, config: Any) -> TestGates:
-        """Bundle the four `test_cmd_*` config fields, a `false` command reading as
-        no command. Duck-typed on `config` so this stays free of an
-        `imp.providers.config` import."""
+        """Bundle the four `test_cmd_*` config fields and `worktree_setup`, a `false`
+        command reading as no command. Duck-typed on `config` so this stays free of
+        an `imp.providers.config` import."""
         return cls(
             fast=config.test_cmd_fast or None,
             slow=config.test_cmd_slow or None,
             fast_timeout=config.test_cmd_fast_timeout,
             slow_timeout=config.test_cmd_slow_timeout,
+            worktree_setup=config.worktree_setup or None,
         )
 
 
@@ -110,6 +112,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_TEST_CMD_SLOW",
     "IMP_TEST_CMD_FAST_TIMEOUT",
     "IMP_TEST_CMD_SLOW_TIMEOUT",
+    "IMP_WORKTREE_SETUP",
     *HEADLESS_ENV,
 })
 
@@ -249,6 +252,8 @@ def engine_env(
                             run-verify.sh applies its own per-tier default (120/300).
                             IMP_-prefixed, so the sandbox allowlist passes them
                             through with no edit.
+        IMP_WORKTREE_SETUP — the project's worktree_setup command; injected only
+                            when its TestGates field is truthy (unset/false => absent).
         PYTHONPATH        — one entry per `pythonpath` root, each resolved against
                             project_root (the worktree for a live quest), joined
                             by os.pathsep in listed order; e.g. `src` =>
@@ -285,6 +290,8 @@ def engine_env(
             env["IMP_TEST_CMD_FAST_TIMEOUT"] = str(test_gates.fast_timeout)
         if test_gates.slow_timeout is not None:
             env["IMP_TEST_CMD_SLOW_TIMEOUT"] = str(test_gates.slow_timeout)
+        if test_gates.worktree_setup:
+            env["IMP_WORKTREE_SETUP"] = test_gates.worktree_setup
     if pythonpath:
         env["PYTHONPATH"] = os.pathsep.join(
             str(project_root / entry) for entry in pythonpath)

@@ -170,11 +170,13 @@ def test_test_gates_from_config_reads_test_cmd_fields() -> None:
     import types
     cfg = types.SimpleNamespace(
         test_cmd_fast="make check", test_cmd_slow="make check && make test-live",
-        test_cmd_fast_timeout=120, test_cmd_slow_timeout=300)
+        test_cmd_fast_timeout=120, test_cmd_slow_timeout=300,
+        worktree_setup="uv sync --all-extras")
     gates = TestGates.from_config(cfg)
     assert gates == TestGates(fast="make check",
                               slow="make check && make test-live",
-                              fast_timeout=120, slow_timeout=300)
+                              fast_timeout=120, slow_timeout=300,
+                              worktree_setup="uv sync --all-extras")
 
 
 def test_engine_env_injects_zero_timeout() -> None:
@@ -308,8 +310,10 @@ def test_overlay_preserves_an_inherited_imp_home() -> None:
 def test_from_config_reads_a_false_gate_as_no_command() -> None:
     gates = TestGates.from_config(SimpleNamespace(
         test_cmd_fast=False, test_cmd_slow=False,
-        test_cmd_fast_timeout=None, test_cmd_slow_timeout=None))
+        test_cmd_fast_timeout=None, test_cmd_slow_timeout=None,
+        worktree_setup=False))
     assert gates.fast is None and gates.slow is None
+    assert gates.worktree_setup is None
 
 
 def test_engine_env_omits_pythonpath_for_every_undecided_spelling() -> None:
@@ -370,3 +374,66 @@ def test_imp_python_survives_the_policy_env_bake() -> None:
     eng = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
     baked = dict(_build_child_env(eng, {"IMP_PYTHON": "/stale/python"}, ()))
     assert baked["IMP_PYTHON"] == sys.executable
+
+
+def _gates_with_setup(value: object) -> TestGates:
+    return TestGates.from_config(SimpleNamespace(
+        test_cmd_fast=None, test_cmd_slow=None,
+        test_cmd_fast_timeout=None, test_cmd_slow_timeout=None,
+        worktree_setup=value))
+
+
+def test_engine_env_injects_worktree_setup_when_configured() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     test_gates=_gates_with_setup("uv sync --all-extras"))
+    assert env["IMP_WORKTREE_SETUP"] == "uv sync --all-extras"
+
+
+def test_engine_env_omits_worktree_setup_for_unset_false_or_empty() -> None:
+    for value in (None, False, ""):
+        env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                         test_gates=_gates_with_setup(value))
+        assert "IMP_WORKTREE_SETUP" not in env, value
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     test_gates=TestGates(worktree_setup=""))
+    assert "IMP_WORKTREE_SETUP" not in env
+
+
+def test_engine_env_omits_worktree_setup_without_test_gates() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
+    assert "IMP_WORKTREE_SETUP" not in env
+
+
+def test_worktree_setup_is_engine_managed() -> None:
+    from imp.engine.env import ENGINE_ENV_VARS
+    assert "IMP_WORKTREE_SETUP" in ENGINE_ENV_VARS
+
+
+def test_overlay_strips_an_ambient_worktree_setup_when_unconfigured() -> None:
+    # imp-on-imp: an outer imp's setup command must not leak into a project
+    # that configured none.
+    env = overlay_engine_env(
+        {"IMP_WORKTREE_SETUP": "make stale", "FOO": "bar"},
+        engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                   test_gates=_gates_with_setup(False)),
+    )
+    assert "IMP_WORKTREE_SETUP" not in env
+    assert env["FOO"] == "bar"
+
+
+def test_overlay_configured_worktree_setup_overrides_ambient() -> None:
+    env = overlay_engine_env(
+        {"IMP_WORKTREE_SETUP": "make stale"},
+        engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                   test_gates=_gates_with_setup("npm ci")),
+    )
+    assert env["IMP_WORKTREE_SETUP"] == "npm ci"
+
+
+def test_worktree_setup_survives_the_policy_env_bake() -> None:
+    from imp.engine.sandbox import _build_child_env
+
+    eng = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     test_gates=_gates_with_setup("uv sync --all-extras"))
+    baked = dict(_build_child_env(eng, {}, ()))
+    assert baked["IMP_WORKTREE_SETUP"] == "uv sync --all-extras"

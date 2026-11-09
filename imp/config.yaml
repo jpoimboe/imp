@@ -20,8 +20,9 @@ test_cmd_slow_timeout: 600
 # an editable-installed imp resolves to the worktree, not the main checkout.
 pythonpath: [src]
 
-# Command imp runs in each newly created quest worktree, before the first step:
-# `git worktree` materializes only tracked files, so a new tree has no .venv.
+# Command imp runs in each newly created quest worktree, before the first step,
+# and again after an integration rebase: `git worktree` materializes only
+# tracked files, so a new tree has no .venv, and a rebase can change the deps.
 worktree_setup: uv sync --all-extras
 
 # Ambient vars forwarded into the sandbox by name. IMP_E2E_POLL_TIMEOUT lifts the

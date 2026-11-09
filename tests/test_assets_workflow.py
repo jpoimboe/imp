@@ -115,7 +115,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert wf.phases[-1].name == "integrate"
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "reconciler",
-        "validate-memory", "integration-verify", "integration-reviewer",
+        "sync-worktree", "validate-memory", "integration-verify", "integration-reviewer",
         "check-cleared", "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base"]

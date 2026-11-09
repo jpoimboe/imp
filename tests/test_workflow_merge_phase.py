@@ -20,7 +20,7 @@ def test_integrate_phase_step_ordering_and_layering() -> None:
     names = [s.name for s in _phase(wf, "integrate").steps]
     assert names == [
         "wait-for-head", "integrate-rebase", "reconciler",
-        "validate-memory", "integration-verify", "integration-reviewer",
+        "sync-worktree", "validate-memory", "integration-verify", "integration-reviewer",
         "check-cleared", "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
@@ -38,7 +38,7 @@ def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     assert m.var_mutations == {}
     m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA"})
-    assert isinstance(m.action, Goto) and m.action.target == "validate-memory"
+    assert isinstance(m.action, Goto) and m.action.target == "sync-worktree"
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
     assert m.var_mutations.get("integration_review_needed") is True
@@ -66,6 +66,22 @@ def test_reconciler_stuck_pauses_and_else_continues() -> None:
     assert isinstance(m.action, Continue)
     # Every route into the reconciler re-arms the merge review, so its fix is reviewed.
     assert m.var_mutations == {"integration_review_needed": True}
+
+
+def test_sync_worktree_follows_reconciler_and_pauses_on_failure() -> None:
+    wf = load_workflow(WF)
+    names = [s.name for s in _phase(wf, "integrate").steps]
+    assert names.index("sync-worktree") == names.index("reconciler") + 1
+    assert names.index("sync-worktree") == names.index("validate-memory") - 1
+    step = next(s for s in wf.flat_steps() if s.name == "sync-worktree")
+    assert step.kind == "script"
+    assert step.command == "./scripts/sync-worktree.sh"
+    assert step.label == "re-running worktree setup"
+    assert step.show_label is False
+    assert isinstance(evaluate_rules(step.rules, vars={}, output={"exit": 0}).action, Continue)
+    for code in (1, 5, 124):
+        m = evaluate_rules(step.rules, vars={}, output={"exit": code})
+        assert isinstance(m.action, Pause), code
 
 
 def test_only_finalize_routes_to_planning_and_releases_the_lane() -> None:
@@ -221,7 +237,7 @@ def test_merge_to_base_recovery_rules_and_cap() -> None:
 def test_validate_memory_gates_post_rebase() -> None:
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "integrate").steps]
-    assert names.index("validate-memory") == names.index("reconciler") + 1
+    assert names.index("validate-memory") == names.index("sync-worktree") + 1
     assert names.index("validate-memory") == names.index("integration-verify") - 1
     step = next(s for s in wf.flat_steps() if s.name == "validate-memory")
     assert step.kind == "script"

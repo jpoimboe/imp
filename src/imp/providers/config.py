@@ -14,7 +14,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_slow: "..."                  # full run once per quest; false if none needed
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
-    worktree_setup: uv sync --all-extras  # runs in each new quest worktree; false if none needed
+    worktree_setup: uv sync --all-extras  # new worktrees and after rebases; false if none needed
     pythonpath: [src]                     # import roots on PYTHONPATH; false if none needed
     default-workflow: default             # workflow new quests use (default "default")
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)

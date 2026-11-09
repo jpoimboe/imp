@@ -225,7 +225,9 @@ def _exit_table() -> dict[str, str]:
 def test_header_exit_table_names_the_real_routes() -> None:
     table = _exit_table()
     assert "already cleared by an earlier slow pass or toleration" in table["2"]
-    assert "-> validate-memory -> integration-verify -> integration-reviewer" in table["0"]
+    assert ("-> sync-worktree -> validate-memory -> integration-verify -> integration-reviewer"
+            in table["0"])
+    assert "sync-worktree" not in table["7"]
     assert "(the normal first pass: converge runs no slow gate)" in table["7"]
     assert "-> validate-memory -> integration-verify; reviewer skipped on green" in table["7"]
     assert "recovery" not in SCRIPT.read_text()

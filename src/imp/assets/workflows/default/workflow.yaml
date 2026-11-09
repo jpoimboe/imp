@@ -243,7 +243,8 @@ phases:
 
   # ── integrate: the FIFO merge queue (base lock from wait-for-head). Rebase, run
   # the quest's one slow verify, review the integration (skipped on a green,
-  # base-unmoved pass with no reconciler fix), then the human gate.
+  # base-unmoved pass with no reconciler fix), then the human gate. A rebase or
+  # reconciler pass re-runs worktree_setup (sync-worktree) before the gates.
   - name: integrate
     label: "integration phase"
     steps:
@@ -259,7 +260,7 @@ phases:
         command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, set: {integration_fork: output.stdout, integration_review_needed: true}, goto: validate-memory}
+          - {if: {exit: 0}, set: {integration_fork: output.stdout, integration_review_needed: true}, goto: sync-worktree}
           - {if: {exit: 7}, set: {integration_fork: output.stdout, integration_review_needed: false}, goto: validate-memory}
           - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
@@ -271,6 +272,18 @@ phases:
         rules:
           - {if: {stuck: true}, pause: true}
           - {else: true, set: {integration_review_needed: true}, continue: true}
+
+      # Post-rebase environment re-sync: re-runs the project's worktree_setup so
+      # gitignored per-tree toolchain state matches the rebased dependency files.
+      # Reached from integrate-rebase exit 0 and by every reconciler fall-through;
+      # exit 7 (base unmoved) skips it. Failure or timeout pauses.
+      - name: sync-worktree
+        show_label: false
+        label: re-running worktree setup
+        command: ./scripts/sync-worktree.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}
 
       # Post-rebase memory gate: re-runs imp's own load-time memory validation over
       # the fully-merged worktree (quest changes + latest base) against the rebased

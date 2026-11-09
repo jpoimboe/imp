@@ -428,10 +428,10 @@ _TEST_CMD_FAST_COMMENT = (
 )
 
 _WORKTREE_SETUP_COMMENT = (
-    "\n# Command run in each new quest worktree before the first step, for toolchains\n"
-    "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
-    "# node_modules, vendor) that `git worktree` does not materialize. false\n"
-    "# declares the project needs none.\n"
+    "\n# Command run in each new quest worktree before the first step, and again\n"
+    "# after an integration rebase, for toolchains that keep dependencies in a\n"
+    "# gitignored per-tree directory (.venv, node_modules, vendor) that\n"
+    "# `git worktree` does not materialize. false declares the project needs none.\n"
 )
 
 _PYTHONPATH_BLOCK_COMMENT = (

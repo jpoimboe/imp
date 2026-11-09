@@ -102,6 +102,8 @@ def test_lifecycle_places_the_quest_home_outside_the_checkout() -> None:
 def test_lifecycle_documents_worktree_setup_on_go_live() -> None:
     body = DOC.read_text()
     assert "re-runs it on every `create_and_enter_worktree` call" in body
+    flat = " ".join(body.split())
+    assert "imp also re-runs `worktree_setup` after the integration phase rebases" in flat
 
 
 def test_lifecycle_exit_code_table_matches_the_exit_code_constants() -> None:
