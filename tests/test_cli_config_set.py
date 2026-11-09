@@ -448,7 +448,8 @@ def test_bare_config_and_explain_are_unchanged(
     out = capsys.readouterr().out
     assert "settings:" in out
     assert out.splitlines()[0] == (
-        f"project state: {display_path(project_state_dir(project))}")
+        f"project state: {display_path(imp_home / 'projects' / 'proj')} (not created yet)")
+    assert not (imp_home / "projects").exists()
 
     assert main(["config", "--explain", "high"]) == 0
     explained = capsys.readouterr().out
@@ -457,6 +458,17 @@ def test_bare_config_and_explain_are_unchanged(
 
     assert main(["config", "--all"]) == 0
     assert "tiers:" in capsys.readouterr().out
+
+
+def test_bare_config_in_a_claimed_project_shows_the_bare_state_line(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+
+    assert main(["config"]) == 0
+
+    assert capsys.readouterr().out.splitlines()[0] == (
+        f"project state: {display_path(state)}")
 
 
 @pytest.mark.parametrize("tier", ["bogus", ""])

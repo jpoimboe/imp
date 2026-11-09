@@ -119,7 +119,7 @@ def test_read_commands_outside_a_project_claim_no_state_dir(
 
 @pytest.mark.parametrize("argv", [
     ["--help"], ["--version"], ["help"], ["list"], ["search", "x"],
-    ["show", "nope"], ["log", "nope"], ["events", "nope"],
+    ["show", "nope"], ["log", "nope"], ["events", "nope"], ["config"],
 ], ids=" ".join)
 def test_read_commands_in_an_unclaimed_project_claim_no_state_dir(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

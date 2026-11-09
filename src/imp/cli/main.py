@@ -40,7 +40,7 @@ from imp.cli.help_format import (
 from imp.cli.narrative import MANUAL_STOP_LABELS
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, OPENING_HINTS, Prompt
-from imp.paths import claimed_state_dir, project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir, resolve_state_dir
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -4316,8 +4316,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if explain is not None:
         render_explain(eff, explain, buf, color=color)
     else:
-        render_config(eff, buf,
-                      state_dir=None if root is None else project_state_dir(root),
+        state_dir, state_claimed = (None, True) if root is None else resolve_state_dir(root)
+        render_config(eff, buf, state_dir=state_dir, state_claimed=state_claimed,
                       color=color, show_all=args.all)
     _emit_human(buf.getvalue().splitlines())
     return 0

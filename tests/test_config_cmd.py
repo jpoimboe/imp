@@ -531,6 +531,21 @@ def test_config_leads_with_the_project_state_line(
     assert lines[2] == "tiers:"
 
 
+def test_config_marks_an_unclaimed_state_dir_not_created_yet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    state = tmp_path / "imphome" / "projects" / "repo"
+    out = io.StringIO()
+
+    render_config(eff, out, state_dir=state, state_claimed=False, color=False)
+
+    lines = out.getvalue().splitlines()
+    assert lines[0] == f"project state: {display_path(state)} (not created yet)"
+    assert lines[1] == ""
+    assert not state.exists()
+
+
 def test_config_omits_the_state_line_outside_a_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

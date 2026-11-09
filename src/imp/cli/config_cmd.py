@@ -46,9 +46,11 @@ def _setting_display(value: str | tuple[str, ...] | Literal[False] | None) -> st
 
 
 def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
-                  color: bool = False, show_all: bool = False) -> None:
+                  color: bool = False, show_all: bool = False,
+                  state_claimed: bool = True) -> None:
     if state_dir is not None:
-        out.write(f"project state: {display_path(state_dir)}\n\n")
+        suffix = "" if state_claimed else " (not created yet)"
+        out.write(f"project state: {display_path(state_dir)}{suffix}\n\n")
     cfg, prov = eff.config, eff.provenance
     configured = set(cfg.providers)
     tier_rows: list[tuple[str, str, str]] = []

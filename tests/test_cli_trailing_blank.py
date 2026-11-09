@@ -300,7 +300,7 @@ def test_cmd_config_trailing_blank_on_tty(
 
     captured: dict = {}
 
-    def fake_render(eff, out, *, state_dir, color, show_all):
+    def fake_render(eff, out, *, state_dir, state_claimed, color, show_all):
         captured["out"] = out
         out.write("tiers:\n")
         out.write("  high opus\n")
@@ -330,7 +330,7 @@ def test_cmd_config_unchanged_when_piped(
 
     captured: dict = {}
 
-    def fake_render(eff, out, *, state_dir, color, show_all):
+    def fake_render(eff, out, *, state_dir, state_claimed, color, show_all):
         captured["out"] = out
         out.write("tiers:\n")
         out.write("  high opus\n")
