@@ -28,7 +28,7 @@ from imp.cli.config_edit import (
 from imp.cli.config_keys import Layer, SettableKey, resolve_key, unknown_key_message
 from imp.engine._yaml import config_yaml_error
 from imp.engine.errors import LoadError
-from imp.paths import project_state_dir
+from imp.paths import claimed_state_dir, project_state_dir, resolve_state_dir
 from imp.providers.config import (
     parse_config_layer,
     parse_default_base,
@@ -144,7 +144,7 @@ def _settable(key: str) -> SettableKey:
 
 
 def _target(key: SettableKey, scope: Layer | None,
-            control_root: Path) -> tuple[Layer, Path]:
+            control_root: Path, *, claim: bool) -> tuple[Layer, Path]:
     layer: Layer = scope or key.home
     if layer in ("global", "local"):
         if key.project_only:
@@ -152,7 +152,9 @@ def _target(key: SettableKey, scope: Layer | None,
                 f"{key.dotted!r} is a project setting; drop --{layer}")
         if layer == "global":
             return "global", global_config_path()
-        return "local", project_state_dir(control_root) / "config.yaml"
+        state_dir = (project_state_dir(control_root) if claim
+                     else resolve_state_dir(control_root)[0])
+        return "local", state_dir / "config.yaml"
     return "project", control_root / "imp" / "config.yaml"
 
 
@@ -178,8 +180,9 @@ def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
     if key.project_only or layer == "local":
         return
     above = [global_config_path()] if layer == "project" else []
-    if (control_root / "imp" / "config.yaml").is_file():
-        above.append(project_state_dir(control_root) / "config.yaml")
+    if ((control_root / "imp" / "config.yaml").is_file()
+            and (state_dir := claimed_state_dir(control_root)) is not None):
+        above.append(state_dir / "config.yaml")
     winner: Path | None = None
     effective: Any = None
     for src in above:
@@ -201,7 +204,7 @@ def run_set(*, key: str, value: str, scope: Layer | None,
             control_root: Path) -> int:
     try:
         settable = _settable(key)
-        layer, target = _target(settable, scope, control_root)
+        layer, target = _target(settable, scope, control_root, claim=True)
         if layer == "project":
             _require_project_file(target, control_root)
         current = target.read_text() if target.is_file() else ""
@@ -239,7 +242,8 @@ def run_unset(*, key: str, scope: Layer | None,
               control_root: Path) -> int:
     try:
         settable = _settable(key)
-        layer, target = _target(settable, scope, control_root)
+        # An unclaimed local layer has no file, so the not-set branch below fires.
+        layer, target = _target(settable, scope, control_root, claim=False)
         if layer == "project":
             _require_project_file(target, control_root)
         elif not target.is_file():
