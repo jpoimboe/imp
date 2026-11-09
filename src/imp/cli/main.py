@@ -3520,7 +3520,7 @@ def apply_edit(
     dep_change = depends_on is not None or clear_deps
     if (title is None and not zone_change and not dep_change
             and append_intent is None and base is None):
-        return 2, ("imp: imp edit needs at least one of --title, --backlog/--active, "
+        return 2, ("imp: edit needs at least one of --title, --backlog/--active, "
                    "--depends-on/--clear-deps, --base, or --append-intent")
 
     if zone_change and quest.materialized:

@@ -606,7 +606,7 @@ def test_edit_no_flags_guard_names_base(
     rc = main._cmd_edit(_edit_args("2026-06-24-edit53"))
     assert rc == 2
     assert capsys.readouterr().err.strip() == (
-        "imp: imp edit needs at least one of --title, --backlog/--active, "
+        "imp: edit needs at least one of --title, --backlog/--active, "
         "--depends-on/--clear-deps, --base, or --append-intent")
 
 
