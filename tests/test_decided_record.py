@@ -189,3 +189,14 @@ def test_integration_review_checks_both_reconciler_line_forms() -> None:
             "it flagged — its `DEFERRED reconciler:` lines, `— needs-decision:` and "
             "`— decided:` alike. Read both files and check each flagged "
             "reconciliation first") in flat
+
+
+def test_deferred_sweep_never_re_evaluates_or_authors_decided() -> None:
+    flat = _flat(_agent("deferred-sweep"))
+    assert ("Any line carrying `— needs-decision:` (including a toleration), "
+            "`— decided:`, or a terminal tag (`— fixed` / `— dismissed` / `— seeded` "
+            "/ `— ignored-at-gate` / `— tracked-by`) is already triaged; leave it "
+            "untouched.") in flat
+    assert ("A `— decided:` record is a call a producer already made, born ticked; "
+            "the sweep never authors one — its fixes close "
+            "`— fixed in \"<commit-subject>\"`.") in flat

@@ -32,7 +32,7 @@ Three further terminal markers appear on already-checked lines, written by the `
 
 A `- [ ] DEFERRED ` line already carrying a `— needs-decision: <why>` marker is a **pre-classified human decision** — authored by `spec-finalizer`/`plan-writer`, recorded by a prior sweep pass, or born as a **toleration** at a gate. **Leave the line exactly as-is**: do not re-evaluate it on the risk gate, do not fix it, and **never dismiss it**. It must survive verbatim to the `finalize` merge gate's per-item walk.
 
-**Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag** — a `- [ ] DEFERRED ` line with NO trailing `— …` marker. Any line carrying `— needs-decision:` (including a toleration) or a terminal tag (`— fixed` / `— dismissed` / `— seeded` / `— ignored-at-gate` / `— tracked-by`) is already triaged; leave it untouched. Pinned so no future pruning rule can silently sweep a toleration out mid-gate.
+**Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag** — a `- [ ] DEFERRED ` line with NO trailing `— …` marker. Any line carrying `— needs-decision:` (including a toleration), `— decided:`, or a terminal tag (`— fixed` / `— dismissed` / `— seeded` / `— ignored-at-gate` / `— tracked-by`) is already triaged; leave it untouched. A `— decided:` record is a call a producer already made, born ticked; the sweep never authors one — its fixes close `— fixed in "<commit-subject>"`. Pinned so no future pruning rule can silently sweep a toleration out mid-gate.
 
 ## Per item — gate on risk, not scope
 
