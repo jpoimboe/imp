@@ -192,7 +192,7 @@ def test_emit_paused_summary_error_block_plain_under_no_color(capsys) -> None:
     assert "resume: imp resume" not in out
 
 
-def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -> None:
+def test_emit_paused_summary_interrupt_renders_gold_spine(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([
         {"type": "workflow_paused",
@@ -201,11 +201,8 @@ def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -
     main._emit_paused_summary(quest, info=main._PauseInfo("interrupt", None))
     out = capsys.readouterr().out
     lines = out.split("\n")
-    assert lines[0] == "interrupt"  # gold headline, own line (plain here)
-    assert lines[1] == "2026-06-12-run-x"                      # identity, bare id (untitled)
-    assert lines[2] == "resume: imp resume 2026-06-12-run-x"   # resume line kept
-    assert "(untitled)" not in out
-    assert "· interrupt" not in out                            # no crammed spine tail
+    assert lines[0] == "2026-06-12-run-x · (untitled) · interrupt"   # one spine line
+    assert lines[1] == "resume: imp resume 2026-06-12-run-x"         # resume line kept
     assert not out.startswith("\n")                            # no leading blank
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
@@ -219,7 +216,7 @@ def test_emit_paused_summary_renders_the_info_it_is_handed_not_the_event_log(
     quest = _Change([{"type": "workflow_paused", "payload": {"reason": "max_loops"}}])
     main._emit_paused_summary(quest, info=main._PauseInfo("interrupt", None))
     out = capsys.readouterr().out
-    assert out.split("\n")[0] == "interrupt"
+    assert out.split("\n")[0] == "2026-06-12-run-x · (untitled) · interrupt"
     assert "loop limit" not in out
 
 
@@ -234,8 +231,7 @@ def test_emit_leave_pause_prints_only_the_pause_block(
     main._emit_leave_pause(_Change([]), trigger)
     out = capsys.readouterr().out
     assert out == (
-        f"paused · {display}\n"
-        "2026-06-12-run-x\n"
+        f"2026-06-12-run-x · (untitled) · paused · {display}\n"
         "resume: imp resume 2026-06-12-run-x\n"
         "\n")
 
@@ -313,23 +309,6 @@ def test_status_spine_qualifier_plain_without_color() -> None:
     line = main._status_spine("vahi04", "T", "archived", "wordmark", color=False,
                               qualifier="SIGTERM")
     assert line == "vahi04 · T · archived · SIGTERM"
-
-
-def test_clean_block_titled_gold_headline_and_identity() -> None:
-    from imp.cli import palette as pal
-    lines = main._clean_block("completed", "vahi04", "Real title",
-                              color=True, intent="ignored prompt")
-    assert lines == [
-        pal.ansi("completed", "wordmark"),                       # gold headline, own line
-        f'{pal.ansi("vahi04", "wordmark")} · Real title',        # gold id · plain title
-    ]
-
-
-def test_clean_block_untitled_is_bare_gold_id() -> None:
-    from imp.cli import palette as pal
-    lines = main._clean_block("completed", "vahi04", "", color=True, intent=None)
-    assert lines == [pal.ansi("completed", "wordmark"),
-                     pal.ansi("vahi04", "wordmark")]             # bare gold id, no ` · `
 
 
 _SHA_A = "4091ab6d1f2e3d4c5b6a7988990011223344ffee"
@@ -529,9 +508,8 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
         quest, info=main._PauseInfo("interrupt", None), intent="add a dark mode toggle")
     out = capsys.readouterr().out
     lines = out.split("\n")
-    assert lines[0] == "interrupt"                                    # gold headline, own line
-    assert lines[1] == "2026-06-12-run-x · add a dark mode toggle"  # identity, prompt fallback
-    assert lines[2] == "resume: imp resume 2026-06-12-run-x"         # resume line kept
+    assert lines[0] == "2026-06-12-run-x · add a dark mode toggle · interrupt"
+    assert lines[1] == "resume: imp resume 2026-06-12-run-x"
     assert "(untitled)" not in out
 
 

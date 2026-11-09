@@ -1467,7 +1467,7 @@ async def test_end_frame_with_a_genuine_pause_renders_the_pause_summary(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
-    assert out.split("\n")[0] == "paused"
+    assert out.split("\n")[0] == f"{quest.id} · T · paused"
     assert f"resume: imp resume {quest.id}" in out
     assert "lost the connection" not in out
 
@@ -1775,8 +1775,7 @@ async def test_ctrl_d_leave_still_renders_its_pause_block(
     assert rc == 130
     # The WHOLE buffer, not a prefix: AC 5 asks for byte-identical leave rendering.
     assert out == (
-        "paused · Ctrl-D\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · Ctrl-D\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -1809,8 +1808,7 @@ async def test_ctrl_d_leave_off_a_terminal_writes_only_the_pause_block_below_the
     assert rc == 130
     assert capsys.readouterr().out == (
         "last row\n"
-        "paused · Ctrl-D\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · Ctrl-D\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -1833,8 +1831,7 @@ async def test_sigterm_leave_still_renders_its_pause_block_without_a_caret(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused · SIGTERM\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · SIGTERM\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -1911,8 +1908,7 @@ async def test_pause_on_a_built_quest_renders_the_trigger_block_without_a_caret(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused · /pause\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · /pause\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -1959,10 +1955,9 @@ async def test_headless_gate_detach_still_renders_the_bare_pause(
         non_interactive=True, stream=_watched())
     out = capsys.readouterr().out
     assert rc == 130
-    # No leave_reason, so no qualifier: the bare pause block, exactly as today.
+    # No leave_reason, so no qualifier: the bare pause spine.
     assert out == (
-        "paused\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -2020,7 +2015,7 @@ async def test_witnessed_merge_renders_merged_with_no_quest_home_at_all(
     out = capsys.readouterr().out
     assert rc == 0
     # The witnessed payload names the base (the quest's own attribute is `main`),
-    # and the identity line carries the witnessed opening prompt.
+    # and the spine's name segment carries the witnessed opening prompt.
     assert out == f"{quest.id} · fold the corrections · merged into master as 20d0d699\n\n"
     assert "paused" not in out
     assert "resume: imp resume" not in out
@@ -2105,8 +2100,7 @@ async def test_witnessed_awaiting_user_pause_renders_the_bare_block(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "loop limit" not in out               # the disk fossil never surfaced
@@ -2132,8 +2126,7 @@ async def test_witnessed_loop_limit_pause_renders_the_qualified_block(
     out = capsys.readouterr().out
     assert rc == 1
     assert out == (
-        "paused · loop limit\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · loop limit\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -2217,8 +2210,7 @@ async def test_a_witnessed_pause_never_outranks_a_deliberate_leave_trigger(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused · Ctrl-D\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · Ctrl-D\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "loop limit" not in out
@@ -2375,8 +2367,7 @@ async def test_a_leave_with_no_completion_on_disk_still_renders_its_pause_block(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused · SIGTERM\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused · SIGTERM\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
 
@@ -2409,8 +2400,7 @@ async def test_headless_detach_on_a_resumed_quest_renders_the_bare_pause(
     out = capsys.readouterr().out
     assert rc == 130
     assert out == (
-        "paused\n"
-        f"{quest.id} · T\n"
+        f"{quest.id} · T · paused\n"
         f"resume: imp resume {quest.id}\n"
         "\n")
     assert "interrupt" not in out        # the inferred STALE head is retired
@@ -2440,7 +2430,7 @@ async def test_a_resumed_merge_blocked_never_outranks_this_segments_pause(
         solicit=lambda _p: _never(), confirm=_no_confirm, leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
-    assert out.split("\n")[0] == "paused · loop limit"
+    assert out.split("\n")[0] == f"{quest.id} · T · paused · loop limit"
     assert "merge blocked" not in out
 
 

@@ -201,13 +201,15 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 
 
 # -- end-of-run status lines ------------------------------------------------
-# Every terminal line shares one spine: a gold quest id, a middle display-name
-# segment, and a dot-joined gold outcome tail; only an error block's head
-# (_error_block) is red. The middle segment is always present via the shared
-# resolver (quest_row.resolve_display_name): a real title is plain, else the
-# opening message renders dim, else the dim `(untitled)` placeholder. Dim is
-# color-only, so NO_COLOR / non-TTY output stays plain and script-parseable.
-# Shared by `new`/`resume`, leaves, and the completed block.
+# Every clean closing block is one spine line: a gold quest id, a middle
+# display-name segment, a gold outcome tail, then — when a trigger or reason is
+# known — a dim ` · <trigger/reason>` qualifier; a resumable outcome adds a
+# `resume:` line beneath. Only an error block (_error_block) is head-first: a red
+# head, its body, then the identity line. The spine's middle segment is always
+# present via the shared resolver (quest_row.resolve_display_name): a real title
+# is plain, else the opening message renders dim, else the dim `(untitled)`
+# placeholder. Dim is color-only, so NO_COLOR / non-TTY output stays plain and
+# script-parseable. Shared by `new`/`resume`, pauses, leaves, and the completed block.
 
 def _spine_name(title: str, intent: str | None, *,
                 color: bool) -> tuple[str, quest_row.NameKind]:
@@ -295,7 +297,7 @@ _PAUSE_QUALIFIER: dict[str, str] = {
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
                    intent: str | None = None) -> str:
-    """The shared identity line: gold id, ` · `, then the resolved name — the title,
+    """The identity line: gold id, ` · `, then the resolved name — the title,
     else the dim opening-prompt fallback; a bare gold id only when the quest has
     neither (kind UNTITLED)."""
     ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
@@ -303,14 +305,6 @@ def _identity_line(quest_id: str, title: str, *, color: bool,
     if kind is not quest_row.NameKind.UNTITLED:
         ident = f"{ident} · {name}"
     return ident
-
-
-def _clean_block(head: str, quest_id: str, title: str, *, color: bool,
-                 intent: str | None = None) -> list[str]:
-    """The clean-exit sibling of `_error_block`: a gold `head` line on its own line, then
-    the identity line. No resume line — pause callers append their own resume line."""
-    return [ansi(head, "wordmark", enabled=color),
-            _identity_line(quest_id, title, color=color, intent=intent)]
 
 
 def _commit_lines(commits: Sequence[dict[str, str]], *, color: bool) -> list[str]:
@@ -367,19 +361,12 @@ def _pause_lines(
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
     if info is not None and info.base in _PAUSE_QUALIFIER:
-        display = _PAUSE_QUALIFIER[info.base]
-        head_line = (ansi("paused", "wordmark", enabled=color)
-                     + ansi(f" · {display}", "dim", enabled=color))
-        return [
-            head_line,
-            _identity_line(name, title, color=color, intent=intent),
-            _resume_line(token),
-        ]
-    head = info.base if info is not None else "paused"
-    return [
-        *_clean_block(head, name, title, color=color, intent=intent),
-        _resume_line(token),
-    ]
+        tail, qualifier = "paused", _PAUSE_QUALIFIER[info.base]
+    else:
+        tail, qualifier = (info.base if info is not None else "paused"), None
+    return [_status_spine(name, title, tail, "wordmark", color=color, intent=intent,
+                          qualifier=qualifier),
+            _resume_line(token)]
 
 
 def _leave_trigger(coord: Any) -> str | None:
@@ -413,8 +400,8 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
                          intent: str | None = None) -> None:
-    """The trailing run-status line on a non-interactive pause; `info` None renders the
-    bare `paused` block."""
+    """The closing block for a pause: the red error block for an error reason, else the
+    pause spine; `info` None renders the bare `paused` spine."""
     color = should_use_color(sys.stdout)
     intent = quest_row.fallback_intent(intent, quest.seed_opening)
     for ln in _pause_lines(quest.id, quest.id, info=info, title=quest.title,
@@ -425,7 +412,7 @@ def _emit_paused_summary(quest: Quest, *, info: _PauseInfo | None,
 
 def _emit_leave_pause(quest: Quest, trigger: str, *,
                       intent: str | None = None) -> None:
-    """A deliberate leave's own block: the trigger-qualified pause block."""
+    """A deliberate leave's own block: the trigger-qualified pause spine."""
     _emit_paused_summary(quest, info=_PauseInfo(trigger, None), intent=intent)
 
 

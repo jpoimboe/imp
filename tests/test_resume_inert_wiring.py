@@ -397,7 +397,7 @@ async def test_inert_ask_line_ctrl_d_prints_pause_block_without_caret(
 
     assert line is None
     assert capsys.readouterr().out == (
-        f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+        f"c · C · paused · {display}\nresume: imp resume c\n\n")
 
 
 @pytest.mark.anyio
@@ -424,7 +424,7 @@ async def test_resume_inert_ctrl_d_prints_pause_block_parks_and_exits_130(
     out = capsys.readouterr().out
     assert "c · C · resuming" in out             # resuming header printed
     assert "Which DB should I use?" in out       # pending question replayed
-    assert out.endswith(f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+    assert out.endswith(f"c · C · paused · {display}\nresume: imp resume c\n\n")
     assert not any(ln.startswith(">") for ln in out.splitlines())   # no caret line
     assert "cancelled" not in out                # no `imp: cancelled` message
 
@@ -469,7 +469,7 @@ async def test_inert_ask_line_leave_signal_prints_pause_block_without_caret(
 
     assert line is None
     assert capsys.readouterr().out == (
-        f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+        f"c · C · paused · {display}\nresume: imp resume c\n\n")
 
 
 @pytest.mark.anyio
@@ -478,7 +478,7 @@ async def test_inert_ask_line_leave_signal_names_a_titleless_quest_by_its_openin
     capsys: pytest.CaptureFixture[str],
     signal_sentinels: Callable[[int, object], None],
 ) -> None:
-    # A titleless saved chat: the identity line carries the opening, not a bare id.
+    # A titleless saved chat: the spine's name segment carries the opening, not a placeholder.
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="", quest_id="c", base_branch="main")
     State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
@@ -496,7 +496,7 @@ async def test_inert_ask_line_leave_signal_names_a_titleless_quest_by_its_openin
 
     assert line is None
     assert capsys.readouterr().out == (
-        "paused · SIGTERM\nc · summarize foo.py\nresume: imp resume c\n\n")
+        "c · summarize foo.py · paused · SIGTERM\nresume: imp resume c\n\n")
 
 
 @pytest.mark.anyio
@@ -524,7 +524,7 @@ async def test_resume_inert_leave_signal_parks_and_exits_130(
     assert after == before
     assert State.load(ch.state_dir).status == "paused"
     out = capsys.readouterr().out
-    assert out.endswith(f"paused · {display}\nc · C\nresume: imp resume c\n\n")
+    assert out.endswith(f"c · C · paused · {display}\nresume: imp resume c\n\n")
     assert not any(ln.startswith(">") for ln in out.splitlines())   # no caret line
 
 

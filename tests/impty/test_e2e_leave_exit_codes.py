@@ -105,12 +105,12 @@ def _assert_closing_layout(rows: list[str], head: str) -> int:
     return at
 
 
-def _assert_pause_block(s: TerminalSession, head: str, quest_id: str, title: str) -> int:
-    """The closing layout above `head`, then the identity and resume rows; returns its index."""
+def _assert_pause_block(s: TerminalSession, outcome: str, quest_id: str, title: str) -> int:
+    """The closing layout above the `<id> · <title> · <outcome>` spine, then the resume
+    row; returns the spine's index."""
     rows = s.lines()
-    at = _assert_closing_layout(rows, head)
-    assert rows[at + 1:at + 3] == [
-        f"{quest_id} · {title}", f"resume: imp resume {quest_id}"], "\n".join(rows)
+    at = _assert_closing_layout(rows, f"{quest_id} · {title} · {outcome}")
+    assert rows[at + 1] == f"resume: imp resume {quest_id}", "\n".join(rows)
     return at
 
 
@@ -212,7 +212,7 @@ def test_sigterm_mid_run_on_a_built_quest_exits_130(tmp_path: Path, interrupt: s
         rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130, "\n".join(s.lines())
-        assert_screen(s, contains=("paused · SIGTERM",))
+        assert_screen(s, contains=(f"{quest_dir.name} · sigterm mid run · paused · SIGTERM",))
 
     # Left mid-run: resume runs the agent on, not the interrupted-steer prompt.
     assert _poll(lambda: _flock_free(quest_dir / "lock"), timeout=E2E_POLL_TIMEOUT)

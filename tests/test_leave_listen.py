@@ -157,8 +157,7 @@ def _closing(tmp_path: Path, session: _Session) -> int:
 
 
 def _pause_block(label: str) -> str:
-    return (f"paused · {label}\n"
-            f"{_QUEST_ID} · T\n"
+    return (f"{_QUEST_ID} · T · paused · {label}\n"
             f"resume: imp resume {_QUEST_ID}\n"
             "\n")
 
