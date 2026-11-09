@@ -411,9 +411,10 @@ def test_memory_doc_documents_worktree_setup() -> None:
     flat = " ".join(_memory_doc().split())
     assert (
         "`worktree_setup` — a shell command imp runs in each newly created quest "
-        "worktree, before the first step, for toolchains that keep dependencies in a "
-        "gitignored per-tree directory (`.venv`, `node_modules`, `vendor/bundle`) that "
-        "`git worktree` does not materialize."
+        "worktree, before the first step, and again after an integration rebase, for "
+        "toolchains that keep dependencies in a gitignored per-tree directory "
+        "(`.venv`, `node_modules`, `vendor/bundle`) that `git worktree` does not "
+        "materialize."
     ) in flat
 
 

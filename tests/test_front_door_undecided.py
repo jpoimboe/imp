@@ -26,9 +26,9 @@ needs none, so it stops being raised. If this quest can't answer one, leave it.
 {% endif %}
 {% if project.undecided.worktree_setup %}
 - `worktree_setup` — a command run in each new quest worktree before the first
-  step. Unset, a fresh worktree holds only tracked files: no `.venv`,
-  `node_modules` or `vendor`, which `git worktree` does not materialize
-  (e.g. `npm ci`).
+  step and again after an integration rebase. Unset, a fresh worktree holds only
+  tracked files: no `.venv`, `node_modules` or `vendor`, which `git worktree`
+  does not materialize (e.g. `npm ci`).
 {% endif %}
 {% if project.undecided.pythonpath %}
 - `pythonpath` — worktree-relative Python import paths. Unset in an

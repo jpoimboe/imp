@@ -666,10 +666,10 @@ def test_write_init_files_places_worktree_setup_between_tests_and_pythonpath(
     )
     text = (tmp_path / "imp" / "config.yaml").read_text()
     assert (
-        "\n# Command run in each new quest worktree before the first step, for toolchains\n"
-        "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
-        "# node_modules, vendor) that `git worktree` does not materialize. false\n"
-        "# declares the project needs none.\n"
+        "\n# Command run in each new quest worktree before the first step, and again\n"
+        "# after an integration rebase, for toolchains that keep dependencies in a\n"
+        "# gitignored per-tree directory (.venv, node_modules, vendor) that\n"
+        "# `git worktree` does not materialize. false declares the project needs none.\n"
         'worktree_setup: "npm ci"\n'
     ) in text
     assert text.index("test_cmd_fast:") < text.index("worktree_setup:")
