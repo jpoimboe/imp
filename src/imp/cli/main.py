@@ -4088,25 +4088,34 @@ def _highlight(text: str, query: str, *, color: bool) -> str:
     return "".join(out)
 
 
+_MATCH_CONTEXT = 40
+
+
+def _first_match(text: str, query: str) -> re.Match[str] | None:
+    """First case-insensitive literal occurrence of `query` in `text`."""
+    return re.search(re.escape(query), text, flags=re.IGNORECASE)
+
+
+def _match_window(source: str, m: re.Match[str]) -> str:
+    """±_MATCH_CONTEXT characters of `source` around `m`, cut then whitespace-collapsed,
+    with `…` on each clipped side."""
+    start = max(0, m.start() - _MATCH_CONTEXT)
+    end = min(len(source), m.end() + _MATCH_CONTEXT)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(source) else ""
+    return prefix + " ".join(source[start:end].split()) + suffix
+
+
 def _excerpts(
     content: str, query: str, *, color: bool, limit: int = 3,
 ) -> tuple[list[str], int]:
-    """Up to `limit` grep-style match spans — whitespace-collapsed,
-    query-highlighted, `…`-truncated toward the terminal width — plus the count
-    of query occurrences beyond `limit`."""
+    """Up to `limit` grep-style match spans — each a query-highlighted
+    `_match_window` — plus the count of query occurrences beyond `limit`."""
     if not query:
         return [], 0
-    width = shutil.get_terminal_size((80, 24)).columns
-    context = max(20, (width - len(query) - 6) // 2)
     matches = list(re.finditer(re.escape(query), content, flags=re.IGNORECASE))
-    spans: list[str] = []
-    for m in matches[:limit]:
-        start = max(0, m.start() - context)
-        end = min(len(content), m.end() + context)
-        body = " ".join(content[start:end].split())
-        prefix = "…" if start > 0 else ""
-        suffix = "…" if end < len(content) else ""
-        spans.append(prefix + _highlight(body, query, color=color) + suffix)
+    spans = [_highlight(_match_window(content, m), query, color=color)
+             for m in matches[:limit]]
     return spans, max(0, len(matches) - limit)
 
 

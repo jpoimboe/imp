@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 
 from imp.cli.main import (
     _excerpts,
+    _first_match,
     _highlight,
+    _match_window,
     _render_search_hit,
     _search_list_line,
     _spine_segment,
@@ -129,6 +131,51 @@ def test_excerpts_empty_when_no_match() -> None:
 
 def test_excerpts_empty_query_returns_empty_not_infinite_loop() -> None:
     assert _excerpts("any content here", "", color=False) == ([], 0)
+
+
+def test_match_window_keeps_forty_characters_each_side_of_a_mid_match() -> None:
+    source = "a" * 100 + "Q" + "b" * 100
+    m = _first_match(source, "q")
+    assert m is not None
+    assert _match_window(source, m) == "…" + "a" * 40 + "Q" + "b" * 40 + "…"
+
+
+def test_match_window_omits_ellipses_on_unclipped_sides() -> None:
+    source = "abc Q def"
+    m = _first_match(source, "Q")
+    assert m is not None
+    assert _match_window(source, m) == "abc Q def"
+
+
+def test_match_window_cuts_before_collapsing_and_trims_edge_whitespace() -> None:
+    source = "y" * 60 + " " * 40 + "Q" + "\n\n  tail"
+    m = _first_match(source, "Q")
+    assert m is not None
+    assert _match_window(source, m) == "…Q tail"
+
+
+def test_first_match_is_case_insensitive_and_literal() -> None:
+    m = _first_match("one A.B two a.b", "a.b")
+    assert m is not None and m.start() == 4
+    assert _first_match("axb", "a.b") is None
+
+
+def test_excerpts_window_is_forty_characters_each_side() -> None:
+    content = "x" * 200 + "50%" + "y" * 200
+    assert _excerpts(content, "50%", color=False) == (
+        ["…" + "x" * 40 + "50%" + "y" * 40 + "…"], 0)
+
+
+def test_excerpts_ignore_terminal_size(monkeypatch) -> None:
+    content = "lead " * 40 + "the 50% mark" + " tail" * 40
+    outs = []
+    for cols in ("40", "300", None):
+        if cols is None:
+            monkeypatch.delenv("COLUMNS", raising=False)
+        else:
+            monkeypatch.setenv("COLUMNS", cols)
+        outs.append(_excerpts(content, "50%", color=False))
+    assert outs[0] == outs[1] == outs[2]
 
 
 _OPENING = "/home/jpoimboe/foo.py -- in one sentence, what does this file do?"
