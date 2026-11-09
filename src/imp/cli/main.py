@@ -1229,6 +1229,18 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         _emit_cli_error(f"{e}")
         return 2
 
+    if getattr(args, "idea", None) is not None:
+        if getattr(args, "title", None):
+            _emit_cli_error("--backlog and --title cannot be combined (--backlog is the title)")
+            return 2
+        run_only = _backlog_run_only_flag(args)
+        if run_only is not None:
+            _emit_cli_error(
+                f"--backlog files an idea instantly and never runs; {run_only} "
+                f"only applies to a run.\nDrop one. Start a filed idea later with "
+                f"`imp resume <id>`.")
+            return 2
+
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         _refuse_foreign_cwd()
         return _emit_mutation_result(await proxy_mutation_async("new", {
@@ -1275,16 +1287,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return rc
 
     if getattr(args, "idea", None) is not None:
-        if getattr(args, "title", None):
-            _emit_cli_error("--backlog and --title cannot be combined (--backlog is the title)")
-            return 2
-        run_only = _backlog_run_only_flag(args)
-        if run_only is not None:
-            _emit_cli_error(
-                f"--backlog files an idea instantly and never runs; {run_only} "
-                f"only applies to a run.\nDrop one. Start a filed idea later with "
-                f"`imp resume <id>`.")
-            return 2
         if not args.idea.strip():
             _emit_cli_error("--backlog title must be non-empty")
             return 2

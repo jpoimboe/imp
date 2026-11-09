@@ -455,3 +455,30 @@ def test_async_cmd_new_proxy_rejects_both_openings_without_proxying(
         ["new", "--background", "--message", "x", "y"])
     assert asyncio.run(main._async_cmd_new(args)) == 2
     assert "Pass the opening message once" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flags", "expected"), [
+    (["--message", "M"],
+     "imp: --backlog files an idea instantly and never runs; --message "
+     "only applies to a run.\nDrop one. Start a filed idea later with "
+     "`imp resume <id>`.\n"),
+    (["--autonomous"],
+     "imp: --backlog files an idea instantly and never runs; --autonomous "
+     "only applies to a run.\nDrop one. Start a filed idea later with "
+     "`imp resume <id>`.\n"),
+    (["--title", "X"],
+     "imp: --backlog and --title cannot be combined (--backlog is the title)\n"),
+])
+def test_async_cmd_new_proxy_rejects_backlog_conflicts_without_proxying(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        flags: list[str], expected: str) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    monkeypatch.setenv("IMP_PROJECT_ROOT", str(Path.cwd()))
+
+    async def _boom(op: str, args: dict) -> dict:
+        raise AssertionError("must not proxy a conflicting --backlog")
+
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _boom)
+    args = main._build_parser().parse_args(["new", "--backlog", "T", *flags])
+    assert asyncio.run(main._async_cmd_new(args)) == 2
+    assert capsys.readouterr().err == expected
