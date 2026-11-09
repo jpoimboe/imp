@@ -269,11 +269,8 @@ async def test_a_backlogged_quest_keeps_the_pin_for_its_later_resume(
     monkeypatch.chdir(tmp_path)
     floor_availability({"claude", "codex"})
 
-    # non_interactive stays False: --backlog refuses to be combined with a
-    # run-only flag (_backlog_run_only_flag reads --headless first).
     rc = await main._async_cmd_new(
-        _ns(idea="file this", opening=None, non_interactive=False,
-            provider="codex"))
+        _ns(idea="file this", opening=None, provider="codex"))
 
     assert rc == 0
     (quest_id,) = main._live_quest_ids(tmp_path)

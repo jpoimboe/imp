@@ -130,7 +130,6 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
 
 
 @pytest.mark.parametrize("flag,expected", [
-    ({"non_interactive": True}, "--headless"),
     ({"message": "do the thing"}, "--message"),
     ({"autonomous": True}, "--autonomous"),
 ])
@@ -147,9 +146,10 @@ def test_backlog_with_run_only_flag_errors(
     assert rc == 2
     assert not (project_state_dir(tmp_path) / "quests").exists()
     err = capsys.readouterr().err
-    assert "files an idea instantly and never runs" in err
-    assert "imp resume" in err
-    assert expected in err
+    assert err == (
+        f"imp: --backlog files an idea instantly and never runs; {expected} "
+        "only applies to a run.\nDrop one. Start a filed idea later with "
+        "`imp resume <id>`.\n")
 
 
 def test_non_backlog_non_interactive_runs_headless(

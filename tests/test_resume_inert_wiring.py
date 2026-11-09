@@ -104,7 +104,7 @@ async def test_resume_skips_inert_when_message_supplied(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
+    monkeypatch.setattr(m, "_select_headless", lambda args: (bool(args.non_interactive), False))
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
 
     async def boom_inert_msg(quest, question, *, marker=None, notice=None,
@@ -113,10 +113,10 @@ async def test_resume_skips_inert_when_message_supplied(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
 
-    async def fake_clear_loop(control_root, base, *, first, leave_mode):
+    async def fake_session(quest, **kw):
         return 7
 
-    monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", fake_session)
 
     rc = await m._async_cmd_resume(_args_with_message("c", "hello"))
 

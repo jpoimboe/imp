@@ -278,7 +278,8 @@ async def test_run_fresh_session_threads_autonomous(
         return 0
 
     monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
-    args = main._build_parser().parse_args(["new", "--headless", "--autonomous"])
+    monkeypatch.setattr(main, "_select_headless", lambda _a: (True, False))
+    args = main._build_parser().parse_args(["new", "--autonomous"])
     rc = await main._run_fresh_session(
         SimpleNamespace(id="x", title="t", create_mode="new",
                         control_root=Path("/checkouts/imp")), args=args)
@@ -319,16 +320,6 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
         args=args)
     assert rc == 0
     assert captured.get("autonomous") is True
-
-
-@pytest.mark.parametrize("cmd", ["new", "chat", "resume"])
-def test_headless_flag_replaces_non_interactive(cmd: str) -> None:
-    # New spelling parses and still lands on the non_interactive dest.
-    args = _build_parser().parse_args([cmd, "--headless"])
-    assert args.non_interactive is True
-    # Old spelling is gone: argparse rejects it.
-    with pytest.raises(SystemExit):
-        _build_parser().parse_args([cmd, "--non-interactive"])
 
 
 def test_artifact_commit_subcommand_is_removed() -> None:

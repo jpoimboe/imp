@@ -176,14 +176,11 @@ def test_new_message_help_is_seed_alias(
 ) -> None:
     monkeypatch.setenv("COLUMNS", "200")
     out = _help_for(["new", "-h"], capsys)
-    assert "Requires --headless" not in out
     assert "Alias for the positional opening message" in out
     assert "seeds the opening step" in out
-    assert "supply the opening message via the positional argument or --message" in out
 
     chat_out = _help_for(["chat", "-h"], capsys)
     assert "Alias for the positional opening message" in chat_out
-    assert "supply the opening message via the positional argument or --message" in chat_out
 
 
 def test_resume_help_drops_replay_claim(capsys: pytest.CaptureFixture[str]) -> None:

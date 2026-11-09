@@ -1151,8 +1151,6 @@ async def _run_fresh_session(
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
-    if getattr(args, "non_interactive", False):
-        return "--headless"
     if getattr(args, "message", None) is not None:
         return "--message"
     if getattr(args, "autonomous", False):
@@ -1284,7 +1282,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if run_only is not None:
             _emit_cli_error(
                 f"--backlog files an idea instantly and never runs; {run_only} "
-                f"is for headless\nruns. Drop one. Start a filed idea later with "
+                f"only applies to a run.\nDrop one. Start a filed idea later with "
                 f"`imp resume <id>`.")
             return 2
         if not args.idea.strip():
@@ -1555,6 +1553,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False)))
     if isinstance(target, int):
         return target
+    args.non_interactive = getattr(args, "message", None) is not None
     quest_id = target
     loaded = _load_or_rehydrate(control, quest_id)
     if isinstance(loaded, int):
@@ -1624,19 +1623,17 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             resume=True, status=status, non_interactive=True,
             leave_mode=quest.create_mode, autonomous=autonomous,
             provider=pending_provider, stream=watched)
-    if not getattr(args, "message", None):
-        question = bare_turn_end_question(quest)
-        if question is not None:
-            return await _resume_inert(
-                quest, question, marker=marker, notice=live_notice,
-                autonomous=autonomous, provider=pending_provider)
+    question = bare_turn_end_question(quest)
+    if question is not None:
+        return await _resume_inert(
+            quest, question, marker=marker, notice=live_notice,
+            autonomous=autonomous, provider=pending_provider)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     color = should_use_color(sys.stdout)
     _print_resume_opening(quest, marker, live_notice, color=color)
-    splash_shown = _print_splash_banner(interactive=_is_interactive(
-        non_interactive=bool(getattr(args, "non_interactive", False))))
+    splash_shown = _print_splash_banner(interactive=_is_interactive(non_interactive=False))
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(watched)
@@ -4630,9 +4627,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step sets one if omitted.")
-    p_new.add_argument("--headless", action="store_true", dest="non_interactive",
-                       help="Run headless: no live prompt; supply the opening "
-                            "message via the positional argument or --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Take imp's recommendation at routine decision points "
                             "instead of asking you; questions only you can answer "
@@ -4690,13 +4684,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
-    p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
-                        help="Headless: no live prompt; supply the opening message "
-                             "via the positional argument or --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Take imp's recommendation at routine decision points "
                              "instead of asking you; questions only you can answer "
-                             "still pause for you. Independent of --headless.")
+                             "still pause for you.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Alias for the positional opening message.")
     p_chat.add_argument("--provider", metavar="NAME", default=None,
@@ -4714,8 +4705,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument(
         "token", nargs="?", metavar="ID",
         help="id of the quest to resume, or any unique part of it.")
-    p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
-                          help="Headless: no live prompt; supply the reply via --message.")
+    # Pre-merge spawners still pass this; their children have no TTY, so it is moot.
+    p_resume.add_argument("--headless", action="store_true", dest="legacy_headless",
+                          help=argparse.SUPPRESS)
     p_resume.add_argument("--background", action="store_true",
                           help="Continue the quest detached in the background with no "
                                "live prompt. Combine with --message to answer the "
@@ -4726,10 +4718,9 @@ def _build_parser() -> argparse.ArgumentParser:
                                "still pause for you. Combine with --background for a "
                                "hands-off run.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
-                          help="Headless reply to the question the quest is waiting "
-                               "on (or the next one it asks); answer a later question "
-                               "by resuming again with another --message. "
-                               "Requires --headless.")
+                          help="Reply to the question the quest is waiting on (or "
+                               "the next one it asks), with no live prompt; answer a "
+                               "later question by resuming again with another --message.")
     p_resume.add_argument("--provider", metavar="NAME", default=None,
                           help="Switch the quest to NAME for its remaining "
                                "steps; the current step picks up from the "

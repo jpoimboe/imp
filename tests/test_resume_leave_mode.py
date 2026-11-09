@@ -71,7 +71,8 @@ async def test_run_fresh_session_headless_threads_create_mode(
     driver_kwargs = _stub_ui(monkeypatch)
     monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
     captured = _capture_leave_mode(monkeypatch)
-    args = m._build_parser().parse_args(["resume", "--headless"])
+    monkeypatch.setattr(m, "_select_headless", lambda _a: (True, False))
+    args = m._build_parser().parse_args(["resume"])
     quest = SimpleNamespace(
         id="x", title="t", create_mode=create_mode, seed_opening=None,
         control_root=Path("/checkouts/imp"))

@@ -162,7 +162,7 @@ async def test_resume_at_an_unanswered_gate_delivers_the_human_answer(
 ) -> None:
     """The gate re-opens, the typed answer is journaled as the human's reply, and
     no continuation nudge is emitted for the re-entry. `buffered` is the
-    interactive resume prompt; `message` is `imp resume --headless --message`."""
+    interactive resume prompt; `message` is `imp resume --message`."""
     from imp.cli.inert_resume import make_buffered_solicit
     from imp.cli.session_run import make_headless_solicit
 
