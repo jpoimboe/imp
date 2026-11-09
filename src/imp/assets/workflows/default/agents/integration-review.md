@@ -35,9 +35,10 @@ In `bash`:
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show the
   rebase/resolution result.
 - `{{ quest.home }}/progress.md` is the reconciler's narration;
-  `{{ quest.home }}/deferred.md` carries any `## Deferred Followups` `needs-decision`
-  lines it flagged. Read both and check each flagged reconciliation first — the likeliest
-  place something went wrong.
+  `{{ quest.home }}/deferred.md` carries any `## Deferred Followups` lines it flagged —
+  its `DEFERRED reconciler:` lines, `— needs-decision:` and `— decided:` alike. Read
+  both files and check each flagged reconciliation first — the likeliest place
+  something went wrong.
 - `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` is the quest's intent; judge
   faithfulness against it.
 

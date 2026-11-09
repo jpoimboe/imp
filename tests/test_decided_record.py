@@ -181,3 +181,11 @@ def test_gap_check_treats_decided_alterations_as_settled() -> None:
             "met as decided, it does not drive a plan.") in walk
     # Still a pure reader of the ledger.
     assert "read `deferred.md` and never write it" in walk
+
+
+def test_integration_review_checks_both_reconciler_line_forms() -> None:
+    flat = _flat(_agent("integration-review"))
+    assert ("`{{ quest.home }}/deferred.md` carries any `## Deferred Followups` lines "
+            "it flagged — its `DEFERRED reconciler:` lines, `— needs-decision:` and "
+            "`— decided:` alike. Read both files and check each flagged "
+            "reconciliation first") in flat
