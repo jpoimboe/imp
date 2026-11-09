@@ -282,7 +282,8 @@ ahead of other waiting verify gates. `integrate-rebase` routes on four outcomes:
 unmoved with the tree already cleared skips straight to `summarizer` with no re-review; a
 clean rebase or an uncleared tree goes to `validate-memory`; a conflict hands off to
 `reconciler`; a bad base ref or dirty tree pauses. `validate-memory` re-runs imp's own
-load-time memory validation over the merged tree. A failing `integration-verify` always
+load-time memory validation over the merged tree. An invalid tree goes back to
+`reconciler`; any other failure pauses. A failing `integration-verify` always
 goes to `integration-reviewer`, which adjudicates fix-vs-tolerate rather than pausing. A
 pass goes to `integration-reviewer` too, unless the base did not move and no reconciler
 fix landed since `integrate-rebase`: with no incoming diff to review, it goes straight
@@ -315,6 +316,7 @@ flowchart TD
   REC --> VM{{"validate-memory"}}
   REC -. stuck .-> HUMAN
   VM -. "invalid imp/memory/" .-> REC
+  VM -. "other failure" .-> HUMAN
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]

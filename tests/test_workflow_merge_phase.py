@@ -230,10 +230,16 @@ def test_validate_memory_gates_post_rebase() -> None:
     assert step.max_loops == 6
     m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
     assert isinstance(m0.action, Goto) and m0.action.target == "integration-verify"
-    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
-    assert isinstance(m1.action, Goto) and m1.action.target == "reconciler"
-    assert m1.action.resume is True
-    assert "invalid against the rebased workflows" in m1.action.feedback
+    m3 = evaluate_rules(step.rules, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Goto) and m3.action.target == "reconciler"
+    assert m3.action.resume is True
+    assert m3.action.feedback == (
+        "The imp/memory/ tree is invalid against the rebased workflows. "
+        "Fix the memory file paths:")
+    # A crash (1) or a missing interpreter (127) is not the reconciler's to fix.
+    for code in (1, 127):
+        m = evaluate_rules(step.rules, vars={}, output={"exit": code})
+        assert isinstance(m.action, Pause), code
 
 
 def test_finalize_merge_routes_to_cleanup_merge() -> None:

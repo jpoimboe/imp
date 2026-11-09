@@ -1,6 +1,7 @@
 from imp.assets import bundled_workflow_dir
+from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Goto, Pause
+from imp.engine.types import Continue, Goto, Pause
 
 _VALIDATE_MEMORY_COMMAND = (
     '"$IMP_PYTHON" -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"')
@@ -78,3 +79,15 @@ def test_merge_and_validate_resume_routing() -> None:
     validate = by["validate-memory"]
     resume_rule = next(r for r in validate.rules if isinstance(r.action, Goto) and r.action.resume)
     assert resume_rule.action.feedback is None
+
+
+def test_validate_memory_routes_on_exit_class() -> None:
+    rules = next(s for s in _wf().flat_steps() if s.name == "validate-memory").rules
+    assert isinstance(evaluate_rules(rules, vars={}, output={"exit": 0}).action, Continue)
+    m3 = evaluate_rules(rules, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Goto) and m3.action.target == "memory-editor"
+    assert m3.action.resume is True
+    assert m3.action.feedback is None
+    for code in (1, 127):
+        m = evaluate_rules(rules, vars={}, output={"exit": code})
+        assert isinstance(m.action, Pause), code

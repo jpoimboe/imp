@@ -563,6 +563,7 @@ INTEGRATE_DIAGRAM = """flowchart TD
   REC --> VM{{"validate-memory"}}
   REC -. stuck .-> HUMAN
   VM -. "invalid imp/memory/" .-> REC
+  VM -. "other failure" .-> HUMAN
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
@@ -647,6 +648,15 @@ def test_architecture_integrate_prose_describes_the_review_skip() -> None:
         "unless the base did not move and no reconciler fix landed since "
         "`integrate-rebase`: with no incoming diff to review, it goes straight to "
         "`check-cleared`."
+    ) in flat
+
+
+def test_architecture_integrate_prose_describes_the_memory_gate_routing() -> None:
+    flat = " ".join(_phase_section(ARCH.read_text(), "integrate").split())
+    assert (
+        "`validate-memory` re-runs imp's own load-time memory validation over the "
+        "merged tree. An invalid tree goes back to `reconciler`; any other failure "
+        "pauses."
     ) in flat
 
 
