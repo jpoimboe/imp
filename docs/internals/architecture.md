@@ -357,7 +357,7 @@ name:
 | `gap-check` | `gap-check` | high | Once-per-quest coverage backstop: do the implemented plans cover the spec, or is a corrective plan needed. |
 | `batch-code-reviewer` | `quest-review` | high | The single quest-wide code review of the whole diff vs the spec; routes approve / task_gap. |
 | `deferred-sweep` | `deferred-sweep` | high | Drain the quest's deferred followups once; may dispatch coder + code-reviewer for fixes. |
-| `reconciler` | `reconciler` | high | Reconcile the branch against a moved base: resolve conflicts, fix what the base broke. |
+| `reconciler` | `reconciler` | high | Reconcile the branch at the merge head: resolve conflicts, fix what the base or the slow run broke. |
 | `integration-review` | `integration-reviewer` | high | At-head semantic integration review; classifies findings and routes back to the reconciler. |
 | `summarizer` | `summarizer` | medium | Write the quest's intent-level summary artifact. |
 | `finalize` | `finalize` | high | The human gate: merge / rework / pause. |
