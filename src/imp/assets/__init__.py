@@ -118,8 +118,8 @@ INTERNAL_WORKFLOWS = frozenset({"memory"})
 
 def selectable_workflow_names(project_root: Path) -> list[str]:
     """Available names minus imp's internal lanes — the set offered as a project
-    default. `memory` exists and runs (`imp new --workflow memory --background`)
-    but is never a sensible project default."""
+    default. `memory` exists and runs (`imp new --workflow memory --background
+    --autonomous`) but is never a sensible project default."""
     return [
         name
         for name in available_workflow_names(project_root)

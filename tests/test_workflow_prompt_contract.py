@@ -704,8 +704,8 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
 
     # Autonomous runs omit the whole {% if not run.autonomous %} block. Its
     # `imp new --backlog` command appears only in that block (the always-rendered
-    # memory-authoring partial uses `imp new --workflow memory --background`), so
-    # its absence proves the block was dropped.
+    # memory-authoring partial uses `imp new --workflow memory --background
+    # --autonomous`), so its absence proves the block was dropped.
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", autonomous=True),

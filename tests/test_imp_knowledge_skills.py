@@ -362,7 +362,7 @@ def test_knowledge_imp_edit_bullet_documents_base_flag() -> None:
 def test_knowledge_memory_line_uses_background_and_carries_imp_edit_bullet() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     # the memory-recording line now launches the memory quest in the background
-    assert 'imp new --workflow memory --background "<what to change>"' in body
+    assert 'imp new --workflow memory --background --autonomous "<what to change>"' in body
     assert "coupled to a code quest rides that quest's spec as a Memory changes item" in body
     assert 'imp new --workflow memory "<what to change>"' not in body
     # the new imp edit cheat-sheet bullet, verbatim in its load-bearing parts
