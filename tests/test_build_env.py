@@ -184,12 +184,13 @@ def test_conftest_still_pins_this_worktree_on_the_subprocess_path(
     assert os.environ["PYTHONPATH"] == f"{_REPO_ROOT / 'src'}{os.pathsep}/somewhere/else"
 
 
-def test_dev_extra_declares_build_and_the_lock_carries_it() -> None:
+@pytest.mark.parametrize("tool", ["build", "hatchling"])
+def test_dev_extra_declares_the_build_tool_and_the_lock_carries_it(tool: str) -> None:
     # $(PYTHON) is the venv, carrying only uv.lock pins — declaring without relocking breaks build.
     data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
     dev = data["project"]["optional-dependencies"]["dev"]
-    assert any(re.match(r"^build(?![\w.-])", req, re.I) for req in dev), dev
-    assert '\nname = "build"\n' in (_REPO_ROOT / "uv.lock").read_text()
+    assert any(re.match(rf"^{tool}(?![\w.-])", req, re.I) for req in dev), dev
+    assert f'\nname = "{tool}"\n' in (_REPO_ROOT / "uv.lock").read_text()
 
 
 def test_test_live_runs_the_deny_posture_probes() -> None:
