@@ -43,7 +43,9 @@ names rather than guessing them.
 ## What work exists
 
 - `imp list` — the board: active in-flight and draft quests, the backlog
-  (parked items for later), and completed quests.
+  (parked items for later), and completed quests. A `waiting` quest needs your
+  answer — parked at a live input gate or stopped on an unanswered question;
+  `imp resume <id>` answers it.
 - `imp list --all` — also includes abandoned and archived quests; `--archived`
   alone shows only archived conversations.
 - `imp list --json` — the same board as a structured JSON array, one
@@ -101,7 +103,12 @@ A quest that completed with a recorded merge SHA also shows a `merge_commit:`
 line beneath `base_branch:`; `--json` always carries `merge_commit` (`null`
 when the quest has none). A quest halted as paused or error shows a
 `reason:` line beneath `status:` naming why it stopped; `--json` carries the
-raw token as `pause_reason`. A quest card shows a `vars:` line of the
+raw token as `pause_reason`.
+A quest stopped on an unanswered question shows `waiting` with a `reason:` line
+pointing at `imp resume <id>`, and a `question:` section just before `intent:`
+holding the full question; `--json` carries it as `question` (`null`
+otherwise).
+A quest card shows a `vars:` line of the
 variables you set with `--var`, and a backlog card the ones it was filed
 with; either shows no line at all when there are none. Values are never
 clipped: the line wraps between entries onto indented continuation lines at

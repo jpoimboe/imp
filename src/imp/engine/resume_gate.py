@@ -32,9 +32,13 @@ def _is_gate_answer(event: dict[str, Any]) -> bool:
 
 
 def unanswered_bare_gate(quest: Quest) -> dict[str, Any] | None:
+    """`unanswered_gate_in` over the quest's event log."""
+    return unanswered_gate_in(list(quest.event_log().read()))
+
+
+def unanswered_gate_in(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The last `awaiting_user_input` gate's payload when it is a bare-turn-end yield
     (`interrupt` falsy) that nothing has answered, else None."""
-    events = list(quest.event_log().read())
     for i in range(len(events) - 1, -1, -1):
         if events[i].get("type") == "awaiting_user_input":
             gate = events[i]
@@ -48,3 +52,12 @@ def unanswered_bare_gate(quest: Quest) -> dict[str, Any] | None:
     if any(_is_gate_answer(e) for e in following):
         return None
     return payload
+
+
+def pending_question(events: list[dict[str, Any]]) -> str | None:
+    """The unanswered bare-turn-end gate's `last_agent_message`, else None."""
+    gate = unanswered_gate_in(events)
+    if gate is None:
+        return None
+    message: str | None = gate.get("last_agent_message")
+    return message or None

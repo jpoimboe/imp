@@ -50,6 +50,7 @@ class QuestCard:
     quest_id: str
     status: str
     pause_reason: str | None
+    question: str | None   # the pending bare-turn-end question; set only while waiting
     step: str
     last: str
     title: str
@@ -197,6 +198,7 @@ class LocalStore:
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.engine import quest_refs
+        from imp.engine.resume_gate import pending_question
         from imp.providers.effective import resolve_default_workflow
         if not _is_quest_id(quest_id):
             return None
@@ -209,6 +211,7 @@ class LocalStore:
         state = _quest_state(self.control_root, quest_id) or {}
         return QuestCard(
             quest_id=_id, status=status, pause_reason=_last_pause_reason(events),
+            question=pending_question(events) if status == "waiting" else None,
             step=step, last=last, title=title,
             created=created, step_label=step_label, phase_label=phase_label,
             workflow=(meta.get("workflow")

@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from imp.cli.exit_codes import ExitCode
 from imp.engine.quest import Quest
-from imp.engine.resume_gate import unanswered_bare_gate
+from imp.engine.resume_gate import pending_question
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -25,11 +25,7 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
 
 def bare_turn_end_question(quest: Quest) -> str | None:
     """Last unanswered bare-turn-end gate's `last_agent_message`, else None."""
-    gate = unanswered_bare_gate(quest)
-    if gate is None:
-        return None
-    message: str | None = gate.get("last_agent_message")
-    return message or None
+    return pending_question(list(quest.event_log().read()))
 
 
 def make_buffered_solicit(

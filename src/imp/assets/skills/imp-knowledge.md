@@ -69,12 +69,13 @@ bookkeeping. Ask the CLI instead:
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
   completed quests; `--all` adds abandoned and archived quests, `--json` emits
   the board as a structured array.
-- `imp show <id>` — a quest's card: status, why it halted, current step, `--var`
-  values (`vars:`), intent, summary, the saved files (`files:`), and the run
-  ledger — a `run:` line of time, tokens, and charge (the run's share of its
-  week's quota, or its cost when no gauge readings exist for that week),
-  `workflow:`, and the per-step `ledger:` table minus idle steps (`--json` for a
-  structured card with every effective var, no ledger). `show <id> <name>`
+- `imp show <id>` — a quest's card: status, why it halted or its pending
+  question, current step, `--var` values (`vars:`), intent, summary, the saved
+  files (`files:`), and the run ledger — a `run:` line of time, tokens, and
+  charge (the run's share of its week's quota, or its cost when no gauge
+  readings exist for that week), `workflow:`, and the per-step `ledger:` table
+  minus idle steps (`--json` for a structured card with every effective var, no
+  ledger). `show <id> <name>`
   prints one saved file: a `files:` path, or a folder — a one-file folder prints
   its file (`show <id> spec`, `show <id> verify` for the last failing gate run),
   a several-file folder lists them (`show <id> plans`).
