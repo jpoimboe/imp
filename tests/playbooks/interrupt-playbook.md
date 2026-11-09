@@ -342,15 +342,15 @@ imp runs the **first** provider in the resolved `providers:` whose env_check pas
 `providers` is **global**-config-homed and precedence is operator-wins (`project < global <
 local`), the layer that forces a provider is **local** — `~/.imp/projects/<clone-name>/config.yaml`,
 this project's state directory, keyed to the control root. Because `$WT` is a standalone clone,
-its control root is `$WT` itself and it claims its own state directory, so this file both
-**wins** (highest precedence) and **stays isolated**.
+its control root is `$WT` itself and it claims its own state directory on the first `--local`
+write, so this file both **wins** (highest precedence) and **stays isolated**.
 
 Write the single-provider override (this run targets exactly one provider — `claude` by
 default; substitute another only if the operator named it). The `remote: {driver: null}` line
 keeps inherited channels off so a channel subprocess's stderr can't interleave with imp's
 streaming output:
 ```bash
-cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+cd "$WT" && imp config set --local theme ansi  # claims this clone's state dir; the heredoc below overwrites the file
 STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
 test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
 cat > "$STATE/config.yaml" <<'YAML'

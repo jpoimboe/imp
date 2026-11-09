@@ -85,3 +85,19 @@ def test_playbook_cleanup_reclaims_the_project_state_directory() -> None:
         assert _RECLAIM in body, name
         # the state dir goes first: the guard reads `$WT` to confirm ownership
         assert body.index(_RECLAIM) < body.index('rm -rf "$WT"'), name
+
+
+def test_playbooks_claim_the_clone_state_dir_with_a_local_write() -> None:
+    """Bare `imp config` claims nothing, so setup claims through a deliberate
+    `--local` write before checking the marker."""
+    for name, theme in (("dogfood-playbook.md", "ansi"), ("interrupt-playbook.md", "ansi"),
+                        ("remote-control-playbook.md", "ansi"),
+                        ("imp-ux-playbook.md", "dark")):
+        body = (Path("tests/playbooks") / name).read_text()
+        claim = f'cd "$WT" && imp config set --local theme {theme}'
+        assert claim in body, name
+        assert body.index(claim) < body.index('test -f "$STATE/repo"'), name
+        assert "imp config | sed -n '1p'" not in body, name
+        assert "imp config >/dev/null" not in body, name
+    interrupt = " ".join((Path("tests/playbooks") / "interrupt-playbook.md").read_text().split())
+    assert "it claims its own state directory on the first `--local` write" in interrupt
