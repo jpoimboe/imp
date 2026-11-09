@@ -15,7 +15,7 @@ discipline, debugging checklists. Skills ship inside the package and are availab
 in every project an agent runs in. An agent loads a skill explicitly when it needs
 the procedure.
 
-Bundled skills are overlaid into each quest's workflow snapshot (under the quest's `workflow/skills/`), so an agent can load them without a repo checkout — the deliberate contrast with the `docs/` corpus, which is read in place at `{{ docs.path }}` and never copied into a snapshot.
+Bundled skills are overlaid into each quest's workflow snapshot (under the quest's `workflow/skills/`), so an agent can load them without a repo checkout — the deliberate contrast with the `docs/` corpus, which is read in place at `{{ docs.path }}` (a wheel install's packaged `imp/assets/docs`, a clone's repo `docs/`) and never copied into a snapshot.
 
 Keep skills **thin**. They are not a general corpus; do not grow a comprehensive
 reference here.
@@ -23,11 +23,11 @@ reference here.
 ### 2. The `docs/` Corpus
 
 imp's **descriptive** self-knowledge — what imp is, how it works, its invariants,
-its conventions. This directory (`docs/`) is imp's own repo, but agents in any
-project can read it via the engine-injected `{{ docs.path }}` path variable, which
-resolves to the corpus **in place** rather than copying files into quest snapshots.
-That is why portability of the corpus does not require bundling it into the package:
-the path is always resolved in place at runtime.
+its conventions. This directory (`docs/`) lives in imp's own repo; wheels bundle it
+into the package as `imp/assets/docs`. Agents in any project read it via the
+engine-injected `{{ docs.path }}` path variable, which resolves to the corpus
+**in place** at runtime rather than copying it into quest snapshots — that is what
+makes it portable across projects.
 
 ### 3. Workflow Prompts
 

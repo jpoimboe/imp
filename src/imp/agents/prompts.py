@@ -13,8 +13,8 @@ Seven namespaces (spec §7.5):
       (strict-within), like quest
   step.lap — this step's 1-based lap number (1 = first forward pass);
       step.prior_laps — retained {lap, outcome} entries of prior laps
-  docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
-      place relative to the install (readable in any project via bash/read_file)
+  docs.path — absolute path to imp's docs corpus (a wheel install's packaged
+      copy, a clone's repo docs/), resolved in place (readable in any project)
   project.undecided — the stack-dependent settings this project never decided,
       three bools (test_cmd_fast, worktree_setup, pythonpath); the object is
       falsy when every one of them is decided

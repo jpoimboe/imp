@@ -255,7 +255,7 @@ def test_operator_notes_document_the_per_run_source_snapshot() -> None:
     assert ("`imp resume <id>` (after Ctrl-D) is how a running quest moves onto "
             "newer code") in section
     # the two things a merge still reaches
-    assert "imp's `docs/` corpus, which agents read live from the checkout" in section
+    assert "imp's `docs/` corpus, which agents read live in place" in section
     assert "the project's local config layer" in section
 
 
