@@ -56,8 +56,16 @@ def resume_quest(control_root: Path, token: str) -> str:
     return f"Resuming @{target}…"
 
 
-def start_quest(control_root: Path, quest_id: str, *, autonomous: bool) -> None:
-    """Spawn a detached `imp resume` for a started draft; with no TTY it runs headless."""
+def start_quest(
+    control_root: Path, quest_id: str, *, autonomous: bool,
+    message: str | None = None, provider: str | None = None,
+) -> None:
+    """Spawn a detached `imp resume` carrying only the given flags; with no TTY it runs headless."""
     flags = ["--autonomous"] if autonomous else []
+    # `=` keeps a value that starts with `-` from parsing as an option.
+    if message is not None:
+        flags.append(f"--message={message}")
+    if provider is not None:
+        flags.append(f"--provider={provider}")
     _spawn_detached(_imp("resume", quest_id, *flags), _base_env(), control_root)
 

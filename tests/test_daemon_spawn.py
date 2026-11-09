@@ -99,15 +99,19 @@ def test_resume_quest_reports_no_match_and_does_not_spawn(
     assert "'ghost'" in msg
 
 
-@pytest.mark.parametrize(("autonomous", "flags"), [
-    (False, []),
-    (True, ["--autonomous"]),
+@pytest.mark.parametrize(("kwargs", "flags"), [
+    ({"autonomous": False}, []),
+    ({"autonomous": True}, ["--autonomous"]),
+    ({"autonomous": False, "message": "yes, ship it"}, ["--message=yes, ship it"]),
+    ({"autonomous": False, "provider": "codex"}, ["--provider=codex"]),
+    ({"autonomous": True, "message": "-1 go", "provider": "codex"},
+     ["--autonomous", "--message=-1 go", "--provider=codex"]),
 ])
 def test_start_quest_spawns_a_resume_carrying_only_the_given_flags(
-    monkeypatch: Any, tmp_path: Path, autonomous: bool, flags: list[str],
+    monkeypatch: Any, tmp_path: Path, kwargs: dict[str, Any], flags: list[str],
 ) -> None:
     calls = _capture(monkeypatch)
-    spawn.start_quest(tmp_path, "2026-06-13-aaaaaa", autonomous=autonomous)
+    spawn.start_quest(tmp_path, "2026-06-13-aaaaaa", **kwargs)
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa", *flags]
     assert calls[0]["cwd"] == tmp_path
