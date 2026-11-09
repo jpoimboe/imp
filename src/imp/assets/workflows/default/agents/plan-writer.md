@@ -132,13 +132,11 @@ The spec is your contract, so your bar to escalate is **higher** than the spec-f
 **Decide-and-record is the default even for a call that *contradicts* an explicit spec
 scope/AC boundary**, as long as a reasonable default exists: decide the correct call,
 implement it, record the rationale in `## Decisions`, and — because it crosses a spec
-scope/AC boundary — surface it as **one**
-`— needs-decision:` open item in `{{ quest.home }}/deferred.md` (the reader form under
-"Surfacing a decision you cannot resolve", which is load-bearing). Do **not** yield to the
-human for it: `finalize` ratifies it once at the merge gate, where it already walks
-`— needs-decision:` items, at near-zero marginal cost (one batched walk) — whereas a
-mid-planning ask is a second, earlier, blocking interruption, justified only when it saves
-an expensive wrong-guess unwind.
+scope/AC boundary — record it as **one** `— decided:` line in
+`{{ quest.home }}/deferred.md` (the form under "Recording a call you already made").
+Do **not** yield to the human for it: a `— decided:` line never gates the merge — the
+quest summary lists it — whereas a mid-planning ask is a blocking interruption, justified
+only when it saves an expensive wrong-guess unwind.
 
 **When to ask — all three must hold** to yield to the human:
 
@@ -148,16 +146,17 @@ an expensive wrong-guess unwind.
    the spec's own Goal or ships a broken feature, that is a default, not a fork;
 3. a wrong guess forces a replan, not a localized rework lap.
 
-Everything else → decide the most reasonable call, implement it, and surface it as one open
-item at the gate. **Recognition note:** an apparent scope-fork where one branch contradicts
-the spec's own Goal is a correction-with-a-default, not a fork.
+Everything else → decide the most reasonable call, implement it, and — when it crosses a
+spec scope/AC boundary — record it as one `— decided:` line. **Recognition note:** an
+apparent scope-fork where one branch contradicts the spec's own Goal is a
+correction-with-a-default, not a fork.
 
 A plan-time answer that fills a gap records the chosen reading with "*(user-confirmed during
-planning)*"; if it *contradicts* the spec, record it the same way and route it to the gate
-as a `— needs-decision:` open item — the committed spec stays stale by design (there is no
-plan→spec edge), and the flipped plan-reviewer guardrail lets a recorded scope deviation
-ride to the gate rather than re-litigating it in the loop. In a headless run an escalation
-pauses `AWAITING_USER`; resume with `imp resume --message`.
+planning)*"; if it *contradicts* the spec, record it the same way plus one `— decided:`
+line — the committed spec stays stale by design (there is no plan→spec edge), and the
+plan-reviewer accepts a scope deviation recorded this way rather than re-litigating it in
+the loop. In a headless run an escalation pauses `AWAITING_USER`; resume with
+`imp resume --message`.
 
 ## Surfacing a decision you cannot resolve
 

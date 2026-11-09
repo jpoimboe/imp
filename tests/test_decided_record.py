@@ -99,3 +99,19 @@ _GENUINE_FORMS = [
 @pytest.mark.parametrize(("source", "form"), _GENUINE_FORMS)
 def test_genuine_calls_keep_the_needs_decision_form(source: str, form: str) -> None:
     assert form in _agent(source)
+
+
+def test_plan_writer_records_boundary_calls_as_decided() -> None:
+    ask = _flat(_section(_agent("plan-writer"), "## Ask vs. decide"))
+    assert "needs-decision" not in ask
+    for path in (
+        # spec scope/AC boundary decide-and-record
+        "record it as **one** `— decided:` line in `{{ quest.home }}/deferred.md` "
+        "(the form under \"Recording a call you already made\")",
+        # "Everything else" sentence
+        "Everything else → decide the most reasonable call, implement it, and — when "
+        "it crosses a spec scope/AC boundary — record it as one `— decided:` line.",
+        # plan-time user-confirmed contradiction
+        "if it *contradicts* the spec, record it the same way plus one `— decided:` line",
+    ):
+        assert path in ask, path

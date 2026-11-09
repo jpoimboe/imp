@@ -66,19 +66,21 @@ def test_plan_writer_writes_to_artifacts_no_commit_script() -> None:
 def test_plan_writer_decides_and_records_scope_contradictions() -> None:
     body = _agent_prompt("plan-writer")
     assert "correction-with-a-default" in body
-    assert "marginal cost" in body
+    assert "a `— decided:` line never gates the merge" in " ".join(body.split())
     assert "ships a broken feature" in body
-    assert "ride to the" in body
+    # The old merge-gate ratification framing is gone.
+    assert "marginal cost" not in body
+    assert "ride to the" not in body
     # Stale "authoritative for that point" phrase is reconciled away.
     assert "authoritative for that point" not in body
 
 
-def test_both_prompts_route_recorded_scope_deviations_to_the_gate() -> None:
-    writer = _agent_prompt("plan-writer")
+def test_plan_writer_and_reviewer_accept_recorded_scope_deviations() -> None:
+    writer = " ".join(_agent_prompt("plan-writer").split())
     reviewer = _agent_prompt("plan-reviewer")
-    # No contradiction between the two: both route a recorded scope deviation to
-    # the merge gate rather than re-litigating it in the loop.
-    assert "ride to the" in writer
+    # Neither re-litigates a recorded scope deviation in the loop.
+    assert ("plan-reviewer accepts a scope deviation recorded this way rather than "
+            "re-litigating it in the loop") in writer
     assert "ride to the" in reviewer
 
 
