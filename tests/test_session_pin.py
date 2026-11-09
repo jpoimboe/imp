@@ -10,7 +10,9 @@ from typing import Any
 import pytest
 
 import imp
+import imp.assets as assets
 import imp.remote.session.pin as pin_mod
+from imp.assets import bundled_docs_dir
 from imp.engine.worktree import RepoGitLock
 from imp.paths import SOURCE_ROOT_MARKER
 from imp.remote.session.pin import (
@@ -21,9 +23,11 @@ from imp.remote.session.pin import (
 from tests.async_wait import HANG_BACKSTOP
 
 
-def _fake_source(root: Path, *, marker: str = "one") -> Path:
+def _fake_source(root: Path, *, marker: str = "one", packaged_docs: bool = False) -> Path:
     """A src/ shaped like the two packages pyproject ships — small enough to copy in a
-    test — each carrying a __pycache__ that must not travel into the snapshot."""
+    test — each carrying a __pycache__ that must not travel into the snapshot.
+    packaged_docs adds the corpus a wheel ships as imp/assets/docs, plus an unrelated
+    imp/docs that must still travel."""
     src = root / "src"
     for pkg in ("imp", "impty"):
         (src / pkg / "__pycache__").mkdir(parents=True)
@@ -31,6 +35,11 @@ def _fake_source(root: Path, *, marker: str = "one") -> Path:
         (src / pkg / "__pycache__" / "__init__.cpython-311.pyc").write_bytes(b"\x00stale")
     (src / "imp" / "assets").mkdir()
     (src / "imp" / "assets" / "prompt.md").write_text("# asset\n")
+    if packaged_docs:
+        (src / "imp" / "assets" / "docs" / "guide").mkdir(parents=True)
+        (src / "imp" / "assets" / "docs" / "guide" / "what-is-imp.md").write_text("# corpus\n")
+        (src / "imp" / "docs").mkdir()
+        (src / "imp" / "docs" / "keep.md").write_text("# not the corpus\n")
     return src
 
 
@@ -64,8 +73,8 @@ def test_a_published_snapshot_is_a_faithful_copy_of_the_running_packages(
 
 def test_a_snapshot_carries_no_bytecode_cache(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """__pycache__ is the one exclusion: stale bytecode keyed to another interpreter
-    has no business in a frozen source tree."""
+    """Stale bytecode keyed to another interpreter has no business in a frozen source
+    tree, so no __pycache__ travels into the snapshot."""
     src = _fake_source(tmp_path)
     monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
 
@@ -76,6 +85,25 @@ def test_a_snapshot_carries_no_bytecode_cache(
     assert (snapshot / "imp" / "__init__.py").read_text() == "imp one\n"
     assert (snapshot / "impty" / "__init__.py").read_text() == "impty one\n"
     assert (snapshot / "imp" / "assets" / "prompt.md").read_text() == "# asset\n"
+
+
+def test_a_wheel_snapshot_reads_the_packaged_corpus_in_place(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wheel ships the docs corpus inside the imp package. The snapshot leaves it
+    behind — the corpus is read in place, never copied — and finds it through its
+    source-root marker. Only that one path is skipped, not every dir named docs."""
+    src = _fake_source(tmp_path, packaged_docs=True)
+    monkeypatch.setattr(imp, "__file__", str(src / "imp" / "__init__.py"))
+
+    snapshot = pin_source_snapshot(tmp_path / "quest", tmp_path / "control")
+
+    assert not (snapshot / "imp" / "assets" / "docs").exists()
+    assert (snapshot / "imp" / "assets" / "prompt.md").read_text() == "# asset\n"
+    assert (snapshot / "imp" / "docs" / "keep.md").read_text() == "# not the corpus\n"
+    monkeypatch.setattr(assets, "files", lambda package: snapshot / "imp" / "assets")
+    corpus = bundled_docs_dir()
+    assert corpus == src.resolve() / "imp" / "assets" / "docs"
+    assert (corpus / "guide" / "what-is-imp.md").read_text() == "# corpus\n"
 
 
 def test_a_successful_pin_leaves_no_temporary_directory(

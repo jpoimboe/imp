@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,6 +20,16 @@ from imp.paths import SOURCE_ROOT_MARKER
 PINNED_SRC_DIRNAME = "pinned-src"
 OWNER_PID_MARKER = "owner-pid"
 _NO_BYTECODE = shutil.ignore_patterns("__pycache__")
+
+
+def _imp_ignore(running_pkg: Path) -> Callable[[str, list[str]], list[str]]:
+    """Skip bytecode and the packaged docs corpus, read in place via the source-root marker."""
+    corpus = running_pkg / "assets" / "docs"
+
+    def ignore(dirpath: str, names: list[str]) -> list[str]:
+        return [n for n in names if n == "__pycache__" or Path(dirpath, n) == corpus]
+
+    return ignore
 
 
 def pin_source_snapshot(quest_dir: Path, control_root: Path) -> Path:
@@ -35,7 +46,7 @@ def pin_source_snapshot(quest_dir: Path, control_root: Path) -> Path:
     try:
         # The lock merge_to_base takes: a merge either finishes before the copy or waits.
         with RepoGitLock(control_root).acquire():
-            shutil.copytree(running_pkg, staging / "imp", ignore=_NO_BYTECODE)
+            shutil.copytree(running_pkg, staging / "imp", ignore=_imp_ignore(running_pkg))
             shutil.copytree(impty_pkg, staging / "impty", ignore=_NO_BYTECODE)
         (staging / SOURCE_ROOT_MARKER).write_text(f"{source_root}\n")
         (staging / OWNER_PID_MARKER).write_text(f"{os.getpid()}\n")
