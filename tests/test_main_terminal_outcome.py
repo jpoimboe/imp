@@ -301,6 +301,20 @@ def test_status_spine_colors_id_gold_and_tail_by_role() -> None:
                     f'{pal.ansi("completed", "green")}')
 
 
+def test_status_spine_qualifier_is_a_dim_trailing_segment() -> None:
+    from imp.cli import palette as pal
+    line = main._status_spine("vahi04", "T", "paused", "wordmark", color=True,
+                              qualifier="Ctrl-D")
+    assert line == (f'{pal.ansi("vahi04", "wordmark")} · T · '
+                    f'{pal.ansi("paused", "wordmark")}{pal.ansi(" · Ctrl-D", "dim")}')
+
+
+def test_status_spine_qualifier_plain_without_color() -> None:
+    line = main._status_spine("vahi04", "T", "archived", "wordmark", color=False,
+                              qualifier="SIGTERM")
+    assert line == "vahi04 · T · archived · SIGTERM"
+
+
 def test_clean_block_titled_gold_headline_and_identity() -> None:
     from imp.cli import palette as pal
     lines = main._clean_block("completed", "vahi04", "Real title",

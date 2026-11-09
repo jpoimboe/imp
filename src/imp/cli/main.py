@@ -220,11 +220,16 @@ def _spine_name(title: str, intent: str | None, *,
 
 
 def _status_spine(quest_id: str, title: str, tail: str, *tail_codes: str,
-                  color: bool, intent: str | None = None) -> str:
-    """`<id>gold · <name> · <tail>colored`; the middle segment is always present."""
+                  color: bool, intent: str | None = None,
+                  qualifier: str | None = None) -> str:
+    """`<id>gold · <name> · <tail>colored[ · <qualifier>dim]`; the middle segment is
+    always present."""
     name, _ = _spine_name(title, intent, color=color)
-    return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    line = (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
             + f" · {name} · " + ansi(tail, *tail_codes, enabled=color))
+    if qualifier is not None:
+        line += ansi(f" · {qualifier}", "dim", enabled=color)
+    return line
 
 
 def _resume_line(token: str, suffix: str = "") -> str:
