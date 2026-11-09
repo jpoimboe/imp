@@ -1039,7 +1039,9 @@ def apply_new(
         from imp.remote.daemon import spawn
         spawn.start_quest(control, quest_id)
         return 0, (f"Started quest {quest_id} (running autonomously in the "
-                   f"background; appears in the active list).")
+                   f"background; appears in the active list).\n"
+                   f"If it needs your answer it waits: imp list shows it as "
+                   f"waiting, and imp resume {quest_id} answers it.")
 
     if idea is not None:
         if not idea.strip():
