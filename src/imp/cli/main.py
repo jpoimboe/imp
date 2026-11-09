@@ -3951,13 +3951,18 @@ def _matched_events(
 class EventSearchHit(NamedTuple):
     quest_id: str
     title: str
-    zone: Zone
+    status: str
     last_activity: str | None
     events: list[tuple[int, dict[str, Any]]]
     handle_map: dict[str, str]
     match_count: int
     overlays: dict[int, dict[str, Any]]
     intent: str | None   # titleless name source (opening, else seed_opening); None when titled
+
+    @property
+    def zone(self) -> Zone:
+        from imp.cli.store import zone_of
+        return zone_of(self.status)
 
 
 def _events_search_active(
@@ -3976,7 +3981,7 @@ def _events_search_active(
             intent = None if r[4].strip() else quest_row.fallback_intent(
                 _resolve_intent(events), seed_by_id.get(r[0]))
             hits.append(EventSearchHit(
-                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays,
+                r[0], r[4], r[1], r[3], matched, handle_map, len(matched), overlays,
                 intent))
     return hits
 
@@ -4019,7 +4024,7 @@ def _events_search_archived(
         if matched:
             intent = None if title.strip() else _archived_hit_intent(store, cid, events)
             hits.append(EventSearchHit(
-                cid, title, "history", last, matched, handle_map, len(matched), overlays,
+                cid, title, status, last, matched, handle_map, len(matched), overlays,
                 intent))
     return hits
 
@@ -4168,7 +4173,7 @@ def _events_search_list_line(
 ) -> str:
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
                             color=color)
-    tail = pal.ansi(hit.zone, "dim", enabled=color)
+    tail = pal.ansi(quest_row.display_word(hit.status), "dim", enabled=color)
     name = _search_name_segment(hit.title, hit.intent, query, color=color)
     if name is None:
         return f"{id_seg} · {tail}"
@@ -4182,7 +4187,7 @@ def _render_events_search_hit(
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
-        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity, hit.intent),
+        SearchHit(hit.quest_id, hit.title, hit.status, "", hit.last_activity, hit.intent),
         query=query, now=now, color=color)
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]
@@ -4201,7 +4206,7 @@ def _events_search_json(
 ) -> list[dict[str, Any]]:
     from imp.engine import events_index as ei
     return [
-        {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
+        {"quest_id": h.quest_id, "title": h.title, "zone": h.zone, "status": h.status,
          "last_activity": h.last_activity,
          "events": ei.events_json(
              h.events if event_limit is None else h.events[:event_limit])}
