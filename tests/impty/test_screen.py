@@ -273,3 +273,44 @@ def test_delete_lines_clears_rows_whose_source_row_is_absent() -> None:
     screen, stream = _filtered(cols=10, rows=5)
     stream.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n\x1b[3;1H\x1b[2M")
     assert _rows(screen) == ["b", "c", "", "", ""]
+
+
+@pytest.mark.parametrize(
+    ("seq", "expected"),
+    [
+        (b"a\x1b[3b", "aaaa"),
+        (b"a\x1b[b", "aa"),
+        (b"a\x1b[0b", "aa"),
+        (b"ab\x1b[2b", "abbb"),
+        # Nothing drawn yet: nothing to repeat.
+        (b"\x1b[3bx", "x"),
+        # Private form is not REP.
+        (b"a\x1b[?3b", "a"),
+    ],
+    ids=repr,
+)
+def test_rep_repeats_the_last_drawn_character(seq: bytes, expected: str) -> None:
+    screen, stream = _filtered()
+    stream.feed(seq)
+    assert _rows(screen)[0] == expected
+
+
+def test_rep_wraps_at_the_right_edge_under_autowrap() -> None:
+    screen, stream = _filtered(cols=4, rows=3)
+    stream.feed(b"ab\x1b[4b")
+    assert _rows(screen) == ["abbb", "bb", ""]
+    assert (screen.cursor.x, screen.cursor.y) == (2, 1)
+
+
+def test_rep_inserts_under_insert_mode() -> None:
+    screen, stream = _filtered()
+    stream.feed(b"xa\x1b[4h\x1b[1;1H\x1b[2b")
+    assert _rows(screen)[0] == "aaxa"
+
+
+def test_an_oversized_rep_draws_at_most_one_screenful() -> None:
+    # 1 + 8 cells on a 4x2 screen scrolls exactly one row into history.
+    screen, stream = _filtered(cols=4, rows=2)
+    stream.feed(b"a\x1b[1000b")
+    assert _rows(screen) == ["aaaa", "a"]
+    assert len(screen.history.top) == 1

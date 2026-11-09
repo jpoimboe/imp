@@ -9,8 +9,9 @@ subclass intercepts set_mode/reset_mode to do a real two-buffer swap, suppresses
 history while in alt (so "alt has no scrollback" holds at the buffer level), and
 hand-rolls resize-during-alt on the detached saved buffer. It also absorbs the
 old _ReplyScreen CPR/DA shim so prompt_toolkit/curses apps still unblock,
-emulates SU/SD (`CSI S` / `CSI T`, which pyte drops), tmux's bulk scroll, and
-fixes pyte's delete_lines, which keeps a stale row when its source row is absent.
+emulates SU/SD (`CSI S` / `CSI T`, tmux's bulk scroll) and REP (`CSI b`), which
+pyte drops, and fixes pyte's delete_lines, which keeps a stale row when its
+source row is absent.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ class TerminalScreen(pyte.HistoryScreen):
         self._saved_margins: Margins | None = None
         self._saved_lines: int = 0
         self._saved_columns: int = 0
+        self._last_drawn: str | None = None
 
     # --- CPR / device-attribute reply shim (absorbed from _ReplyScreen) ----
     def write_process_input(self, data: str) -> None:
@@ -184,6 +186,18 @@ class TerminalScreen(pyte.HistoryScreen):
                 else:
                     self.buffer.pop(y, None)
             self.carriage_return()
+
+    # --- REP (pyte has no CSI b handler) ----------------------------------
+    def draw(self, data: str) -> None:
+        if data:
+            self._last_drawn = data[-1]
+        super().draw(data)
+
+    def repeat_last(self, *params: int, private: bool = False) -> None:
+        if private or self._last_drawn is None:
+            return
+        count = min((params[0] if params else 0) or 1, self.lines * self.columns)
+        self.draw(self._last_drawn * count)
 
     # --- resize (incl. the detached saved buffer while in alt) ------------
     def resize(self, lines: int | None = None, columns: int | None = None) -> None:

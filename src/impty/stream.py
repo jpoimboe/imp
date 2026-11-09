@@ -11,7 +11,8 @@ sequences at all, drawing a DCS/SOS/PM/APC payload onto the grid as text. OSC an
 `?`-prefixed CSI are deliberately left alone: `?` carries the DECSET alt-screen
 switch TerminalScreen's regime tracking depends on, and TerminalScreen guards the
 few `?` forms pyte mis-dispatches (device status, and SGR). The stream also routes
-the SU/SD finals (`S`, `T`), absent from pyte's CSI table, to TerminalScreen.
+the SU/SD/REP finals (`S`, `T`, `b`), absent from pyte's CSI table, to
+TerminalScreen.
 """
 
 from __future__ import annotations
@@ -46,7 +47,9 @@ class TerminalStream(pyte.ByteStream):
     """
 
     # No ClassVar: mypy rejects it against pyte's instance-variable declaration.
-    csi = {**pyte.Stream.csi, "S": "scroll_up", "T": "scroll_down"}  # noqa: RUF012
+    csi = {  # noqa: RUF012
+        **pyte.Stream.csi, "S": "scroll_up", "T": "scroll_down", "b": "repeat_last"
+    }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
