@@ -18,6 +18,7 @@ from imp.cli import palette as pal
 from imp.cli.main import main
 from imp.cli.store import HomeDigest, SearchZones
 from imp.engine import archive
+from imp.engine import events_index as ei
 
 
 def _ev(eid: str | None, etype: str, agent_id: str | None = None,
@@ -724,7 +725,7 @@ def test_search_hit_digest_applies_codex_usage_patch_overlay(
         _ev("msg1", "agent_message", agent_id,
             provider="codex", model="gpt-6-astra",
             stop_reason="end_turn", usage={"input_tokens": 100, "output_tokens": 50},
-            content=[{"type": "text", "text": "GREPTARGET work done"}]),
+            raw={"content": [{"type": "text", "text": "GREPTARGET work done"}]}),
         _ev("pat1", "agent_message_usage_patch", agent_id,
             context_tokens=8000, context_window=200000),
     ]
@@ -935,7 +936,7 @@ def test_events_search_headings_render_merge_blocked_as_two_words() -> None:
     assert m._events_search_list_line(hit, query="zzz", color=False) == (
         "abc · Title · merge blocked")
     spine = m._render_events_search_hit(
-        hit, "zzz", now=datetime(2026, 6, 14, tzinfo=UTC), color=False, width=120)[0]
+        hit, "zzz", now=datetime(2026, 6, 14, tzinfo=UTC), color=False)[0]
     assert spine == "abc · Title · merge blocked · -"
 
 
@@ -974,3 +975,84 @@ def test_cmd_events_search_json_carries_raw_status_and_derived_zone(
         ("bkl001", "backlog", "backlog"),
         ("cmp001", "completed", "history"),
     ]
+
+
+_TR_PREFIX = "#1  " + "tool_result".ljust(16) + " [coder]  "
+_AM_PREFIX = "#1  " + "agent_message".ljust(16) + " [coder]  "
+
+
+def _one_row(event: dict[str, Any], query: str, *, color: bool = False) -> str:
+    hit = _hit("q1", "T1", "running", [(1, event)], 1)
+    lines = m._render_events_search_hit(hit, query, now=datetime.now(UTC), color=color)
+    assert len(lines) == 2
+    return lines[1]
+
+
+def test_events_search_row_windows_a_mid_summary_match() -> None:
+    ev = _ev("e1", "tool_result", "step:impl/coder",
+             content="a" * 5000 + "NEEDLE" + "b" * 5000)
+    assert _one_row(ev, "needle") == (
+        "  " + _TR_PREFIX + "…" + "a" * 40 + "NEEDLE" + "b" * 40 + "…")
+
+
+def test_events_search_row_highlights_the_query_inside_the_window() -> None:
+    ev = _ev("e1", "tool_result", "step:impl/coder",
+             content="a" * 5000 + "NEEDLE" + "b" * 5000)
+    row = _one_row(ev, "needle", color=True)
+    assert pal.ansi("NEEDLE", "bold", "yellow", enabled=True) in row
+    assert re.sub(r"\x1b\[[0-9;]*m", "", row) == _one_row(ev, "needle")
+
+
+def test_events_search_row_keeps_the_summary_head_for_an_early_match() -> None:
+    ev = _ev("e1", "tool_result", "step:impl/coder", content="NEEDLE " + "z" * 300)
+    assert _one_row(ev, "NEEDLE") == (
+        "  " + _TR_PREFIX + "error=None bytes=307 NEEDLE " + "z" * 39 + "…")
+
+
+def test_events_search_row_has_no_trailing_ellipsis_at_the_summary_end() -> None:
+    ev = _ev("e1", "tool_result", "step:impl/coder", content="z" * 300 + " NEEDLE tail")
+    assert _one_row(ev, "NEEDLE") == "  " + _TR_PREFIX + "…" + "z" * 39 + " NEEDLE tail"
+
+
+def test_events_search_row_falls_back_to_raw_payload_text() -> None:
+    ev = _ev("e1", "agent_message", "step:impl/coder",
+             provider="anthropic", stop_reason="tool_use",
+             usage={"input_tokens": 1, "output_tokens": 2},
+             raw={"content": [
+                 {"type": "text", "text": "working"},
+                 {"type": "tool_use", "id": "t1", "name": "bash",
+                  "input": {"cmd": "x" * 100 + " RAWONLY " + "y" * 100}}]})
+    assert "RAWONLY" not in ei.digest_summary(ev)
+    assert _one_row(ev, "rawonly") == (
+        "  " + _AM_PREFIX + "…" + "x" * 39 + " RAWONLY " + "y" * 39 + "…")
+
+
+def test_events_search_row_survives_a_match_only_across_raw_whitespace() -> None:
+    ev = _ev("e1", "tool_result", "step:impl/coder", content="pre foo  bar post")
+    matched, _, _ = m._matched_events([ev], "foo  bar", types=None, agents=None)
+    assert [o for o, _ in matched] == [1]
+    assert _one_row(ev, "foo  bar") == "  " + _TR_PREFIX + "pre foo bar post"
+
+
+def test_matched_events_treats_the_query_literally() -> None:
+    events = [_ev("e0", "tool_result", "step:impl/coder", content="axb")]
+    matched, _, _ = m._matched_events(events, "a.b", types=None, agents=None)
+    assert matched == []
+
+
+def test_cmd_events_search_output_ignores_terminal_width(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    content = "lead " * 30 + "GREPTARGET" + " tail" * 60
+    hit = _hit("aaa111", "Alpha", "running",
+               [(1, _ev("e0", "tool_result", "step:impl/coder", content=content))], 1)
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
+    monkeypatch.setenv("NO_COLOR", "1")
+    outs = []
+    for cols in ("40", "300", None):
+        if cols is None:
+            monkeypatch.delenv("COLUMNS", raising=False)
+        else:
+            monkeypatch.setenv("COLUMNS", cols)
+        assert m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path) == 0
+        outs.append(capsys.readouterr().out)
+    assert outs[0] == outs[1] == outs[2]

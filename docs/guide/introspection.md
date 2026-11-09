@@ -72,7 +72,9 @@ names rather than guessing them.
   `imp search` scope it, and `imp events`' `--type` / `--agent` filters narrow
   which events match (`--type tool_call` for "where invoked", the default for
   anywhere). Results stay zone-major — active →
-  backlog → history — and newest-first within each zone. Default rich and `--json`
+  backlog → history — and newest-first within each zone. Each matching event shows
+  as one digest row whose snippet is the 40 characters either side of the first
+  match. Default rich and `--json`
   output show the first three matched quests and the first three matching events per
   quest; `--limit N` changes only the matched-quest bound. `--list` scans every
   matched quest unless capped with `--limit N`; `--all` lifts both search-result

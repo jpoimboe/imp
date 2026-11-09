@@ -3941,8 +3941,7 @@ def _matched_events(
     all_overlays = ei.usage_patch_overlays(indexed)
     candidates = ei.select_event_lines(
         indexed, types=types, agents=agents, handle_map=handle_map)
-    q = query.lower()
-    matched = [(o, ev) for o, ev in candidates if q in event_text(ev).lower()]
+    matched = [(o, ev) for o, ev in candidates if _first_match(event_text(ev), query)]
     matched_ordinals = {o for o, _ in matched}
     overlays = {o: v for o, v in all_overlays.items() if o in matched_ordinals}
     return matched, handle_map, overlays
@@ -4191,8 +4190,9 @@ def _events_search_list_line(
 
 def _render_events_search_hit(
     hit: EventSearchHit, query: str, *, now: datetime, color: bool,
-    width: int, limit: int | None = 3,
+    limit: int | None = 3,
 ) -> list[str]:
+    from imp.cli.render_helpers import event_text
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
@@ -4201,9 +4201,14 @@ def _render_events_search_hit(
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]
     for ordinal, event in events:
-        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width,
-                                overlay=hit.overlays.get(ordinal))
-        lines.append("  " + _highlight(digest, query, color=color))
+        source = ei.digest_summary(event, hit.overlays.get(ordinal))
+        m = _first_match(source, query)
+        if m is None:
+            source = event_text(event)
+            m = _first_match(source, query)
+            assert m is not None  # hits are selected by _first_match on event_text
+        row = ei.digest_prefix(ordinal, event, hit.handle_map) + _match_window(source, m)
+        lines.append("  " + _highlight(row, query, color=color))
     extra = len(hit.events) - len(events)
     if limit is not None and extra > 0:
         lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
@@ -4285,13 +4290,11 @@ def _cmd_events_search(
     noun_q = "quest" if quests == 1 else "quests"
     header = pal.ansi(f'{total} {noun_m} in {quests} {noun_q} for "{args.query}"',
                       "dim", enabled=color)
-    width = _term_width()
     lines = [header]
     for h in selected_hits:
         lines.append("")
         lines.extend(_render_events_search_hit(
-            h, args.query, now=now, color=color, width=width,
-            limit=event_limit))
+            h, args.query, now=now, color=color, limit=event_limit))
     extra = len(hits) - len(selected_hits)
     if extra > 0:
         lines.append("")

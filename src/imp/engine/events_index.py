@@ -398,6 +398,23 @@ def usage_patch_overlays(
     return overlays
 
 
+def digest_prefix(ordinal: int, event: dict[str, Any], handle_map: dict[str, str]) -> str:
+    """The digest columns before the summary: `#N  <type>  [agent]  `."""
+    etype = event.get("type") or "?"
+    agent = agent_display(event.get("agent_id"), handle_map)
+    return f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  "
+
+
+def digest_summary(event: dict[str, Any], overlay: dict[str, Any] | None = None) -> str:
+    """`summarize(event)`; `overlay` adds payload fields for this rendering only —
+    a copy is summarized, so the event dict stays exactly as it was read."""
+    if overlay:
+        payload = event.get("payload")
+        base = payload if isinstance(payload, dict) else {}
+        event = {**event, "payload": {**base, **overlay}}
+    return summarize(event)
+
+
 def digest_line(
     ordinal: int, event: dict[str, Any], handle_map: dict[str, str],
     *, width: int | None = None, overlay: dict[str, Any] | None = None,
@@ -405,18 +422,9 @@ def digest_line(
     """Compact one-line rendering: `#N  <type>  [agent]  <summary>` — no
     wall-clock timestamp (the ordinal conveys order). When `width` is an int the
     assembled line is clipped to that many columns (one reserved for a trailing
-    `…`); `width=None` renders the full untruncated line (the `--full` path).
-    `overlay` adds payload fields for this rendering only — a copy is summarized,
-    so the event dict stays exactly as it was read."""
-    etype = event.get("type") or "?"
-    agent = agent_display(event.get("agent_id"), handle_map)
-    if overlay:
-        payload = event.get("payload")
-        base = payload if isinstance(payload, dict) else {}
-        event = {**event, "payload": {**base, **overlay}}
-    line = (
-        f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  {summarize(event)}"
-    ).rstrip()
+    `…`); `width=None` renders the full untruncated line (the `--full` path)."""
+    line = (digest_prefix(ordinal, event, handle_map)
+            + digest_summary(event, overlay)).rstrip()
     if width is not None and len(line) > width:
         line = line[: width - 1] + "…"
     return line
