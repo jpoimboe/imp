@@ -567,11 +567,14 @@ INTEGRATE_DIAGRAM = """flowchart TD
   in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
   WFH --> IR{{"integrate-rebase"}}
   IR -->|"base unmoved, tree cleared"| SUM
-  IR -->|"rebased / needs re-verify"| VM
+  IR -->|rebased| SW
+  IR -->|"base unmoved, needs re-verify"| VM
   IR -->|conflicts| REC["reconciler"]
   IR -. "bad ref / dirty tree" .-> HUMAN([pause → human])
-  REC --> VM{{"validate-memory"}}
+  REC --> SW{{"sync-worktree"}}
   REC -. stuck .-> HUMAN
+  SW -. "setup failed / timed out" .-> HUMAN
+  SW --> VM{{"validate-memory"}}
   VM -. "invalid imp/memory/" .-> REC
   VM -. "other failure" .-> HUMAN
   VM --> IV{{"integration-verify · slow"}}
@@ -668,6 +671,13 @@ def test_architecture_integrate_prose_describes_the_memory_gate_routing() -> Non
         "merged tree. An invalid tree goes back to `reconciler`; any other failure "
         "pauses."
     ) in flat
+
+
+def test_architecture_integrate_prose_describes_the_worktree_resync() -> None:
+    flat = " ".join(_phase_section(ARCH.read_text(), "integrate").split())
+    assert "a clean rebase goes to `sync-worktree`" in flat
+    assert "`sync-worktree` re-runs the project's `worktree_setup`" in flat
+    assert "`reconciler` falls through into it too" in flat
 
 
 def test_architecture_names_no_retired_reviewer_verdict_field() -> None:

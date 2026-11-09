@@ -167,13 +167,13 @@ def test_check_cleared_bounce_shows_only_the_gate_completion_line(quest: Quest) 
 
 def test_forward_move_between_hidden_steps_prints_no_route_line(quest: Quest) -> None:
     source = _step("default", "integrate-rebase")
-    rule = _route_rule("default", "integrate-rebase", "validate-memory")
+    rule = _route_rule("default", "integrate-rebase", "sync-worktree")
     assert _lines([
         _started(source, quest),
         _ev("step_completed", _END, step=source.name, kind=source.kind,
             action=_action_payload(rule.action), var_mutations={}, label=rule.label),
-        _started(_step("default", "validate-memory"), quest, rule.label),
-        _script_completed("validate-memory"),
+        _started(_step("default", "sync-worktree"), quest, rule.label),
+        _script_completed("sync-worktree"),
     ]) == ["── integration phase ───"]
 
 

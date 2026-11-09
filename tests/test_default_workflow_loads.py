@@ -143,6 +143,7 @@ def test_every_step_has_its_label() -> None:
         "check-next-plan": "choosing next plan",
         "deferred-check": "checking deferred tasks",
         "integrate-rebase": "rebasing onto base",
+        "sync-worktree": "re-running worktree setup",
         "validate-memory": "checking memory files",
         "check-cleared": "checking test clearance",
         "cleanup-merge": "cleaning up commits",

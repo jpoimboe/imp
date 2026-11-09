@@ -72,8 +72,8 @@ yourself, without a confirmation prompt:
 
 **Verify with focused tests only.** After any reconciliation fix, run the *narrowest*
 tests covering the reconciled and base-broken code with the project's own test tooling, to
-catch mistakes early. `validate-memory` and then `integration-verify`, which runs the
-combined checks, are the very next steps.
+catch mistakes early. Re-running the project's worktree setup, `validate-memory`, then
+`integration-verify`, which runs the combined checks, are the very next steps.
 
 Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
 base — the quest's diff is always carried forward on the rebased history.
@@ -126,7 +126,7 @@ Drive to a clean state, then verify it:
 
 End with `complete_step`:
 - `stuck: false` — you reconciled in-loop; the head stays held and the quest proceeds to
-  validate-memory, then integration-verify.
+  sync-worktree (re-running worktree setup), validate-memory, then integration-verify.
 - `stuck: true` — pause for a human. Fire this ONLY for an irreducible ambiguity (a
   reconciliation that could go two materially different ways with no basis in the spec to
   pick) or a suspected invalidation (base has superseded the quest and it should be
