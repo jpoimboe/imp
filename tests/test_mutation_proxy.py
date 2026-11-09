@@ -240,7 +240,7 @@ def test_run_mutation_new_background_starts_quest(
     started: dict[str, object] = {}
     monkeypatch.setattr(
         spawn_mod, "start_quest",
-        lambda control, qid: started.update(qid=qid))
+        lambda control, qid, *, autonomous: started.update(qid=qid))
     result = run_mutation(tmp_path, "new", {
         "opening": "brief", "title": "T", "workflow": None, "base": None,
         "idea": None, "depends_on": None, "var_flags": None, "background": True})

@@ -98,7 +98,7 @@ def create_quest(
     if background:
         from imp.remote.daemon import spawn
         try:
-            spawn.start_quest(control_root, quest.id)
+            spawn.start_quest(control_root, quest.id, autonomous=True)
         except OSError as e:
             raise ImpError(
                 f"quest {quest.id} was created but its run could not start: {e}") from e

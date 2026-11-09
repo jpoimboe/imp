@@ -153,7 +153,8 @@ def test_background_flag_threads_the_overrides_through_apply_new(
     _seed_control_with_vars(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "imp.remote.daemon.spawn.start_quest", lambda control, quest_id: None)
+        "imp.remote.daemon.spawn.start_quest",
+        lambda control, quest_id, *, autonomous: None)
 
     rc = anyio.run(cli_main._async_cmd_new,
                    _ns(background=True, var=["retries=5"]))
@@ -168,7 +169,8 @@ def test_background_path_persists_the_overrides(
 ) -> None:
     _seed_control_with_vars(tmp_path)
     monkeypatch.setattr(
-        "imp.remote.daemon.spawn.start_quest", lambda control, quest_id: None)
+        "imp.remote.daemon.spawn.start_quest",
+        lambda control, quest_id, *, autonomous: None)
 
     rc, message = cli_main.apply_new(
         tmp_path, opening="go", title=None, workflow=None, base=None, idea=None,

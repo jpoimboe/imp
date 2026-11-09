@@ -301,7 +301,7 @@ def test_apply_new_background_records_the_pin_and_calls_spawn(
     spawned: list[tuple] = []
     monkeypatch.setattr(
         "imp.remote.daemon.spawn.start_quest",
-        lambda control, quest_id: spawned.append((control, quest_id)))
+        lambda control, quest_id, *, autonomous: spawned.append((control, quest_id)))
 
     rc, _message = main.apply_new(
         tmp_path, opening="x", title="t", workflow=None, base=None, idea=None,

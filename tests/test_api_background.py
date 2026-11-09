@@ -66,7 +66,8 @@ def test_background_flag_calls_start_quest_with_the_created_id(
     started: dict[str, object] = {}
     monkeypatch.setattr(
         "imp.remote.daemon.spawn.start_quest",
-        lambda control, quest_id: started.update(control=control, id=quest_id))
+        lambda control, quest_id, *, autonomous: started.update(
+            control=control, id=quest_id))
 
     handle = create_quest(tmp_path, "go", background=True)
 
@@ -78,7 +79,7 @@ def test_no_background_flag_spawns_nothing(
 ) -> None:
     _seed_control(tmp_path)
 
-    def _boom(control: Path, quest_id: str) -> None:
+    def _boom(control: Path, quest_id: str, *, autonomous: bool) -> None:
         raise AssertionError("start_quest must not run without background=True")
 
     monkeypatch.setattr("imp.remote.daemon.spawn.start_quest", _boom)

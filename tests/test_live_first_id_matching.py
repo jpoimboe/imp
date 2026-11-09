@@ -175,7 +175,7 @@ def test_resume_quest_resolves_a_live_token_with_an_unreadable_journal(
     msg = spawn.resume_quest(tmp_path, "livid")
 
     assert msg == "Resuming @livid1…"
-    assert spawned == [[sys.executable, "-m", "imp", "resume", LIVE, "--headless"]]
+    assert spawned == [[sys.executable, "-m", "imp", "resume", LIVE]]
 
 
 def test_daemon_list_quests_reports_live_quests_with_an_unreadable_journal(

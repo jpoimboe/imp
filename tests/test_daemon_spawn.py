@@ -42,9 +42,7 @@ def test_create_quest_writes_the_draft_before_spawning_an_interactive_resume(
 
     quest_id = spawn.create_quest(tmp_path, "add dark mode")
 
-    assert seen[0]["argv"] == [
-        sys.executable, "-m", "imp", "resume", quest_id, "--headless"]
-    assert "--autonomous" not in seen[0]["argv"]
+    assert seen[0]["argv"] == [sys.executable, "-m", "imp", "resume", quest_id]
     assert seen[0]["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
     assert "IMP_REMOTE_CONTROL_SOCK" not in seen[0]["env"]
     assert seen[0]["cwd"] == tmp_path
@@ -73,8 +71,7 @@ def test_resume_quest_spawns_imp_resume_for_a_unique_match(
         "imp.cli.main._live_quest_ids", lambda _c: ["2026-06-13-aaaaaa"])
     msg = spawn.resume_quest(tmp_path, "aaaa")
     assert calls[0]["argv"] == [
-        sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
-        "--headless"]
+        sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa"]
     assert calls[0]["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
     assert "2026-06-13-aaaaaa" in msg
 
@@ -102,14 +99,17 @@ def test_resume_quest_reports_no_match_and_does_not_spawn(
     assert "'ghost'" in msg
 
 
-def test_start_quest_spawns_autonomous_resume(
-    monkeypatch: Any, tmp_path: Path,
+@pytest.mark.parametrize(("autonomous", "flags"), [
+    (False, []),
+    (True, ["--autonomous"]),
+])
+def test_start_quest_spawns_a_resume_carrying_only_the_given_flags(
+    monkeypatch: Any, tmp_path: Path, autonomous: bool, flags: list[str],
 ) -> None:
     calls = _capture(monkeypatch)
-    spawn.start_quest(tmp_path, "2026-06-13-aaaaaa")
+    spawn.start_quest(tmp_path, "2026-06-13-aaaaaa", autonomous=autonomous)
     assert calls[0]["argv"] == [
-        sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
-        "--headless", "--autonomous"]
+        sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa", *flags]
     assert calls[0]["cwd"] == tmp_path
     assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
     assert "IMP_REMOTE_AUTOSUBSCRIBE" not in calls[0]["env"]

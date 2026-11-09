@@ -273,7 +273,7 @@ def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
     import imp.remote.daemon.spawn as spawn_mod
     monkeypatch.setattr(
         spawn_mod, "start_quest",
-        lambda control, qid: started.update(control=control, qid=qid))
+        lambda control, qid, *, autonomous: started.update(control=control, qid=qid))
     rc, msg = main.apply_new(
         tmp_path, opening="do the thing", title="Task", workflow=None,
         base=None, idea=None, depends_on=None, background=True, parent="mom3")

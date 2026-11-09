@@ -1037,7 +1037,7 @@ def apply_new(
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
-        spawn.start_quest(control, quest_id)
+        spawn.start_quest(control, quest_id, autonomous=True)
         return 0, (f"Started quest {quest_id} (running autonomously in the "
                    f"background; appears in the active list).\n"
                    f"If it needs your answer it waits: imp list shows it as "
