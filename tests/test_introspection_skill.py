@@ -31,6 +31,8 @@ def test_introspection_documents_bounded_events_search_workflow() -> None:
     assert "`--list` scans every matched quest unless capped with `--limit N`" in flat
     assert "`--all` lifts both search-result bounds" in flat
     assert "`imp events <id> <range> --json`" in text
+    assert ("Each matching event shows as one digest row whose snippet is the 40 characters "
+            "either side of the first match.") in flat
 
 
 def test_reading_another_quest_credits_the_daemon_not_the_sandbox_floor() -> None:

@@ -485,38 +485,33 @@ def test_events_json_includes_ordinal_and_full_payload() -> None:
     assert obj[0]["payload"]["name"] == "read_file"
 
 
-def test_digest_line_clips_assembled_line_to_width() -> None:
-    # Content is deliberately short (~30 chars) so it survives the per-field cap
-    # still present until Task 3, while the assembled `#N  <type>  [agent]  …`
-    # line (~85 chars) still exceeds the 40-column clip width.
+def _long_result(n: int) -> dict[str, Any]:
+    # `#7  tool_result      [y]  error=False bytes=<n> ` + n chars: 48 + n long for 100 <= n < 1000.
+    return _ev("a", "tool_result", agent_id="step:x/y", content="Q" * n, error=False)
+
+
+def test_digest_line_of_exactly_200_characters_is_untouched() -> None:
+    line = ei.digest_line(7, _long_result(152), {})
+    assert len(line) == 200
+    assert line.endswith("Q")
+
+
+def test_digest_line_caps_at_200_characters_with_ellipsis_last() -> None:
+    ev = _long_result(153)
+    line = ei.digest_line(7, ev, {})
+    full = ei.digest_line(7, ev, {}, full=True)
+    assert len(full) == 201
+    assert len(line) == 200
+    assert line[199] == "…"
+    assert line[:199] == full[:199]
+
+
+def test_digest_line_full_renders_the_whole_line() -> None:
     ev = _ev("a", "tool_result", agent_id="step:x/y",
-             content="Z" * 30 + "TAILMARK", error=False)
-    clipped = ei.digest_line(7, ev, {}, width=40)
-    full = ei.digest_line(7, ev, {})            # default: no clip
-    assert len(clipped) == 40                   # exactly one row's worth
-    assert clipped.endswith("…")
-    assert "TAILMARK" not in clipped            # the tail fell off the right edge
-    assert "TAILMARK" in full                   # no-clip keeps the whole line
-    assert len(full) > 40
-
-
-def test_digest_line_no_clip_when_width_none() -> None:
-    # 80 chars < the 120-char per-field cap still present until Task 3, so the
-    # content passes through untouched under the no-clip (width=None) path.
-    ev = _ev("a", "tool_result", agent_id="step:x/y",
-             content="Q" * 80, error=False)
-    line = ei.digest_line(1, ev, {}, width=None)
-    assert "Q" * 80 in line
-    assert not line.endswith("…")
-
-
-def test_digest_line_width_larger_than_line_is_untouched() -> None:
-    # Models the piped no-wrap width (10_000): long-but-under-width lines stay
-    # whole so `grep` over piped output sees full lines.
-    ev = _ev("a", "step_started", agent_id=None, step="spec")
-    line = ei.digest_line(2, ev, {}, width=10_000)
-    assert not line.endswith("…")
-    assert "step=spec" in line
+             content="Z" * 300 + "TAILMARK", error=False)
+    line = ei.digest_line(7, ev, {}, full=True)
+    assert line.endswith("Z" * 300 + "TAILMARK")
+    assert "…" not in line
 
 
 def test_select_filters_by_subtype():

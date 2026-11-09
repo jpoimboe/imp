@@ -87,7 +87,8 @@ bookkeeping. Ask the CLI instead:
 - `imp events <id>` — the agent-facing digest, where event content actually
   lives: bare prints an index (steps, subagents, types); add a leaf selector
   (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact
-  line per event, `--step <name>` to scope, `--json` for exact payloads.
+  line per event (rows cap at 200 chars, `--full` lifts), `--step <name>` to
+  scope, `--json` for exact payloads.
 - `imp events search <query>` — structured-event search is bounded by default;
   `--type` / `--agent` narrow it. Use `--list` to scan every matched quest,
   `imp events <id> ... --json` for exact payloads, and `--all` only for exhaustive

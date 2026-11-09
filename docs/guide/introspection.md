@@ -72,7 +72,9 @@ names rather than guessing them.
   `imp search` scope it, and `imp events`' `--type` / `--agent` filters narrow
   which events match (`--type tool_call` for "where invoked", the default for
   anywhere). Results stay zone-major — active →
-  backlog → history — and newest-first within each zone. Default rich and `--json`
+  backlog → history — and newest-first within each zone. Each matching event shows
+  as one digest row whose snippet is the 40 characters either side of the first
+  match. Default rich and `--json`
   output show the first three matched quests and the first three matching events per
   quest; `--limit N` changes only the matched-quest bound. `--list` scans every
   matched quest unless capped with `--limit N`; `--all` lifts both search-result
@@ -143,11 +145,10 @@ answers the question, and never dump the raw log as your default.
   shows the state and duration it reached in the whole log.
 - **Digest** — `imp events <id>`. A bare `imp events <id>` call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`,
-  `--limit N`, or `--all`) to get one compact line per event. On a TTY each compact line is
-  clipped to one terminal row so the stream stays scannable; add `--full` to
-  lift the clip and render the full untruncated line (still one logical line per
-  event). Piped output is effectively unclipped already. This is the default for
-  scanning and filtering an event stream from bash.
+  `--limit N`, or `--all`) to get one compact line per event. Each compact line is
+  capped at 200 characters, the same on a TTY and through a pipe; add `--full` to
+  lift the cap and render the full untruncated line (still one logical line per
+  event). This is the default for scanning and filtering an event stream from bash.
 - **Raw** — `imp events <id> --json` (composes with any filter). The exact event
   payloads, including the full timestamp, uncapped. Drop to this tier only for
   the few events whose full contents you actually need.

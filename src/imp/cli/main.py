@@ -3941,8 +3941,7 @@ def _matched_events(
     all_overlays = ei.usage_patch_overlays(indexed)
     candidates = ei.select_event_lines(
         indexed, types=types, agents=agents, handle_map=handle_map)
-    q = query.lower()
-    matched = [(o, ev) for o, ev in candidates if q in event_text(ev).lower()]
+    matched = [(o, ev) for o, ev in candidates if _first_match(event_text(ev), query)]
     matched_ordinals = {o for o, _ in matched}
     overlays = {o: v for o, v in all_overlays.items() if o in matched_ordinals}
     return matched, handle_map, overlays
@@ -4088,25 +4087,34 @@ def _highlight(text: str, query: str, *, color: bool) -> str:
     return "".join(out)
 
 
+_MATCH_CONTEXT = 40
+
+
+def _first_match(text: str, query: str) -> re.Match[str] | None:
+    """First case-insensitive literal occurrence of `query` in `text`."""
+    return re.search(re.escape(query), text, flags=re.IGNORECASE)
+
+
+def _match_window(source: str, m: re.Match[str]) -> str:
+    """±_MATCH_CONTEXT characters of `source` around `m`, cut then whitespace-collapsed,
+    with `…` on each clipped side."""
+    start = max(0, m.start() - _MATCH_CONTEXT)
+    end = min(len(source), m.end() + _MATCH_CONTEXT)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(source) else ""
+    return prefix + " ".join(source[start:end].split()) + suffix
+
+
 def _excerpts(
     content: str, query: str, *, color: bool, limit: int = 3,
 ) -> tuple[list[str], int]:
-    """Up to `limit` grep-style match spans — whitespace-collapsed,
-    query-highlighted, `…`-truncated toward the terminal width — plus the count
-    of query occurrences beyond `limit`."""
+    """Up to `limit` grep-style match spans — each a query-highlighted
+    `_match_window` — plus the count of query occurrences beyond `limit`."""
     if not query:
         return [], 0
-    width = shutil.get_terminal_size((80, 24)).columns
-    context = max(20, (width - len(query) - 6) // 2)
     matches = list(re.finditer(re.escape(query), content, flags=re.IGNORECASE))
-    spans: list[str] = []
-    for m in matches[:limit]:
-        start = max(0, m.start() - context)
-        end = min(len(content), m.end() + context)
-        body = " ".join(content[start:end].split())
-        prefix = "…" if start > 0 else ""
-        suffix = "…" if end < len(content) else ""
-        spans.append(prefix + _highlight(body, query, color=color) + suffix)
+    spans = [_highlight(_match_window(content, m), query, color=color)
+             for m in matches[:limit]]
     return spans, max(0, len(matches) - limit)
 
 
@@ -4182,8 +4190,9 @@ def _events_search_list_line(
 
 def _render_events_search_hit(
     hit: EventSearchHit, query: str, *, now: datetime, color: bool,
-    width: int, limit: int | None = 3,
+    limit: int | None = 3,
 ) -> list[str]:
+    from imp.cli.render_helpers import event_text
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
@@ -4192,9 +4201,14 @@ def _render_events_search_hit(
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]
     for ordinal, event in events:
-        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width,
-                                overlay=hit.overlays.get(ordinal))
-        lines.append("  " + _highlight(digest, query, color=color))
+        source = ei.digest_summary(event, hit.overlays.get(ordinal))
+        m = _first_match(source, query)
+        if m is None:
+            source = event_text(event)
+            m = _first_match(source, query)
+            assert m is not None  # hits are selected by _first_match on event_text
+        row = ei.digest_prefix(ordinal, event, hit.handle_map) + _match_window(source, m)
+        lines.append("  " + _highlight(row, query, color=color))
     extra = len(hit.events) - len(events)
     if limit is not None and extra > 0:
         lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
@@ -4276,13 +4290,11 @@ def _cmd_events_search(
     noun_q = "quest" if quests == 1 else "quests"
     header = pal.ansi(f'{total} {noun_m} in {quests} {noun_q} for "{args.query}"',
                       "dim", enabled=color)
-    width = _term_width()
     lines = [header]
     for h in selected_hits:
         lines.append("")
         lines.extend(_render_events_search_hit(
-            h, args.query, now=now, color=color, width=width,
-            limit=event_limit))
+            h, args.query, now=now, color=color, limit=event_limit))
     extra = len(hits) - len(selected_hits)
     if extra > 0:
         lines.append("")
@@ -4430,10 +4442,9 @@ def _cmd_events(args: argparse.Namespace) -> int:
             json.dumps(ei.events_json(selected), indent=2).splitlines(),
             no_pager=args.no_pager)
         return 0
-    width = None if args.full else _term_width()
     overlays = ei.usage_patch_overlays(indexed)
     _page_or_print(
-        [ei.digest_line(o, ev, handle_map, width=width, overlay=overlays.get(o))
+        [ei.digest_line(o, ev, handle_map, full=args.full, overlay=overlays.get(o))
          for o, ev in selected],
         no_pager=args.no_pager, trailing_blank=True)
     return 0
@@ -4799,8 +4810,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="All event lines (escape hatch from the index/filters).")
     p_events.add_argument(
         "--full", action="store_true",
-        help="Render full untruncated event lines (lift the one-terminal-row "
-             "width clip); composes with every filter.")
+        help="Render full untruncated event lines (lift the 200-character "
+             "line cap); composes with every filter.")
     p_events.add_argument(
         "--json", action="store_true",
         help="Structured output instead of text.")
