@@ -221,8 +221,9 @@ answers them — not the sandbox floor:
   opening intent, the summary inlined, the saved files (`files:`), and the run
   ledger — a `run:` totals line and the per-step `ledger:` table minus idle
   steps). Add `spec` for the raw spec, `verify` for the last failing gate run,
-  any other saved file or folder named in `files:` (`plans` lists the plans), or
-  `--json` for the card as a structured object (which carries no ledger).
+  any other saved file or folder named in `files:` (`plans` prints the plan when
+  there is only one, else lists them), or `--json` for the card as a structured
+  object (which carries no ledger).
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`
