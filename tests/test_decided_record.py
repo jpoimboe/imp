@@ -200,3 +200,19 @@ def test_deferred_sweep_never_re_evaluates_or_authors_decided() -> None:
     assert ("A `— decided:` record is a call a producer already made, born ticked; "
             "the sweep never authors one — its fixes close "
             "`— fixed in \"<commit-subject>\"`.") in flat
+
+
+def test_summarizer_lists_decided_calls_after_the_headline() -> None:
+    flat = _flat(_agent("summarizer"))
+    assert ("- `{{ quest.home }}/deferred.md` — its `— decided:` lines are calls agents "
+            "made without asking the user;") in flat
+    assert ("- **Decided without asking you** — when `deferred.md` has any `— decided:` "
+            "lines, follow the headline's blank line with a line reading exactly "
+            "`Decided without asking you:`, then one `- <what was decided> — <why>` bullet "
+            "per line, in plain user terms.") in flat
+    assert ("A line rewritten to `— overridden-at-gate` is no longer decided; leave it "
+            "out. Omit the section entirely when there are none.") in flat
+    # After the headline (outside the merge commit body), before the optional diagram.
+    assert (flat.index("- **Headline**")
+            < flat.index("- **Decided without asking you**")
+            < flat.index("- **Optional diagram**"))
