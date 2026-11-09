@@ -512,8 +512,8 @@ def test_knowledge_and_introspection_describe_saved_files() -> None:
             ) in intro
     assert ("reads the live quest files while a quest is in flight and the copy"
             " saved in git once it is finished") in intro
-    assert ("any other saved file or folder named in `files:` (`plans` lists the"
-            " plans)") in intro
+    assert ("any other saved file or folder named in `files:` (`plans` prints the"
+            " plan when there is only one, else lists them)") in intro
 
 
 def test_show_card_vars_are_documented_as_var_seeded_only() -> None:

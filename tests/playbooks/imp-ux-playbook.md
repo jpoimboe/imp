@@ -122,9 +122,10 @@ Run this top-to-bottom once on a real feature-sized intent:
    send("add an `imp doctor` subcommand that checks the project setup (git repo present, providers configured, workflow resolvable) and prints a short report\r")
    ```
    (Pick something that does **not** already exist — check `imp --help` first so the agent
-   isn't derailed by "that's already there".) Live through plan presentation, step-by-step
-   execution, status/progress. Judge clarity of *what imp is doing* and *where you are*.
-   `snapshot()` the plan screen and a mid-execution screen.
+   isn't derailed by "that's already there".) Live through the planning phase (headed
+   `planning phase · plan N/M`), step-by-step execution, status/progress. Judge clarity of
+   *what imp is doing* and *where you are*. `snapshot()` the planning-phase screen and a
+   mid-execution screen.
 3. **An in-turn prompt** — when a step asks you a question, read *that* prompt with fresh
    eyes: clear question, obvious default, discoverable affordance? `snapshot()`.
 4. **Pause → steer → detach → `imp resume`** — with the agent working, pause it
@@ -159,10 +160,12 @@ to score).
     machine whose `~/.imp/config.yaml` already lists providers skips only the picker. To see the
     real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME` pointed at an
     empty dir. The **provider multi-select** comes first, then the **confirmation screen**
-    (detected settings, `enter` to accept) — both interactive; theme is **auto-detected
-    silently** (no prompt): `ansi` unless `COLORTERM` is `truecolor`/`24bit`, else
-    `dark`/`light` from the terminal background (default `dark`). impty advertises truecolor,
-    so expect `dark`; to see the `ansi` path, spawn with `env={"COLORTERM":""}`.
+    (detected settings, `enter` to accept) — both interactive; theme is **auto-detected** with
+    no prompt: `ansi` unless `COLORTERM` is `truecolor`/`24bit`, else `dark`/`light` from the
+    terminal background (default `dark`). A `dark`/`light` pick prints one dim line,
+    `Detected a dark terminal — colors tuned to match.` (or `light`); the `ansi` path prints
+    nothing. impty advertises truecolor, so expect `dark` and that line; to see the silent
+    `ansi` path, spawn with `env={"COLORTERM":""}`.
   - `imp new -h` — the flag surface (`--title`, `--backlog`, `--background`, `--depends-on`,
     `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
     `--provider`): can a new user tell which they need?
@@ -173,11 +176,12 @@ to score).
     legible? ids vs titles? Then `imp show <id>` (detail card, whose `files:` block lists the
     quest's saved files) and its saved-file views: `imp show <id> spec`, `imp show <id> verify`
     (the last failing test-gate run) and `summary` each print their folder's one file, `plans`
-    lists the plans, and a listed path prints that file. A name matching nothing (e.g.
-    `status`) errors and points back at `imp show <id>`. A plan's task list (`✓ plan N/M · K
-    tasks · imp show <id> plans/…`) prints only once the plan is finalized (after plan review
-    passes, or on the trivial-quest fast path) — a run stopped during plan review never shows
-    it; not a defect. Also `imp list -a`.
+    prints the plan when there is only one and lists them when there are several, and a listed
+    path prints that file. A name matching nothing (e.g. `status`) errors and points back at
+    `imp show <id>`. A plan's task list (`✓ plan N/M · K tasks · imp show <id> plans/…`)
+    prints only once the plan is finalized (after plan review passes, or on the trivial-quest
+    fast path) — a run stopped during plan review never shows it; not a defect. Also
+    `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`):
@@ -220,7 +224,9 @@ to score).
   without spending a model turn; Tab completion covers them (`send("/sk\t")` → `/skills`), an
   unambiguous prefix fills and an ambiguous one lists candidates, then further Tabs cycle them;
   Up-arrow recalls previous input; Alt+Enter (`send("\x1b\r")`) inserts a newline;
-  Ctrl-C clears the buffer (and hints Ctrl-D once). **Note** (see `slash.py`): an unmatched
+  Ctrl-C clears a typed line; only on an already-empty line does it print
+  `press Ctrl-D to pause & exit` (once per prompt, and never at a prompt whose placeholder
+  already names Ctrl-D). **Note** (see `slash.py`): an unmatched
   command-shaped `/<name>` (e.g. `/list`) prints `Unknown command: /<name> — /help for the list`
   and re-prompts; only a path-shaped token (holding `/` or `.`, e.g. `/home/user/foo.py`) is
   submitted to the model verbatim. Test both: a typo errors client-side, and a pasted path submits
@@ -272,7 +278,7 @@ Open with the **verdict**, then functional findings, then suggestions — in thi
    argv, keystrokes, config) and `view(full=True)` / `snapshot()` evidence.
 3. **Polish suggestions** — the open-ended list: per-area usability/readability/polish notes
    with relative image links for visuals (e.g.
-   `![plan screen, dark](<YYYY-MM-DD>-imp-ux-shots/dark-plan.png)`) and per-theme
+   `![planning-phase screen, dark](<YYYY-MM-DD>-imp-ux-shots/dark-plan.png)`) and per-theme
    (dark/light/ansi) differences; a
    ranked top-suggestions shortlist (highest-impact first, one-line rationale + rough effort);
    and a "what worked well" call-out (a clean area is a result).
