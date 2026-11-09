@@ -14,6 +14,7 @@ host. Tool paths are worktree-relative.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -104,6 +105,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_QUEST_TITLE",
     "IMP_QUEST_DIR",
     "IMP_OUTPUT",
+    "IMP_PYTHON",
     "IMP_TEST_CMD_FAST",
     "IMP_TEST_CMD_SLOW",
     "IMP_TEST_CMD_FAST_TIMEOUT",
@@ -224,6 +226,10 @@ def engine_env(
                             would make overlay_engine_env strip an inherited custom
                             home from the host-side spawns that overlay an empty
                             engine env.
+        IMP_PYTHON        — the engine's own interpreter (sys.executable), emitted
+                            unconditionally. Workflow assets invoke Python through
+                            it, never a bare `python3` from PATH, which may not be
+                            able to import imp.
         IMP_QUEST_DIR     — absolute host path of the quest state directory;
                             injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/quests/
@@ -261,6 +267,7 @@ def engine_env(
         "IMP_QUEST_ID": quest_id,
         "IMP_QUEST_TITLE": quest_title,
         "IMP_HOME": str(imp_home()),
+        "IMP_PYTHON": sys.executable,
         **HEADLESS_ENV,
     }
     if quest_dir is not None:

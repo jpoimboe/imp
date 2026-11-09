@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import shlex
+import sys
 import time
 from pathlib import Path
 
@@ -444,6 +445,18 @@ def test_bash_no_test_gates_means_empty(
     out = json.loads(_run_bash(_ctx(tmp_path),
                                {"command": "echo [$IMP_TEST_CMD_FAST]"}))
     assert "[]" in out["stdout"]
+
+
+def test_bash_exposes_the_engine_interpreter_as_imp_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Agent prompts run quest.json one-liners via "$IMP_PYTHON"; a stale ambient
+    # copy must not reach the shell.
+    monkeypatch.setenv("IMP_PYTHON", "/stale/python")
+    out = json.loads(_run_bash(_ctx(tmp_path),
+                               {"command": 'printf %s "$IMP_PYTHON"'}))
+    assert out["returncode"] == 0
+    assert out["stdout"] == sys.executable
 
 
 def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:

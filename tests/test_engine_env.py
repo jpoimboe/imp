@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
         "IMP_QUEST_ID": "eee555",
         "IMP_QUEST_TITLE": "Add OAuth",
         "IMP_HOME": str(imp_home()),
+        "IMP_PYTHON": sys.executable,
         "GIT_EDITOR": "true",
         "GIT_TERMINAL_PROMPT": "0",
         "EDITOR": "true",
@@ -340,3 +342,31 @@ def test_undecided_is_falsy_when_every_setting_is_decided() -> None:
 def test_undecided_carries_no_test_cmd_slow_field() -> None:
     # An unset slow gate falls back to the fast one, so it is never raised.
     assert not hasattr(ALL_DECIDED, "test_cmd_slow")
+
+
+def test_engine_env_emits_the_running_interpreter() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
+    assert env["IMP_PYTHON"] == sys.executable
+
+
+def test_imp_python_is_engine_managed() -> None:
+    from imp.engine.env import ENGINE_ENV_VARS
+    assert "IMP_PYTHON" in ENGINE_ENV_VARS
+
+
+def test_overlay_replaces_a_stale_ambient_imp_python() -> None:
+    # An outer imp (imp-on-imp) may export a different interpreter; the engine's
+    # own sys.executable is authoritative.
+    env = overlay_engine_env(
+        {"IMP_PYTHON": "/stale/python"},
+        engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t"),
+    )
+    assert env["IMP_PYTHON"] == sys.executable
+
+
+def test_imp_python_survives_the_policy_env_bake() -> None:
+    from imp.engine.sandbox import _build_child_env
+
+    eng = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
+    baked = dict(_build_child_env(eng, {"IMP_PYTHON": "/stale/python"}, ()))
+    assert baked["IMP_PYTHON"] == sys.executable
