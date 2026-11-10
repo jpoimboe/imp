@@ -601,3 +601,9 @@ and bundled workflows.
 Issues and pull requests are welcome.  To work on imp itself, clone the repo and
 run `make sync-env` for a `.venv` matching `uv.lock`, then `make check` before
 opening a pull request.
+
+## License and trademarks
+
+imp is released under the [MIT License](LICENSE).  The imp name, the imp
+logo, and the slogan "mischief, at your command." are trademarks of Josh
+Poimboeuf; see [TRADEMARKS.md](TRADEMARKS.md) for how you can use them.
